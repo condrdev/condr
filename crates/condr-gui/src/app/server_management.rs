@@ -94,7 +94,7 @@ impl Condr {
         cx: &mut Context<Self>,
     ) {
         if self.start_connect(key) {
-            self.refresh_target_pane(self.active_connection);
+            self.refresh_target_pane(self.input_connection());
             self.rebuild_dock(window, cx);
         }
         cx.notify();
@@ -236,8 +236,9 @@ impl Condr {
         self.connection(self.active_connection)
     }
 
+    /// The Session the active window's actions apply to.
     pub(super) fn active_session(&self) -> Option<&Session> {
-        self.active_connection()?.session()
+        self.connection(self.input_connection())?.session()
     }
 
     pub(crate) fn terminal(
@@ -326,6 +327,14 @@ impl Condr {
             return;
         };
         let was_active = self.active_connection == key;
+        // Its windows go with it (ADR 0043).
+        let windows: Vec<_> = self
+            .windows
+            .iter()
+            .filter(|view| view.scope.connection() == Some(key))
+            .map(|view| view.handle)
+            .collect();
+        self.close_windows(&windows, cx);
         self.connections.remove(index);
         self.save_servers(cx);
         self.clear_connection_gui_state(key, cx);
@@ -336,10 +345,10 @@ impl Condr {
                 .get(index)
                 .or_else(|| self.connections.last())
                 .map_or(0, |connection| connection.key);
-            self.refresh_target_pane(self.active_connection);
+            self.refresh_target_pane(self.input_connection());
             self.rebuild_dock(window, cx);
         } else if released_presentation {
-            self.refresh_target_pane(self.active_connection);
+            self.refresh_target_pane(self.input_connection());
             self.rebuild_dock(window, cx);
         }
         cx.notify();
@@ -449,7 +458,7 @@ impl Condr {
             }
             self.sync_local_settings(key, cx);
             self.refresh_target_pane(key);
-            if key == self.active_connection {
+            if self.presents(key) {
                 self.rebuild_dock(window, cx);
             }
             if self
@@ -494,7 +503,7 @@ impl Condr {
         clear_pending_sizes_for_bootstrap(&mut self.pending_sizes, key);
         self.forget_file_saves(key);
         IncomingEffect {
-            rebuild: self.active_connection == key && active_projection_cleared,
+            rebuild: self.presents(key) && active_projection_cleared,
             rebuild_active: false,
             notify: true,
         }

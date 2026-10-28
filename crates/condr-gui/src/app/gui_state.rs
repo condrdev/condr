@@ -109,7 +109,7 @@ impl From<WindowBounds> for WindowState {
 }
 
 impl WindowState {
-    fn rect(self) -> WindowRect {
+    pub(super) fn rect(self) -> WindowRect {
         match self {
             Self::Windowed(rect) | Self::Maximized(rect) | Self::Fullscreen(rect) => rect,
         }

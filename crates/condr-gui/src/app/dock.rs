@@ -8,6 +8,9 @@ pub(super) struct DockSurfaceKey {
 
 pub(super) struct DockSurface {
     pub(super) area: Entity<DockArea>,
+    /// The window `_subscription` delivers to; a surface that moves to another window
+    /// subscribes again there (ADR 0043).
+    pub(super) window: AnyWindowHandle,
     pub(super) _subscription: Subscription,
     pub(super) pane_ids: HashSet<PaneId>,
     pub(super) projection: Option<PaneLayout>,
@@ -169,12 +172,28 @@ impl TabGroupRenderer for CondrTabGroupRenderer {
 }
 
 impl Condr {
+    /// The Pane the active window's actions apply to, on `input_connection`.
     pub(super) fn focused_pane(&self) -> Option<PaneId> {
+        let key = self.input_connection();
         self.terminal_input
             .target
-            .filter(|(key, _)| *key == self.active_connection)
+            .filter(|(target_key, _)| *target_key == key)
             .map(|(_, pane_id)| pane_id)
-            .or_else(|| self.connection_focused_pane(self.active_connection))
+            .or_else(|| self.view_focused_pane(self.active_view()))
+    }
+
+    /// The connection the active window presents: where its actions go.
+    pub(super) fn input_connection(&self) -> ConnectionKey {
+        self.presented_key(self.active_view())
+    }
+
+    /// The Session's focus in the terminal Tab `view` draws.
+    pub(super) fn view_focused_pane(&self, view: &WindowView) -> Option<PaneId> {
+        if self.shown_elsewhere(view).is_some() {
+            return None;
+        }
+        let (_, session, _, tab_id) = self.presented_in(view)?;
+        Some(session.tab(tab_id)?.focused_pane()?.id())
     }
 
     pub(super) fn focus_pane_panel(
@@ -196,9 +215,10 @@ impl Condr {
         window.defer(cx, move |window, cx| {
             let should_focus = owner
                 .update(cx, |this, _| {
-                    this.active_connection == key
-                        && this.terminal_input.target == Some((key, pane_id))
-                        && this.active_dock_surface == Some(surface_key)
+                    this.owns_window(window)
+                        && this.window_view(window).dock_surface == Some(surface_key)
+                        && (this.last_active != window.window_handle()
+                            || this.terminal_input.target == Some((key, pane_id)))
                 })
                 .unwrap_or(false);
             if should_focus && !window.has_active_dialog(cx) {
@@ -207,27 +227,47 @@ impl Condr {
         });
     }
 
-    pub(super) fn rebuild_dock(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Prepares the Dock surface `window` draws and, while it is the window last
+    /// activated, points the keyboard at its Pane.
+    pub(super) fn rebuild_window_dock(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // Every view change ends here (ADR 0021), so this is where the state file learns
         // of it; `show_view` has no context to schedule from.
         if std::mem::take(&mut self.state_dirty) {
             self.schedule_state_save(cx);
         }
-        let Some(connection) = self.active_connection() else {
-            self.active_dock_surface = None;
+        let handle = window.window_handle();
+        let input_window = self.last_active == handle;
+        let view = self.window_view(window);
+        let shown = if self.shown_elsewhere(view).is_some() {
+            None
+        } else {
+            let key = self.presented_key(view);
+            let scope = view.scope;
+            self.connection(key).and_then(|connection| {
+                let session = connection.session()?;
+                let (workspace_id, tab_id) = match scope {
+                    WindowScope::Main | WindowScope::Device(_) => connection.viewed(session)?,
+                    WindowScope::Workspace(_, workspace_id) => (
+                        workspace_id,
+                        connection.viewed_tab_id(session, workspace_id)?,
+                    ),
+                    WindowScope::Tab(_, tab_id) => (workspace_of_tab(session, tab_id)?, tab_id),
+                };
+                Some((key, workspace_id, tab_id))
+            })
+        };
+        let Some((key, _workspace_id, tab_id)) = shown else {
+            if input_window {
+                self.terminal_input.target = None;
+            }
+            self.window_view_mut(window).dock_surface = None;
             return;
         };
-        let Some(session) = connection.session() else {
-            self.active_dock_surface = None;
-            return;
-        };
-        let key = connection.key;
+        let connection = self
+            .connection(key)
+            .expect("the presented connection exists");
+        let session = connection.session().expect("the presented Session exists");
         let can_mutate = connection.can_mutate();
-        let Some((_workspace_id, tab_id)) = connection.viewed(session) else {
-            self.terminal_input.target = None;
-            self.active_dock_surface = None;
-            return;
-        };
         let tab = session
             .tab(tab_id)
             .expect("presented Tab belongs to the restored Session");
@@ -238,8 +278,10 @@ impl Condr {
                 TabContent::File(file) => Some((false, file.path().to_relative_path_buf())),
                 TabContent::Terminals(_) => None,
             };
-            self.terminal_input.target = None;
-            self.active_dock_surface = None;
+            if input_window {
+                self.terminal_input.target = None;
+            }
+            self.window_view_mut(window).dock_surface = None;
             match viewer {
                 Some((true, path)) => self.sync_diff_view(key, _workspace_id, tab_id, path, cx),
                 Some((false, path)) => {
@@ -253,6 +295,7 @@ impl Condr {
         let focused = self
             .terminal_input
             .target
+            .filter(|_| input_window)
             .filter(|(target_key, _)| *target_key == key)
             .map(|(_, pane_id)| pane_id)
             .filter(|pane_id| tab.panes().iter().any(|pane| pane.id() == *pane_id))
@@ -284,8 +327,8 @@ impl Condr {
             .get(&surface_key)
             .map(|surface| surface.area.read(cx).bounds().size)
             .filter(|size| size.width > px(0.) && size.height > px(0.));
-        let active_size = self
-            .active_dock_surface
+        let shown_surface = self.window_view(window).dock_surface;
+        let active_size = shown_surface
             .and_then(|active| self.dock_surfaces.get(&active))
             .map(|surface| surface.area.read(cx).bounds().size)
             .filter(|size| size.width > px(0.) && size.height > px(0.));
@@ -297,7 +340,7 @@ impl Condr {
             );
             (size.width > px(0.) && size.height > px(0.)).then_some(size)
         };
-        let available_size = if self.active_dock_surface == Some(surface_key) {
+        let available_size = if shown_surface == Some(surface_key) {
             target_size.or(measured_size).or(active_size)
         } else {
             active_size.or(measured_size).or(target_size)
@@ -320,20 +363,10 @@ impl Condr {
                 )
                 .with_renderer(Rc::new(CondrDockRenderer))
             });
-            let subscription = cx.subscribe_in(
-                &area,
-                window,
-                move |this, dock, event: &DockEvent, window, cx| match event {
-                    DockEvent::LayoutChanged => {
-                        this.on_dock_layout_changed(surface_key, dock, window, cx);
-                    }
-                    DockEvent::DragDrop { item, target } => {
-                        this.on_dock_drag_drop(surface_key, dock, item, target, cx);
-                    }
-                },
-            );
+            let subscription = subscribe_to_dock(surface_key, &area, window, cx);
             DockSurface {
                 area,
+                window: handle,
                 _subscription: subscription,
                 pane_ids: HashSet::new(),
                 projection: None,
@@ -353,12 +386,25 @@ impl Condr {
             collect_layout_pane_ids(&layout, &mut surface.pane_ids);
         }
 
+        if self.dock_surfaces[&surface_key].window != handle {
+            let area = self.dock_surfaces[&surface_key].area.clone();
+            let subscription = subscribe_to_dock(surface_key, &area, window, cx);
+            let surface = self
+                .dock_surfaces
+                .get_mut(&surface_key)
+                .expect("Dock surface was installed");
+            surface.window = handle;
+            surface._subscription = subscription;
+        }
+
         // Focus follows the presented Pane, not every rebuild: one for a Git refresh must
         // leave an open context menu or a sidebar field holding the keyboard.
-        let retargeted = self.terminal_input.target != Some((key, focused))
-            || self.active_dock_surface != Some(surface_key);
-        self.terminal_input.target = Some((key, focused));
-        self.active_dock_surface = Some(surface_key);
+        let retargeted = (input_window && self.terminal_input.target != Some((key, focused)))
+            || shown_surface != Some(surface_key);
+        if input_window {
+            self.terminal_input.target = Some((key, focused));
+        }
+        self.window_view_mut(window).dock_surface = Some(surface_key);
         let needs_rebuild = self.dock_surfaces.get(&surface_key).is_none_or(|surface| {
             surface.projection.as_ref() != Some(&layout)
                 || target_size.is_some_and(|target_size| {
@@ -540,7 +586,11 @@ impl Condr {
             surface.programmatic_layout_events -= 1;
             return;
         }
-        if self.active_dock_surface != Some(surface_key) {
+        if !self
+            .windows
+            .iter()
+            .any(|view| view.dock_surface == Some(surface_key))
+        {
             return;
         }
         let Some(connection) = self.connection(surface_key.connection_key) else {
@@ -599,15 +649,34 @@ impl Condr {
                 let owner = cx.weak_entity();
                 window.defer(cx, move |window, cx| {
                     let _ = owner.update(cx, |this, cx| {
-                        if this.active_dock_surface == Some(surface_key) {
-                            this.rebuild_dock(window, cx);
-                            cx.notify();
-                        }
+                        this.rebuild_dock(window, cx);
+                        cx.notify();
                     });
                 });
             }
         }
     }
+}
+
+/// The Dock's events reach `Condr` through the window drawing it.
+fn subscribe_to_dock(
+    surface_key: DockSurfaceKey,
+    area: &Entity<DockArea>,
+    window: &mut Window,
+    cx: &mut Context<Condr>,
+) -> Subscription {
+    cx.subscribe_in(
+        area,
+        window,
+        move |this, dock, event: &DockEvent, window, cx| match event {
+            DockEvent::LayoutChanged => {
+                this.on_dock_layout_changed(surface_key, dock, window, cx);
+            }
+            DockEvent::DragDrop { item, target } => {
+                this.on_dock_drag_drop(surface_key, dock, item, target, cx);
+            }
+        },
+    )
 }
 
 fn collect_layout_ratios(layout: &PaneLayout, ratios: &mut Vec<f32>) {

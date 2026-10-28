@@ -9,7 +9,9 @@ pub(super) struct TerminalPanel {
     pub(super) focus_handle: FocusHandle,
     pub(super) render_cache: Rc<RefCell<TerminalRenderCache>>,
     pub(super) scroll_remainder: Rc<RefCell<Point<f32>>>,
-    focus_subscriptions: Vec<Subscription>,
+    /// Focus listeners belong to a window; a Panel moved to another window (ADR 0043)
+    /// listens again there.
+    focus_subscriptions: Option<(AnyWindowHandle, [Subscription; 2])>,
     ime_terminal_revision: Option<u64>,
     cursor_blink_hidden: bool,
     /// Runs only while the focused cursor asks to blink; dropping it stops the blink.
@@ -33,7 +35,7 @@ impl TerminalPanel {
             focus_handle: cx.focus_handle(),
             render_cache: Rc::new(RefCell::new(TerminalRenderCache::default())),
             scroll_remainder: Rc::new(RefCell::new(point(0., 0.))),
-            focus_subscriptions: Vec::new(),
+            focus_subscriptions: None,
             ime_terminal_revision: None,
             cursor_blink_hidden: false,
             _cursor_blink: None,
@@ -82,25 +84,33 @@ impl BasePanel for TerminalPanel {
 
 impl Render for TerminalPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if self.focus_subscriptions.is_empty() {
+        let handle = window.window_handle();
+        if self
+            .focus_subscriptions
+            .as_ref()
+            .is_none_or(|(subscribed, _)| *subscribed != handle)
+        {
             let focus_owner = self.owner.clone();
             let blur_owner = self.owner.clone();
             // GPUI leases this Panel while it runs a focus callback, and sync_terminal_focus
             // reads every Panel, so the owner update has to wait for the lease to be released.
-            self.focus_subscriptions = vec![
-                cx.on_focus(&self.focus_handle, window, move |_, window, cx| {
-                    let owner = focus_owner.clone();
-                    window.defer(cx, move |window, cx| {
-                        let _ = owner.update(cx, |app, cx| app.sync_terminal_focus(window, cx));
-                    });
-                }),
-                cx.on_blur(&self.focus_handle, window, move |_, window, cx| {
-                    let owner = blur_owner.clone();
-                    window.defer(cx, move |window, cx| {
-                        let _ = owner.update(cx, |app, cx| app.sync_terminal_focus(window, cx));
-                    });
-                }),
-            ];
+            self.focus_subscriptions = Some((
+                handle,
+                [
+                    cx.on_focus(&self.focus_handle, window, move |_, window, cx| {
+                        let owner = focus_owner.clone();
+                        window.defer(cx, move |window, cx| {
+                            let _ = owner.update(cx, |app, cx| app.sync_terminal_focus(window, cx));
+                        });
+                    }),
+                    cx.on_blur(&self.focus_handle, window, move |_, window, cx| {
+                        let owner = blur_owner.clone();
+                        window.defer(cx, move |window, cx| {
+                            let _ = owner.update(cx, |app, cx| app.sync_terminal_focus(window, cx));
+                        });
+                    }),
+                ],
+            ));
         }
         let owner = self.owner.upgrade();
         let (

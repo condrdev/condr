@@ -62,7 +62,7 @@ action_handlers! {
         cx.notify();
     }
     action_new_workspace(NewWorkspace) |this, window, cx| {
-        this.choose_workspace_directory_on(this.active_connection, window, cx);
+        this.choose_workspace_directory_on(this.input_connection(), window, cx);
     }
     action_new_tab(NewTab) |this, window, cx| { this.new_tab(window, cx); }
     action_open_settings(OpenSettings) |this, window, cx| { this.open_settings(window, cx); }

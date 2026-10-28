@@ -77,8 +77,7 @@ impl Condr {
                     self.connections[index].subscribe();
                 }
                 self.refresh_target_pane(key);
-                let target_changed = self.active_connection == key
-                    && self.terminal_input.target != target_before_refresh;
+                let target_changed = self.terminal_input.target != target_before_refresh;
                 return IncomingEffect {
                     rebuild: application.rebuild
                         || application.recovery
@@ -202,8 +201,17 @@ impl Condr {
                         workspace_id,
                         tab_id,
                     } => {
-                        // Someone (the CLI, an agent) asked every viewer to look here.
+                        // Someone (the CLI, an agent) asked every viewer to look here; the
+                        // window drawing it comes forward among this Client's windows.
                         let changed = self.show_view(key, workspace_id, tab_id);
+                        let shown_tab = tab_id.or_else(|| {
+                            let connection = self.connection(key)?;
+                            connection.viewed_tab_id(connection.session()?, workspace_id)
+                        });
+                        self.activate_window(
+                            self.home_window(key, Some(workspace_id), shown_tab),
+                            cx,
+                        );
                         return IncomingEffect {
                             rebuild: false,
                             rebuild_active: changed,
@@ -326,7 +334,7 @@ impl Condr {
                 }
                 IncomingEffect {
                     // A presented Diff Tab refetches its file on the rebuild.
-                    rebuild: git_changed && self.active_connection == key,
+                    rebuild: git_changed && self.presents(key),
                     notify,
                     ..IncomingEffect::default()
                 }
@@ -527,12 +535,14 @@ impl Condr {
                         surface.pending_projection_request = None;
                         surface.pending_projection_applied_sequence = None;
                         surface.projection = None;
-                        active_projection_rejected |=
-                            self.active_dock_surface == Some(*surface_key);
+                        active_projection_rejected |= self
+                            .windows
+                            .iter()
+                            .any(|view| view.dock_surface == Some(*surface_key));
                     }
                 }
                 IncomingEffect {
-                    rebuild: self.active_connection == key && active_projection_rejected,
+                    rebuild: self.presents(key) && active_projection_rejected,
                     rebuild_active: false,
                     notify: true,
                 }
@@ -666,7 +676,7 @@ impl Condr {
                     return IncomingEffect::default();
                 }
                 IncomingEffect {
-                    rebuild: self.active_connection == key,
+                    rebuild: self.presents(key),
                     notify: true,
                     ..IncomingEffect::default()
                 }
@@ -698,7 +708,7 @@ impl Condr {
                 }
                 // A Diff Tab on this commit takes its status and message from it.
                 IncomingEffect {
-                    rebuild: self.active_connection == key,
+                    rebuild: self.presents(key),
                     notify: true,
                     ..IncomingEffect::default()
                 }
@@ -735,7 +745,7 @@ impl Condr {
                     return IncomingEffect::default();
                 }
                 IncomingEffect {
-                    rebuild: self.active_connection == key,
+                    rebuild: self.presents(key),
                     notify: true,
                     ..IncomingEffect::default()
                 }

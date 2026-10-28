@@ -140,7 +140,7 @@ use terminal_input::{
 };
 use terminal_panel::TerminalPanel;
 use updates::{UpdateChannel, UpdateCheck, UpdateState};
-use window_view::WindowView;
+use window_view::{WindowScope, WindowView, workspace_of_tab};
 use workspace::{default_worktree_branch, title_bar};
 use workspace_resources::WorkspaceResources;
 
@@ -258,12 +258,13 @@ pub(crate) struct Condr {
     _connect_results_task: Task<()>,
     _size_retry_task: Task<()>,
     dock_surfaces: HashMap<DockSurfaceKey, DockSurface>,
-    active_dock_surface: Option<DockSurfaceKey>,
     #[cfg(feature = "test-support")]
     dock_rebuild_count: usize,
     panels: HashMap<(ConnectionKey, PaneId), Entity<TerminalPanel>>,
-    /// Every window this Client draws in, the main window first.
+    /// Every window this Client draws in, the main window first (ADR 0043).
     windows: Vec<WindowView>,
+    /// The window last activated, which the keyboard and the reported focus follow.
+    last_active: AnyWindowHandle,
     terminal_input: terminal_input::TerminalInputState,
     pending_sizes: HashMap<(ConnectionKey, PaneId), PendingSize>,
     terminal_geometry: HashMap<(ConnectionKey, PaneId), TerminalGeometry>,
@@ -307,9 +308,10 @@ pub(crate) struct Condr {
     drop_target: Option<sidebar::DropTarget>,
     /// Flushes a pending font save when the app quits before the debounce elapses.
     _quit_subscription: Subscription,
+    /// Closing the main window quits, taking the detached windows with it (ADR 0043).
+    _main_window_closed: Subscription,
     /// The most recent failure given to `report_error`, kept so tests can check it.
     pub(super) last_error: Option<String>,
-    _window_activation_subscription: Subscription,
     _window_appearance_subscription: Subscription,
     /// `syntax::apply_code_theme` writes Kit's theme whenever the code theme can change.
     _theme_subscription: Subscription,
@@ -399,11 +401,14 @@ impl Condr {
         }
         let next_connection_key = connections.len() as u64 + 1;
 
-        let window_activation_subscription =
-            cx.observe_window_activation(window, |this, window, cx| {
-                this.end_pointer_gesture_on_deactivation(window);
-                this.sync_terminal_focus(window, cx);
-            });
+        let mut main_view = WindowView::new(window, WindowScope::Main, cx);
+        if let Some(width) = restored_state.sidebar_width {
+            main_view.sidebar_width = px(width).max(MIN_SIDEBAR_WIDTH).min(MAX_SIDEBAR_WIDTH);
+        }
+        main_view.sidebar_collapsed = restored_state.sidebar_collapsed;
+        if let Some(width) = restored_state.changes_width {
+            main_view.changes_width = px(width).max(MIN_CHANGES_WIDTH).min(MAX_CHANGES_WIDTH);
+        }
         let window_appearance_subscription =
             cx.observe_window_appearance(window, |this, window, cx| {
                 if this.appearance == Appearance::System {
@@ -446,6 +451,12 @@ impl Condr {
                 }
             }
         });
+        let main_window = window.window_handle();
+        let main_window_closed = cx.on_window_closed(move |cx, _| {
+            if !cx.windows().contains(&main_window) {
+                cx.quit();
+            }
+        });
         let mut this = Self {
             client_config_path,
             config_save: None,
@@ -458,11 +469,11 @@ impl Condr {
             _connect_results_task: Task::ready(()),
             _size_retry_task: Task::ready(()),
             dock_surfaces: HashMap::new(),
-            active_dock_surface: None,
             #[cfg(feature = "test-support")]
             dock_rebuild_count: 0,
             panels: HashMap::new(),
-            windows: vec![WindowView::new(window, &restored_state, cx)],
+            windows: vec![main_view],
+            last_active: window.window_handle(),
             terminal_input: terminal_input::TerminalInputState::default(),
             pending_sizes: HashMap::new(),
             terminal_geometry: HashMap::new(),
@@ -493,8 +504,8 @@ impl Condr {
             _code_font_save: None,
             drop_target: None,
             _quit_subscription: quit_subscription,
+            _main_window_closed: main_window_closed,
             last_error: None,
-            _window_activation_subscription: window_activation_subscription,
             _window_appearance_subscription: window_appearance_subscription,
             _theme_subscription: theme_subscription,
             _window_bounds_subscription: window_bounds_subscription,
@@ -542,9 +553,8 @@ impl Condr {
                 cx.background_executor()
                     .timer(condr_core::protocol::HEARTBEAT_INTERVAL)
                     .await;
-                let retried = cx.update(|window, cx| {
-                    owner.update(cx, |this, cx| this.retry_dropped_sizes(window, cx))
-                });
+                let retried =
+                    cx.update(|_, cx| owner.update(cx, |this, cx| this.retry_dropped_sizes(cx)));
                 if retried.and_then(|retried| retried).is_err() {
                     break;
                 }

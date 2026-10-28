@@ -183,7 +183,8 @@ impl Condr {
         let message = message.into();
         self.last_error = Some(message.clone());
         let message: SharedString = message.into();
-        let handle = self.main_window();
+        // In the window last activated: where the person acted, or is looking (ADR 0043).
+        let handle = self.active_view().handle;
         cx.defer(move |cx| {
             let _ = handle.update(cx, |_, window, cx| {
                 let copied = message.clone();

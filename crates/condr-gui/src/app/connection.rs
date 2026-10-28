@@ -139,9 +139,7 @@ impl ClientIo {
                             effect.rebuild_active |= next.rebuild_active;
                             effect.notify |= next.notify;
                         }
-                        if effect.rebuild_active
-                            || (effect.rebuild && key == this.active_connection)
-                        {
+                        if effect.rebuild_active || (effect.rebuild && this.presents(key)) {
                             this.rebuild_dock(window, cx);
                         }
                         this.sync_terminal_focus(window, cx);

@@ -3,7 +3,7 @@ use condr_core::PaneLayout;
 use gpui_kit::{Pixels, Point};
 
 /// Where the window looks: connection, Workspace, Tab.
-fn presented(
+pub(super) fn presented(
     window: &mut VisualTestContext,
     view: &Entity<Condr>,
 ) -> Option<(u64, WorkspaceId, TabId)> {
@@ -14,7 +14,7 @@ fn presented(
     })
 }
 
-fn create_workspace(
+pub(super) fn create_workspace(
     window: &mut VisualTestContext,
     view: &Entity<Condr>,
     root: &TestDirectory,
@@ -44,7 +44,7 @@ fn create_workspace(
                 tab_id: tab.id(),
             };
             // The Client that asked for the Workspace shows it (ADR 0021).
-            (condr.active_dock_surface == Some(surface)
+            (condr.main_view().dock_surface == Some(surface)
                 && condr.dock_surfaces.contains_key(&surface))
             .then(|| (workspace.id(), tab.id(), tab.focused_pane().unwrap().id()))
         });
@@ -271,7 +271,7 @@ fn the_view_is_local_follows_activation_and_survives_a_closed_tab() {
         Some((1, first_workspace, first_tab))
     );
     assert_eq!(
-        window.read(|app| view.read(app).active_dock_surface),
+        window.read(|app| view.read(app).main_view().dock_surface),
         Some(DockSurfaceKey {
             connection_key: 1,
             tab_id: first_tab,

@@ -32,7 +32,8 @@ fn numbered_tab_shortcuts_follow_order_and_stay_out_of_terminal_input() {
         window.read(|app| {
             let condr = view.read(app);
             condr
-                .active_dock_surface
+                .main_view()
+                .dock_surface
                 .is_some_and(|surface| surface.tab_id == tab_id)
                 && condr
                     .presented()

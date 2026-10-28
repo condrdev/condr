@@ -370,7 +370,7 @@ impl Condr {
         if moved && was_up {
             self.disconnect_server(key);
             if self.start_connect(key) {
-                self.refresh_target_pane(self.active_connection);
+                self.refresh_target_pane(self.input_connection());
                 self.rebuild_dock(window, cx);
             }
         }

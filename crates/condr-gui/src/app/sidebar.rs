@@ -117,211 +117,227 @@ impl Condr {
 
     pub(super) fn render_sidebar(&self, view: &WindowView, cx: &mut Context<Self>) -> AnyElement {
         if view.sidebar_collapsed {
-            return self.render_collapsed_sidebar(cx);
+            return self.render_collapsed_sidebar(view, cx);
         }
         let owner = cx.weak_entity();
-        let needs_you = self.needs_you_items(cx);
-        let items = self.connections.iter().map(|connection| {
-            let key = connection.key;
-            let server_target = DropTarget::Server { key, after: false };
-            let active_server = key == self.active_connection;
-            let connected = connection.can_mutate();
-            let workspaces = connection
-                .presented_session()
-                .map(|session| {
-                    let active_workspace = self.presented_workspace_id(key, session);
-                    // Drop handlers need the source index of the dragged Workspace.
-                    let workspace_ids = Rc::new(
+        let needs_you = self.needs_you_items(view, cx);
+        // A detached window lists only what it shows (ADR 0043).
+        let scope = view.scope;
+        let items = self
+            .connections
+            .iter()
+            .filter(|connection| scope.lists_connection(connection.key))
+            .map(|connection| {
+                let key = connection.key;
+                let server_target = DropTarget::Server { key, after: false };
+                let active_server = key == self.presented_key(view);
+                let connected = connection.can_mutate();
+                let workspaces = connection
+                    .presented_session()
+                    .map(|session| {
+                        let active_workspace = self.presented_workspace_id(key, session);
+                        // Drop handlers need the source index of the dragged Workspace.
+                        let workspace_ids = Rc::new(
+                            session
+                                .workspaces()
+                                .iter()
+                                .map(|workspace| workspace.id())
+                                .collect::<Vec<_>>(),
+                        );
                         session
                             .workspaces()
                             .iter()
-                            .map(|workspace| workspace.id())
-                            .collect::<Vec<_>>(),
-                    );
-                    session
-                        .workspaces()
-                        .iter()
-                        .enumerate()
-                        .map(|(workspace_index, workspace)| {
-                            let workspace_id = workspace.id();
-                            let workspace_name = workspace.name().to_owned();
-                            let git = connection.model.workspace_git.get(&workspace_id);
-                            // Every Workspace gets its second line, `detached` and no
-                            // repository included, so the rows keep one height.
-                            let detail = git.map_or_else(
-                                || "no git".to_owned(),
-                                |git| git.branch.clone().unwrap_or_else(|| "detached".to_owned()),
-                            );
-                            let upstream =
-                                git.and_then(|git| git.upstream).and_then(upstream_label);
-                            let mut statuses = Vec::new();
-                            let supports_worktrees = git.is_some_and(|git| !git.linked_worktree)
-                                && workspace.worktree().is_none();
-                            let managed_worktree = workspace
-                                .worktree()
-                                .is_some_and(|association| association.is_managed());
-                            let agents = workspace
-                                .tabs()
-                                .iter()
-                                .flat_map(|tab| tab.panes())
-                                .filter_map(|pane| {
-                                    let pane_id = pane.id();
-                                    let agent = connection.model.agents.get(&pane_id)?;
-                                    let state = connection.model.agent_display_state(pane_id)?;
-                                    let status = if connection.model.attention.contains(&pane_id) {
-                                        BELL_SIDEBAR_STATUS
-                                    } else {
-                                        agent_sidebar_status(state)
-                                    };
-                                    statuses.push(status);
-                                    let agent_label = agent.kind.label();
-                                    // The Pane's title is what the agent is doing; the
-                                    // mark already says which agent, so the name is only
-                                    // the fallback before a title arrives.
-                                    let row_label = connection
-                                        .model
-                                        .terminal_titles
-                                        .get(&pane_id)
-                                        .cloned()
-                                        .unwrap_or_else(|| agent_label.to_owned());
-                                    let agent_owner = owner.clone();
-                                    Some(
-                                        CondrSidebarTreeItem::new(
-                                            format!("sidebar-agent-{key}-{}", pane_id.as_u64()),
-                                            format!("agent-{key}-{}", pane_id.as_u64()),
-                                            format!("agent-label-{key}-{}", pane_id.as_u64()),
-                                            row_label,
-                                        )
-                                        .icon(CondrSidebarIcon::agent(
-                                            agent.kind,
-                                            status,
-                                            format!(
-                                                "agent-status-{key}-{}-{}",
-                                                pane_id.as_u64(),
-                                                status.key
+                            .enumerate()
+                            .filter(|(_, workspace)| scope.lists_workspace(key, workspace.id()))
+                            .map(|(workspace_index, workspace)| {
+                                let workspace_id = workspace.id();
+                                let workspace_name = workspace.name().to_owned();
+                                let git = connection.model.workspace_git.get(&workspace_id);
+                                // Every Workspace gets its second line, `detached` and no
+                                // repository included, so the rows keep one height.
+                                let detail = git.map_or_else(
+                                    || "no git".to_owned(),
+                                    |git| {
+                                        git.branch.clone().unwrap_or_else(|| "detached".to_owned())
+                                    },
+                                );
+                                let upstream =
+                                    git.and_then(|git| git.upstream).and_then(upstream_label);
+                                let mut statuses = Vec::new();
+                                let supports_worktrees = git
+                                    .is_some_and(|git| !git.linked_worktree)
+                                    && workspace.worktree().is_none();
+                                let managed_worktree = workspace
+                                    .worktree()
+                                    .is_some_and(|association| association.is_managed());
+                                let agents = workspace
+                                    .tabs()
+                                    .iter()
+                                    .flat_map(|tab| tab.panes())
+                                    .filter_map(|pane| {
+                                        let pane_id = pane.id();
+                                        let agent = connection.model.agents.get(&pane_id)?;
+                                        let state =
+                                            connection.model.agent_display_state(pane_id)?;
+                                        let status =
+                                            if connection.model.attention.contains(&pane_id) {
+                                                BELL_SIDEBAR_STATUS
+                                            } else {
+                                                agent_sidebar_status(state)
+                                            };
+                                        statuses.push(status);
+                                        let agent_label = agent.kind.label();
+                                        // The Pane's title is what the agent is doing; the
+                                        // mark already says which agent, so the name is only
+                                        // the fallback before a title arrives.
+                                        let row_label = connection
+                                            .model
+                                            .terminal_titles
+                                            .get(&pane_id)
+                                            .cloned()
+                                            .unwrap_or_else(|| agent_label.to_owned());
+                                        let agent_owner = owner.clone();
+                                        Some(
+                                            CondrSidebarTreeItem::new(
+                                                format!("sidebar-agent-{key}-{}", pane_id.as_u64()),
+                                                format!("agent-{key}-{}", pane_id.as_u64()),
+                                                format!("agent-label-{key}-{}", pane_id.as_u64()),
+                                                row_label,
+                                            )
+                                            .icon(CondrSidebarIcon::agent(
+                                                agent.kind,
+                                                status,
+                                                format!(
+                                                    "agent-status-{key}-{}-{}",
+                                                    pane_id.as_u64(),
+                                                    status.key
+                                                ),
+                                                format!("{agent_label}: {}", status.label),
+                                            ))
+                                            // What a Blocked agent waits for, or why an
+                                            // Error one halted (ADR 0024, ADR 0044).
+                                            .when_some(agent.detail.clone(), |item, text| {
+                                                item.detail(text)
+                                            })
+                                            .active(
+                                                active_server
+                                                    && self.terminal_input.target
+                                                        == Some((key, pane_id)),
+                                            )
+                                            .disable(!connected)
+                                            .on_click(
+                                                move |_, window, cx| {
+                                                    let _ = agent_owner.update(cx, |this, cx| {
+                                                        this.select_pane(key, pane_id, window, cx)
+                                                    });
+                                                },
                                             ),
-                                            format!("{agent_label}: {}", status.label),
-                                        ))
-                                        // What a Blocked agent waits for, or why an
-                                        // Error one halted (ADR 0024, ADR 0044).
-                                        .when_some(agent.detail.clone(), |item, text| {
-                                            item.detail(text)
-                                        })
-                                        .active(
-                                            active_server
-                                                && self.terminal_input.target
-                                                    == Some((key, pane_id)),
                                         )
-                                        .disable(!connected)
-                                        .on_click(
-                                            move |_, window, cx| {
-                                                let _ = agent_owner.update(cx, |this, cx| {
-                                                    this.select_pane(key, pane_id, window, cx)
-                                                });
-                                            },
-                                        ),
+                                    })
+                                    .collect::<Vec<_>>();
+                                let summary = agent_status_summary(statuses);
+                                let owner = owner.clone();
+                                let menu_owner = owner.clone();
+                                CondrSidebarTreeItem::new(
+                                    format!("sidebar-workspace-{key}-{}", workspace_id.as_u64()),
+                                    format!("workspace-{key}-{}", workspace_id.as_u64()),
+                                    format!("workspace-label-{key}-{}", workspace_id.as_u64()),
+                                    workspace_name.clone(),
+                                )
+                                .icon(CondrSidebarIcon::avatar(
+                                    &workspace_name,
+                                    &workspace.root_directory().to_string_lossy(),
+                                    format!("workspace-icon-{key}-{}", workspace_id.as_u64()),
+                                ))
+                                // Lit beside its selected agent too: folded, the row is the only
+                                // sign of which Workspace is shown.
+                                .active(active_server && active_workspace == Some(workspace_id))
+                                .tree_parent(
+                                    format!("workspace-toggle-{key}-{}", workspace_id.as_u64()),
+                                    self.sidebar_workspace_open[&(key, workspace_id)].clone(),
+                                )
+                                .children(agents)
+                                .disable(!connected)
+                                .when(connected, |item| {
+                                    let drop_owner = owner.clone();
+                                    let move_owner = owner.clone();
+                                    let target = DropTarget::Workspace {
+                                        key,
+                                        workspace_id,
+                                        after: false,
+                                    };
+                                    let workspace_ids = workspace_ids.clone();
+                                    item.draggable(DraggedWorkspace {
+                                        key,
+                                        workspace_id,
+                                        name: workspace_name.clone().into(),
+                                    })
+                                    .drop_target(
+                                        self.drop_indicator_for(target, cx),
+                                        move |half, cx| {
+                                            let _ = move_owner.update(cx, |this, cx| {
+                                                this.set_drop_target(target, half, cx)
+                                            });
+                                        },
+                                    )
+                                    .on_drop(
+                                        move |dragged, _, cx| {
+                                            let _ = drop_owner.update(cx, |this, _| {
+                                                let after = this.take_drop_after(target);
+                                                if dragged.key != key {
+                                                    return;
+                                                }
+                                                let Some(source) = workspace_ids
+                                                    .iter()
+                                                    .position(|id| *id == dragged.workspace_id)
+                                                else {
+                                                    return;
+                                                };
+                                                if let Some(index) =
+                                                    drop_index(source, workspace_index, after)
+                                                {
+                                                    this.send_layout_to(
+                                                        key,
+                                                        LayoutCommand::MoveWorkspace {
+                                                            workspace_id: dragged.workspace_id,
+                                                            target_index: index as u32,
+                                                        },
+                                                    );
+                                                }
+                                            });
+                                        },
                                     )
                                 })
-                                .collect::<Vec<_>>();
-                            let summary = agent_status_summary(statuses);
-                            let owner = owner.clone();
-                            let menu_owner = owner.clone();
-                            CondrSidebarTreeItem::new(
-                                format!("sidebar-workspace-{key}-{}", workspace_id.as_u64()),
-                                format!("workspace-{key}-{}", workspace_id.as_u64()),
-                                format!("workspace-label-{key}-{}", workspace_id.as_u64()),
-                                workspace_name.clone(),
-                            )
-                            .icon(CondrSidebarIcon::avatar(
-                                &workspace_name,
-                                &workspace.root_directory().to_string_lossy(),
-                                format!("workspace-icon-{key}-{}", workspace_id.as_u64()),
-                            ))
-                            // Lit beside its selected agent too: folded, the row is the only
-                            // sign of which Workspace is shown.
-                            .active(active_server && active_workspace == Some(workspace_id))
-                            .tree_parent(
-                                format!("workspace-toggle-{key}-{}", workspace_id.as_u64()),
-                                self.sidebar_workspace_open[&(key, workspace_id)].clone(),
-                            )
-                            .children(agents)
-                            .disable(!connected)
-                            .when(connected, |item| {
-                                let drop_owner = owner.clone();
-                                let move_owner = owner.clone();
-                                let target = DropTarget::Workspace {
-                                    key,
-                                    workspace_id,
-                                    after: false,
-                                };
-                                let workspace_ids = workspace_ids.clone();
-                                item.draggable(DraggedWorkspace {
-                                    key,
-                                    workspace_id,
-                                    name: workspace_name.clone().into(),
-                                })
-                                .drop_target(
-                                    self.drop_indicator_for(target, cx),
-                                    move |half, cx| {
-                                        let _ = move_owner.update(cx, |this, cx| {
-                                            this.set_drop_target(target, half, cx)
-                                        });
-                                    },
-                                )
-                                .on_drop(move |dragged, _, cx| {
-                                    let _ = drop_owner.update(cx, |this, _| {
-                                        let after = this.take_drop_after(target);
-                                        if dragged.key != key {
-                                            return;
-                                        }
-                                        let Some(source) = workspace_ids
-                                            .iter()
-                                            .position(|id| *id == dragged.workspace_id)
-                                        else {
-                                            return;
-                                        };
-                                        if let Some(index) =
-                                            drop_index(source, workspace_index, after)
-                                        {
-                                            this.send_layout_to(
-                                                key,
-                                                LayoutCommand::MoveWorkspace {
-                                                    workspace_id: dragged.workspace_id,
-                                                    target_index: index as u32,
-                                                },
-                                            );
-                                        }
-                                    });
-                                })
-                            })
-                            .context_menu(move |menu, _, _| {
-                                let rename_owner = menu_owner.clone();
-                                let create_owner = menu_owner.clone();
-                                let open_owner = menu_owner.clone();
-                                let remove_owner = menu_owner.clone();
-                                let close_owner = menu_owner.clone();
-                                let rename_name = workspace_name.clone();
-                                let create_name = workspace_name.clone();
-                                let open_name = workspace_name.clone();
-                                let remove_name = workspace_name.clone();
-                                let menu = menu.item(
-                                    PopupMenuItem::new("Rename Workspace")
-                                        .disabled(!connected)
-                                        .on_click(move |_, window, cx| {
-                                            let name = rename_name.clone();
-                                            let _ = rename_owner.update(cx, |this, cx| {
-                                                this.prompt_rename_workspace_on(
-                                                    key,
-                                                    workspace_id,
-                                                    name,
-                                                    window,
-                                                    cx,
-                                                )
-                                            });
-                                        }),
-                                );
-                                let menu = if supports_worktrees {
-                                    menu.separator()
+                                .context_menu(move |menu, _, _| {
+                                    let rename_owner = menu_owner.clone();
+                                    let create_owner = menu_owner.clone();
+                                    let open_owner = menu_owner.clone();
+                                    let remove_owner = menu_owner.clone();
+                                    let close_owner = menu_owner.clone();
+                                    let detach_owner = menu_owner.clone();
+                                    let rename_name = workspace_name.clone();
+                                    let create_name = workspace_name.clone();
+                                    let open_name = workspace_name.clone();
+                                    let remove_name = workspace_name.clone();
+                                    let menu = menu.item(
+                                        PopupMenuItem::new("Rename Workspace")
+                                            .disabled(!connected)
+                                            .on_click(move |_, window, cx| {
+                                                let name = rename_name.clone();
+                                                let _ = rename_owner.update(cx, |this, cx| {
+                                                    this.prompt_rename_workspace_on(
+                                                        key,
+                                                        workspace_id,
+                                                        name,
+                                                        window,
+                                                        cx,
+                                                    )
+                                                });
+                                            }),
+                                    );
+                                    let menu =
+                                        if supports_worktrees {
+                                            menu.separator()
                                         .item(
                                             PopupMenuItem::new("Create Worktree")
                                                 .disabled(!connected)
@@ -354,240 +370,263 @@ impl Condr {
                                                     });
                                                 }),
                                         )
-                                } else {
-                                    menu
-                                };
-                                let menu = if managed_worktree {
-                                    menu.separator().item(
-                                        PopupMenuItem::new("Remove Worktree")
+                                        } else {
+                                            menu
+                                        };
+                                    let menu = if managed_worktree {
+                                        menu.separator().item(
+                                            PopupMenuItem::new("Remove Worktree")
+                                                .disabled(!connected)
+                                                .on_click(move |_, window, cx| {
+                                                    let name = remove_name.clone();
+                                                    let _ = remove_owner.update(cx, |this, cx| {
+                                                        this.confirm_remove_worktree_on(
+                                                            key,
+                                                            workspace_id,
+                                                            name,
+                                                            window,
+                                                            cx,
+                                                        )
+                                                    });
+                                                }),
+                                        )
+                                    } else {
+                                        menu
+                                    };
+                                    menu.item(PopupMenuItem::new("Open in New Window").on_click(
+                                        move |_, window, cx| {
+                                            let _ = detach_owner.update(cx, |this, cx| {
+                                                this.open_in_new_window(
+                                                    WindowScope::Workspace(key, workspace_id),
+                                                    window,
+                                                    cx,
+                                                )
+                                            });
+                                        },
+                                    ))
+                                    .separator()
+                                    .item(
+                                        PopupMenuItem::new("Close Workspace")
                                             .disabled(!connected)
                                             .on_click(move |_, window, cx| {
-                                                let name = remove_name.clone();
-                                                let _ = remove_owner.update(cx, |this, cx| {
-                                                    this.confirm_remove_worktree_on(
+                                                let _ = close_owner.update(cx, |this, cx| {
+                                                    this.close_workspace_id(
                                                         key,
                                                         workspace_id,
-                                                        name,
                                                         window,
                                                         cx,
                                                     )
                                                 });
                                             }),
                                     )
-                                } else {
-                                    menu
-                                };
-                                menu.separator().item(
-                                    PopupMenuItem::new("Close Workspace")
-                                        .disabled(!connected)
-                                        .on_click(move |_, window, cx| {
-                                            let _ = close_owner.update(cx, |this, cx| {
-                                                this.close_workspace_id(
-                                                    key,
-                                                    workspace_id,
-                                                    window,
-                                                    cx,
-                                                )
-                                            });
-                                        }),
-                                )
-                            })
-                            .detail(detail)
-                            .when(!summary.is_empty() || upstream.is_some(), |item| {
-                                item.suffix(move |_, cx| {
-                                    workspace_suffix(&summary, upstream.as_deref(), cx)
                                 })
-                            })
-                            .on_click(move |_, window, cx| {
-                                let _ = owner.update(cx, |this, cx| {
-                                    this.select_workspace(key, workspace_id, window, cx)
-                                });
-                            })
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            let select_owner = owner.clone();
-            let new_workspace_owner = owner.clone();
-            let server_menu_owner = owner.clone();
-            let server_name = connection.label.clone();
-            let status = connection.status;
-            let connect_reason = connection.error.clone();
-            let build_notice = connection.build_notice();
-            let is_local = connection.endpoint.as_local_path().is_some();
-            let new_workspace_label = connection.label.clone();
-            let descendant_selected = workspaces.iter().any(CondrSidebarTreeItem::subtree_active);
-            CondrSidebarSection::new(
-                connection.label.clone(),
-                format!("server-heading-{key}"),
-                move |_, cx| {
-                    let owner = new_workspace_owner.clone();
-                    let tooltip = format!("New Workspace on {new_workspace_label}");
-                    // A device that is not connected says so in its heading: red when
-                    // something failed, grey when the user disconnected, as on its page.
-                    // The mark tells why on hover and connects on click.
-                    let indicator = match status {
-                        // A connected Server of another build gets a mark that says which
-                        // side to update (ADR 0027); clicking it puts it away.
-                        ConnectionStatus::Connected => build_notice.clone().map(|notice| {
-                            let dismiss_owner = owner.clone();
-                            Button::new(("build-notice", key))
-                                .debug_selector(move || format!("build-notice-{key}"))
-                                .ghost()
-                                .xsmall()
-                                .compact()
-                                .icon(
-                                    Icon::new(IconName::TriangleAlert)
-                                        .text_color(cx.theme().warning),
-                                )
-                                .tooltip(format!("{notice}\nClick to dismiss."))
-                                .on_click(move |_, _, cx| {
-                                    let _ = dismiss_owner.update(cx, |this, cx| {
-                                        if let Some(connection) = this.connection_mut(key) {
-                                            connection.build_notice_dismissed = true;
-                                        }
-                                        cx.notify();
+                                .detail(detail)
+                                .when(!summary.is_empty() || upstream.is_some(), |item| {
+                                    item.suffix(move |_, cx| {
+                                        workspace_suffix(&summary, upstream.as_deref(), cx)
+                                    })
+                                })
+                                .on_click(move |_, window, cx| {
+                                    let _ = owner.update(cx, |this, cx| {
+                                        this.select_workspace(key, workspace_id, window, cx)
                                     });
                                 })
-                                .into_any_element()
-                        }),
-                        ConnectionStatus::Connecting => {
-                            Some(Spinner::new().xsmall().into_any_element())
-                        }
-                        ConnectionStatus::Disconnected => {
-                            let connect_owner = owner.clone();
-                            let mark = match &connect_reason {
-                                Some(_) => Icon::new(CondrIconName::CircleAlert)
-                                    .text_color(cx.theme().danger),
-                                None => Icon::new(CondrIconName::Circle)
-                                    .text_color(cx.theme().muted_foreground),
-                            };
-                            let why = connect_reason
-                                .clone()
-                                .map_or("Not connected. Click to connect.".to_owned(), |reason| {
-                                    format!("Not connected: {reason}\nClick to connect.")
-                                });
-                            Some(
-                                Button::new(("connect-indicator", key))
-                                    .debug_selector(move || format!("connect-indicator-{key}"))
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                let select_owner = owner.clone();
+                let new_workspace_owner = owner.clone();
+                let server_menu_owner = owner.clone();
+                let server_name = connection.label.clone();
+                let status = connection.status;
+                let connect_reason = connection.error.clone();
+                let build_notice = connection.build_notice();
+                let is_local = connection.endpoint.as_local_path().is_some();
+                let new_workspace_label = connection.label.clone();
+                let descendant_selected =
+                    workspaces.iter().any(CondrSidebarTreeItem::subtree_active);
+                CondrSidebarSection::new(
+                    connection.label.clone(),
+                    format!("server-heading-{key}"),
+                    move |_, cx| {
+                        let owner = new_workspace_owner.clone();
+                        let tooltip = format!("New Workspace on {new_workspace_label}");
+                        // A device that is not connected says so in its heading: red when
+                        // something failed, grey when the user disconnected, as on its page.
+                        // The mark tells why on hover and connects on click.
+                        let indicator = match status {
+                            // A connected Server of another build gets a mark that says which
+                            // side to update (ADR 0027); clicking it puts it away.
+                            ConnectionStatus::Connected => build_notice.clone().map(|notice| {
+                                let dismiss_owner = owner.clone();
+                                Button::new(("build-notice", key))
+                                    .debug_selector(move || format!("build-notice-{key}"))
                                     .ghost()
                                     .xsmall()
                                     .compact()
-                                    .icon(mark)
-                                    .tooltip(why)
-                                    .on_click(move |_, window, cx| {
-                                        cx.stop_propagation();
-                                        let _ = connect_owner.update(cx, |this, cx| {
-                                            this.connect_server(key, window, cx)
+                                    .icon(
+                                        Icon::new(IconName::TriangleAlert)
+                                            .text_color(cx.theme().warning),
+                                    )
+                                    .tooltip(format!("{notice}\nClick to dismiss."))
+                                    .on_click(move |_, _, cx| {
+                                        let _ = dismiss_owner.update(cx, |this, cx| {
+                                            if let Some(connection) = this.connection_mut(key) {
+                                                connection.build_notice_dismissed = true;
+                                            }
+                                            cx.notify();
                                         });
                                     })
-                                    .into_any_element(),
+                                    .into_any_element()
+                            }),
+                            ConnectionStatus::Connecting => {
+                                Some(Spinner::new().xsmall().into_any_element())
+                            }
+                            ConnectionStatus::Disconnected => {
+                                let connect_owner = owner.clone();
+                                let mark = match &connect_reason {
+                                    Some(_) => Icon::new(CondrIconName::CircleAlert)
+                                        .text_color(cx.theme().danger),
+                                    None => Icon::new(CondrIconName::Circle)
+                                        .text_color(cx.theme().muted_foreground),
+                                };
+                                let why = connect_reason.clone().map_or(
+                                    "Not connected. Click to connect.".to_owned(),
+                                    |reason| format!("Not connected: {reason}\nClick to connect."),
+                                );
+                                Some(
+                                    Button::new(("connect-indicator", key))
+                                        .debug_selector(move || format!("connect-indicator-{key}"))
+                                        .ghost()
+                                        .xsmall()
+                                        .compact()
+                                        .icon(mark)
+                                        .tooltip(why)
+                                        .on_click(move |_, window, cx| {
+                                            cx.stop_propagation();
+                                            let _ = connect_owner.update(cx, |this, cx| {
+                                                this.connect_server(key, window, cx)
+                                            });
+                                        })
+                                        .into_any_element(),
+                                )
+                            }
+                        };
+                        h_flex()
+                            .gap_1()
+                            .items_center()
+                            .children(indicator)
+                            .child(
+                                Button::new(("new-workspace", key))
+                                    .debug_selector(move || format!("new-workspace-server-{key}"))
+                                    .ghost()
+                                    .small()
+                                    .icon(Icon::new(CondrIconName::FolderPlus))
+                                    .tooltip(tooltip)
+                                    .disabled(!connected)
+                                    .on_click(move |_, window, cx| {
+                                        cx.stop_propagation();
+                                        let _ = owner.update(cx, |this, cx| {
+                                            this.choose_workspace_directory_on(key, window, cx)
+                                        });
+                                    }),
                             )
-                        }
+                            .into_any_element()
+                    },
+                    workspaces,
+                )
+                .active(active_server && !descendant_selected)
+                .draggable(DraggedServer {
+                    key,
+                    name: connection.label.clone().into(),
+                })
+                .drop_target(self.drop_indicator_for(server_target, cx), {
+                    let move_owner = owner.clone();
+                    move |half, cx| {
+                        let _ = move_owner
+                            .update(cx, |this, cx| this.set_drop_target(server_target, half, cx));
+                    }
+                })
+                .on_drop({
+                    let drop_owner = owner.clone();
+                    move |dragged, _, cx| {
+                        let _ = drop_owner.update(cx, |this, cx| {
+                            let after = this.take_drop_after(server_target);
+                            this.move_server(dragged.key, key, after, cx);
+                            cx.notify();
+                        });
+                    }
+                })
+                .context_menu(move |menu, _, _| {
+                    let edit_owner = server_menu_owner.clone();
+                    let connection_owner = server_menu_owner.clone();
+                    let delete_owner = server_menu_owner.clone();
+                    let detach_owner = server_menu_owner.clone();
+                    let delete_name = server_name.clone();
+                    let (connection_label, connection_disabled) = match status {
+                        ConnectionStatus::Connected => ("Disconnect", false),
+                        ConnectionStatus::Disconnected => ("Connect", false),
+                        ConnectionStatus::Connecting => ("Connecting…", true),
                     };
-                    h_flex()
-                        .gap_1()
-                        .items_center()
-                        .children(indicator)
-                        .child(
-                            Button::new(("new-workspace", key))
-                                .debug_selector(move || format!("new-workspace-server-{key}"))
-                                .ghost()
-                                .small()
-                                .icon(Icon::new(CondrIconName::FolderPlus))
-                                .tooltip(tooltip)
-                                .disabled(!connected)
+                    // The Local Server is this machine's own: nothing to edit, nothing to
+                    // delete, only its connection to toggle.
+                    let menu = if is_local {
+                        menu
+                    } else {
+                        menu.item(PopupMenuItem::new("Edit").on_click(move |_, window, cx| {
+                            let _ = edit_owner
+                                .update(cx, |this, cx| this.prompt_edit_server_on(key, window, cx));
+                        }))
+                    };
+                    let menu = menu
+                        .item(
+                            PopupMenuItem::new(connection_label)
+                                .disabled(connection_disabled)
                                 .on_click(move |_, window, cx| {
-                                    cx.stop_propagation();
-                                    let _ = owner.update(cx, |this, cx| {
-                                        this.choose_workspace_directory_on(key, window, cx)
+                                    let _ = connection_owner.update(cx, |this, cx| {
+                                        match status {
+                                            ConnectionStatus::Connected => {
+                                                if this.disconnect_server(key) {
+                                                    this.refresh_target_pane(
+                                                        this.input_connection(),
+                                                    );
+                                                    this.rebuild_dock(window, cx);
+                                                }
+                                            }
+                                            ConnectionStatus::Disconnected => {
+                                                this.connect_server(key, window, cx);
+                                            }
+                                            ConnectionStatus::Connecting => {}
+                                        }
+                                        cx.notify();
                                     });
                                 }),
                         )
-                        .into_any_element()
-                },
-                workspaces,
-            )
-            .active(active_server && !descendant_selected)
-            .draggable(DraggedServer {
-                key,
-                name: connection.label.clone().into(),
-            })
-            .drop_target(self.drop_indicator_for(server_target, cx), {
-                let move_owner = owner.clone();
-                move |half, cx| {
-                    let _ = move_owner
-                        .update(cx, |this, cx| this.set_drop_target(server_target, half, cx));
-                }
-            })
-            .on_drop({
-                let drop_owner = owner.clone();
-                move |dragged, _, cx| {
-                    let _ = drop_owner.update(cx, |this, cx| {
-                        let after = this.take_drop_after(server_target);
-                        this.move_server(dragged.key, key, after, cx);
-                        cx.notify();
-                    });
-                }
-            })
-            .context_menu(move |menu, _, _| {
-                let edit_owner = server_menu_owner.clone();
-                let connection_owner = server_menu_owner.clone();
-                let delete_owner = server_menu_owner.clone();
-                let delete_name = server_name.clone();
-                let (connection_label, connection_disabled) = match status {
-                    ConnectionStatus::Connected => ("Disconnect", false),
-                    ConnectionStatus::Disconnected => ("Connect", false),
-                    ConnectionStatus::Connecting => ("Connecting…", true),
-                };
-                // The Local Server is this machine's own: nothing to edit, nothing to
-                // delete, only its connection to toggle.
-                let menu = if is_local {
-                    menu
-                } else {
-                    menu.item(PopupMenuItem::new("Edit").on_click(move |_, window, cx| {
-                        let _ = edit_owner
-                            .update(cx, |this, cx| this.prompt_edit_server_on(key, window, cx));
-                    }))
-                };
-                let menu = menu.item(
-                    PopupMenuItem::new(connection_label)
-                        .disabled(connection_disabled)
-                        .on_click(move |_, window, cx| {
-                            let _ = connection_owner.update(cx, |this, cx| {
-                                match status {
-                                    ConnectionStatus::Connected => {
-                                        if this.disconnect_server(key) {
-                                            this.refresh_target_pane(this.active_connection);
-                                            this.rebuild_dock(window, cx);
-                                        }
-                                    }
-                                    ConnectionStatus::Disconnected => {
-                                        this.connect_server(key, window, cx);
-                                    }
-                                    ConnectionStatus::Connecting => {}
-                                }
-                                cx.notify();
-                            });
-                        }),
-                );
-                if is_local {
-                    menu
-                } else {
-                    menu.separator().item(PopupMenuItem::new("Delete").on_click(
-                        move |_, window, cx| {
-                            let name = delete_name.clone();
-                            let _ = delete_owner.update(cx, |this, cx| {
-                                this.confirm_delete_server_on(key, name, window, cx)
-                            });
-                        },
-                    ))
-                }
-            })
-            .on_click(move |_, window, cx| {
-                let _ = select_owner.update(cx, |this, cx| this.select_server(key, window, cx));
-            })
-        });
+                        .item(PopupMenuItem::new("Open in New Window").on_click(
+                            move |_, window, cx| {
+                                let _ = detach_owner.update(cx, |this, cx| {
+                                    this.open_in_new_window(WindowScope::Device(key), window, cx)
+                                });
+                            },
+                        ));
+                    if is_local {
+                        menu
+                    } else {
+                        menu.separator().item(PopupMenuItem::new("Delete").on_click(
+                            move |_, window, cx| {
+                                let name = delete_name.clone();
+                                let _ = delete_owner.update(cx, |this, cx| {
+                                    this.confirm_delete_server_on(key, name, window, cx)
+                                });
+                            },
+                        ))
+                    }
+                })
+                .on_click(move |_, window, cx| {
+                    let _ = select_owner.update(cx, |this, cx| this.select_server(key, window, cx));
+                })
+            });
 
         let add_owner = cx.weak_entity();
         let settings_owner = cx.weak_entity();
@@ -668,7 +707,11 @@ impl Condr {
     /// One row per Blocked or Error agent across all connections: its mark, the
     /// Workspace (and the Device once there is more than one), and what it waits for or
     /// why it halted. A click lands in the Pane, as the OS notification's click does.
-    fn needs_you_items(&self, cx: &mut Context<Self>) -> Vec<CondrSidebarTreeItem> {
+    fn needs_you_items(
+        &self,
+        view: &WindowView,
+        cx: &mut Context<Self>,
+    ) -> Vec<CondrSidebarTreeItem> {
         let owner = cx.weak_entity();
         let several_devices = self.connections.len() > 1;
         let mut items = Vec::new();
@@ -678,6 +721,9 @@ impl Condr {
                 continue;
             }
             for (workspace, pane_id, agent) in connection.model.agents_needing_you() {
+                if !view.scope.lists_workspace(key, workspace.id()) {
+                    continue;
+                }
                 let status = agent_sidebar_status(
                     connection
                         .model
@@ -715,7 +761,7 @@ impl Condr {
         items
     }
 
-    fn render_collapsed_sidebar(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_collapsed_sidebar(&self, view: &WindowView, cx: &mut Context<Self>) -> AnyElement {
         let owner = cx.weak_entity();
         let mut avatars = Vec::new();
         for connection in &self.connections {
@@ -726,7 +772,10 @@ impl Condr {
             let active_workspace = self.presented_workspace_id(connection.key, session);
             for workspace in session.workspaces() {
                 let workspace_id = workspace.id();
-                let active = connection.key == self.active_connection
+                if !view.scope.lists_workspace(connection_key, workspace_id) {
+                    continue;
+                }
+                let active = connection.key == self.presented_key(view)
                     && active_workspace == Some(workspace_id);
                 let workspace_name = workspace.name().to_owned();
                 let icon = CondrSidebarIcon::avatar(

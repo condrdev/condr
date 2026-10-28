@@ -62,7 +62,7 @@ impl Condr {
         view: &WindowView,
         cx: &mut Context<Self>,
     ) -> WorkspaceChrome {
-        let Some(connection) = self.active_connection() else {
+        let Some(connection) = self.connection(self.presented_key(view)) else {
             return WorkspaceChrome::body(div().size_full().into_any_element());
         };
         let can_mutate =
@@ -71,38 +71,51 @@ impl Condr {
             return WorkspaceChrome::body(self.render_disconnected(connection, cx));
         };
         let key = connection.key;
-        let Some(workspace_id) = self.presented_workspace_id(key, session) else {
+        // A Device or Workspace another window draws leaves only its page here; a Tab
+        // drawn elsewhere leaves its Workspace and Tab strip, with the page in its place.
+        let elsewhere = self.shown_elsewhere(view);
+        if let Some((scope @ (WindowScope::Device(_) | WindowScope::Workspace(..)), handle)) =
+            elsewhere
+        {
+            return WorkspaceChrome::body(self.render_shown_elsewhere(scope, handle, cx));
+        }
+        let Some((_, _, workspace_id, active_tab)) = self.presented_in(view) else {
             // Nothing to show and not connected: say so, instead of a greyed-out Welcome.
             if connection.status != ConnectionStatus::Connected {
                 return WorkspaceChrome::body(self.render_disconnected(connection, cx));
+            }
+            if !matches!(view.scope, WindowScope::Main | WindowScope::Device(_)) {
+                // Its unit is gone; the window is closing.
+                return WorkspaceChrome::body(div().size_full().into_any_element());
             }
             return WorkspaceChrome::body(self.render_welcome(key, can_mutate, cx));
         };
         let workspace = session
             .workspace(workspace_id)
             .expect("presented Workspace belongs to the restored Session");
-
-        let active_tab = self
-            .presented_tab_id(key, session, workspace_id)
-            .expect("presented Workspace has an active Tab");
         let surface_key = DockSurfaceKey {
             connection_key: key,
             tab_id: active_tab,
         };
-        let dock_area = (self.active_dock_surface == Some(surface_key))
+        // Never a surface another window draws, even before this one rebuilds.
+        let dock_area = (view.dock_surface == Some(surface_key) && elsewhere.is_none())
             .then(|| self.dock_surfaces.get(&surface_key))
             .flatten()
             .map(|surface| surface.area.clone());
+        let page = elsewhere.map(|(scope, handle)| self.render_shown_elsewhere(scope, handle, cx));
         // A viewer Tab has no Dock; its body is the diff or the file (ADR 0017, ADR 0018).
-        let viewer = session.tab(active_tab).and_then(|tab| match tab.content() {
-            TabContent::Diff(diff) => {
-                Some(self.render_diff_tab(key, workspace_id, active_tab, diff.path(), cx))
-            }
-            TabContent::File(file) => {
-                Some(self.render_file_tab(view, key, workspace_id, active_tab, file.path(), cx))
-            }
-            TabContent::Terminals(_) => None,
-        });
+        let viewer = session
+            .tab(active_tab)
+            .filter(|_| page.is_none())
+            .and_then(|tab| match tab.content() {
+                TabContent::Diff(diff) => {
+                    Some(self.render_diff_tab(key, workspace_id, active_tab, diff.path(), cx))
+                }
+                TabContent::File(file) => {
+                    Some(self.render_file_tab(view, key, workspace_id, active_tab, file.path(), cx))
+                }
+                TabContent::Terminals(_) => None,
+            });
         let strip = self.render_tab_strip(
             view,
             key,
@@ -119,6 +132,7 @@ impl Condr {
             .relative()
             .when_some(dock_area, |view, dock_area| view.child(dock_area))
             .children(viewer)
+            .children(page)
             .children(self.render_reconnect_veil(connection, cx))
             .into_any_element();
         WorkspaceChrome {
@@ -342,6 +356,7 @@ impl Condr {
                 .context_menu(move |menu, _, _| {
                     let rename_owner = menu_owner.clone();
                     let close_owner = menu_owner.clone();
+                    let detach_owner = menu_owner.clone();
                     let rename_name = tab_name.clone();
                     menu.item(
                         PopupMenuItem::new("Rename Tab")
@@ -353,6 +368,13 @@ impl Condr {
                                 });
                             }),
                     )
+                    .item(PopupMenuItem::new("Open in New Window").on_click(
+                        move |_, window, cx| {
+                            let _ = detach_owner.update(cx, |this, cx| {
+                                this.open_in_new_window(WindowScope::Tab(key, tab_id), window, cx)
+                            });
+                        },
+                    ))
                     .separator()
                     .item(
                         PopupMenuItem::new("Close Tab")
@@ -612,12 +634,15 @@ const TITLE_TOGGLE_SLOT: Pixels = px(24.);
 /// is the sidebar's width and color, its right segment hosts the Tab strip, so the two
 /// columns read as one surface each and the Panes get the height a separate strip took.
 /// The Kit still draws the window controls and moves the window from empty space.
+#[allow(clippy::too_many_arguments)]
 fn workspace_title_bar(
+    title: String,
     sidebar_width: Pixels,
     sidebar_collapsed: bool,
     tab_strip: Option<AnyElement>,
     open_in: Option<AnyElement>,
     changes_toggle: Option<AnyElement>,
+    bring_back: Option<AnyElement>,
     owner: WeakEntity<Condr>,
     cx: &App,
 ) -> TitleBar {
@@ -674,8 +699,9 @@ fn workspace_title_bar(
                                     .gap_2()
                                     .items_center()
                                     .flex_shrink_0()
+                                    .min_w_0()
                                     .child(img(APP_LOGO).size_4().flex_shrink_0())
-                                    .child(condr_core::APP_NAME),
+                                    .child(div().min_w_0().truncate().child(title)),
                             )
                         })
                         .child(
@@ -709,13 +735,18 @@ fn workspace_title_bar(
                         .bg(theme.background)
                         .children(tab_strip)
                         .children(open_in)
-                        .children(changes_toggle),
+                        .children(changes_toggle)
+                        .children(bring_back),
                 ),
         )
 }
 
 impl Render for Condr {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // A detached window being closed draws once more after its view went back.
+        if !self.owns_window(window) {
+            return div().into_any_element();
+        }
         self.ask_file_prompts(window, cx);
         let view = self.window_view(window);
         let workspace_owner = cx.weak_entity();
@@ -725,11 +756,16 @@ impl Render for Condr {
             open_in,
             body,
         } = self.render_workspace(view, cx);
-        let has_workspace = self.presented_workspace().is_some();
-        let changes_toggle = has_workspace.then(|| self.render_changes_toggle(cx));
+        let has_workspace =
+            self.presented_workspace_in(view).is_some() && self.draws_workspace(view);
+        let changes_toggle = has_workspace.then(|| self.render_changes_toggle(view, cx));
         let changes_column = self
-            .changes_sidebar_open()
-            .then(|| self.render_right_sidebar(cx));
+            .changes_sidebar_open(view)
+            .then(|| self.render_right_sidebar(view, cx));
+        let tab_window = matches!(view.scope, WindowScope::Tab(..));
+        let title = self.window_title(view.scope);
+        let bring_back =
+            (view.scope != WindowScope::Main).then(|| bring_back_button(cx.weak_entity()));
         let workspace = div()
             .size_full()
             // A flex item's minimum defaults to its content: without this a Pane whose
@@ -793,109 +829,218 @@ impl Render for Condr {
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             // Client-side title bar on every platform, as Zed does; the OS title for the
-            // taskbar is set separately when the window opens.
-            .child(workspace_title_bar(
-                view.sidebar_width,
-                view.sidebar_collapsed,
-                tab_strip,
-                open_in,
-                changes_toggle,
-                sidebar_toggle_owner,
-                cx,
-            ))
-            .child(
-                // The sidebar keeps an absolute width, the way Zed sizes its docks: a
-                // resizable group would rescale it with the window on every resize.
-                // Dragging the handle on its right edge is the only thing that moves it.
-                h_flex()
-                    .w_full()
-                    .flex_1()
-                    .min_h_0()
-                    .on_drag_move(cx.listener(
-                        |this, event: &DragMoveEvent<DraggedSidebar>, window, cx| {
-                            let width = event.event.position.x - event.bounds.origin.x;
-                            this.window_view_mut(window).sidebar_width =
-                                width.max(MIN_SIDEBAR_WIDTH).min(MAX_SIDEBAR_WIDTH).round();
-                            this.schedule_state_save(cx);
-                            cx.notify();
-                        },
-                    ))
-                    // The Changes sidebar mirrors it: its handle is on its left edge.
-                    .on_drag_move(cx.listener(
-                        |this, event: &DragMoveEvent<DraggedChanges>, window, cx| {
-                            let right = event.bounds.origin.x + event.bounds.size.width;
-                            let width = right - event.event.position.x;
-                            this.window_view_mut(window).changes_width =
-                                width.max(MIN_CHANGES_WIDTH).min(MAX_CHANGES_WIDTH).round();
-                            this.schedule_state_save(cx);
-                            cx.notify();
-                        },
+            // taskbar is set separately when the window opens. A Tab window draws its Tab
+            // alone: no Tab strip and no sidebars (ADR 0043).
+            .map(|this| {
+                if tab_window {
+                    this.child(tab_window_title_bar(title, bring_back, cx))
+                        .child(workspace)
+                } else {
+                    this.child(workspace_title_bar(
+                        title,
+                        view.sidebar_width,
+                        view.sidebar_collapsed,
+                        tab_strip,
+                        open_in,
+                        changes_toggle,
+                        bring_back,
+                        sidebar_toggle_owner,
+                        cx,
                     ))
                     .child(
-                        div()
-                            .debug_selector(|| "condr-sidebar".into())
-                            .relative()
-                            .w(view.sidebar_layout_width())
-                            .flex_none()
-                            .h_full()
-                            .child(self.render_sidebar(view, cx))
-                            // Deferred so it paints above the workspace it overlaps by
-                            // half its width, occluding so the terminal underneath never
-                            // sees the press, and swallowing the press so the pane does
-                            // not start a selection.
-                            .when(!view.sidebar_collapsed, |this| {
-                                this.child(deferred(
+                        // The sidebar keeps an absolute width, the way Zed sizes its docks: a
+                        // resizable group would rescale it with the window on every resize.
+                        // Dragging the handle on its right edge is the only thing that moves it.
+                        h_flex()
+                            .w_full()
+                            .flex_1()
+                            .min_h_0()
+                            .on_drag_move(cx.listener(
+                                |this, event: &DragMoveEvent<DraggedSidebar>, window, cx| {
+                                    let width = event.event.position.x - event.bounds.origin.x;
+                                    this.window_view_mut(window).sidebar_width =
+                                        width.max(MIN_SIDEBAR_WIDTH).min(MAX_SIDEBAR_WIDTH).round();
+                                    this.schedule_state_save(cx);
+                                    cx.notify();
+                                },
+                            ))
+                            // The Changes sidebar mirrors it: its handle is on its left edge.
+                            .on_drag_move(cx.listener(
+                                |this, event: &DragMoveEvent<DraggedChanges>, window, cx| {
+                                    let right = event.bounds.origin.x + event.bounds.size.width;
+                                    let width = right - event.event.position.x;
+                                    this.window_view_mut(window).changes_width =
+                                        width.max(MIN_CHANGES_WIDTH).min(MAX_CHANGES_WIDTH).round();
+                                    this.schedule_state_save(cx);
+                                    cx.notify();
+                                },
+                            ))
+                            .child(
+                                div()
+                                    .debug_selector(|| "condr-sidebar".into())
+                                    .relative()
+                                    .w(view.sidebar_layout_width())
+                                    .flex_none()
+                                    .h_full()
+                                    .child(self.render_sidebar(view, cx))
+                                    // Deferred so it paints above the workspace it overlaps by
+                                    // half its width, occluding so the terminal underneath never
+                                    // sees the press, and swallowing the press so the pane does
+                                    // not start a selection.
+                                    .when(!view.sidebar_collapsed, |this| {
+                                        this.child(deferred(
+                                            div()
+                                                .id("condr-sidebar-resize")
+                                                .debug_selector(|| "condr-sidebar-resize".into())
+                                                .absolute()
+                                                .top_0()
+                                                .bottom_0()
+                                                .right(-SIDEBAR_RESIZE_HANDLE_WIDTH / 2.)
+                                                .w(SIDEBAR_RESIZE_HANDLE_WIDTH)
+                                                .occlude()
+                                                .cursor_col_resize()
+                                                .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                                    cx.stop_propagation()
+                                                })
+                                                .on_drag(DraggedSidebar, |_, _, _, cx| {
+                                                    cx.new(|_| EmptyView)
+                                                }),
+                                        ))
+                                    }),
+                            )
+                            .child(workspace)
+                            .when_some(changes_column, |this, changes| {
+                                this.child(
                                     div()
-                                        .id("condr-sidebar-resize")
-                                        .debug_selector(|| "condr-sidebar-resize".into())
-                                        .absolute()
-                                        .top_0()
-                                        .bottom_0()
-                                        .right(-SIDEBAR_RESIZE_HANDLE_WIDTH / 2.)
-                                        .w(SIDEBAR_RESIZE_HANDLE_WIDTH)
-                                        .occlude()
-                                        .cursor_col_resize()
-                                        .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                                            cx.stop_propagation()
-                                        })
-                                        .on_drag(DraggedSidebar, |_, _, _, cx| {
-                                            cx.new(|_| EmptyView)
-                                        }),
-                                ))
+                                        .debug_selector(|| "condr-changes-column".into())
+                                        .relative()
+                                        .w(view.changes_width)
+                                        .flex_none()
+                                        .h_full()
+                                        .child(changes)
+                                        .child(deferred(
+                                            div()
+                                                .id("condr-changes-resize")
+                                                .debug_selector(|| "condr-changes-resize".into())
+                                                .absolute()
+                                                .top_0()
+                                                .bottom_0()
+                                                .left(-SIDEBAR_RESIZE_HANDLE_WIDTH / 2.)
+                                                .w(SIDEBAR_RESIZE_HANDLE_WIDTH)
+                                                .occlude()
+                                                .cursor_col_resize()
+                                                .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                                    cx.stop_propagation()
+                                                })
+                                                .on_drag(DraggedChanges, |_, _, _, cx| {
+                                                    cx.new(|_| EmptyView)
+                                                }),
+                                        )),
+                                )
                             }),
                     )
-                    .child(workspace)
-                    .when_some(changes_column, |this, changes| {
-                        this.child(
-                            div()
-                                .debug_selector(|| "condr-changes-column".into())
-                                .relative()
-                                .w(view.changes_width)
-                                .flex_none()
-                                .h_full()
-                                .child(changes)
-                                .child(deferred(
-                                    div()
-                                        .id("condr-changes-resize")
-                                        .debug_selector(|| "condr-changes-resize".into())
-                                        .absolute()
-                                        .top_0()
-                                        .bottom_0()
-                                        .left(-SIDEBAR_RESIZE_HANDLE_WIDTH / 2.)
-                                        .w(SIDEBAR_RESIZE_HANDLE_WIDTH)
-                                        .occlude()
-                                        .cursor_col_resize()
-                                        .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                                            cx.stop_propagation()
-                                        })
-                                        .on_drag(DraggedChanges, |_, _, _, cx| {
-                                            cx.new(|_| EmptyView)
-                                        }),
-                                )),
-                        )
-                    }),
-            )
+                }
+            })
             .when(self.fps_monitor, |this| this.child(fps_monitor(window, cx)))
+            .into_any_element()
+    }
+}
+
+/// "Bring Back" in a detached window's title bar: the same as closing it (ADR 0043).
+fn bring_back_button(owner: WeakEntity<Condr>) -> AnyElement {
+    h_flex()
+        .flex_none()
+        .h_full()
+        .items_center()
+        .pr_3()
+        // Inside the title bar an unclaimed press starts a window move on Windows.
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .child(
+            Button::new("bring-back-window")
+                .debug_selector(|| "bring-back-window".into())
+                .ghost()
+                .small()
+                .label("Bring Back")
+                .on_click(move |_, window, cx| {
+                    let _ = owner.update(cx, |this, cx| this.bring_back_and_close(window, cx));
+                }),
+        )
+        .into_any_element()
+}
+
+/// A Tab window's title bar: its name and Bring Back, with neither Tab strip nor sidebar.
+fn tab_window_title_bar(title: String, bring_back: Option<AnyElement>, cx: &App) -> TitleBar {
+    TitleBar::new()
+        .h(WORKSPACE_TITLE_BAR_HEIGHT)
+        .bg(cx.theme().title_bar)
+        .border_color(cx.theme().border)
+        .child(
+            h_flex()
+                .h_full()
+                .w_full()
+                .min_w_0()
+                .gap_2()
+                .items_center()
+                .child(img(APP_LOGO).size_4().flex_shrink_0())
+                .child(div().min_w_0().flex_1().truncate().child(title))
+                .children(bring_back),
+        )
+}
+
+impl Condr {
+    /// What the content area shows of a Device, Workspace or Tab another window draws:
+    /// where it went, and the way back (ADR 0043).
+    pub(super) fn render_shown_elsewhere(
+        &self,
+        scope: WindowScope,
+        handle: AnyWindowHandle,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let what = match scope {
+            WindowScope::Main => "This",
+            WindowScope::Device(_) => "This Device",
+            WindowScope::Workspace(..) => "This Workspace",
+            WindowScope::Tab(..) => "This Tab",
+        };
+        let owner = cx.weak_entity();
+        v_flex()
+            .debug_selector(|| "shown-elsewhere".into())
+            .size_full()
+            .items_center()
+            .justify_center()
+            .gap_3()
+            .child(
+                div()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(format!("{what} is shown in another window.")),
+            )
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(
+                        Button::new("go-to-window")
+                            .debug_selector(|| "go-to-window".into())
+                            .primary()
+                            .label("Go to Window")
+                            .on_click(move |_, _, cx| {
+                                let _ = handle.update(cx, |_, window, _| window.activate_window());
+                            }),
+                    )
+                    .child(
+                        Button::new("bring-back")
+                            .debug_selector(|| "bring-back".into())
+                            .label("Bring Back")
+                            .on_click(move |_, _, cx| {
+                                let owner = owner.clone();
+                                let _ = handle.update(cx, |_, window, cx| {
+                                    owner.update(cx, |this, cx| {
+                                        this.bring_back_and_close(window, cx)
+                                    })
+                                });
+                            }),
+                    ),
+            )
+            .into_any_element()
     }
 }
 

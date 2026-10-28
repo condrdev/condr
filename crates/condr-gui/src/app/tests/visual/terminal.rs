@@ -1774,8 +1774,7 @@ fn an_active_window_resends_a_size_dropped_for_a_heartbeat() {
     });
     let retry = |window: &mut VisualTestContext| {
         let before = notified.get();
-        window
-            .update(|window, cx| view.update(cx, |this, cx| this.retry_dropped_sizes(window, cx)));
+        window.update(|_, cx| view.update(cx, |this, cx| this.retry_dropped_sizes(cx)));
         window.run_until_parked();
         notified.get() > before
     };

@@ -116,6 +116,9 @@ impl Condr {
         let Some(workspace) = self.presented_workspace() else {
             return;
         };
+        if !self.draws_workspace(self.active_view()) {
+            return;
+        }
         if !self.files_view.changes_open.remove(&workspace) {
             self.files_view.changes_open.insert(workspace);
         }
@@ -123,18 +126,28 @@ impl Condr {
         cx.notify();
     }
 
-    pub(super) fn changes_sidebar_open(&self) -> bool {
-        self.presented_workspace()
-            .is_some_and(|workspace| self.files_view.changes_open.contains(&workspace))
+    /// A window draws the right sidebar of the Workspace it draws; a Tab window has none.
+    pub(super) fn changes_sidebar_open(&self, view: &WindowView) -> bool {
+        !matches!(view.scope, WindowScope::Tab(..))
+            && self.draws_workspace(view)
+            && self
+                .presented_workspace_in(view)
+                .is_some_and(|workspace| self.files_view.changes_open.contains(&workspace))
+    }
+
+    /// The Workspace the active window presents, for its actions to review.
+    pub(super) fn presented_workspace(&self) -> Option<(ConnectionKey, WorkspaceId)> {
+        self.presented_workspace_in(self.active_view())
     }
 
     /// The Workspace presented for the sidebar to review. Without one the column stays
     /// hidden and its toggle disabled.
-    pub(super) fn presented_workspace(&self) -> Option<(ConnectionKey, WorkspaceId)> {
-        let connection = self.active_connection()?;
-        let session = connection.presented_session()?;
-        let workspace_id = self.presented_workspace_id(connection.key, session)?;
-        Some((connection.key, workspace_id))
+    pub(super) fn presented_workspace_in(
+        &self,
+        view: &WindowView,
+    ) -> Option<(ConnectionKey, WorkspaceId)> {
+        self.presented_in(view)
+            .map(|(key, _, workspace_id, _)| (key, workspace_id))
     }
 
     fn toggle_changes_section(&mut self, section: ChangesSection, cx: &mut Context<Self>) {
@@ -174,14 +187,19 @@ impl Condr {
 
     /// The title bar's toggle for the right sidebar, next to "Open in". Only a Workspace
     /// has anything to show, so the welcome page renders none.
-    pub(super) fn render_changes_toggle(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_changes_toggle(
+        &self,
+        view: &WindowView,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let owner = cx.weak_entity();
-        let label = if self.changes_sidebar_open() {
+        let open = self.changes_sidebar_open(view);
+        let label = if open {
             "Hide Changes & Files"
         } else {
             "Show Changes & Files"
         };
-        let icon = if self.changes_sidebar_open() {
+        let icon = if open {
             IconName::PanelRightClose
         } else {
             IconName::PanelRightOpen
@@ -249,7 +267,11 @@ impl Condr {
 
     /// The right sidebar: the presented Workspace's changes against `HEAD`, or its files
     /// (ADR 0018), chosen by the tabs in the header.
-    pub(super) fn render_right_sidebar(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_right_sidebar(
+        &self,
+        view: &WindowView,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = cx.theme();
         let column = v_flex()
             .debug_selector(|| "condr-right-sidebar".into())
@@ -259,28 +281,30 @@ impl Condr {
             .border_l_1()
             .border_color(theme.sidebar_border);
 
-        let presented = self.active_connection().and_then(|connection| {
-            let session = connection.session()?;
-            let workspace_id = self.presented_workspace_id(connection.key, session)?;
-            let workspace = session.workspace(workspace_id)?;
-            let presented_tab = self.presented_tab_id(connection.key, session, workspace_id);
-            let shown_diff = session
-                .diff_tab(workspace_id)
-                .filter(|tab| presented_tab == Some(tab.id()))
-                .and_then(|tab| tab.diff().map(|diff| diff.path().to_relative_path_buf()));
-            let shown_file = session
-                .file_tab(workspace_id)
-                .filter(|tab| presented_tab == Some(tab.id()))
-                .and_then(|tab| tab.file().map(|file| file.path().to_relative_path_buf()));
-            Some((
-                connection.key,
-                workspace_id,
-                workspace.name().to_owned(),
-                connection.model.workspace_git.get(&workspace_id).cloned(),
-                shown_diff,
-                shown_file,
-            ))
-        });
+        let presented =
+            self.presented_in(view)
+                .and_then(|(key, _, workspace_id, presented_tab)| {
+                    let connection = self.connection(key)?;
+                    let session = connection.session()?;
+                    let workspace = session.workspace(workspace_id)?;
+                    let presented_tab = Some(presented_tab);
+                    let shown_diff = session
+                        .diff_tab(workspace_id)
+                        .filter(|tab| presented_tab == Some(tab.id()))
+                        .and_then(|tab| tab.diff().map(|diff| diff.path().to_relative_path_buf()));
+                    let shown_file = session
+                        .file_tab(workspace_id)
+                        .filter(|tab| presented_tab == Some(tab.id()))
+                        .and_then(|tab| tab.file().map(|file| file.path().to_relative_path_buf()));
+                    Some((
+                        connection.key,
+                        workspace_id,
+                        workspace.name().to_owned(),
+                        connection.model.workspace_git.get(&workspace_id).cloned(),
+                        shown_diff,
+                        shown_file,
+                    ))
+                });
         let Some((key, workspace_id, workspace_name, git, shown_diff, shown_file)) = presented
         else {
             return column

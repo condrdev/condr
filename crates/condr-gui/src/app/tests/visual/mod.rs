@@ -7,6 +7,7 @@ mod layout;
 mod session_model;
 mod settings;
 mod terminal;
+mod windows;
 mod workflows;
 
 use super::super::{

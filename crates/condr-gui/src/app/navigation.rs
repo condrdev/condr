@@ -2,9 +2,11 @@ use super::dialogs::{DangerConfirm, confirm_danger};
 use super::*;
 
 impl Condr {
+    /// Points the keyboard at the Session's focus in the active window's Tab, when that
+    /// window presents connection `key`.
     pub(super) fn refresh_target_pane(&mut self, key: ConnectionKey) {
-        let target = self.connection_focused_pane(key);
-        if key == self.active_connection {
+        if key == self.input_connection() {
+            let target = self.view_focused_pane(self.active_view());
             self.terminal_input.target = target.map(|pane_id| (key, pane_id));
             if let Some(pane_id) = target {
                 self.mark_pane_seen(key, pane_id);
@@ -35,6 +37,7 @@ impl Condr {
         self.prune_files_state(key, cx);
 
         self.retain_dock_cache(key, &tab_ids, &pane_ids);
+        self.close_windows_without_units(key, cx);
     }
 
     /// The user selected this Pane: a Done it shows is seen.
@@ -50,21 +53,15 @@ impl Condr {
             .is_some_and(|connection| connection.model.attention.remove(&pane_id))
     }
 
-    /// The focused Pane of the Tab connection `key` shows.
-    pub(super) fn connection_focused_pane(&self, key: ConnectionKey) -> Option<PaneId> {
-        let connection = self.connection(key)?;
-        let session = connection.session()?;
-        let (_, tab_id) = connection.viewed(session)?;
-        Some(session.tab(tab_id)?.focused_pane()?.id())
-    }
-
     pub(super) fn select_server(
         &mut self,
         key: ConnectionKey,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.connection(key).is_none() || self.active_connection == key {
+        // A Device window shows its own Device whatever its rows say.
+        if self.connection(key).is_none() || !self.is_main(window) || self.active_connection == key
+        {
             return;
         }
         self.active_connection = key;
@@ -82,10 +79,31 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.show_view(key, workspace_id, None) {
+        let mut changed = self.show_view(key, workspace_id, None);
+        // A Workspace another window draws is still selected here, and shows its page:
+        // the sidebar and the keys agree on the order (ADR 0043).
+        if let Some(connection) = self.connection_mut(key)
+            && connection.view_workspace != Some(workspace_id)
+        {
+            connection.view_workspace = Some(workspace_id);
+            self.state_dirty = true;
+            changed = true;
+        }
+        if changed | self.present_in_main(key, window) {
             self.rebuild_dock(window, cx);
         }
         cx.notify();
+    }
+
+    /// A selection in the main window presents its Device there, even one another window
+    /// draws: the main window then shows the page saying so (ADR 0043).
+    fn present_in_main(&mut self, key: ConnectionKey, window: &Window) -> bool {
+        if !self.is_main(window) || self.active_connection == key {
+            return false;
+        }
+        self.active_connection = key;
+        self.refresh_target_pane(key);
+        true
     }
 
     /// Shows a Pane's Tab and targets the Pane. Pane focus inside a Tab is Session
@@ -116,6 +134,9 @@ impl Condr {
             return false;
         };
         self.show_view(key, workspace_id, Some(tab_id));
+        // A Pane another window draws is shown there, and that window comes forward.
+        let home = self.home_window(key, Some(workspace_id), Some(tab_id));
+        self.activate_window(home, cx);
         self.terminal_input.target = Some((key, pane_id));
         self.mark_pane_seen(key, pane_id);
         if can_mutate && !server_focused {
@@ -148,9 +169,7 @@ impl Condr {
         {
             return None;
         }
-        let changed =
-            self.active_connection != key || self.terminal_input.target != Some((key, pane_id));
-        self.active_connection = key;
+        let changed = self.terminal_input.target != Some((key, pane_id));
         self.terminal_input.target = Some((key, pane_id));
         self.mark_pane_seen(key, pane_id);
         if changed {
@@ -160,7 +179,7 @@ impl Condr {
     }
 
     pub(super) fn send_layout(&mut self, command: LayoutCommand) {
-        self.send_layout_to(self.active_connection, command);
+        self.send_layout_to(self.input_connection(), command);
     }
 
     /// Shows a Tab; local, like `select_workspace`.
@@ -184,7 +203,7 @@ impl Condr {
         else {
             return;
         };
-        if self.show_view(key, workspace_id, Some(tab_id)) {
+        if self.show_view(key, workspace_id, Some(tab_id)) | self.present_in_main(key, window) {
             self.rebuild_dock(window, cx);
         }
         cx.notify();
@@ -200,9 +219,7 @@ impl Condr {
         cx: &mut Context<Self>,
     ) -> Option<u64> {
         let request_id = self.send_layout_to(key, command)?;
-        if self.active_connection != key {
-            self.active_connection = key;
-            self.refresh_target_pane(key);
+        if self.present_in_main(key, window) {
             self.rebuild_dock(window, cx);
         }
         cx.notify();
@@ -265,7 +282,7 @@ impl Condr {
     }
 
     pub(super) fn reconnect_active(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.connect_server(self.active_connection, window, cx);
+        self.connect_server(self.input_connection(), window, cx);
     }
 
     pub(super) fn new_workspace_on(
@@ -469,7 +486,7 @@ impl Condr {
             })
         });
         self.confirm_close_on(
-            self.active_connection,
+            self.input_connection(),
             LayoutCommand::ClosePane { pane_id },
             closes_workspace,
             window,

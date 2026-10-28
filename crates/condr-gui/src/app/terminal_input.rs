@@ -140,8 +140,12 @@ impl Condr {
 
     /// Repaints the Panels whose sent size has gone a heartbeat without a frame carrying
     /// it, so they measure and send it again while this window is the active one.
-    pub(super) fn retry_dropped_sizes(&mut self, window: &Window, cx: &mut Context<Self>) {
-        if !window.is_window_active() {
+    pub(super) fn retry_dropped_sizes(&mut self, cx: &mut Context<Self>) {
+        // Any of this Client's windows counts as the active one (ADR 0043).
+        if !cx
+            .active_window()
+            .is_some_and(|active| self.windows.iter().any(|view| view.handle == active))
+        {
             return;
         }
         let dropped: Vec<_> = self
@@ -258,6 +262,11 @@ impl Condr {
     }
 
     pub(crate) fn sync_terminal_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // The focus this Client reports is the window last activated's (ADR 0043); a
+        // window in the background has none to report and must not clear it.
+        if window.window_handle() != self.last_active {
+            return;
+        }
         let focused = window
             .is_window_active()
             .then(|| {
