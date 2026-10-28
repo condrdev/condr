@@ -19,6 +19,7 @@ use super::{
     agent_sidebar_status, agent_status_summary, clear_pending_sizes_for_bootstrap,
     connect_to_server_with, fixed_shortcut, lock_exclusively, reorder_connection,
     should_defer_to_character_input, single_instance_lock_path, terminal_clipboard_shortcut,
+    upstream_counts,
 };
 use crate::terminal_element::HoveredTerminalLink;
 use condr_client::frames::read_bootstrap_batches;

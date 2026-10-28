@@ -4,7 +4,7 @@
 
 use super::change_tree::{TreeRow, directory_row, file_row, row_highlight, tree_rows};
 use super::placeholders::{empty_state, failed_state, list_note};
-use super::sidebar::upstream_label;
+use super::sidebar::{upstream_counts, upstream_label};
 use super::*;
 use condr_core::protocol::{DiffBase, relative_age};
 use condr_core::{GitChangeEntry, HISTORY_PAGE, MAX_GIT_CHANGES};
@@ -32,7 +32,8 @@ pub(super) fn history_branch(git: &WorkspaceGitSnapshot, cx: &App) -> AnyElement
         .items_center()
         .text_xs()
         // `px_1`, `h_5` and the colour are an xsmall ghost Button's, so the name reads
-        // like "Against HEAD" and sits where it does.
+        // like "Against HEAD" and sits where it does. Without a base that Button is
+        // disabled, and Kit dims a disabled one's label so.
         .child(
             div()
                 .h_5()
@@ -41,20 +42,20 @@ pub(super) fn history_branch(git: &WorkspaceGitSnapshot, cx: &App) -> AnyElement
                 .items_center()
                 .min_w_0()
                 .truncate()
-                .text_color(cx.theme().secondary_foreground)
+                .text_color(if git.base.is_some() {
+                    cx.theme().secondary_foreground
+                } else {
+                    cx.theme().muted_foreground.opacity(0.5)
+                })
                 .child(git.branch.clone().unwrap_or_else(|| "detached".to_owned())),
         )
-        .children(
-            git.upstream
-                .and_then(|upstream| upstream_label(upstream, cx))
-                .map(|label| {
-                    div()
-                        .debug_selector(|| "history-upstream".into())
-                        .flex_none()
-                        .pr_2()
-                        .child(label)
-                }),
-        )
+        .children(git.upstream.and_then(upstream_counts).map(|counts| {
+            div()
+                .debug_selector(|| "history-upstream".into())
+                .flex_none()
+                .pr_2()
+                .child(upstream_label(&counts, cx))
+        }))
         .into_any_element()
 }
 

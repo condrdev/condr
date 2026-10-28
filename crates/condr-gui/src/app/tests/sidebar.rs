@@ -134,7 +134,7 @@ fn sidebar_status_visuals_follow_the_prototype_semantics() {
 }
 
 #[test]
-fn workspace_row_summarizes_agents_by_urgency() {
+fn workspace_row_summarizes_agents_by_urgency_and_upstream_by_divergence() {
     use AgentDisplayState::*;
     let statuses = [Working, Done, Unknown, Idle, Error, Done, Blocked]
         .into_iter()
@@ -156,4 +156,12 @@ fn workspace_row_summarizes_agents_by_urgency() {
         ]
     );
     assert!(agent_status_summary([]).is_empty());
+
+    let counts = |ahead, behind| upstream_counts(condr_core::GitUpstream { ahead, behind });
+    let ahead = |text: &str| (text.to_owned(), SidebarIconTone::Success);
+    let behind = |text: &str| (text.to_owned(), SidebarIconTone::Warning);
+    assert_eq!(counts(0, 0), None);
+    assert_eq!(counts(3, 0), Some(vec![ahead("↑3")]));
+    assert_eq!(counts(0, 1), Some(vec![behind("↓1")]));
+    assert_eq!(counts(3, 1), Some(vec![ahead("↑3"), behind("↓1")]));
 }

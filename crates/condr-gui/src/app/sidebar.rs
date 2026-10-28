@@ -13,7 +13,7 @@ pub(super) use icon::*;
 /// the row's own two lines.
 fn workspace_suffix(
     summary: &[(SidebarStatusVisual, usize)],
-    upstream: Option<condr_core::GitUpstream>,
+    upstream: Option<&[UpstreamCount]>,
     cx: &App,
 ) -> AnyElement {
     let states = h_flex()
@@ -37,7 +37,36 @@ fn workspace_suffix(
                 .h(DETAIL_LINE_HEIGHTS.1)
                 .line_height(DETAIL_LINE_HEIGHTS.1)
                 .text_xs()
-                .children(upstream.and_then(|upstream| upstream_label(upstream, cx))),
+                .children(upstream.map(|counts| upstream_label(counts, cx))),
+        )
+        .into_any_element()
+}
+
+/// `↑2` or `↓1` against the upstream, in the tone it shows in.
+pub(in crate::app) type UpstreamCount = (String, SidebarIconTone);
+
+/// Ahead in green and behind in amber; `None` while in sync, so a quiet row stays quiet.
+pub(in crate::app) fn upstream_counts(
+    upstream: condr_core::GitUpstream,
+) -> Option<Vec<UpstreamCount>> {
+    let counts: Vec<_> = [
+        (upstream.ahead, "↑", SidebarIconTone::Success),
+        (upstream.behind, "↓", SidebarIconTone::Warning),
+    ]
+    .into_iter()
+    .filter(|(count, ..)| *count > 0)
+    .map(|(count, arrow, tone)| (format!("{arrow}{count}"), tone))
+    .collect();
+    (!counts.is_empty()).then_some(counts)
+}
+
+pub(in crate::app) fn upstream_label(counts: &[UpstreamCount], cx: &App) -> AnyElement {
+    h_flex()
+        .gap_1()
+        .children(
+            counts
+                .iter()
+                .map(|(count, tone)| div().text_color(tone.color(cx)).child(count.clone())),
         )
         .into_any_element()
 }
@@ -160,9 +189,8 @@ impl Condr {
                                         git.branch.clone().unwrap_or_else(|| "detached".to_owned())
                                     },
                                 );
-                                let upstream = git
-                                    .and_then(|git| git.upstream)
-                                    .filter(|upstream| upstream.ahead > 0 || upstream.behind > 0);
+                                let upstream =
+                                    git.and_then(|git| git.upstream).and_then(upstream_counts);
                                 let mut statuses = Vec::new();
                                 let supports_worktrees = git
                                     .is_some_and(|git| !git.linked_worktree)
@@ -423,7 +451,7 @@ impl Condr {
                                 .detail(detail)
                                 .when(!summary.is_empty() || upstream.is_some(), |item| {
                                     item.suffix(move |_, cx| {
-                                        workspace_suffix(&summary, upstream, cx)
+                                        workspace_suffix(&summary, upstream.as_deref(), cx)
                                     })
                                 })
                                 .on_click(move |_, window, cx| {

@@ -181,27 +181,6 @@ pub(in crate::app) fn agent_status_summary(
     summary
 }
 
-/// `↑2 ↓1` against the upstream, ahead in green and behind in amber; nothing while in
-/// sync, so a quiet row stays quiet.
-pub(in crate::app) fn upstream_label(
-    upstream: condr_core::GitUpstream,
-    cx: &App,
-) -> Option<AnyElement> {
-    let parts: Vec<_> = [
-        (upstream.ahead, "↑", SidebarIconTone::Success),
-        (upstream.behind, "↓", SidebarIconTone::Warning),
-    ]
-    .into_iter()
-    .filter(|(count, ..)| *count > 0)
-    .map(|(count, arrow, tone)| {
-        div()
-            .text_color(tone.color(cx))
-            .child(format!("{arrow}{count}"))
-    })
-    .collect();
-    (!parts.is_empty()).then(|| h_flex().gap_1().children(parts).into_any_element())
-}
-
 pub(in crate::app) fn agent_sidebar_status(state: AgentDisplayState) -> SidebarStatusVisual {
     match state {
         AgentDisplayState::Unknown => SidebarStatusVisual {
