@@ -38,7 +38,10 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
     std::fs::write(root.join("src/app/mod.rs"), "pub mod app;\n").unwrap();
 
     let mut cx = TestAppContext::single();
-    cx.update(gpui_kit::init);
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        super::super::super::startup::bind_keys(cx);
+    });
     let (view, window, _server) = connected_condr(&mut cx);
     window.update(|window, cx| _ = window.draw(cx));
 
@@ -150,6 +153,47 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
         }),
         "the Server's file should reach the Editor"
     );
+    // Alt+N into the Preview Tab takes the focused terminal out of the window; Alt+N
+    // must still answer there.
+    let shows_preview = |window: &mut VisualTestContext| {
+        window.read(|app| {
+            view.read(app)
+                .presented()
+                .is_some_and(|(_, session, _, tab_id)| {
+                    session.tab(tab_id).unwrap().file().is_some()
+                })
+        })
+    };
+    let terminal_focused = |window: &mut VisualTestContext| {
+        window.update(|window, cx| _ = window.draw(cx));
+        window.update(|window, cx| {
+            view.read(cx)
+                .panels
+                .values()
+                .any(|panel| panel.read(cx).focus_handle.is_focused(window))
+        })
+    };
+    let modifier = if cfg!(target_os = "macos") {
+        "cmd"
+    } else {
+        "alt"
+    };
+    window.simulate_keystrokes(&format!("{modifier}-1"));
+    assert!(
+        wait_until(window, |window| !shows_preview(window)
+            && terminal_focused(window)),
+        "the terminal Tab takes the keyboard"
+    );
+    window.simulate_keystrokes(&format!("{modifier}-2"));
+    assert!(wait_until(window, shows_preview));
+    window.update(|window, cx| _ = window.draw(cx));
+    window.simulate_keystrokes(&format!("{modifier}-1"));
+    assert!(
+        wait_until(window, |window| !shows_preview(window)),
+        "the Tab shortcut works from a Preview Tab the keyboard followed"
+    );
+    window.simulate_keystrokes(&format!("{modifier}-2"));
+    assert!(wait_until(window, shows_preview));
     let workspace_id = window.read(|app| {
         view.read(app)
             .active_session()

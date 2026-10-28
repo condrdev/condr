@@ -73,6 +73,7 @@ pub(super) struct WindowView {
     pub(super) display: Option<DisplayId>,
     _activation_subscription: Subscription,
     _bounds_subscription: Subscription,
+    _focus_lost_subscription: Subscription,
 }
 
 impl WindowView {
@@ -96,6 +97,16 @@ impl WindowView {
                 this.schedule_state_save(cx);
             }
         });
+        // A Tab switch takes the focused Pane or Editor out of the tree, and GPUI then sends
+        // keys from above the "Condr" context, where Alt+N reaches nothing.
+        let focus_lost_subscription = cx.on_focus_lost(window, |this, window, cx| {
+            if this.owns_window(window) && !window.has_active_dialog(cx) {
+                this.window_view(window)
+                    .focus_handle
+                    .clone()
+                    .focus(window, cx);
+            }
+        });
         Self {
             handle: window.window_handle(),
             scope,
@@ -114,6 +125,7 @@ impl WindowView {
             display: window.display(cx).map(|display| display.id()),
             _activation_subscription: activation_subscription,
             _bounds_subscription: bounds_subscription,
+            _focus_lost_subscription: focus_lost_subscription,
         }
     }
 
