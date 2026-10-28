@@ -78,7 +78,7 @@ jobs:
         run: |
           yes 2>/dev/null | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.2" "build-tools;36.0.0" >/dev/null
-      - name: Build the APK
+      - name: Build the APK and the Play bundle
         working-directory: mobile/android
         env:
           ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
@@ -86,19 +86,28 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           printf '%s' "$ANDROID_KEYSTORE" | base64 -d > "$RUNNER_TEMP/condr-upload.jks"
-          ANDROID_KEYSTORE_FILE="$RUNNER_TEMP/condr-upload.jks" ./gradlew --no-daemon :app:assembleRelease -Prelease
+          ANDROID_KEYSTORE_FILE="$RUNNER_TEMP/condr-upload.jks" ./gradlew --no-daemon :app:assembleRelease :app:bundleRelease -Prelease
       - name: Name the APK like the desktop's packages
         env:
           VERSION: ${{ needs.check.outputs.version }}
         run: |
           mkdir -p dist
           cp mobile/android/app/build/outputs/apk/release/app-release.apk "dist/condr-companion-$VERSION.apk"
+          cp mobile/android/app/build/outputs/bundle/release/app-release.aab "condr-companion-$VERSION.aab"
       - uses: actions/upload-artifact@v7
         with:
           name: condr-companion
           path: dist/*.apk
           if-no-files-found: error
           retention-days: 1
+      # Google Play takes the bundle, signed with the same key (ADR 0048); it is uploaded in
+      # Play Console by hand and never joins the GitHub release.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: condr-companion-bundle
+          path: condr-companion-*.aab
+          if-no-files-found: error
+          retention-days: 7
 
   ios:
     name: iPhone app

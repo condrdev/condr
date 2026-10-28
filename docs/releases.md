@@ -42,7 +42,7 @@ The iPhone and Android app share one version, `MARKETING_VERSION` in `mobile/ver
 
 3. `companion.yml` checks the tag against the file, builds the APK, signed with the upload key it will not go without, and publishes it with `SHA256SUMS` as **Condr Companion 0.1.15**, never marked Latest, and archives the iPhone app and uploads it to TestFlight. The APK is published only once the iPhone build is uploaded, so the two ship together, and then condr.dev redeploys so its download page links that APK. In App Store Connect, add the processed build to the public group. Every Companion release is a new version, and a version's first build for external testers goes through Beta App Review, usually within a day.
 
-The notes take the commits since the previous `companion-v*` tag (the first release starts from `v0.1.14`) that touch `mobile/`, `crates/condr-mobile/`, `crates/condr-client/`, which both apps link, or the two mobile scripts. Preview them with the command `companion.yml` runs, `--tag companion-v<next>` and all. `gh workflow run companion.yml`, on any branch or tag, builds and signs both platforms and publishes nothing, which checks the secrets.
+The notes take the commits since the previous `companion-v*` tag (the first release starts from `v0.1.14`) that touch `mobile/`, `crates/condr-mobile/`, `crates/condr-client/`, which both apps link, or the two mobile scripts. Preview them with the command `companion.yml` runs, `--tag companion-v<next>` and all. `gh workflow run companion.yml`, on any branch or tag, builds and signs both platforms and publishes nothing, which checks the secrets. The Android job also keeps the Play bundle, `condr-companion-<version>.aab`, as the `condr-companion-bundle` artifact for seven days; upload it to a testing track in Play Console.
 
 The iPhone upload signs with an App Store Connect team key that has the **Admin** role, so `xcodebuild -allowProvisioningUpdates` may create the cloud-managed distribution certificate and the App Store profile; the notary key's Developer role cannot. Create it under Users and Access › Integrations › App Store Connect API › Team Keys. The archive is signed for development first, so the job also imports one Apple Development certificate kept for CI; without it, every run would have the API create a new one. That certificate was made through the API from a key that never entered a keychain, and it expires on 2027-10-23; renew it the same way, as a `DEVELOPMENT` certificate from a new CSR, and revoke the old one.
 
@@ -53,7 +53,7 @@ The iPhone upload signs with an App Store Connect team key that has the **Admin*
 | `APPLE_NOTARY_ISSUER` | The team's Issuer ID, shared with the notary key |
 | `APPLE_DEVELOPMENT_P12` | The CI's Apple Development certificate with its private key, `.p12`, base64-encoded |
 | `APPLE_DEVELOPMENT_P12_PASSWORD` | The password of that `.p12` |
-| `ANDROID_KEYSTORE`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_PASSWORD` | The APK's upload key (ADR 0048) |
+| `ANDROID_KEYSTORE`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_PASSWORD` | The Android key: it signs the APK and the Play bundle, and Google Play signs with it too (ADR 0048) |
 
 ## macOS signing and notarization
 
