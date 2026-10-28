@@ -1,5 +1,5 @@
 // The Companion's version, one for the iPhone and the Android app (ADR 0049). Bump the last
 // number for every release; `companion-v<this>` is the tag that ships it. iOS takes it as the
 // build number too, and Android derives its versionCode from it.
-MARKETING_VERSION = 0.1.15
+MARKETING_VERSION = 0.1.16
 CURRENT_PROJECT_VERSION = $(MARKETING_VERSION)
