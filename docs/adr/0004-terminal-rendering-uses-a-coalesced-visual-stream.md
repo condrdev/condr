@@ -19,3 +19,5 @@ This follows the render ownership and backpressure semantics verified in herdr v
 References: [herdr client transport](https://github.com/herdrdev/herdr/blob/9eb521456ac0d19d3ab3d9d7cea3cca10baa8a4c/src/server/client_transport.rs), [herdr render stream](https://github.com/herdrdev/herdr/blob/9eb521456ac0d19d3ab3d9d7cea3cca10baa8a4c/src/server/render_stream.rs), [herdr headless drain handling](https://github.com/herdrdev/herdr/blob/9eb521456ac0d19d3ab3d9d7cea3cca10baa8a4c/src/server/headless.rs).
 
 > ADR 0041 adds `WatchTerminals`: a Client may name the Panes whose frames it wants. Its per-subscriber pending set and baselines follow that set, which belongs to the connection and survives a rejected subscription; the Bootstrap still carries every Pane's terminal record, with a view only for watched Panes. A Client that never sends it streams every Pane, as here.
+
+> ADR 0051 moves the VT to libghostty-vt. The producer reads its render state, which marks dirty rows rather than cell ranges, and compares each dirty row with the retained view cell by cell before it emits runs; the per-Client baselines are unchanged.
