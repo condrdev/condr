@@ -173,26 +173,21 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
                 .any(|panel| panel.read(cx).focus_handle.is_focused(window))
         })
     };
-    let modifier = if cfg!(target_os = "macos") {
-        "cmd"
-    } else {
-        "alt"
-    };
-    window.simulate_keystrokes(&format!("{modifier}-1"));
+    window.simulate_keystrokes(&format!("{TAB_MODIFIER}-1"));
     assert!(
         wait_until(window, |window| !shows_preview(window)
             && terminal_focused(window)),
         "the terminal Tab takes the keyboard"
     );
-    window.simulate_keystrokes(&format!("{modifier}-2"));
+    window.simulate_keystrokes(&format!("{TAB_MODIFIER}-2"));
     assert!(wait_until(window, shows_preview));
     window.update(|window, cx| _ = window.draw(cx));
-    window.simulate_keystrokes(&format!("{modifier}-1"));
+    window.simulate_keystrokes(&format!("{TAB_MODIFIER}-1"));
     assert!(
         wait_until(window, |window| !shows_preview(window)),
         "the Tab shortcut works from a Preview Tab the keyboard followed"
     );
-    window.simulate_keystrokes(&format!("{modifier}-2"));
+    window.simulate_keystrokes(&format!("{TAB_MODIFIER}-2"));
     assert!(wait_until(window, shows_preview));
     let workspace_id = window.read(|app| {
         view.read(app)

@@ -89,13 +89,8 @@ fn terminal_shortcut_fallback_maps_only_fixed_chords() {
 
 #[test]
 fn numbered_tab_shortcuts_reserve_only_the_platforms_digit_chords() {
-    let modifier = if cfg!(target_os = "macos") {
-        "cmd"
-    } else {
-        "alt"
-    };
     for number in 1..=9 {
-        let action = fixed_shortcut(&keystroke(&format!("{modifier}-{number}")))
+        let action = fixed_shortcut(&keystroke(&format!("{TAB_MODIFIER}-{number}")))
             .expect("each numbered Tab has a shortcut");
         assert_eq!(
             action.as_any().downcast_ref::<ActivateTab>(),
@@ -103,8 +98,8 @@ fn numbered_tab_shortcuts_reserve_only_the_platforms_digit_chords() {
         );
     }
     for chord in [
-        format!("{modifier}-0"),
-        format!("{modifier}-shift-1"),
+        format!("{TAB_MODIFIER}-0"),
+        format!("{TAB_MODIFIER}-shift-1"),
         "ctrl-1".into(),
         "ctrl-alt-1".into(),
         "1".into(),

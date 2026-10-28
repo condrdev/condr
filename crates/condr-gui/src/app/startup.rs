@@ -21,6 +21,13 @@ macro_rules! secondary {
     };
 }
 
+/// Held with a digit to pick the Nth Tab: Cmd on macOS and Alt elsewhere.
+pub(super) const TAB_MODIFIER: &str = if cfg!(target_os = "macos") {
+    "cmd"
+} else {
+    "alt"
+};
+
 pub(super) fn fixed_shortcut(stroke: &Keystroke) -> Option<Box<dyn Action>> {
     if stroke.modifiers.function {
         return None;
@@ -71,15 +78,10 @@ fn fixed_bindings() -> Vec<KeyBinding> {
         KeyBinding::new(secondary!("shift-up"), PreviousWorkspace, Some("Condr")),
         KeyBinding::new(secondary!("shift-down"), NextWorkspace, Some("Condr")),
     ];
-    let tab_modifier = if cfg!(target_os = "macos") {
-        "cmd"
-    } else {
-        "alt"
-    };
     bindings.extend((0..9).map(|index| {
         KeyBinding::new(
             // Nine short strings, once per thread.
-            format!("{tab_modifier}-{}", index + 1).leak(),
+            format!("{TAB_MODIFIER}-{}", index + 1).leak(),
             ActivateTab { index },
             Some("Condr"),
         )

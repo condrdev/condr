@@ -23,11 +23,6 @@ fn numbered_tab_shortcuts_follow_order_and_stay_out_of_terminal_input() {
         super::super::super::startup::bind_keys(cx);
     });
     let (view, window, server) = connected_condr_with(&mut cx, server, endpoint);
-    let modifier = if cfg!(target_os = "macos") {
-        "cmd"
-    } else {
-        "alt"
-    };
     let selected = |window: &mut VisualTestContext, tab_id| {
         window.read(|app| {
             let condr = view.read(app);
@@ -52,7 +47,7 @@ fn numbered_tab_shortcuts_follow_order_and_stay_out_of_terminal_input() {
     let structure = server.handle.snapshot();
 
     for (number, tab_id) in [(2, second_tab), (1, first_tab)] {
-        window.simulate_keystrokes(&format!("{modifier}-{number}"));
+        window.simulate_keystrokes(&format!("{TAB_MODIFIER}-{number}"));
         assert!(wait_until(window, |window| selected(window, tab_id)));
     }
     assert_eq!(
@@ -82,7 +77,7 @@ fn numbered_tab_shortcuts_follow_order_and_stay_out_of_terminal_input() {
         })
     }));
     for (number, tab_id) in [(2, first_tab), (1, second_tab)] {
-        window.simulate_keystrokes(&format!("{modifier}-{number}"));
+        window.simulate_keystrokes(&format!("{TAB_MODIFIER}-{number}"));
         assert!(wait_until(window, |window| selected(window, tab_id)));
     }
     let pane_id = window.read(|app| view.read(app).terminal_input.target.unwrap().1);
@@ -100,7 +95,7 @@ fn numbered_tab_shortcuts_follow_order_and_stay_out_of_terminal_input() {
             });
         });
     });
-    window.simulate_keystrokes(&format!("{modifier}-9"));
+    window.simulate_keystrokes(&format!("{TAB_MODIFIER}-9"));
     window.run_until_parked();
     assert!(selected(window, second_tab));
     assert!(received.try_iter().next().is_none());
@@ -110,7 +105,7 @@ fn numbered_tab_shortcuts_follow_order_and_stay_out_of_terminal_input() {
     });
     window.run_until_parked();
     assert!(window.update(|window, cx| window.has_active_dialog(cx)));
-    window.simulate_keystrokes(&format!("{modifier}-2"));
+    window.simulate_keystrokes(&format!("{TAB_MODIFIER}-2"));
     window.run_until_parked();
     assert!(selected(window, second_tab));
     assert!(received.try_iter().next().is_none());
@@ -118,7 +113,7 @@ fn numbered_tab_shortcuts_follow_order_and_stay_out_of_terminal_input() {
     window.run_until_parked();
     assert!(!window.update(|window, cx| window.has_active_dialog(cx)));
 
-    window.simulate_keystrokes(&format!("{modifier}-2"));
+    window.simulate_keystrokes(&format!("{TAB_MODIFIER}-2"));
     window.run_until_parked();
     assert!(selected(window, first_tab));
     let messages = received.try_iter().collect::<Vec<_>>();

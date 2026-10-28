@@ -122,9 +122,9 @@ use settings::{
 };
 #[cfg(test)]
 use sidebar::*;
-use startup::{connect_to_server, fixed_shortcut};
 #[cfg(test)]
-use startup::{connect_to_server_with, lock_exclusively, single_instance_lock_path};
+use startup::{TAB_MODIFIER, connect_to_server_with, lock_exclusively, single_instance_lock_path};
+use startup::{connect_to_server, fixed_shortcut};
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Range;

@@ -14,7 +14,7 @@ use super::terminal_input::{
 use super::{
     ActivateTab, BELL_SIDEBAR_STATUS, ClientIo, ClosePane, CondrAssets, ConnectionStatus,
     FocusLeft, NewTab, NextTab, NextWorkspace, OpenSettings, PreviousTab, PreviousWorkspace,
-    ServerConnection, SidebarGlyph, SidebarIconTone, SplitDown, SplitRight,
+    ServerConnection, SidebarGlyph, SidebarIconTone, SplitDown, SplitRight, TAB_MODIFIER,
     TerminalClipboardShortcut, ToggleChanges, ToggleSidebar, ToggleZoom, accepted_text_input,
     agent_sidebar_status, agent_status_summary, clear_pending_sizes_for_bootstrap,
     connect_to_server_with, fixed_shortcut, lock_exclusively, reorder_connection,
