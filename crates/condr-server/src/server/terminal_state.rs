@@ -47,6 +47,7 @@ impl RuntimeState {
         let view_source = runtime.view_source();
         self.clear_terminal_title(pane_id);
         self.clear_terminal_attention(pane_id);
+        self.set_agent_unseen(pane_id, false);
         let mut view = runtime.view();
         let hyperlinks = TerminalHyperlinkBudget::new(&mut view);
         self.terminal_views.insert(
@@ -107,6 +108,7 @@ impl RuntimeState {
             self.focused_terminal = Some((pane_id, client_id));
             self.sizing_client = Some(client_id);
             self.clear_terminal_attention(pane_id);
+            self.set_agent_unseen(pane_id, false);
             true
         } else {
             if self.sizing_client == Some(client_id) {
@@ -127,6 +129,19 @@ impl RuntimeState {
                 pane_id,
                 attention: false,
             });
+        }
+    }
+
+    /// Records whether the Pane's `Done` waits to be looked at, and tells subscribers
+    /// when that changed (ADR 0052).
+    pub(super) fn set_agent_unseen(&mut self, pane_id: PaneId, unseen: bool) {
+        let changed = if unseen {
+            self.unseen_done.insert(pane_id)
+        } else {
+            self.unseen_done.remove(&pane_id)
+        };
+        if changed {
+            self.publish_background(SessionEvent::AgentUnseenChanged { pane_id, unseen });
         }
     }
 

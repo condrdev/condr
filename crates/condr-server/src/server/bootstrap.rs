@@ -328,6 +328,7 @@ impl RuntimeState {
                 .map(|(&pane_id, agent)| PaneAgentSnapshot {
                     pane_id,
                     agent: agent.clone(),
+                    unseen: self.unseen_done.contains(&pane_id),
                 })
                 .collect(),
             workspace_git: self

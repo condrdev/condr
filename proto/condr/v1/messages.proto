@@ -498,6 +498,8 @@ message PaneTerminalMetadata {
 message PaneAgentSnapshot {
   uint64 pane_id = 1;
   AgentSnapshot agent = 2;
+  // A DONE no Client has looked at yet (ADR 0052).
+  bool unseen = 3;
 }
 
 message SessionOverview {
@@ -598,6 +600,7 @@ message SessionEvent {
     // An event this Client's protocol does not include, sent in its place so the
     // sequence stays contiguous (ADR 0028).
     Empty omitted = 10;
+    AgentUnseenChanged agent_unseen_changed = 11;
   }
 }
 
@@ -624,6 +627,11 @@ message TerminalTitleChanged {
 message TerminalAttentionChanged {
   uint64 pane_id = 1;
   bool attention = 2;
+}
+
+message AgentUnseenChanged {
+  uint64 pane_id = 1;
+  bool unseen = 2;
 }
 
 message Activated {

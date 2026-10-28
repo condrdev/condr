@@ -196,6 +196,7 @@ fn encode_pane_agent(agent: &PaneAgentSnapshot) -> super::PaneAgentSnapshot {
     super::PaneAgentSnapshot {
         pane_id: agent.pane_id.as_u64(),
         agent: encode_agent(&agent.agent),
+        unseen: agent.unseen,
     }
 }
 
@@ -203,6 +204,7 @@ fn decode_pane_agent(agent: super::PaneAgentSnapshot) -> WireResult<PaneAgentSna
     Ok(PaneAgentSnapshot {
         pane_id: pane(agent.pane_id),
         agent: decode_agent(agent.agent)?,
+        unseen: agent.unseen,
     })
 }
 
@@ -1310,6 +1312,12 @@ impl TryFrom<&SessionEvent> for super::SessionEvent {
                     attention: *attention,
                 })
             }
+            SessionEvent::AgentUnseenChanged { pane_id, unseen } => {
+                Event::AgentUnseenChanged(super::AgentUnseenChanged {
+                    pane_id: pane_id.as_u64(),
+                    unseen: *unseen,
+                })
+            }
             SessionEvent::ServerSettingsChanged { settings } => {
                 Event::ServerSettingsChanged(encode_settings(settings))
             }
@@ -1357,6 +1365,10 @@ impl TryFrom<super::SessionEvent> for SessionEvent {
             Event::TerminalAttentionChanged(changed) => Self::TerminalAttentionChanged {
                 pane_id: pane(changed.pane_id),
                 attention: changed.attention,
+            },
+            Event::AgentUnseenChanged(changed) => Self::AgentUnseenChanged {
+                pane_id: pane(changed.pane_id),
+                unseen: changed.unseen,
             },
             Event::ServerSettingsChanged(settings) => Self::ServerSettingsChanged {
                 settings: decode_settings(settings)?,

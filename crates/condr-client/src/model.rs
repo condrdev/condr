@@ -8,7 +8,7 @@ use condr_core::protocol::{
     WorkspaceGitSnapshot,
 };
 use condr_core::{
-    AgentDisplayState, AgentSnapshot, AgentState, AgentTracker, PaneId, Session, SessionSnapshot,
+    AgentDisplayState, AgentSnapshot, AgentState, PaneId, Session, SessionSnapshot,
     TerminalHyperlinkBudget, TerminalViewFrame, Workspace, WorkspaceId,
 };
 use std::collections::{HashMap, HashSet};
@@ -32,9 +32,8 @@ pub struct SessionModel {
     pub terminal_titles: HashMap<PaneId, String>,
     pub terminal_hyperlinks: HashMap<PaneId, TerminalHyperlinkBudget>,
     pub agents: HashMap<PaneId, AgentSnapshot>,
-    /// Done is each Client's own (ADR 0014, ADR 0041): an `Idle` after work this Client
-    /// did not watch.
-    pub agent_trackers: HashMap<PaneId, AgentTracker>,
+    /// Panes whose `Done` no Client has looked at yet, as the Server keeps them (ADR 0052).
+    pub unseen_done: HashSet<PaneId>,
     /// Panes that rang BEL while no Client had them focused.
     pub attention: HashSet<PaneId>,
     pub workspace_git: HashMap<WorkspaceId, WorkspaceGitSnapshot>,
@@ -76,9 +75,6 @@ impl SessionModel {
         let authority_changed = self.server_id != Some(bootstrap.server_id)
             || self.runtime_epoch != Some(bootstrap.runtime_epoch)
             || self.session_id != Some(bootstrap.session_id);
-        if authority_changed {
-            self.agent_trackers.clear();
-        }
         self.server_id = Some(bootstrap.server_id);
         self.runtime_epoch = Some(bootstrap.runtime_epoch);
         self.session_id = Some(bootstrap.session_id);
@@ -117,19 +113,17 @@ impl SessionModel {
                 );
             }
         }
+        self.unseen_done = bootstrap
+            .agents
+            .iter()
+            .filter(|agent| agent.unseen)
+            .map(|agent| agent.pane_id)
+            .collect();
         self.agents = bootstrap
             .agents
             .into_iter()
             .map(|agent| (agent.pane_id, agent.agent))
             .collect();
-        self.agent_trackers
-            .retain(|pane_id, _| self.agents.contains_key(pane_id));
-        for (&pane_id, agent) in &self.agents {
-            self.agent_trackers
-                .entry(pane_id)
-                .and_modify(|tracker| tracker.update(agent.state, false))
-                .or_insert_with(|| AgentTracker::new(agent.state));
-        }
         self.workspace_git = bootstrap
             .workspace_git
             .into_iter()
@@ -174,8 +168,7 @@ impl SessionModel {
         self.terminal_titles
             .retain(|pane_id, _| live.contains(pane_id));
         self.agents.retain(|pane_id, _| live.contains(pane_id));
-        self.agent_trackers
-            .retain(|pane_id, _| live.contains(pane_id));
+        self.unseen_done.retain(|pane_id| live.contains(pane_id));
         self.attention.retain(|pane_id| live.contains(pane_id));
         self.workspace_git
             .retain(|workspace_id, _| live_workspaces.contains(workspace_id));
@@ -223,16 +216,9 @@ impl SessionModel {
         apply_terminal_frame_batch(&mut self.terminals, &mut self.terminal_hyperlinks, panes)
     }
 
-    /// Applies an `AgentChanged`. `visible` is whether this Client shows the Pane, so a
-    /// `Done` it watched arrive is seen.
-    pub fn apply_agent(
-        &mut self,
-        pane_id: PaneId,
-        agent: Option<AgentSnapshot>,
-        visible: bool,
-    ) -> AgentChange {
+    /// Applies an `AgentChanged`.
+    pub fn apply_agent(&mut self, pane_id: PaneId, agent: Option<AgentSnapshot>) -> AgentChange {
         let Some(agent) = agent else {
-            self.agent_trackers.remove(&pane_id);
             return AgentChange {
                 previous: self.agents.remove(&pane_id),
                 started: false,
@@ -245,36 +231,22 @@ impl SessionModel {
         let started = previous
             .as_ref()
             .is_none_or(|previous| previous.kind != agent.kind);
-        self.agent_trackers
-            .entry(pane_id)
-            .and_modify(|tracker| {
-                // Nothing is seen of an agent with no record, whichever way it lost it.
-                if agent.state == AgentState::Unknown {
-                    *tracker = AgentTracker::new(agent.state);
-                } else {
-                    tracker.update(agent.state, visible);
-                }
-            })
-            .or_insert_with(|| AgentTracker::new(agent.state));
         AgentChange { previous, started }
     }
 
-    /// The person looked at the Pane: its Done goes.
+    /// The person looked at the Pane: its Done goes here at once, ahead of the Server's
+    /// answer to the focus this Client reports.
     pub fn mark_seen(&mut self, pane_id: PaneId) {
-        if let Some(tracker) = self.agent_trackers.get_mut(&pane_id) {
-            tracker.mark_seen();
-        }
+        self.unseen_done.remove(&pane_id);
     }
 
-    /// How the Pane's Agent shows to this Client: its state, or Done.
+    /// How the Pane's Agent shows: its state, or Idle for a Done someone looked at.
     pub fn agent_display_state(&self, pane_id: PaneId) -> Option<AgentDisplayState> {
         let agent = self.agents.get(&pane_id)?;
-        Some(
-            self.agent_trackers
-                .get(&pane_id)
-                .map(|tracker| tracker.display_state())
-                .unwrap_or_else(|| AgentTracker::new(agent.state).display_state()),
-        )
+        Some(AgentDisplayState::of(
+            agent.state,
+            self.unseen_done.contains(&pane_id),
+        ))
     }
 
     /// What a Pane is called: the title its program set, else its Agent's name.
@@ -470,31 +442,43 @@ mod tests {
         };
         assert!(
             model
-                .apply_agent(pane_id, snapshot(AgentState::Unknown), false)
+                .apply_agent(pane_id, snapshot(AgentState::Unknown))
                 .started
         );
         assert!(
             !model
-                .apply_agent(pane_id, snapshot(AgentState::Done), false)
+                .apply_agent(pane_id, snapshot(AgentState::Done))
                 .started
         );
+        // The Server says whether anyone looked at the Done; this Client's own look
+        // clears it ahead of the Server's answer.
+        assert_eq!(
+            model.agent_display_state(pane_id),
+            Some(AgentDisplayState::Idle)
+        );
+        model.unseen_done.insert(pane_id);
         assert_eq!(
             model.agent_display_state(pane_id),
             Some(AgentDisplayState::Done)
         );
+        model.mark_seen(pane_id);
+        assert_eq!(
+            model.agent_display_state(pane_id),
+            Some(AgentDisplayState::Idle)
+        );
         assert!(
             !model
-                .apply_agent(pane_id, snapshot(AgentState::Unknown), false)
+                .apply_agent(pane_id, snapshot(AgentState::Unknown))
                 .started
         );
         assert_eq!(
             model.agent_display_state(pane_id),
             Some(AgentDisplayState::Unknown)
         );
-        assert!(!model.apply_agent(pane_id, None, false).started);
+        assert!(!model.apply_agent(pane_id, None).started);
         assert!(
             model
-                .apply_agent(pane_id, snapshot(AgentState::Unknown), false)
+                .apply_agent(pane_id, snapshot(AgentState::Unknown))
                 .started
         );
     }

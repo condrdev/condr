@@ -1096,7 +1096,7 @@ fn apply_message(
                     }
                 },
                 SessionEvent::AgentChanged { pane_id, agent } => {
-                    model.apply_agent(pane_id, agent, shown == Some(pane_id));
+                    model.apply_agent(pane_id, agent);
                     changes.push(device_change());
                 }
                 SessionEvent::TerminalExited { pane_id } => {
@@ -1116,6 +1116,15 @@ fn apply_message(
                         model.attention.insert(pane_id);
                     } else {
                         model.attention.remove(&pane_id);
+                    }
+                    changes.push(device_change());
+                }
+                // The Pane on screen is looked at, whoever reported focus last (ADR 0052).
+                SessionEvent::AgentUnseenChanged { pane_id, unseen } => {
+                    if unseen && shown != Some(pane_id) {
+                        model.unseen_done.insert(pane_id);
+                    } else {
+                        model.unseen_done.remove(&pane_id);
                     }
                     changes.push(device_change());
                 }

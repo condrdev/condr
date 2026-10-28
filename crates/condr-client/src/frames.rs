@@ -268,7 +268,8 @@ pub fn enforce_terminal_chunk_reliable_fence(
                         | SessionEvent::WorkspaceGitChanged { .. }
                         | SessionEvent::WorkspaceFilesChanged { .. }
                         | SessionEvent::TerminalTitleChanged { .. }
-                        | SessionEvent::TerminalAttentionChanged { .. },
+                        | SessionEvent::TerminalAttentionChanged { .. }
+                        | SessionEvent::AgentUnseenChanged { .. },
                     ..
                 }
         )

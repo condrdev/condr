@@ -101,7 +101,7 @@ pub enum AgentStatus {
     Idle,
     Working,
     Blocked,
-    /// Finished work this phone has not looked at (ADR 0041, ADR 0044).
+    /// Finished work nobody has looked at, on this phone or anywhere else (ADR 0052).
     Done,
     /// A turn failed and the Agent halted.
     Error,

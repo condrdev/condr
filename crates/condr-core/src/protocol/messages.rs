@@ -588,6 +588,8 @@ pub struct PaneTerminalSnapshot {
 pub struct PaneAgentSnapshot {
     pub pane_id: PaneId,
     pub agent: AgentSnapshot,
+    /// A `Done` no Client has looked at yet (ADR 0052).
+    pub unseen: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -688,6 +690,13 @@ pub enum SessionEvent {
     TerminalAttentionChanged {
         pane_id: PaneId,
         attention: bool,
+    },
+    /// Whether the Pane's `Done` still waits for a Client to look at it (ADR 0052): set
+    /// when it arrives while no Client has the Pane focused, cleared when one focuses it
+    /// or the Agent moves on.
+    AgentUnseenChanged {
+        pane_id: PaneId,
+        unseen: bool,
     },
     ServerSettingsChanged {
         settings: ServerSettings,

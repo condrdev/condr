@@ -275,6 +275,20 @@ pub(super) fn apply_agent_refresh(
     let alert = next
         .as_ref()
         .and_then(|next| condr_core::AgentAlert::between(previous, next));
+    let is_done = |agent: Option<&AgentSnapshot>| {
+        agent.is_some_and(|agent| agent.state == condr_core::AgentState::Done)
+    };
+    // A Done arriving while no Client has the Pane focused waits for someone to look
+    // (ADR 0052); a repeated Done keeps whatever it had.
+    let unseen = match (is_done(previous), is_done(next.as_ref())) {
+        (_, false) => Some(false),
+        (false, true) => Some(
+            state
+                .focused_terminal
+                .is_none_or(|(focused, _)| focused != pane_id),
+        ),
+        (true, true) => None,
+    };
     match &next {
         Some(agent) => {
             state.agents.insert(pane_id, agent.clone());
@@ -300,6 +314,9 @@ pub(super) fn apply_agent_refresh(
         pane_id,
         agent: next,
     });
+    if let Some(unseen) = unseen {
+        state.set_agent_unseen(pane_id, unseen);
+    }
     state.agent_state_changed(pane_id);
 }
 

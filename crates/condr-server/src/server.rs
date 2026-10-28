@@ -547,6 +547,9 @@ struct RuntimeState {
     terminal_titles: std::collections::HashMap<PaneId, String>,
     /// Panes that rang while no Client had them focused, until one focuses them.
     pending_terminal_bells: std::collections::HashSet<PaneId>,
+    /// Panes whose Agent reported `Done` while no Client had them focused, until one
+    /// focuses them or the Agent moves on (ADR 0052).
+    unseen_done: std::collections::HashSet<PaneId>,
     workspace_git: std::collections::HashMap<WorkspaceId, WorkspaceGit>,
     /// Owns Git refresh scheduling for filesystem and terminal activity; `None` until
     /// the state has its shared handle, and in unit tests.
@@ -713,6 +716,7 @@ impl RuntimeState {
             agent_control: AgentControl::default(),
             terminal_titles: std::collections::HashMap::new(),
             pending_terminal_bells: std::collections::HashSet::new(),
+            unseen_done: std::collections::HashSet::new(),
             workspace_git: std::collections::HashMap::new(),
             git_watcher: None,
             worktree_root: load_worktree_root(config_path.as_deref()),

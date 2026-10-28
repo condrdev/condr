@@ -315,9 +315,10 @@ fn bootstrap_assembler_reassembles_multiple_record_chunks() {
             agent: AgentSnapshot {
                 session_id: None,
                 kind: condr_core::AgentKind::Codex,
-                state: condr_core::AgentState::Working,
+                state: condr_core::AgentState::Done,
                 detail: None,
             },
+            unseen: true,
         }),
         BootstrapRecord::WorkspaceGit(WorkspaceGitSnapshot {
             workspace_id,
@@ -503,6 +504,7 @@ fn bootstrap_assembler_rejects_duplicate_ids_per_record_kind() {
                 state: condr_core::AgentState::Idle,
                 detail: None,
             },
+            unseen: false,
         }),
         BootstrapRecord::WorkspaceGit(WorkspaceGitSnapshot {
             workspace_id,

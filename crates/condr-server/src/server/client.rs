@@ -360,6 +360,7 @@ pub(super) fn handle_client(
                                 .map(|(pane_id, agent)| PaneAgentSnapshot {
                                     pane_id: *pane_id,
                                     agent: agent.clone(),
+                                    unseen: state.unseen_done.contains(pane_id),
                                 })
                                 .collect(),
                             zoomed_panes: state.zoomed_panes(),

@@ -110,7 +110,7 @@ A recognized agent CLI process running inside a Terminal. It does not own or cre
 _Avoid_: Pane, blocked_on
 
 **Done**:
-An Agent's state once a turn finished and it has not seen the user come back for the result (ADR 0044); its own `Idle` ends it everywhere. Each Client adds one bit of its own, whether it looked: a `Done` this Client watched arrive, or whose Pane it opened since, shows as `Idle`, so an Agent watched finishing on the desktop is still Done on the phone (ADR 0041).
+An Agent's state once a turn finished and it has not seen the user come back for the result (ADR 0044); its own `Idle` ends it everywhere. The Server adds one bit, shared by every Client, whether anyone looked: a `Done` that arrived while a Client had its Pane focused, or whose Pane a Client focused since, shows as `Idle` on every Client, before and after a restart of any of them (ADR 0052).
 _Avoid_: Finished, Completed (as states)
 
 **Needs you**:

@@ -779,28 +779,11 @@ fn program_status_reports_take_over_from_hooks_and_follow_their_lifetime() {
 }
 
 #[test]
-fn a_client_shows_done_until_it_looked_and_error_until_the_agent_moves_on() {
-    let mut tracker = AgentTracker::new(AgentState::Working);
-    assert_eq!(tracker.display_state(), AgentDisplayState::Working);
-    // Done arriving while another Client shows the Pane stays Done here.
-    tracker.update(AgentState::Done, false);
-    assert_eq!(tracker.display_state(), AgentDisplayState::Done);
-    tracker.mark_seen();
-    assert_eq!(tracker.display_state(), AgentDisplayState::Idle);
-    // A Done watched arrive is seen at once; the agent's own Idle needs no look.
-    tracker.update(AgentState::Working, false);
-    tracker.update(AgentState::Done, true);
-    assert_eq!(tracker.display_state(), AgentDisplayState::Idle);
-    tracker.update(AgentState::Working, false);
-    tracker.update(AgentState::Done, false);
-    tracker.update(AgentState::Idle, false);
-    assert_eq!(tracker.display_state(), AgentDisplayState::Idle);
-    // Error shows whether or not it was looked at.
-    tracker.update(AgentState::Error, true);
-    assert_eq!(tracker.display_state(), AgentDisplayState::Error);
-    // A Client learning of a Done agent sees the Done the agent still reports.
-    assert_eq!(
-        AgentTracker::new(AgentState::Done).display_state(),
-        AgentDisplayState::Done
-    );
+fn done_shows_until_someone_looked_and_error_until_the_agent_moves_on() {
+    use AgentDisplayState as Shown;
+    assert_eq!(Shown::of(AgentState::Done, true), Shown::Done);
+    assert_eq!(Shown::of(AgentState::Done, false), Shown::Idle);
+    // The agent's own Idle needs no look, and Error shows whether or not anyone looked.
+    assert_eq!(Shown::of(AgentState::Idle, true), Shown::Idle);
+    assert_eq!(Shown::of(AgentState::Error, false), Shown::Error);
 }

@@ -236,11 +236,9 @@ impl Condr {
                         // Terminal focus is None while the window is inactive, so a
                         // completion behind another window still shows as done.
                         let visible = self.terminal_input.focused == Some((key, pane_id));
-                        let change = self.connections[index].model.apply_agent(
-                            pane_id,
-                            agent.clone(),
-                            visible,
-                        );
+                        let change = self.connections[index]
+                            .model
+                            .apply_agent(pane_id, agent.clone());
                         if let Some(agent) = agent {
                             // A new process reopens the Workspace row; a repeat does not
                             // undo a manual collapse.
@@ -329,6 +327,17 @@ impl Condr {
                             !focused && self.connections[index].model.attention.insert(pane_id)
                         } else {
                             self.connections[index].model.attention.remove(&pane_id)
+                        };
+                    }
+                    SessionEvent::AgentUnseenChanged { pane_id, unseen } => {
+                        // The Pane in front of the user is looked at, whoever reported focus
+                        // last (ADR 0052).
+                        let focused = self.terminal_input.focused == Some((key, pane_id));
+                        let unseen_done = &mut self.connections[index].model.unseen_done;
+                        notify = if unseen {
+                            !focused && unseen_done.insert(pane_id)
+                        } else {
+                            unseen_done.remove(&pane_id)
                         };
                     }
                     SessionEvent::ServerSettingsChanged { settings } => {

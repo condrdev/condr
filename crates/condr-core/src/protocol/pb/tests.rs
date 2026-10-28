@@ -266,11 +266,16 @@ fn an_unknown_bootstrap_record_is_skipped_and_an_omitted_event_round_trips() {
         decode_bootstrap_record(super::BootstrapRecord { record: None }).unwrap(),
         None
     );
-    let omitted = super::SessionEvent::try_from(&SessionEvent::Omitted).unwrap();
-    assert_eq!(
-        SessionEvent::try_from(omitted).unwrap(),
-        SessionEvent::Omitted
-    );
+    for event in [
+        SessionEvent::Omitted,
+        SessionEvent::AgentUnseenChanged {
+            pane_id: crate::PaneId::from_u64(3),
+            unseen: true,
+        },
+    ] {
+        let encoded = super::SessionEvent::try_from(&event).unwrap();
+        assert_eq!(SessionEvent::try_from(encoded).unwrap(), event);
+    }
 }
 
 #[test]

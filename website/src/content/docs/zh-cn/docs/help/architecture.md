@@ -52,7 +52,7 @@ Condr 把运行时和界面分成两个进程。Server 托管终端、Agent 和 
 3. Server 从 PTY 输出流中拦截这两种序列，据此更新对应 Pane 的 Agent 状态为 Unknown、Idle、Working、Blocked、Done 或 Error。Agent 一旦通过 OSC 7501 上报过，其 Hook 就只提供重启后恢复会话所需的会话 ID。Blocked 和 Error 可附带 `detail` 字段：它在等什么，或为何失败。
 4. 若 Agent 未曾上报数据，状态保持为 Unknown。Condr 不通过分析屏幕文本推断 Agent 状态。
 
-Done 是 Agent 自己在一轮结束后报告的状态。每个窗口再加一位自己的信息，即有没有看过：看着它到来、或此后打开过其 Pane 的 Done，显示为 Idle。
+Done 是 Agent 自己在一轮结束后报告的状态。Server 再加一位所有窗口和手机共用的信息，即有没有人看过：在其 Pane 有焦点时到来、或此后有人打开过其 Pane 的 Done，在所有地方都显示为 Idle，重启 GUI 或 App 之后也一样。
 
 ---
 

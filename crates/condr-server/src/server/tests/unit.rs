@@ -184,6 +184,70 @@ fn bootstrap_retains_a_closing_terminal_without_inventing_an_exit() {
     assert!(state.bootstrap().terminals[0].exited);
 }
 
+/// ADR 0052: a Done no Client is looking at waits for a focus from any Client, and a
+/// Client that connects later learns it from the Bootstrap.
+#[test]
+fn a_done_nobody_looked_at_waits_for_a_focus_from_any_client() {
+    let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
+    state
+        .session
+        .create_workspace(std::env::temp_dir())
+        .expect("Workspace capacity");
+    let pane_id = state.session.workspaces()[0].tabs()[0]
+        .focused_pane()
+        .unwrap()
+        .id();
+    let agent = |state| {
+        Some(AgentSnapshot {
+            session_id: None,
+            kind: condr_core::AgentKind::Claude,
+            state,
+            detail: None,
+        })
+    };
+    let unseen_events = |state: &RuntimeState| {
+        state
+            .events
+            .iter()
+            .filter_map(|event| match event.event {
+                SessionEvent::AgentUnseenChanged { unseen, .. } => Some(unseen),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let finish = |state: &mut RuntimeState| {
+        apply_agent_refresh(state, pane_id, agent(condr_core::AgentState::Working));
+        apply_agent_refresh(state, pane_id, agent(condr_core::AgentState::Done));
+    };
+
+    finish(&mut state);
+    assert_eq!(unseen_events(&state), [true]);
+    assert!(state.bootstrap().agents[0].unseen);
+    state.record_terminal_focus(pane_id, 2, true);
+    assert_eq!(
+        unseen_events(&state),
+        [true, false],
+        "any Client's look counts"
+    );
+    assert!(!state.bootstrap().agents[0].unseen);
+
+    finish(&mut state);
+    assert_eq!(
+        unseen_events(&state),
+        [true, false],
+        "a Done arriving in the focused Pane is seen"
+    );
+
+    state.record_terminal_focus(pane_id, 2, false);
+    finish(&mut state);
+    apply_agent_refresh(&mut state, pane_id, agent(condr_core::AgentState::Idle));
+    assert_eq!(
+        unseen_events(&state),
+        [true, false, true, false],
+        "the Agent moving on needs no look"
+    );
+}
+
 #[test]
 fn terminal_notices_publish_title_changes_once_and_collapse_bells() {
     let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());

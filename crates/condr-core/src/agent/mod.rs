@@ -254,46 +254,18 @@ impl AgentDisplayState {
             Self::Error => "error",
         }
     }
-}
 
-/// How one Client shows an Agent (ADR 0041, ADR 0044): its state, except that a `Done`
-/// this Client has looked at shows as `Idle`. Each Client keeps its own, so an Agent
-/// watched finishing on the desktop is still Done on the phone, and the Agent's own
-/// `Idle`, once it sees the user back, clears it everywhere.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct AgentTracker {
-    state: AgentState,
-    seen: bool,
-}
-
-impl AgentTracker {
-    pub const fn new(state: AgentState) -> Self {
-        Self { state, seen: false }
-    }
-
-    /// `visible` is whether this Client shows the Pane: a Done it watched arrive is seen.
-    pub fn update(&mut self, state: AgentState, visible: bool) {
-        if state != self.state {
-            self.seen = false;
-        }
-        self.state = state;
-        if visible {
-            self.seen = true;
-        }
-    }
-
-    pub fn mark_seen(&mut self) {
-        self.seen = true;
-    }
-
-    pub const fn display_state(self) -> AgentDisplayState {
-        match (self.state, self.seen) {
-            (AgentState::Done, true) | (AgentState::Idle, _) => AgentDisplayState::Idle,
-            (AgentState::Done, false) => AgentDisplayState::Done,
-            (AgentState::Unknown, _) => AgentDisplayState::Unknown,
-            (AgentState::Working, _) => AgentDisplayState::Working,
-            (AgentState::Blocked, _) => AgentDisplayState::Blocked,
-            (AgentState::Error, _) => AgentDisplayState::Error,
+    /// How an Agent shows (ADR 0052): its state, except that a `Done` someone has looked
+    /// at, on any Client, shows as `Idle`. The Server keeps whether anyone has, so a
+    /// Client that restarts or connects later sees the same.
+    pub const fn of(state: AgentState, unseen: bool) -> Self {
+        match (state, unseen) {
+            (AgentState::Done, false) | (AgentState::Idle, _) => Self::Idle,
+            (AgentState::Done, true) => Self::Done,
+            (AgentState::Unknown, _) => Self::Unknown,
+            (AgentState::Working, _) => Self::Working,
+            (AgentState::Blocked, _) => Self::Blocked,
+            (AgentState::Error, _) => Self::Error,
         }
     }
 }

@@ -618,8 +618,8 @@ fn detected_agent_sidebar_item_activates_its_real_pty_pane() {
         window.read(|app| {
             view.read(app)
                 .connection(1)
-                .and_then(|connection| connection.model.agent_trackers.get(&agent_pane))
-                .is_some_and(|tracker| tracker.display_state().label() == "done")
+                .and_then(|connection| connection.model.agent_display_state(agent_pane))
+                .is_some_and(|state| state.label() == "done")
         })
     }));
     window.update(|window, cx| _ = window.draw(cx));
@@ -655,10 +655,8 @@ fn detected_agent_sidebar_item_activates_its_real_pty_pane() {
                 .connection(1)
                 .unwrap()
                 .model
-                .agent_trackers
-                .get(&agent_pane)
+                .agent_display_state(agent_pane)
                 .unwrap()
-                .display_state()
                 .label()
         }),
         "idle"

@@ -52,7 +52,7 @@ Condr splits the runtime and the interface into two processes. The Server hosts 
 3. The Server intercepts both in the PTY output and updates that Pane's Agent state to Unknown, Idle, Working, Blocked, Done or Error. Once an Agent has reported over OSC 7501, its hooks only supply the session ID a restart resumes with. Blocked and Error carry a `detail` field: what the Agent waits for, or why it failed.
 4. If the Agent has never reported, its state stays Unknown. Condr does not infer Agent state from screen text.
 
-Done is the Agent's own state after a finished turn. Each window adds whether it looked: a Done it watched arrive, or whose Pane it has opened since, shows as Idle.
+Done is the Agent's own state after a finished turn. The Server adds whether anyone looked, one bit for every window and the phone: a Done that arrived while its Pane was focused, or whose Pane someone has opened since, shows as Idle everywhere, and stays so after a restart of the GUI or the app.
 
 ---
 
