@@ -13,7 +13,7 @@ pub(super) use icon::*;
 /// the row's own two lines.
 fn workspace_suffix(
     summary: &[(SidebarStatusVisual, usize)],
-    upstream: Option<&str>,
+    upstream: Option<condr_core::GitUpstream>,
     cx: &App,
 ) -> AnyElement {
     let states = h_flex()
@@ -37,8 +37,7 @@ fn workspace_suffix(
                 .h(DETAIL_LINE_HEIGHTS.1)
                 .line_height(DETAIL_LINE_HEIGHTS.1)
                 .text_xs()
-                .text_color(cx.theme().muted_foreground)
-                .children(upstream.map(str::to_owned)),
+                .children(upstream.and_then(|upstream| upstream_label(upstream, cx))),
         )
         .into_any_element()
 }
@@ -161,8 +160,9 @@ impl Condr {
                                         git.branch.clone().unwrap_or_else(|| "detached".to_owned())
                                     },
                                 );
-                                let upstream =
-                                    git.and_then(|git| git.upstream).and_then(upstream_label);
+                                let upstream = git
+                                    .and_then(|git| git.upstream)
+                                    .filter(|upstream| upstream.ahead > 0 || upstream.behind > 0);
                                 let mut statuses = Vec::new();
                                 let supports_worktrees = git
                                     .is_some_and(|git| !git.linked_worktree)
@@ -423,7 +423,7 @@ impl Condr {
                                 .detail(detail)
                                 .when(!summary.is_empty() || upstream.is_some(), |item| {
                                     item.suffix(move |_, cx| {
-                                        workspace_suffix(&summary, upstream.as_deref(), cx)
+                                        workspace_suffix(&summary, upstream, cx)
                                     })
                                 })
                                 .on_click(move |_, window, cx| {

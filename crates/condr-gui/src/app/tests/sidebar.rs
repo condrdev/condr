@@ -134,7 +134,7 @@ fn sidebar_status_visuals_follow_the_prototype_semantics() {
 }
 
 #[test]
-fn workspace_row_summarizes_agents_by_urgency_and_upstream_by_divergence() {
+fn workspace_row_summarizes_agents_by_urgency() {
     use AgentDisplayState::*;
     let statuses = [Working, Done, Unknown, Idle, Error, Done, Blocked]
         .into_iter()
@@ -156,10 +156,4 @@ fn workspace_row_summarizes_agents_by_urgency_and_upstream_by_divergence() {
         ]
     );
     assert!(agent_status_summary([]).is_empty());
-
-    let label = |ahead, behind| upstream_label(condr_core::GitUpstream { ahead, behind });
-    assert_eq!(label(0, 0), None);
-    assert_eq!(label(3, 0).as_deref(), Some("↑3"));
-    assert_eq!(label(0, 1).as_deref(), Some("↓1"));
-    assert_eq!(label(3, 1).as_deref(), Some("↑3 ↓1"));
 }

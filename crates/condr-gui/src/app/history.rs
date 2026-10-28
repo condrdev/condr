@@ -22,7 +22,6 @@ pub(super) struct DiffCommit {
 /// History's first row, level with Changes' comparison row: the branch the commits are
 /// on and `↑N ↓N` against its upstream, as the Workspace's row in the left sidebar shows.
 pub(super) fn history_branch(git: &WorkspaceGitSnapshot, cx: &App) -> AnyElement {
-    let muted = cx.theme().muted_foreground;
     h_flex()
         .flex_none()
         .w_full()
@@ -32,8 +31,8 @@ pub(super) fn history_branch(git: &WorkspaceGitSnapshot, cx: &App) -> AnyElement
         .justify_between()
         .items_center()
         .text_xs()
-        .text_color(muted)
-        // `px_1` and `h_5` are an xsmall Button's, so the name sits where "Against" does.
+        // `px_1`, `h_5` and the colour are an xsmall ghost Button's, so the name reads
+        // like "Against HEAD" and sits where it does.
         .child(
             div()
                 .h_5()
@@ -42,15 +41,20 @@ pub(super) fn history_branch(git: &WorkspaceGitSnapshot, cx: &App) -> AnyElement
                 .items_center()
                 .min_w_0()
                 .truncate()
+                .text_color(cx.theme().secondary_foreground)
                 .child(git.branch.clone().unwrap_or_else(|| "detached".to_owned())),
         )
-        .children(git.upstream.and_then(upstream_label).map(|label| {
-            div()
-                .debug_selector(|| "history-upstream".into())
-                .flex_none()
-                .pr_2()
-                .child(label)
-        }))
+        .children(
+            git.upstream
+                .and_then(|upstream| upstream_label(upstream, cx))
+                .map(|label| {
+                    div()
+                        .debug_selector(|| "history-upstream".into())
+                        .flex_none()
+                        .pr_2()
+                        .child(label)
+                }),
+        )
         .into_any_element()
 }
 
