@@ -33,7 +33,7 @@ pub struct SessionModel {
     pub terminal_hyperlinks: HashMap<PaneId, TerminalHyperlinkBudget>,
     pub agents: HashMap<PaneId, AgentSnapshot>,
     /// Panes whose `Done` no Client has looked at yet, as the Server keeps them (ADR 0052).
-    pub unseen_done: HashSet<PaneId>,
+    pub agent_unseen: HashSet<PaneId>,
     /// Panes that rang BEL while no Client had them focused.
     pub attention: HashSet<PaneId>,
     pub workspace_git: HashMap<WorkspaceId, WorkspaceGitSnapshot>,
@@ -113,7 +113,7 @@ impl SessionModel {
                 );
             }
         }
-        self.unseen_done = bootstrap
+        self.agent_unseen = bootstrap
             .agents
             .iter()
             .filter(|agent| agent.unseen)
@@ -168,7 +168,7 @@ impl SessionModel {
         self.terminal_titles
             .retain(|pane_id, _| live.contains(pane_id));
         self.agents.retain(|pane_id, _| live.contains(pane_id));
-        self.unseen_done.retain(|pane_id| live.contains(pane_id));
+        self.agent_unseen.retain(|pane_id| live.contains(pane_id));
         self.attention.retain(|pane_id| live.contains(pane_id));
         self.workspace_git
             .retain(|workspace_id, _| live_workspaces.contains(workspace_id));
@@ -234,10 +234,20 @@ impl SessionModel {
         AgentChange { previous, started }
     }
 
+    /// Applies an `AgentUnseenChanged` and reports whether it changed anything. The Pane
+    /// `in_front` of the person is looked at, whoever reported focus last (ADR 0052).
+    pub fn apply_agent_unseen(&mut self, pane_id: PaneId, unseen: bool, in_front: bool) -> bool {
+        if unseen && !in_front {
+            self.agent_unseen.insert(pane_id)
+        } else {
+            self.agent_unseen.remove(&pane_id)
+        }
+    }
+
     /// The person looked at the Pane: its Done goes here at once, ahead of the Server's
     /// answer to the focus this Client reports.
     pub fn mark_seen(&mut self, pane_id: PaneId) {
-        self.unseen_done.remove(&pane_id);
+        self.agent_unseen.remove(&pane_id);
     }
 
     /// How the Pane's Agent shows: its state, or Idle for a Done someone looked at.
@@ -245,7 +255,7 @@ impl SessionModel {
         let agent = self.agents.get(&pane_id)?;
         Some(AgentDisplayState::of(
             agent.state,
-            self.unseen_done.contains(&pane_id),
+            self.agent_unseen.contains(&pane_id),
         ))
     }
 
@@ -456,7 +466,7 @@ mod tests {
             model.agent_display_state(pane_id),
             Some(AgentDisplayState::Idle)
         );
-        model.unseen_done.insert(pane_id);
+        model.agent_unseen.insert(pane_id);
         assert_eq!(
             model.agent_display_state(pane_id),
             Some(AgentDisplayState::Done)

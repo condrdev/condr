@@ -781,9 +781,10 @@ fn program_status_reports_take_over_from_hooks_and_follow_their_lifetime() {
 #[test]
 fn done_shows_until_someone_looked_and_error_until_the_agent_moves_on() {
     use AgentDisplayState as Shown;
-    assert_eq!(Shown::of(AgentState::Done, true), Shown::Done);
-    assert_eq!(Shown::of(AgentState::Done, false), Shown::Idle);
+    let (unseen, seen) = (true, false);
+    assert_eq!(Shown::of(AgentState::Done, unseen), Shown::Done);
+    assert_eq!(Shown::of(AgentState::Done, seen), Shown::Idle);
     // The agent's own Idle needs no look, and Error shows whether or not anyone looked.
-    assert_eq!(Shown::of(AgentState::Idle, true), Shown::Idle);
-    assert_eq!(Shown::of(AgentState::Error, false), Shown::Error);
+    assert_eq!(Shown::of(AgentState::Idle, unseen), Shown::Idle);
+    assert_eq!(Shown::of(AgentState::Error, seen), Shown::Error);
 }

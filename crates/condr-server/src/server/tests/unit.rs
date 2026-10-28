@@ -246,6 +246,14 @@ fn a_done_nobody_looked_at_waits_for_a_focus_from_any_client() {
         [true, false, true, false],
         "the Agent moving on needs no look"
     );
+
+    finish(&mut state);
+    state.forget_agent(pane_id);
+    assert_eq!(
+        unseen_events(&state),
+        [true, false, true, false, true, false],
+        "the Terminal ending takes its Agent's Done with it"
+    );
 }
 
 #[test]

@@ -115,12 +115,7 @@ pub(super) fn monitor_terminal(monitor: TerminalMonitor) {
                         state.forget_agent_control(pane_id);
                         state.publish_background(SessionEvent::TerminalExited { pane_id });
                         state.clear_terminal_title(pane_id);
-                        if state.agents.remove(&pane_id).is_some() {
-                            state.publish_background(SessionEvent::AgentChanged {
-                                pane_id,
-                                agent: None,
-                            });
-                        }
+                        state.forget_agent(pane_id);
                         clients
                     };
                     for client_id in clients {
@@ -282,11 +277,7 @@ pub(super) fn apply_agent_refresh(
     // (ADR 0052); a repeated Done keeps whatever it had.
     let unseen = match (is_done(previous), is_done(next.as_ref())) {
         (_, false) => Some(false),
-        (false, true) => Some(
-            state
-                .focused_terminal
-                .is_none_or(|(focused, _)| focused != pane_id),
-        ),
+        (false, true) => Some(!state.is_focused(pane_id)),
         (true, true) => None,
     };
     match &next {
@@ -335,9 +326,7 @@ pub(super) fn apply_terminal_notices(
         }
     }
     if notices.bells > 0
-        && state
-            .focused_terminal
-            .is_none_or(|(focused, _)| focused != pane_id)
+        && !state.is_focused(pane_id)
         && state.pending_terminal_bells.insert(pane_id)
     {
         state.publish_background(SessionEvent::TerminalAttentionChanged {

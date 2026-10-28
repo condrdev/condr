@@ -350,19 +350,7 @@ pub(super) fn handle_client(
                                     exited: state.exited_terminals.contains(pane_id),
                                 })
                                 .collect(),
-                            agents: state
-                                .agents
-                                .iter()
-                                .filter(|(pane_id, _)| {
-                                    !state.closing_terminals.contains(pane_id)
-                                        && !state.exited_terminals.contains(pane_id)
-                                })
-                                .map(|(pane_id, agent)| PaneAgentSnapshot {
-                                    pane_id: *pane_id,
-                                    agent: agent.clone(),
-                                    unseen: state.unseen_done.contains(pane_id),
-                                })
-                                .collect(),
+                            agents: state.pane_agent_snapshots(),
                             zoomed_panes: state.zoomed_panes(),
                         })
                     } else {

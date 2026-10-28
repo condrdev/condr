@@ -26,9 +26,9 @@ impl Condr {
                     // Retrying would fetch the same invalid model; reconnect by hand.
                     Err(error) => return self.mark_protocol_error(key, index, error),
                 };
-                // The Pane the user is in is being looked at: its Done is seen.
-                if let Some((target_key, pane_id)) = self.terminal_input.target
-                    && target_key == key
+                // The Pane in front of the user is being looked at: its Done is seen.
+                if let Some((focused_key, pane_id)) = self.terminal_input.focused
+                    && focused_key == key
                 {
                     self.connections[index].model.mark_seen(pane_id);
                 }
@@ -330,15 +330,10 @@ impl Condr {
                         };
                     }
                     SessionEvent::AgentUnseenChanged { pane_id, unseen } => {
-                        // The Pane in front of the user is looked at, whoever reported focus
-                        // last (ADR 0052).
                         let focused = self.terminal_input.focused == Some((key, pane_id));
-                        let unseen_done = &mut self.connections[index].model.unseen_done;
-                        notify = if unseen {
-                            !focused && unseen_done.insert(pane_id)
-                        } else {
-                            unseen_done.remove(&pane_id)
-                        };
+                        notify = self.connections[index]
+                            .model
+                            .apply_agent_unseen(pane_id, unseen, focused);
                     }
                     SessionEvent::ServerSettingsChanged { settings } => {
                         self.connections[index].model.settings = settings;

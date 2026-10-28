@@ -320,17 +320,7 @@ impl RuntimeState {
             sequence: self.sequence,
             snapshot: self.session.snapshot(),
             terminals,
-            agents: self
-                .agents
-                .iter()
-                .filter(|(pane_id, _)| !self.closing_terminals.contains(pane_id))
-                .filter(|(pane_id, _)| !self.exited_terminals.contains(pane_id))
-                .map(|(&pane_id, agent)| PaneAgentSnapshot {
-                    pane_id,
-                    agent: agent.clone(),
-                    unseen: self.unseen_done.contains(&pane_id),
-                })
-                .collect(),
+            agents: self.pane_agent_snapshots(),
             workspace_git: self
                 .workspace_git
                 .iter()
@@ -338,6 +328,23 @@ impl RuntimeState {
                 .collect(),
             zoomed_panes: self.zoomed_panes(),
         }
+    }
+
+    /// The Agents of the Panes whose Terminal still runs, with whether each one's `Done`
+    /// waits to be looked at (ADR 0052).
+    pub(super) fn pane_agent_snapshots(&self) -> Vec<PaneAgentSnapshot> {
+        self.agents
+            .iter()
+            .filter(|(pane_id, _)| {
+                !self.closing_terminals.contains(pane_id)
+                    && !self.exited_terminals.contains(pane_id)
+            })
+            .map(|(&pane_id, agent)| PaneAgentSnapshot {
+                pane_id,
+                agent: agent.clone(),
+                unseen: self.agent_unseen.contains(&pane_id),
+            })
+            .collect()
     }
 
     #[cfg(test)]

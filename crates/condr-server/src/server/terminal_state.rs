@@ -46,8 +46,7 @@ impl RuntimeState {
         let notice_probe = runtime.notice_probe();
         let view_source = runtime.view_source();
         self.clear_terminal_title(pane_id);
-        self.clear_terminal_attention(pane_id);
-        self.set_agent_unseen(pane_id, false);
+        self.clear_unseen(pane_id);
         let mut view = runtime.view();
         let hyperlinks = TerminalHyperlinkBudget::new(&mut view);
         self.terminal_views.insert(
@@ -107,8 +106,7 @@ impl RuntimeState {
             }
             self.focused_terminal = Some((pane_id, client_id));
             self.sizing_client = Some(client_id);
-            self.clear_terminal_attention(pane_id);
-            self.set_agent_unseen(pane_id, false);
+            self.clear_unseen(pane_id);
             true
         } else {
             if self.sizing_client == Some(client_id) {
@@ -123,12 +121,31 @@ impl RuntimeState {
         }
     }
 
-    pub(super) fn clear_terminal_attention(&mut self, pane_id: PaneId) {
+    pub(super) fn is_focused(&self, pane_id: PaneId) -> bool {
+        self.focused_terminal
+            .is_some_and(|(focused, _)| focused == pane_id)
+    }
+
+    /// What waits for someone to look at the Pane, its bell and its Agent's `Done`, stops
+    /// waiting (ADR 0036, ADR 0052).
+    pub(super) fn clear_unseen(&mut self, pane_id: PaneId) {
         if self.pending_terminal_bells.remove(&pane_id) {
             self.publish_background(SessionEvent::TerminalAttentionChanged {
                 pane_id,
                 attention: false,
             });
+        }
+        self.set_agent_unseen(pane_id, false);
+    }
+
+    /// The Pane's Terminal ended, and its Agent with it.
+    pub(super) fn forget_agent(&mut self, pane_id: PaneId) {
+        if self.agents.remove(&pane_id).is_some() {
+            self.publish_background(SessionEvent::AgentChanged {
+                pane_id,
+                agent: None,
+            });
+            self.set_agent_unseen(pane_id, false);
         }
     }
 
@@ -136,9 +153,9 @@ impl RuntimeState {
     /// when that changed (ADR 0052).
     pub(super) fn set_agent_unseen(&mut self, pane_id: PaneId, unseen: bool) {
         let changed = if unseen {
-            self.unseen_done.insert(pane_id)
+            self.agent_unseen.insert(pane_id)
         } else {
-            self.unseen_done.remove(&pane_id)
+            self.agent_unseen.remove(&pane_id)
         };
         if changed {
             self.publish_background(SessionEvent::AgentUnseenChanged { pane_id, unseen });
@@ -163,12 +180,7 @@ impl RuntimeState {
             self.publish_background(SessionEvent::TerminalExited { pane_id });
         }
         self.clear_terminal_title(pane_id);
-        if self.agents.remove(&pane_id).is_some() {
-            self.publish_background(SessionEvent::AgentChanged {
-                pane_id,
-                agent: None,
-            });
-        }
+        self.forget_agent(pane_id);
         true
     }
 

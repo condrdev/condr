@@ -1119,13 +1119,8 @@ fn apply_message(
                     }
                     changes.push(device_change());
                 }
-                // The Pane on screen is looked at, whoever reported focus last (ADR 0052).
                 SessionEvent::AgentUnseenChanged { pane_id, unseen } => {
-                    if unseen && shown != Some(pane_id) {
-                        model.unseen_done.insert(pane_id);
-                    } else {
-                        model.unseen_done.remove(&pane_id);
-                    }
+                    model.apply_agent_unseen(pane_id, unseen, shown == Some(pane_id));
                     changes.push(device_change());
                 }
                 SessionEvent::WorkspaceGitChanged { workspace_id, git } => match git {
