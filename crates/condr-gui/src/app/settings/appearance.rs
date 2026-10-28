@@ -454,7 +454,7 @@ impl Condr {
         }
         self.appearance = appearance;
         self.save_appearance(cx);
-        let handle = self.window_handle;
+        let handle = self.main_window();
         // Resolving System reads the Window's own appearance, which Linux reports more
         // reliably than the app-global one. GPUI takes the Window out of its table for
         // the duration of an update, so it is unreachable from here — this runs inside

@@ -183,7 +183,7 @@ impl Condr {
         let message = message.into();
         self.last_error = Some(message.clone());
         let message: SharedString = message.into();
-        let handle = self.window_handle;
+        let handle = self.main_window();
         cx.defer(move |cx| {
             let _ = handle.update(cx, |_, window, cx| {
                 let copied = message.clone();

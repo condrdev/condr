@@ -469,9 +469,9 @@ impl Condr {
         }
         GuiState {
             window: self.window_state,
-            sidebar_width: Some(self.sidebar_width.into()),
-            sidebar_collapsed: self.sidebar_collapsed,
-            changes_width: Some(self.changes_width.into()),
+            sidebar_width: Some(self.main_view().sidebar_width.into()),
+            sidebar_collapsed: self.main_view().sidebar_collapsed,
+            changes_width: Some(self.main_view().changes_width.into()),
             diff_unified: self.files_view.diff_unified,
             // Until the active connection has bootstrapped (a slow first start), the
             // file's answer stands rather than `None`.

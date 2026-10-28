@@ -1393,7 +1393,7 @@ fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() 
         "activating the window should report terminal focus to the PTY"
     );
 
-    let app_focus = window.read(|app| view.read(app).focus_handle.clone());
+    let app_focus = window.read(|app| view.read(app).main_view().focus_handle.clone());
     let terminal_focus = window.read(|app| {
         view.read(app).panels[&(1, pane_id)]
             .read(app)

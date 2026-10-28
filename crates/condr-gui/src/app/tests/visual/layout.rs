@@ -554,7 +554,7 @@ fn the_sidebar_keeps_its_dragged_width_across_window_resizes() {
     let (view, window, _server) = connected_condr(&mut cx);
     window.update(|window, cx| _ = window.draw(cx));
 
-    let initial = window.read(|app| view.read(app).sidebar_width);
+    let initial = window.read(|app| view.read(app).main_view().sidebar_width);
     let sidebar = window.debug_bounds("condr-sidebar").unwrap();
     assert_eq!(sidebar.size.width, initial);
 
@@ -609,7 +609,7 @@ fn the_sidebar_keeps_its_dragged_width_across_window_resizes() {
     );
     window.run_until_parked();
     window.update(|window, cx| _ = window.draw(cx));
-    let dragged = window.read(|app| view.read(app).sidebar_width);
+    let dragged = window.read(|app| view.read(app).main_view().sidebar_width);
     assert_eq!(
         dragged,
         initial + px(80.),

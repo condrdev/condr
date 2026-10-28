@@ -290,9 +290,10 @@ impl Condr {
             .map(|surface| surface.area.read(cx).bounds().size)
             .filter(|size| size.width > px(0.) && size.height > px(0.));
         let measured_size = {
+            let workspace_size = self.window_view(window).workspace_size;
             let size = size(
-                self.workspace_size.width.max(px(0.)),
-                self.workspace_size.height.max(px(0.)),
+                workspace_size.width.max(px(0.)),
+                workspace_size.height.max(px(0.)),
             );
             (size.width > px(0.) && size.height > px(0.)).then_some(size)
         };
@@ -303,7 +304,8 @@ impl Condr {
         }
         .unwrap_or_else(|| {
             size(
-                (window.viewport_size().width - self.sidebar_layout_width()).max(px(1.)),
+                (window.viewport_size().width - self.window_view(window).sidebar_layout_width())
+                    .max(px(1.)),
                 (window.viewport_size().height - WORKSPACE_TITLE_BAR_HEIGHT).max(px(1.)),
             )
         });

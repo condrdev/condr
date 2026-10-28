@@ -57,7 +57,11 @@ impl Condr {
     /// The active Workspace as two pieces: its Tab strip, which the title bar hosts so
     /// the Panes get the full body height, and the body under it. No strip without a
     /// Workspace.
-    pub(super) fn render_workspace(&self, cx: &mut Context<Self>) -> WorkspaceChrome {
+    pub(super) fn render_workspace(
+        &self,
+        view: &WindowView,
+        cx: &mut Context<Self>,
+    ) -> WorkspaceChrome {
         let Some(connection) = self.active_connection() else {
             return WorkspaceChrome::body(div().size_full().into_any_element());
         };
@@ -95,11 +99,19 @@ impl Condr {
                 Some(self.render_diff_tab(key, workspace_id, active_tab, diff.path(), cx))
             }
             TabContent::File(file) => {
-                Some(self.render_file_tab(key, workspace_id, active_tab, file.path(), cx))
+                Some(self.render_file_tab(view, key, workspace_id, active_tab, file.path(), cx))
             }
             TabContent::Terminals(_) => None,
         });
-        let strip = self.render_tab_strip(key, workspace_id, workspace, active_tab, can_mutate, cx);
+        let strip = self.render_tab_strip(
+            view,
+            key,
+            workspace_id,
+            workspace,
+            active_tab,
+            can_mutate,
+            cx,
+        );
         // The veil covers the Panes rather than replacing them: the Dock keeps its
         // geometry, so a reconnect shows the live output in place.
         let body = div()
@@ -120,8 +132,10 @@ impl Condr {
     /// Kit's `TabBar` scrolls its own, and brings a newly active Tab into view. "New Tab"
     /// follows the last Tab and scrolls with it. The Tabs themselves keep Condr's
     /// ghost-button look, which none of the Kit `Tab` variants draw.
+    #[allow(clippy::too_many_arguments)]
     fn render_tab_strip(
         &self,
+        view: &WindowView,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
         workspace: &Workspace,
@@ -143,7 +157,7 @@ impl Condr {
         // row's children alternate Tab and separator, so Tab `i` is child `2i`. For the
         // last Tab, scroll to "New Tab" right behind it, so a just-created Tab does not
         // leave the button it came from half hidden.
-        if self.last_scrolled_tab.replace(Some(active_tab)) != Some(active_tab)
+        if view.last_scrolled_tab.replace(Some(active_tab)) != Some(active_tab)
             && let Some(index) = active_index
         {
             let item = if index + 1 == tab_ids.len() {
@@ -151,7 +165,7 @@ impl Condr {
             } else {
                 2 * index
             };
-            self.tab_strip_scroll.scroll_to_item(item);
+            view.tab_strip_scroll.scroll_to_item(item);
         }
         let tab_count = tab_ids.len();
         let separator_color = cx.theme().border;
@@ -380,7 +394,7 @@ impl Condr {
                             .items_center()
                             .overflow_x_scroll()
                             .lock_scroll_axis()
-                            .track_scroll(&self.tab_strip_scroll)
+                            .track_scroll(&view.tab_strip_scroll)
                             // Chrome's cue between two idle Tabs: a hairline in the gap.
                             // Beside the active Tab it is drawn transparent rather than
                             // left out, so the child indices `scroll_to_item` counts on
@@ -569,12 +583,6 @@ impl Condr {
     }
 }
 
-impl Focusable for Condr {
-    fn focus_handle(&self, _: &App) -> FocusHandle {
-        self.focus_handle.clone()
-    }
-}
-
 /// The drawn title bar every Condr window uses: logo, title, and the theme's flat
 /// title-bar color rather than the Kit's default gradient.
 pub(super) fn title_bar(title: &'static str, cx: &App) -> TitleBar {
@@ -685,9 +693,9 @@ fn workspace_title_bar(
                                 .on_mouse_down(MouseButton::Left, |_, _, cx| {
                                     cx.stop_propagation();
                                 })
-                                .on_click(move |_, _, cx| {
-                                    let _ =
-                                        toggle_owner.update(cx, |this, cx| this.toggle_sidebar(cx));
+                                .on_click(move |_, window, cx| {
+                                    let _ = toggle_owner
+                                        .update(cx, |this, cx| this.toggle_sidebar(window, cx));
                                 }),
                         ),
                 )
@@ -706,26 +714,17 @@ fn workspace_title_bar(
         )
 }
 
-impl Condr {
-    pub(super) fn sidebar_layout_width(&self) -> Pixels {
-        if self.sidebar_collapsed {
-            COLLAPSED_SIDEBAR_WIDTH
-        } else {
-            self.sidebar_width
-        }
-    }
-}
-
 impl Render for Condr {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.ask_file_prompts(window, cx);
+        let view = self.window_view(window);
         let workspace_owner = cx.weak_entity();
         let sidebar_toggle_owner = cx.weak_entity();
         let WorkspaceChrome {
             tab_strip,
             open_in,
             body,
-        } = self.render_workspace(cx);
+        } = self.render_workspace(view, cx);
         let has_workspace = self.presented_workspace().is_some();
         let changes_toggle = has_workspace.then(|| self.render_changes_toggle(cx));
         let changes_column = self
@@ -737,9 +736,9 @@ impl Render for Condr {
             // header text is wider than its slot pushes the whole column past the
             // window, and the Dock's stack adopts that width as its container.
             .min_w(px(0.))
-            .on_prepaint(move |bounds, _, cx| {
+            .on_prepaint(move |bounds, window, cx| {
                 let _ = workspace_owner.update(cx, |this, _| {
-                    this.workspace_size = bounds.size;
+                    this.window_view_mut(window).workspace_size = bounds.size;
                 });
             })
             .child(body)
@@ -747,7 +746,7 @@ impl Render for Condr {
         div()
             .key_context("Condr")
             .relative()
-            .track_focus(&self.focus_handle)
+            .track_focus(&view.focus_handle)
             .on_key_down(cx.listener(Self::key_down))
             .on_key_up(cx.listener(Self::key_up))
             .on_action(cx.listener(Self::action_terminal_tab))
@@ -796,8 +795,8 @@ impl Render for Condr {
             // Client-side title bar on every platform, as Zed does; the OS title for the
             // taskbar is set separately when the window opens.
             .child(workspace_title_bar(
-                self.sidebar_width,
-                self.sidebar_collapsed,
+                view.sidebar_width,
+                view.sidebar_collapsed,
                 tab_strip,
                 open_in,
                 changes_toggle,
@@ -813,9 +812,9 @@ impl Render for Condr {
                     .flex_1()
                     .min_h_0()
                     .on_drag_move(cx.listener(
-                        |this, event: &DragMoveEvent<DraggedSidebar>, _, cx| {
+                        |this, event: &DragMoveEvent<DraggedSidebar>, window, cx| {
                             let width = event.event.position.x - event.bounds.origin.x;
-                            this.sidebar_width =
+                            this.window_view_mut(window).sidebar_width =
                                 width.max(MIN_SIDEBAR_WIDTH).min(MAX_SIDEBAR_WIDTH).round();
                             this.schedule_state_save(cx);
                             cx.notify();
@@ -823,10 +822,10 @@ impl Render for Condr {
                     ))
                     // The Changes sidebar mirrors it: its handle is on its left edge.
                     .on_drag_move(cx.listener(
-                        |this, event: &DragMoveEvent<DraggedChanges>, _, cx| {
+                        |this, event: &DragMoveEvent<DraggedChanges>, window, cx| {
                             let right = event.bounds.origin.x + event.bounds.size.width;
                             let width = right - event.event.position.x;
-                            this.changes_width =
+                            this.window_view_mut(window).changes_width =
                                 width.max(MIN_CHANGES_WIDTH).min(MAX_CHANGES_WIDTH).round();
                             this.schedule_state_save(cx);
                             cx.notify();
@@ -836,15 +835,15 @@ impl Render for Condr {
                         div()
                             .debug_selector(|| "condr-sidebar".into())
                             .relative()
-                            .w(self.sidebar_layout_width())
+                            .w(view.sidebar_layout_width())
                             .flex_none()
                             .h_full()
-                            .child(self.render_sidebar(cx))
+                            .child(self.render_sidebar(view, cx))
                             // Deferred so it paints above the workspace it overlaps by
                             // half its width, occluding so the terminal underneath never
                             // sees the press, and swallowing the press so the pane does
                             // not start a selection.
-                            .when(!self.sidebar_collapsed, |this| {
+                            .when(!view.sidebar_collapsed, |this| {
                                 this.child(deferred(
                                     div()
                                         .id("condr-sidebar-resize")
@@ -871,7 +870,7 @@ impl Render for Condr {
                             div()
                                 .debug_selector(|| "condr-changes-column".into())
                                 .relative()
-                                .w(self.changes_width)
+                                .w(view.changes_width)
                                 .flex_none()
                                 .h_full()
                                 .child(changes)

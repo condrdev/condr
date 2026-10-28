@@ -34,6 +34,7 @@ mod terminal_input;
 mod terminal_panel;
 mod updates;
 mod viewer_header;
+mod window_view;
 mod workspace;
 mod workspace_resources;
 
@@ -139,6 +140,7 @@ use terminal_input::{
 };
 use terminal_panel::TerminalPanel;
 use updates::{UpdateChannel, UpdateCheck, UpdateState};
+use window_view::WindowView;
 use workspace::{default_worktree_branch, title_bar};
 use workspace_resources::WorkspaceResources;
 
@@ -260,12 +262,11 @@ pub(crate) struct Condr {
     #[cfg(feature = "test-support")]
     dock_rebuild_count: usize,
     panels: HashMap<(ConnectionKey, PaneId), Entity<TerminalPanel>>,
-    workspace_size: Size<Pixels>,
-    focus_handle: FocusHandle,
+    /// Every window this Client draws in, the main window first.
+    windows: Vec<WindowView>,
     terminal_input: terminal_input::TerminalInputState,
     pending_sizes: HashMap<(ConnectionKey, PaneId), PendingSize>,
     terminal_geometry: HashMap<(ConnectionKey, PaneId), TerminalGeometry>,
-    window_handle: AnyWindowHandle,
     appearance: Appearance,
     fps_monitor: bool,
     /// Whether agent completions in unwatched Panes go to the OS notification center.
@@ -277,11 +278,6 @@ pub(crate) struct Condr {
     /// Windows implements it with `SetThreadExecutionState`, which is per thread: it must
     /// be created and dropped on the GPUI main thread, never from a background task.
     _keep_awake: Option<keepawake::KeepAwake>,
-    /// Absolute, as Zed keeps its dock sizes: a window resize never changes it,
-    /// only dragging the handle does.
-    sidebar_width: Pixels,
-    sidebar_collapsed: bool,
-    changes_width: Pixels,
     files_view: FilesViewState,
     /// What the open Root Directory dialog lists for a remote Device; replaced by the
     /// next such dialog, so a closed one is harmless.
@@ -309,10 +305,6 @@ pub(crate) struct Condr {
     _code_font_save: Option<Task<()>>,
     /// Where the Tab, Workspace or Server being dragged would land; drawn as a line.
     drop_target: Option<sidebar::DropTarget>,
-    /// The title bar's Tab strip scrolls when the Tabs outgrow it; a newly active Tab
-    /// is scrolled into view once, which `last_scrolled_tab` remembers across renders.
-    tab_strip_scroll: ScrollHandle,
-    last_scrolled_tab: Cell<Option<TabId>>,
     /// Flushes a pending font save when the app quits before the debounce elapses.
     _quit_subscription: Subscription,
     /// The most recent failure given to `report_error`, kept so tests can check it.
@@ -470,32 +462,16 @@ impl Condr {
             #[cfg(feature = "test-support")]
             dock_rebuild_count: 0,
             panels: HashMap::new(),
-            workspace_size: size(
-                (window.viewport_size().width - INITIAL_SIDEBAR_WIDTH).max(px(0.)),
-                (window.viewport_size().height - WORKSPACE_TITLE_BAR_HEIGHT).max(px(0.)),
-            ),
-            focus_handle: cx.focus_handle(),
+            windows: vec![WindowView::new(window, &restored_state, cx)],
             terminal_input: terminal_input::TerminalInputState::default(),
             pending_sizes: HashMap::new(),
             terminal_geometry: HashMap::new(),
-            window_handle: window.window_handle(),
             appearance,
             fps_monitor,
             notifications,
             keep_awake,
             updates: UpdateCheck::new(auto_check_updates, update_channel),
             _keep_awake: None,
-            sidebar_width: restored_state
-                .sidebar_width
-                .map_or(INITIAL_SIDEBAR_WIDTH, |width| {
-                    px(width).max(MIN_SIDEBAR_WIDTH).min(MAX_SIDEBAR_WIDTH)
-                }),
-            sidebar_collapsed: restored_state.sidebar_collapsed,
-            changes_width: restored_state
-                .changes_width
-                .map_or(INITIAL_CHANGES_WIDTH, |width| {
-                    px(width).max(MIN_CHANGES_WIDTH).min(MAX_CHANGES_WIDTH)
-                }),
             files_view: FilesViewState {
                 diff_unified: restored_state.diff_unified,
                 ..FilesViewState::default()
@@ -516,8 +492,6 @@ impl Condr {
             _font_save: None,
             _code_font_save: None,
             drop_target: None,
-            tab_strip_scroll: ScrollHandle::new(),
-            last_scrolled_tab: Cell::new(None),
             _quit_subscription: quit_subscription,
             last_error: None,
             _window_activation_subscription: window_activation_subscription,

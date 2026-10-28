@@ -868,8 +868,8 @@ fn a_second_run_restores_the_sidebars_and_the_view_from_the_state_file() {
     );
     first_window.update(|window, cx| {
         first.update(cx, |this, cx| {
-            this.toggle_sidebar(cx);
-            this.sidebar_width = px(300.);
+            this.toggle_sidebar(window, cx);
+            this.window_view_mut(window).sidebar_width = px(300.);
             this.toggle_changes_sidebar(cx);
             this.files_view.sidebar_views.insert(
                 (1, second_workspace),
@@ -908,8 +908,8 @@ fn a_second_run_restores_the_sidebars_and_the_view_from_the_state_file() {
     );
     second_window.read(|app| {
         let this = second.read(app);
-        assert!(this.sidebar_collapsed);
-        assert_eq!(this.sidebar_width, px(300.));
+        assert!(this.main_view().sidebar_collapsed);
+        assert_eq!(this.main_view().sidebar_width, px(300.));
         assert!(
             this.files_view
                 .changes_open

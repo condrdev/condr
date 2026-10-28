@@ -872,6 +872,7 @@ impl Condr {
     /// is none.
     pub(super) fn render_file_tab(
         &self,
+        view: &WindowView,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
         tab_id: TabId,
@@ -908,7 +909,7 @@ impl Condr {
             (Some(Some(Err(NoImage::Note(note)))), ..) => empty_state(note, cx),
             (Some(Some(Err(NoImage::Failed(reason)))), ..) => failed_state(reason, cx),
             (None, Some((markdown, scroll)), ..) => {
-                self.render_markdown(key, workspace_id, path, &markdown, scroll, cx)
+                self.render_markdown(view, key, workspace_id, path, &markdown, scroll, cx)
             }
             (None, None, FileViewContent::Text, Some(editor)) => {
                 let theme = cx.theme();

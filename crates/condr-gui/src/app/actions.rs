@@ -102,7 +102,7 @@ action_handlers! {
     action_swap_up(SwapUp) |this, window, cx| { this.swap_direction(PaneDirection::Up); }
     action_swap_down(SwapDown) |this, window, cx| { this.swap_direction(PaneDirection::Down); }
     action_toggle_zoom(ToggleZoom) |this, window, cx| { this.toggle_zoom(); }
-    action_toggle_sidebar(ToggleSidebar) |this, window, cx| { this.toggle_sidebar(cx); }
+    action_toggle_sidebar(ToggleSidebar) |this, window, cx| { this.toggle_sidebar(window, cx); }
     action_toggle_changes(ToggleChanges) |this, window, cx| { this.toggle_changes_sidebar(cx); }
     action_next_workspace(NextWorkspace) |this, window, cx| {
         this.cycle_workspace(1, window, cx);

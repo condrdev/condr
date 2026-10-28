@@ -77,7 +77,7 @@ impl Condr {
         // The bounds are in this display's coordinates; without the id, Windows
         // would place them on the primary monitor.
         let display_id = window.display(cx).map(|display| display.id());
-        let main_window = self.window_handle;
+        let main_window = self.main_window();
         let owner = cx.weak_entity();
         // Opening a window needs the App without this entity on the stack.
         cx.defer(move |cx| {

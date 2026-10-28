@@ -412,8 +412,9 @@ impl Condr {
         self.select_workspace(key, workspace_id, window, cx);
     }
 
-    pub(super) fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
-        self.sidebar_collapsed = !self.sidebar_collapsed;
+    pub(super) fn toggle_sidebar(&mut self, window: &Window, cx: &mut Context<Self>) {
+        let view = self.window_view_mut(window);
+        view.sidebar_collapsed = !view.sidebar_collapsed;
         self.schedule_state_save(cx);
         cx.notify();
     }

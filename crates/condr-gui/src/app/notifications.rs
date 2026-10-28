@@ -69,7 +69,7 @@ impl Condr {
         if !attention {
             return;
         }
-        let window = self.window_handle;
+        let window = self.main_window();
         cx.defer(move |cx| {
             let _ = window.update(cx, |_, window, _| window.request_attention());
         });

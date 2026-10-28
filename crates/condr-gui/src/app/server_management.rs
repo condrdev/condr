@@ -113,7 +113,7 @@ impl Condr {
             self.clear_restart(key);
             return;
         }
-        let window = self.window_handle;
+        let window = self.main_window();
         cx.spawn(async move |owner, cx| {
             cx.background_executor()
                 .timer(RESTART_RECONNECT_DELAY)
@@ -154,7 +154,7 @@ impl Condr {
                 connection.wake_probe = Some(sent_at);
             }
         }
-        let window = self.window_handle;
+        let window = self.main_window();
         cx.spawn(async move |owner, cx| {
             cx.background_executor().timer(WAKE_PROBE_TIMEOUT).await;
             let _ = cx.update_window(window, |_, window, cx| {

@@ -77,7 +77,7 @@ impl Condr {
             return;
         }
         // Deferred because the Window is unreachable during its own update.
-        let handle = self.window_handle;
+        let handle = self.main_window();
         cx.defer(move |cx| {
             let _ = handle.update(cx, |_, window, cx| {
                 window.push_notification(

@@ -456,8 +456,10 @@ impl Condr {
 
     /// A rendered Markdown file: GPUI Kit's TextView over the Tab's state, its text centred
     /// at a readable width, its images and links resolved in the Workspace.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn render_markdown(
         &self,
+        view: &WindowView,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
         path: &RelativePath,
@@ -470,7 +472,7 @@ impl Condr {
         let theme = cx.theme();
         let rem = theme.font_size;
         // Padding rather than a narrower column keeps the scrollbar at the Tab's edge.
-        let gutter = ((self.workspace_size.width - rem * MARKDOWN_MAX_WIDTH) / 2.).max(rem * 1.5);
+        let gutter = ((view.workspace_size.width - rem * MARKDOWN_MAX_WIDTH) / 2.).max(rem * 1.5);
         let base = path
             .parent()
             .unwrap_or(RelativePath::new(""))

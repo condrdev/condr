@@ -228,7 +228,7 @@ impl Condr {
         result: Result<BrowsedDirectory, String>,
         cx: &mut Context<Self>,
     ) {
-        let handle = self.window_handle;
+        let handle = self.main_window();
         let Some(browser) = self
             .directory_browser
             .as_mut()

@@ -115,8 +115,8 @@ impl Condr {
         }
     }
 
-    pub(super) fn render_sidebar(&self, cx: &mut Context<Self>) -> AnyElement {
-        if self.sidebar_collapsed {
+    pub(super) fn render_sidebar(&self, view: &WindowView, cx: &mut Context<Self>) -> AnyElement {
+        if view.sidebar_collapsed {
             return self.render_collapsed_sidebar(cx);
         }
         let owner = cx.weak_entity();
