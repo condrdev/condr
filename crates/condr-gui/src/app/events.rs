@@ -185,12 +185,17 @@ impl Condr {
                         // The event is the new structure; apply it in place. No Bootstrap
                         // round trip, so the UI never enters the "not synchronized" state
                         // and terminal views are untouched.
+                        let detached_before = self.detached_presentations(key);
                         let connection = &mut self.connections[index];
                         let layout_changed = match connection.apply_layout(snapshot, zoomed_panes) {
                             Ok(changed) => changed,
                             Err(error) => return self.mark_protocol_error(key, index, error),
                         };
+                        // The connection compares only the Tab it shows itself; a Tab in a
+                        // window of its own changes as much (ADR 0043).
                         connection.model.sequence = sequence;
+                        let layout_changed =
+                            layout_changed || self.detached_presentations(key) != detached_before;
                         self.prune_dock_cache(key, cx);
                         self.sync_sidebar_workspace_open(cx);
                         return self.settle_layout(key, sequence, layout_changed);

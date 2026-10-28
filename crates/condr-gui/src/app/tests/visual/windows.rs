@@ -331,6 +331,76 @@ fn a_changes_click_retargets_a_detached_diff_tab_without_moving_either_window() 
     assert!(window.debug_bounds("shown-elsewhere").is_none());
     assert_eq!(window.read(|app| app.active_window()), Some(main));
     assert_eq!(window_for(window, &view, scope), Some(handle));
+    // The detached window's body follows too, not only its header.
+    assert!(
+        wait_until(window, |window| {
+            window.read(|app| {
+                view.read(app)
+                    .files_view
+                    .diff_viewers
+                    .get(&(1, diff_tab))
+                    .is_some_and(|viewer| viewer.patch.contains("BETA"))
+            })
+        }),
+        "the Diff Tab in the other window shows the file clicked"
+    );
+}
+
+#[test]
+fn a_detached_tab_window_follows_its_layout_while_the_main_window_shows_another() {
+    let _serial_guard = acquire_visual_test_lock();
+    let first_root = TestDirectory::new("detached-layout-first");
+    let second_root = TestDirectory::new("detached-layout-second");
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    let (_, tab_id, pane_id) = create_workspace(window, &view, &first_root);
+    let (second, _, _) = create_workspace(window, &view, &second_root);
+    let scope = WindowScope::Tab(1, tab_id);
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| {
+            this.open_in_new_window(scope, window, cx);
+            this.select_workspace(1, second, window, cx);
+        })
+    });
+    window.run_until_parked();
+    let handle = window_for(window, &view, scope).unwrap();
+    let mut detached = VisualTestContext::from_window(handle, window);
+    draw(&mut detached);
+
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.send_layout_to(
+                1,
+                LayoutCommand::SplitPane {
+                    pane_id,
+                    direction: SplitDirection::Horizontal,
+                    focus: true,
+                },
+            );
+        })
+    });
+    let mut new_pane = None;
+    assert!(wait_until(window, |window| {
+        new_pane = window.read(|app| {
+            let session = view.read(app).connection(1)?.session()?;
+            let tab = session.tab(tab_id)?;
+            tab.panes()
+                .iter()
+                .map(|pane| pane.id())
+                .find(|id| *id != pane_id)
+        });
+        new_pane.is_some()
+    }));
+    let new_pane = new_pane.unwrap();
+    assert!(
+        wait_until(&mut detached, |detached| {
+            detached.update(|window, cx| _ = window.draw(cx));
+            detached.debug_bounds(terminal_selector(new_pane)).is_some()
+                && detached.debug_bounds(terminal_selector(pane_id)).is_some()
+        }),
+        "the Tab window draws the Pane its split added"
+    );
 }
 
 #[test]

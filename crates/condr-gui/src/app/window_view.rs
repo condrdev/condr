@@ -277,6 +277,36 @@ impl Condr {
         )
     }
 
+    /// What each detached window shows of connection `key`: its Tab's Dock projection or
+    /// viewer file. A change there needs a rebuild that the connection, which compares
+    /// only the Tab it shows itself, would not ask for.
+    pub(super) fn detached_presentations(
+        &self,
+        key: ConnectionKey,
+    ) -> Vec<(TabId, Option<PaneLayout>, Option<RelativePathBuf>)> {
+        let Some(connection) = self.connection(key) else {
+            return Vec::new();
+        };
+        self.windows[1..]
+            .iter()
+            .filter(|view| self.presented_key(view) == key)
+            .filter_map(|view| {
+                let (_, session, _, tab_id) = self.presented_in(view)?;
+                let tab = session.tab(tab_id)?;
+                let layout = connection
+                    .zoomed_pane(tab)
+                    .map(PaneLayout::Pane)
+                    .or_else(|| tab.layout().cloned());
+                let viewer = match tab.content() {
+                    TabContent::Diff(diff) => Some(diff.path().to_relative_path_buf()),
+                    TabContent::File(file) => Some(file.path().to_relative_path_buf()),
+                    TabContent::Terminals(_) => None,
+                };
+                Some((tab_id, layout, viewer))
+            })
+            .collect()
+    }
+
     /// Whether any window presents connection `key`, so its structure changes reach a Dock.
     pub(super) fn presents(&self, key: ConnectionKey) -> bool {
         self.windows
