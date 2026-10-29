@@ -1,6 +1,6 @@
 # A Panic Ends Its Pane, and a Poisoned Server Lock Ends the Server
 
-Status: accepted 2026-10-29. Builds on ADR 0005, whose Snapshot a restarted Server comes back from, and ADR 0019, whose panic hook already logs every panic with its backtrace.
+Status: accepted 2026-10-29; the threads that hold no lock were added the same day (#42). Builds on ADR 0005, whose Snapshot a restarted Server comes back from, and ADR 0019, whose panic hook already logs every panic with its backtrace.
 
 A panic in a Pane's reader thread while it held that terminal's lock poisoned the lock. The next Client to touch the Pane did so holding the Server state lock, panicked on `expect("terminal state lock poisoned")` and poisoned that lock too. From then on every `state.lock().expect(…)` panicked: the Server answered no Client, not even a new handshake, while the process, its PTYs and its Agents kept running where nobody could see them. One bug in one Pane took the whole Server down, slowly and without a word. `docs/research/lock-poisoning-and-panic-isolation.md` and `docs/research/ffi-callback-panics.md` trace it and survey what other projects do.
 
@@ -12,6 +12,15 @@ A poisoned Server lock ends the Server. The Server state, Snapshot worker, lifec
 
 The locks stay std's `Mutex`, because its poison bit is what tells other threads that a Pane's terminal or the Session may be half-changed. parking_lot, already in the build through GPUI and gix, would mean rebuilding that bit by hand. `std::sync::nonpoison` is still nightly-only in Rust 1.99. A global `panic = "abort"` was declined: it would end every Agent for one Pane's bug, and Cargo cannot set it for the Server alone, so the GUI would abort too. It would also turn the `catch_unwind` that ADR 0051's callbacks need into dead code, for the same reason a panic hook that aborts would. This is worth revisiting once Edition 2027 settles std's default.
 
-Left for later: a thread that holds no lock when it panics, such as a Pane's monitor or probe thread or the Git watcher, still ends silently. Whether each such thread ends its Pane or the Server is a decision of its own.
+A thread that holds no lock when it panics would otherwise end without a word, so each one that does lasting work catches its own panic and drops only the work it was doing:
 
-Tests: a panic on one of a Pane's threads while it holds the terminal lock ends the Pane with `Exited`. The Pane then answers input with an error, a view with a blank grid of its size and a copy or its text with nothing, and still closes. `or_abort` ends the process, so it has no test of its own.
+| Thread | Its panic |
+| --- | --- |
+| A Pane's monitor, which publishes its frames | ends the Pane, through the same path as its program exiting |
+| A Pane's probe, which follows its Agent and cwd | leaves the Pane running and shows its Agent as `Unknown`, since what the probe last reported may no longer hold; the Pane is not ended for it, which would end the Agent too |
+| The Git watcher | loses that Workspace's scan; the next change schedules another |
+| A request's work off the Client's loop (a diff, log or commit, a file change, a directory browsed, a worktree created or removed) | answers the request with an error, shown as a toast (ADR 0020), not with silence the Client would wait on forever |
+
+A Client's connection thread, the accept loop and the SSH and Peer-to-peer bridges keep their natural boundary: a panic drops that one connection, which the Client reconnects, or, on the accept loop, ends the process.
+
+Tests: a panic on one of a Pane's threads while it holds the terminal lock ends the Pane with `Exited`. The Pane then answers input with an error, a view with a blank grid of its size and a copy or its text with nothing, and still closes. A monitor's panic ends its Pane for every Client; a probe's leaves the Pane echoing with its Agent `Unknown`; a request's is answered with an error and the next request as usual; a Git scan's leaves no scan due and the next change scanned. Each is injected through a test-only hook on `RuntimeState`. `or_abort` ends the process, so it has no test of its own.
