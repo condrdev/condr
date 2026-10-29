@@ -1633,6 +1633,59 @@ fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() 
 
 /// Creates a Workspace in a connected GUI and waits for its Pane's Panel to hold focus
 /// in the active window.
+/// ADR 0055: Cmd+Up and Cmd+Down reach the Server, which decides whether they jump between
+/// prompts; other Cmd chords without a binding still go nowhere.
+#[test]
+fn cmd_up_and_down_reach_the_server_for_prompt_jumps() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        super::super::super::startup::bind_keys(cx);
+    });
+    let (view, window, _server) = connected_condr(&mut cx);
+    let pane_id = focused_pane(&view, window);
+    let (outgoing, receiver) = std::sync::mpsc::channel();
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.connection_mut(1)
+                .unwrap()
+                .io
+                .as_mut()
+                .unwrap()
+                .outgoing = outgoing;
+        });
+    });
+    let keys_sent = |receiver: &std::sync::mpsc::Receiver<ClientMessage>| {
+        receiver
+            .try_iter()
+            .filter_map(|message| match message {
+                ClientMessage::Terminal {
+                    pane_id: sent_to,
+                    command: TerminalCommand::Key { key, modifiers, .. },
+                    ..
+                } if sent_to == pane_id => Some((key, modifiers.platform)),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+
+    window.simulate_keystrokes("cmd-up cmd-down");
+    assert_eq!(
+        keys_sent(&receiver),
+        [
+            (condr_core::TerminalKey::Up, true),
+            (condr_core::TerminalKey::Down, true)
+        ]
+    );
+    window.simulate_keystrokes("cmd-left cmd-shift-up");
+    assert_eq!(
+        keys_sent(&receiver),
+        [],
+        "other Cmd chords stay in the window"
+    );
+}
+
 fn focused_pane(view: &Entity<Condr>, window: &mut VisualTestContext) -> PaneId {
     window.update(|_, cx| {
         view.update(cx, |this, _| {

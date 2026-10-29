@@ -270,7 +270,7 @@ pub(in crate::app) fn set_proxy_mode(
     });
 }
 
-/// What flipping Shell integration does (ADR 0055); tests call it without the widget.
+/// What flipping Shell integration does: new Panes start with it or without (ADR 0055).
 pub(in crate::app) fn set_shell_integration(
     settings: &Entity<SettingsWindow>,
     on: bool,

@@ -28,9 +28,11 @@ const WINDOWS_POWERSHELL_CWD_HOOK: &str = r"if ($null -eq $global:__CondrOrigina
 /// the shell integration when the Server turned it on (ADR 0055).
 #[cfg(unix)]
 const BASH_RC_WRAPPER: &str = r#"exec 3<<'__CONDR_BASHRC__'
-if [[ -r "$HOME/.bashrc" ]]; then source "$HOME/.bashrc"; fi
-if [[ -n ${CONDR_BASH_INTEGRATION-} ]]; then source "$CONDR_BASH_INTEGRATION"; fi
+__condr_integration=${CONDR_BASH_INTEGRATION-}
 unset CONDR_BASH_INTEGRATION
+if [[ -r "$HOME/.bashrc" ]]; then source "$HOME/.bashrc"; fi
+if [[ -n $__condr_integration ]]; then source "$__condr_integration"; fi
+unset __condr_integration
 __condr_user_exit=
 __condr_trap=$(trap -p EXIT)
 if [[ -n $__condr_trap ]]; then

@@ -10,7 +10,9 @@ pub(super) fn encode_legacy_key(
     kind: TerminalKeyEventKind,
     application_cursor: bool,
 ) -> io::Result<Vec<u8>> {
-    if kind == TerminalKeyEventKind::Release {
+    // Cmd never types in legacy mode: the encoding cannot carry it, and Cmd+Up must not
+    // reach a program as Up.
+    if kind == TerminalKeyEventKind::Release || modifiers.platform {
         return Ok(Vec::new());
     }
     encode_key(key, modifiers, application_cursor)

@@ -1,19 +1,19 @@
 use super::*;
 
-/// Writes the shell integration beside the Server's socket, in its runtime directory, and
-/// says where; `None` on Windows, where no shell gets one yet, or when writing failed
-/// (ADR 0055).
-fn install_shell_integration(socket_path: &std::path::Path) -> Option<PathBuf> {
+/// Writes the shell integration into Condr's data directory, private to the person and
+/// never cleaned up behind the Server's back, and says where; `None` on Windows, where
+/// no shell gets one yet, or when writing failed (ADR 0055).
+fn install_shell_integration() -> Option<PathBuf> {
     if cfg!(windows) {
         return None;
     }
-    let directory = socket_path.parent()?.join("shell-integration");
-    match condr_core::install_shell_integration(&directory) {
-        Ok(()) => Some(directory),
+    let root = condr_core::data_directory()?;
+    match condr_core::install_shell_integration(&root) {
+        Ok(directory) => Some(directory),
         Err(error) => {
             tracing::warn!(
-                "shell integration not written to {}: {error}",
-                directory.display()
+                "shell integration not written under {}: {error}",
+                root.display()
             );
             None
         }
@@ -32,7 +32,7 @@ impl RuntimeState {
             proxy: condr_core::ProxySetting::load(config_path.as_deref()),
             shell_integration: load_shell_integration(config_path.as_deref()),
         };
-        let shell_integration_dir = install_shell_integration(socket_path);
+        let shell_integration_dir = install_shell_integration();
         let launch = ShellLaunch {
             shell: settings.shell.clone(),
             socket_path: socket_path.to_string_lossy().into_owned(),

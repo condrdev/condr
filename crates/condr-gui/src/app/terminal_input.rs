@@ -459,7 +459,15 @@ impl Condr {
             cx.stop_propagation();
             return;
         }
-        if modifiers.platform {
+        // Cmd+Up and Cmd+Down go to the Server, which jumps between shell prompts while the
+        // shell waits at one and otherwise passes them on as any key (ADR 0055).
+        let prompt_jump = matches!(stroke.key.as_str(), "up" | "down")
+            && modifiers
+                == Modifiers {
+                    platform: true,
+                    ..Modifiers::default()
+                };
+        if modifiers.platform && !prompt_jump {
             // Cmd/Win chords without a binding are never terminal input (legacy encoding
             // has no way to carry the modifier, so Cmd+Ctrl+C must not become ETX).
             return;
