@@ -1,5 +1,7 @@
 # Terminal Rendering Uses a Coalesced Visual Stream
 
+> ADR 0051 changes where the producer's damage comes from: libghostty-vt's render state marks whole rows dirty, and the Server compares each dirty row with the frame it last took, cell by cell, so a small change still sends only the cells that changed. A synchronized update (mode 2026) holds frames until it ends, or for a second at most.
+
 Condr separates terminal presentation updates from reliable Session events. The Server remains the owner of PTYs, VT state, and terminal revisions; the GUI remains an event-driven presenter and does not poll terminal state on a display timer.
 
 A reconnect Bootstrap contains complete terminal views. After subscription, layout, lifecycle, agent, and Git changes use the ordered reliable event stream and its replay cursor. Terminal pixels use independent `TerminalFrameBatch` messages that are neither assigned a Session sequence nor retained in event history. Each client has its own terminal baseline. The Server sends a full view without a baseline or after a resize, and otherwise sends changed cell runs plus viewport and cursor metadata.

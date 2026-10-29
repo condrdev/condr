@@ -29,9 +29,9 @@ Condr splits the runtime and the interface into two processes. The Server hosts 
 ## Terminal frames
 
 1. The Server creates the PTY through `portable-pty`. On Windows it uses ConPTY, and each terminal's processes go into their own Job Object, so closing a Pane ends them together.
-2. Before reaching the terminal emulator, PTY output passes an OSC scan: sequences such as OSC 7 update the current working directory, Program Status Protocol reports in OSC 7501 are read, and Agent events in OSC 777 are extracted and stripped from the raw output.
-3. The remaining bytes are parsed by `alacritty_terminal`.
-4. The Server coalesces wakeups at 60 Hz and reads the changed region once: a full-screen change produces a complete frame, a partial change produces only the changed cells.
+2. PTY output goes to `libghostty-vt`, Ghostty's terminal core, which parses it.
+3. While parsing, it hands the Server what is not screen content: OSC 7 updates the current working directory, OSC 7501 carries Program Status Protocol reports, and OSC 777 carries Agent events.
+4. The Server coalesces wakeups at 60 Hz and reads again only the rows `libghostty-vt` marks changed: a full-screen change produces a complete frame, a partial change produces only the changed cells.
 5. The Server builds each client's frame against the frame that client already has, and sends it over the protocol.
 6. The window draws the terminal with a custom GPUI element and caches the shaping results of unchanged content.
 
@@ -92,7 +92,7 @@ Done is the Agent's own state after a finished turn. The Server adds whether any
 | Dependency | Role |
 | :--- | :--- |
 | `gpui-kit` | GPUI, UI components, the Dock layout and assets |
-| `alacritty_terminal` | Terminal emulation and VT sequence parsing |
+| `libghostty-vt` | Ghostty's terminal core: terminal emulation, VT sequence parsing and kitty keyboard encoding. Built from source with Zig |
 | `portable-pty` | Cross-platform PTYs (Unix pty and Windows ConPTY) |
 | `gix` | Every Git query, plus creating and removing worktrees. Never calls the `git` command and does not link libgit2 |
 | `snow` | The Noise handshake for TCP connections |

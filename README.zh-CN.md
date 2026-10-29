@@ -38,7 +38,7 @@ Condr 由两部分组成：
 - **远程管理** — 无需切窗口，在一个界面总览本地与远程所有 Agent。内置 SSH、TCP 和 P2P 免配置穿透直连。
 - **Agent 状态** — 侧栏显示每个 Agent 正在做什么。Agent 完成任务时，Condr 会向你发送通知。
 - **Agent 驱动** — Agent 也能反向控制 Condr，自动创建窗格、跨窗格任务分发、与其他 Agent 沟通。
-- **真实终端** — 基于 `alacritty` 内核的真实终端，完整保留原生 Shell 生态，还支持跨设备的截图一键粘贴。
+- **真实终端** — 基于 Ghostty 终端内核的真实终端，完整保留原生 Shell 生态，还支持跨设备的截图一键粘贴。
 - **极致流畅** — 纯 Rust 全栈打造，不使用 Electron。体积小，响应快，Agent 忙碌时界面不卡顿。
 - **移动端 App** — 通过手机随时随地管理 Agent，你可以打开任意 Pane 查看或者回复，离开电脑也不耽误。
 
@@ -126,7 +126,7 @@ Condr 建立在这些项目之上：
 
 - **[GPUI](https://www.gpui.rs)**：Zed 团队的 UI 框架。
 - **[GPUI Kit](https://github.com/longbridge/gpui-kit)**：Condr 依赖的组件库。
-- **[Alacritty](https://github.com/alacritty/alacritty)**：其 `alacritty_terminal` crate 是终端模拟的核心。
+- **[Ghostty](https://github.com/ghostty-org/ghostty)**：其 `libghostty-vt` 库是终端模拟的核心。
 
 ## 许可证
 

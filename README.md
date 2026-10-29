@@ -38,7 +38,7 @@ Condr has two parts:
 - **Remote access** — No more switching windows: see every local and remote agent in one place. SSH, TCP and zero-config P2P with NAT traversal are built in.
 - **Agent status** — The sidebar shows what each agent is doing. Condr notifies you when an agent finishes a task.
 - **Agent driven** — Agents can drive Condr in turn: create panes on their own, hand out tasks across panes, and talk to other agents.
-- **Real terminals** — Real terminals built on the `alacritty` core keep the whole native shell ecosystem, and paste a screenshot across devices in one step.
+- **Real terminals** — Real terminals built on Ghostty's terminal core keep the whole native shell ecosystem, and paste a screenshot across devices in one step.
 - **Smooth** — Pure Rust from end to end, with no Electron. Small and responsive, even while agents are busy.
 - **Mobile app** — Manage your agents from your phone wherever you are: open any pane to read or reply, even away from your computer.
 
@@ -127,7 +127,7 @@ Condr stands on these projects:
 
 - **[GPUI](https://www.gpui.rs)**: the UI framework from the Zed team.
 - **[GPUI Kit](https://github.com/longbridge/gpui-kit)**: the component library Condr builds on.
-- **[Alacritty](https://github.com/alacritty/alacritty)**: its `alacritty_terminal` crate is the terminal emulation core.
+- **[Ghostty](https://github.com/ghostty-org/ghostty)**: its `libghostty-vt` library is the terminal emulation core.
 
 ## License
 

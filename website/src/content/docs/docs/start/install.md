@@ -30,6 +30,9 @@ Get the package for your platform from the [download center](/download/):
 
 ### Platform notes
 
+**macOS**
+Requires macOS 13 or later.
+
 **Windows**
 The installer is not code-signed yet. If SmartScreen blocks it, click **More info → Run anyway**.
 

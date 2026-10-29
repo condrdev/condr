@@ -29,9 +29,9 @@ Condr 把运行时和界面分成两个进程。Server 托管终端、Agent 和 
 ## 终端画面
 
 1. Server 调用 `portable-pty` 创建 PTY。Windows 环境使用 ConPTY，各终端进程归入独立的 Job Object 管理，关闭 Pane 时关联进程一并结束。
-2. PTY 输出进入终端模拟器前先经过 OSC 扫描：OSC 7 等序列用于更新当前工作目录，OSC 7501 中的 Program Status Protocol 上报被读取，OSC 777 中的 Agent 事件被提取并从原始输出中剥离。
-3. 剩余字节交由 `alacritty_terminal` 解析。
-4. Server 采用 60 Hz 频率合并唤醒并读取一次变动区域：整屏变动时生成完整画面，局部变动时仅生成发生变化的单元格。
+2. PTY 输出交给 Ghostty 的终端内核 `libghostty-vt` 解析。
+3. 解析时，它把不属于画面的内容交给 Server：OSC 7 更新当前工作目录，OSC 7501 带来 Program Status Protocol 上报，OSC 777 带来 Agent 事件。
+4. Server 采用 60 Hz 频率合并唤醒，只重读 `libghostty-vt` 标记为变动的行：整屏变动时生成完整画面，局部变动时仅生成发生变化的单元格。
 5. Server 结合各客户端现存的画面生成对应的帧，经由协议发送。
 6. 窗口使用自定义 GPUI 元素绘制终端界面，并缓存未变化内容的排版计算结果。
 
@@ -92,7 +92,7 @@ Done 是 Agent 自己在一轮结束后报告的状态。Server 再加一位所�
 | 依赖项 | 作用 |
 | :--- | :--- |
 | `gpui-kit` | GPUI 框架集成、UI 组件、Dock 布局引擎与资源管理 |
-| `alacritty_terminal` | 终端仿真与 VT 序列解析 |
+| `libghostty-vt` | Ghostty 的终端内核：终端仿真、VT 序列解析与 kitty 键盘编码。用 Zig 从源码构建 |
 | `portable-pty` | 跨平台 PTY（Unix pty 与 Windows ConPTY） |
 | `gix` | 处理所有 Git 查询以及 Worktree 的创建与清理。不依赖外部 `git` 命令，不链接 libgit2 |
 | `snow` | TCP 连接层 Noise 握手协议实现 |

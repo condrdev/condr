@@ -1,5 +1,7 @@
 # ADR 0008: Finished selections are tracked by the Server VT
 
+> ADR 0051 makes the selection libghostty-vt's. It follows output and reflow and is cleared on a screen swap, but it survives a resize and an erase. A double click on a bracket selects a word, not the bracketed span, and a triple click's line ends at its last character.
+
 Status: accepted 2026-09-03. Supersedes the "selection remains local to the GUI" sentence of ADR 0004 for finished selections only.
 
 A selection anchored to viewport rows drifts onto other text as soon as the Pane scrolls: an Agent that keeps printing moves the highlight and the copied text away from what the user picked. herdr keeps selection anchors in absolute screen-buffer coordinates and Zed stores the selection inside the alacritty grid, which rotates it with scrolled output; neither exposes a scroll counter Condr could use for a purely Client-side anchor.

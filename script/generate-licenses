@@ -54,6 +54,10 @@ trap 'rm -f "$TMP" "$ABOUT"' EXIT
     echo
     cat crates/condr-gui/assets/code_themes/NOTICE
     echo
+    echo "## Terminal core"
+    echo
+    cat crates/condr-ghostty-vt/NOTICE
+    echo
     echo "## Rust crates"
     echo
 } > "$TMP"

@@ -59,6 +59,7 @@ cat >"$app/Contents/Info.plist" <<PLIST
 <key>CFBundleName</key><string>Condr</string>
 <key>CFBundleIconFile</key><string>condr.icns</string>
 <key>CFBundlePackageType</key><string>APPL</string>
+<key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>CFBundleVersion</key><string>$CONDR_VERSION</string>
 <key>CFBundleShortVersionString</key><string>$CONDR_VERSION</string>
 </dict></plist>

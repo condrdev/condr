@@ -6,7 +6,8 @@
 #   script/update-libghostty-vt.sh <full ghostty commit>
 #
 # Commit the manifest, the bindings and the safe layer's changes together. A function
-# the safe layer starts calling goes into `functions` below first.
+# the safe layer starts calling goes into `functions` below first. The crate's NOTICE
+# lists what the built library carries; check it, then rerun script/generate-licenses.
 set -euo pipefail
 
 commit="${1:?usage: script/update-libghostty-vt.sh <full ghostty commit>}"
