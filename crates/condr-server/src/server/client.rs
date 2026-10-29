@@ -741,20 +741,25 @@ pub(super) fn handle_client(
                 // terminal input (ADR 0046).
                 let outbound = outbound.clone();
                 thread::spawn(move || {
-                    let result = repository.and_then(|(repository, old_path, base)| {
-                        match &commit {
-                            Some(commit) => {
-                                repository.commit_file_diff(commit, &path, full_context)
-                            }
-                            None => repository.file_diff(
-                                &path,
-                                old_path.as_deref(),
-                                base.as_ref(),
-                                full_context,
-                            ),
-                        }
-                        .map_err(|error| error.to_string())
-                    });
+                    let result = answer_or_fail(
+                        || {
+                            repository.and_then(|(repository, old_path, base)| {
+                                match &commit {
+                                    Some(commit) => {
+                                        repository.commit_file_diff(commit, &path, full_context)
+                                    }
+                                    None => repository.file_diff(
+                                        &path,
+                                        old_path.as_deref(),
+                                        base.as_ref(),
+                                        full_context,
+                                    ),
+                                }
+                                .map_err(|error| error.to_string())
+                            })
+                        },
+                        Err,
+                    );
                     queue_message(
                         &outbound,
                         ServerMessage::GitDiff {
@@ -779,13 +784,26 @@ pub(super) fn handle_client(
                 // A long history walks for a while: off this loop (ADR 0046).
                 let repository = workspace_repository(&state, server_id, session_id, workspace_id);
                 let outbound = outbound.clone();
+                #[cfg(test)]
+                let state = Arc::clone(&state);
                 thread::spawn(move || {
                     let limit = limit.min(MAX_LOG_PAGE);
-                    let result = repository.and_then(|repository| {
-                        repository
-                            .log(from.as_deref(), skip, limit)
-                            .map_err(|error| error.to_string())
-                    });
+                    let result = answer_or_fail(
+                        || {
+                            #[cfg(test)]
+                            RuntimeState::panic_if_injected(
+                                &state,
+                                "git-log",
+                                workspace_id.as_u64(),
+                            );
+                            repository.and_then(|repository| {
+                                repository
+                                    .log(from.as_deref(), skip, limit)
+                                    .map_err(|error| error.to_string())
+                            })
+                        },
+                        Err,
+                    );
                     queue_message(
                         &outbound,
                         ServerMessage::GitLog {
@@ -808,11 +826,16 @@ pub(super) fn handle_client(
                 let repository = workspace_repository(&state, server_id, session_id, workspace_id);
                 let outbound = outbound.clone();
                 thread::spawn(move || {
-                    let result = repository.and_then(|repository| {
-                        repository
-                            .commit(&commit)
-                            .map_err(|error| error.to_string())
-                    });
+                    let result = answer_or_fail(
+                        || {
+                            repository.and_then(|repository| {
+                                repository
+                                    .commit(&commit)
+                                    .map_err(|error| error.to_string())
+                            })
+                        },
+                        Err,
+                    );
                     queue_message(
                         &outbound,
                         ServerMessage::GitCommit {
@@ -895,14 +918,17 @@ pub(super) fn handle_client(
                 let state = Arc::clone(&state);
                 let outbound = outbound.clone();
                 thread::spawn(move || {
-                    let result = match workspace_root(&state, server_id, session_id, workspace_id) {
-                        Ok(root) => {
-                            let result = condr_core::mutate_file(&root, &mutation);
-                            files_mutated(&state, workspace_id, &mutation, &result);
-                            result
-                        }
-                        Err(error) => FileMutationResult::Failed(error),
-                    };
+                    let result = answer_or_fail(
+                        || match workspace_root(&state, server_id, session_id, workspace_id) {
+                            Ok(root) => {
+                                let result = condr_core::mutate_file(&root, &mutation);
+                                files_mutated(&state, workspace_id, &mutation, &result);
+                                result
+                            }
+                            Err(error) => FileMutationResult::Failed(error),
+                        },
+                        FileMutationResult::Failed,
+                    );
                     queue_message(
                         &outbound,
                         ServerMessage::FileMutated {
@@ -931,7 +957,7 @@ pub(super) fn handle_client(
                         &outbound,
                         ServerMessage::BrowsedDirectory {
                             request_id,
-                            result: condr_core::browse_directory(&path),
+                            result: answer_or_fail(|| condr_core::browse_directory(&path), Err),
                         },
                     )
                 });

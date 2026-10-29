@@ -7,6 +7,7 @@ mod hooks;
 mod layout;
 #[cfg(windows)]
 mod local;
+mod panics;
 mod persistence;
 mod protocol;
 mod push;

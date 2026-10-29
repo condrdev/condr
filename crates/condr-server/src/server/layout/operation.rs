@@ -91,9 +91,9 @@ impl ClientLayouts {
             thread::spawn(move || {
                 let _span = span.enter();
                 let _operation = operation;
-                let response = client
-                    .execute_external(request, plan, &launch)
-                    .unwrap_or_else(|reason| request.reject(reason));
+                let response =
+                    answer_or_fail(|| client.execute_external(request, plan, &launch), Err)
+                        .unwrap_or_else(|reason| request.reject(reason));
                 // A Client may send its next Layout as soon as it reads this response.
                 // Queue it and release the slot under one lock, after all resource work.
                 let mut running = client.external_running.lock().or_abort();

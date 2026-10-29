@@ -505,6 +505,10 @@ impl Drop for OperationGuard {
 struct RuntimeState {
     #[cfg(test)]
     bootstrap_captures: std::sync::atomic::AtomicUsize,
+    /// Where a test asked a thread to panic: a site and the Pane, Workspace or request it
+    /// was for (ADR 0053).
+    #[cfg(test)]
+    injected_panics: std::collections::HashSet<(&'static str, u64)>,
     // ponytail: one Session behind one lock for MVP; split the registry/locks when concurrency requires it.
     server_id: ServerId,
     runtime_epoch: RuntimeEpoch,
@@ -655,6 +659,13 @@ struct SequencedEvent {
 }
 
 impl RuntimeState {
+    /// Panics if a test injected one here, with the state lock already released.
+    #[cfg(test)]
+    fn panic_if_injected(state: &Mutex<RuntimeState>, site: &'static str, id: u64) {
+        let injected = state.lock().unwrap().injected_panics.remove(&(site, id));
+        assert!(!injected, "injected {site} panic");
+    }
+
     #[cfg(test)]
     fn new(socket_path: &std::path::Path) -> Self {
         Self::with_session(
@@ -676,6 +687,8 @@ impl RuntimeState {
         Self {
             #[cfg(test)]
             bootstrap_captures: std::sync::atomic::AtomicUsize::new(0),
+            #[cfg(test)]
+            injected_panics: std::collections::HashSet::new(),
             server_id: ServerId(stable_endpoint_id(socket_path)),
             runtime_epoch: RuntimeEpoch(runtime_epoch()),
             session_id: SessionId(1),

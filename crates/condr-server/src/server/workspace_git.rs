@@ -7,6 +7,7 @@ use condr_core::protocol::{GitBaseChanges, GitHead};
 use condr_core::{GitBase, GitChanges, GitError, GitFingerprint};
 use notify::Watcher as _;
 use std::collections::HashMap;
+use std::panic::{self, AssertUnwindSafe};
 use std::path::Path;
 use std::sync::Weak;
 
@@ -543,11 +544,33 @@ fn run_watcher(
                 return;
             }
             let entry = watched.get_mut(&workspace_id).expect("watched Workspace");
-            if !refresh_workspace(workspace_id, entry, watcher.as_mut(), &state) {
+            if !refresh_isolated(workspace_id, entry, watcher.as_mut(), &state) {
                 return;
             }
         }
     }
+}
+
+/// One Workspace's scan, whose panic loses that scan and not every later one (ADR 0053):
+/// its pending work is dropped, and the next change schedules another.
+fn refresh_isolated(
+    workspace_id: WorkspaceId,
+    entry: &mut Watched,
+    watcher: Option<&mut notify::RecommendedWatcher>,
+    state: &Weak<Mutex<RuntimeState>>,
+) -> bool {
+    panic::catch_unwind(AssertUnwindSafe(|| {
+        refresh_workspace(workspace_id, entry, watcher, state)
+    }))
+    .unwrap_or_else(|_| {
+        tracing::error!("a Git scan panicked; waiting for the next change");
+        entry.pending.clear();
+        entry.filesystem_due = None;
+        entry.forced = false;
+        entry.overflow = false;
+        entry.record_scan(Instant::now(), None);
+        true
+    })
 }
 
 /// The only background scan/commit path. Both sources run serially here, so an older
@@ -558,6 +581,10 @@ fn refresh_workspace(
     watcher: Option<&mut notify::RecommendedWatcher>,
     state: &Weak<Mutex<RuntimeState>>,
 ) -> bool {
+    #[cfg(test)]
+    if let Some(shared) = state.upgrade() {
+        RuntimeState::panic_if_injected(&shared, "git-scan", workspace_id.as_u64());
+    }
     let now = Instant::now();
     let filesystem_due = entry.filesystem_due.is_some_and(|due| due <= now);
     let terminal_due = entry.terminal_due.is_some_and(|due| due <= now);

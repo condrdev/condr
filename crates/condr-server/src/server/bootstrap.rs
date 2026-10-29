@@ -17,6 +17,15 @@ pub(super) fn queue_message(outbound: &ClientWriter, message: ServerMessage) -> 
     queue_response(outbound, message) == Err(ReliableSendError::Disconnected)
 }
 
+/// Work a request does off the Client's loop. A panic in it answers the request with an
+/// error, never with silence the Client would wait on forever (ADR 0053).
+pub(super) fn answer_or_fail<T>(work: impl FnOnce() -> T, failed: impl FnOnce(String) -> T) -> T {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)).unwrap_or_else(|_| {
+        tracing::error!("a request panicked; answering it with an error");
+        failed("the Server hit an internal error; its log has the details".to_owned())
+    })
+}
+
 pub(super) fn frame_overview_messages(mut overview: SessionOverview) -> io::Result<Vec<Vec<u8>>> {
     // A near-limit structural snapshot and 1024 titles need separate frames. Neither
     // frame contains VT cells, and the writer keeps the pair contiguous.

@@ -122,6 +122,57 @@ fn filesystem_refresh_bypasses_unchanged_fingerprint_and_covers_pending_activity
 }
 
 #[test]
+fn a_git_scan_that_panics_loses_only_that_scan() {
+    let fixture = Repository::new();
+    let mut state = RuntimeState::new(&fixture.root.join("server.sock"));
+    let workspace_id = state
+        .session
+        .create_workspace(fixture.root.clone())
+        .unwrap();
+    set_workspace_git(
+        &mut state,
+        workspace_id,
+        discover_repository(&fixture.root).unwrap(),
+    );
+    state
+        .injected_panics
+        .insert(("git-scan", workspace_id.as_u64()));
+    let state = Arc::new(Mutex::new(state));
+    let weak = Arc::downgrade(&state);
+    let mut watched = Watched::new(fixture.root.clone());
+    std::fs::write(fixture.root.join("changed.txt"), "new content\n").unwrap();
+    let change = |watched: &mut Watched| {
+        watched.pending.push(PathBuf::from("changed.txt"));
+        watched.filesystem_due = Some(Instant::now());
+    };
+
+    change(&mut watched);
+    assert!(refresh_isolated(workspace_id, &mut watched, None, &weak));
+    assert_eq!(
+        watched.next_due(),
+        None,
+        "the scan that panicked is not retried"
+    );
+    assert!(
+        state.lock().unwrap().workspace_git[&workspace_id]
+            .changes
+            .entries
+            .is_empty()
+    );
+
+    change(&mut watched);
+    assert!(refresh_isolated(workspace_id, &mut watched, None, &weak));
+    assert_eq!(
+        state.lock().unwrap().workspace_git[&workspace_id]
+            .changes
+            .entries[0]
+            .path
+            .as_str(),
+        "changed.txt"
+    );
+}
+
+#[test]
 fn idle_watcher_shutdown_joins_even_while_callback_sender_is_alive() {
     let watcher = GitWatcher::start(Weak::new());
     let callback_sender = watcher.messages.clone();
