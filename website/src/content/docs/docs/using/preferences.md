@@ -82,3 +82,14 @@ Add this to `config.toml`:
 [server.terminal]
 shell = "/opt/homebrew/bin/fish"
 ```
+
+## Shell integration
+
+Condr loads a small script into the zsh, bash or fish that a new Pane starts. The script marks each prompt and each command, which gives you two things:
+
+* **Jump between prompts**: `Cmd + ↑` / `Cmd + ↓` on macOS, `Ctrl + ↑` / `Ctrl + ↓` on Windows and Linux, while the shell waits at its prompt.
+* **Long commands notify**: when a command that ran for 10 seconds or more finishes in a Pane you are not looking at, a system notification says so, with its exit code when it failed. Commands an Agent ran in stay quiet; the Agent's own notifications cover them.
+
+Your own startup files still load as before: Condr's script runs alongside them and changes neither your prompt nor your settings. bash before 4.4, such as the one macOS ships, marks prompts but not commands, so it gets prompt jumps without the notifications.
+
+Turn it off under **Settings › General › Shell integration**, or with `shell_integration = false` under `[server.terminal]`. The change applies to new Panes. PowerShell has no integration yet.

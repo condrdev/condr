@@ -76,6 +76,7 @@ fn pane_shell_sees_its_condr_environment() {
     let pane = PaneEnvironment {
         pane_id: PaneId::from_u64(7),
         socket_path: "sock-here".into(),
+        shell_integration: None,
     };
     let mut runtime = TerminalRuntime::spawn_shell(
         std::env::temp_dir(),

@@ -538,6 +538,8 @@ pub struct ServerSettings {
     pub default_shell: String,
     /// `[network.proxy]`, saved; Peer-to-peer takes it when the Server starts.
     pub proxy: crate::ProxySetting,
+    /// Whether new shells get Condr's shell integration (ADR 0055).
+    pub shell_integration: bool,
 }
 
 /// One field of [`ServerSettings`] a Client sets.
@@ -549,6 +551,8 @@ pub enum ServerSetting {
     ProxyMode(crate::ProxyMode),
     /// Like `ProxyMode`.
     ProxyUrl(String),
+    /// Applies to shells started from now on.
+    ShellIntegration(bool),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -704,6 +708,13 @@ pub enum SessionEvent {
         pane_id: PaneId,
         title: Option<String>,
         body: String,
+    },
+    /// A shell command that ran for [`crate::LONG_COMMAND`] or longer ended, with no
+    /// Agent in it, as its shell marked it (ADR 0055).
+    CommandFinished {
+        pane_id: PaneId,
+        exit_code: Option<i32>,
+        duration_secs: u64,
     },
     /// The ordered, coalesced BEL attention state for this Pane (ADR 0036).
     TerminalAttentionChanged {

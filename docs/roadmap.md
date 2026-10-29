@@ -27,7 +27,7 @@ Condr 要守住的差异是原生 GUI 而非 TUI、Windows 一等公民、Server
 | 领域 | 现状 |
 | --- | --- |
 | 运行时 | 一机一 Server（ADR 0013）；GUI 断开不影响 PTY 和 Agent；重连先取权威 Bootstrap 再订阅事件；Server 重启按 Session Snapshot 恢复结构并 resume 原生会话；当前 Workspace 和 Tab 是每个客户端自己的视图（ADR 0021），GUI 重启后恢复窗口、侧栏与视图（ADR 0023）；Windows 上每个 Terminal 的进程归属由 Job Object 决定（ADR 0030），Server 与 GUI 以桌面 shell 给的进程状态运行（ADR 0031） |
-| 终端 | libghostty-vt（Ghostty 的终端内核，ADR 0051）+ 自绘 GPUI 元素；合并视觉流（ADR 0004）；kitty keyboard、OSC 7/52/777、图片粘贴（含远程，ADR 0012）；Server 侧选区（ADR 0008） |
+| 终端 | libghostty-vt（Ghostty 的终端内核，ADR 0051）+ 自绘 GPUI 元素；颜色查询回答所选配色，程序的进度条与桌面通知（ADR 0054）；zsh/bash/fish 的 Shell 集成：提示符跳转与长命令通知（ADR 0055）；合并视觉流（ADR 0004）；kitty keyboard、OSC 7/52/777、图片粘贴（含远程，ADR 0012）；Server 侧选区（ADR 0008） |
 | Agent | 每种 CLI 一个规格模块，9 种完整支持，Kimi 仅识别（ADR 0035）；状态只来自 CLI 自己：会说 Program Status Protocol 的经 OSC 7501 上报（ADR 0044），否则靠 hooks 经 OSC 777 回写（ADR 0014）；`Blocked` 和 `Error` 带 `detail`，sidebar、OS 通知、CLI JSON 和左侧栏顶部跨 Device 的「Needs you」列表都显示它（ADR 0024）；完成、失败或需输入时发 OS 通知 |
 | Agent 驱动 | `condr workspace|tab|pane|agent` 全部 JSON 输出；内嵌 Skill（`condr --skill`）；`agent start|prompt|wait` 可跨 Pane 编排；`--device <name>` 直连保存的远程 Device，`device list` 与 `workspace list --all-devices` 汇总多机（ADR 0022） |
 | Git | gix 只读查询 + Managed Worktree；右侧栏 Changes 和 Files、Diff Tab、Preview Tab（ADR 0017/0018）；Changes 与 Diff Tab 可在对 HEAD 和对 base 分支之间切换，Condr 新建的 worktree 记下分叉时父 Workspace 的分支（ADR 0034）；Preview Tab 用 syntect 高亮，主题和字号在 Settings 里选（ADR 0032），渲染 Markdown、SVG 和常见图片，动图始终播放（ADR 0037），并能编辑保存；Files 能新建、重命名、删除条目并在系统文件管理器中显示（ADR 0045）；Diff Tab 可并排或单栏显示并折叠未改动的行，右侧栏的 History 列出提交并在 Diff Tab 打开其文件（ADR 0046） |

@@ -62,6 +62,17 @@ pub struct TerminalNoticeBatch {
     pub progress: Option<Option<TerminalProgress>>,
     /// OSC 9 and 777 notifications, oldest first (ADR 0054).
     pub notifications: Vec<TerminalNotification>,
+    /// Commands that ran [`LONG_COMMAND`] or longer, oldest first (ADR 0055).
+    pub finished_commands: Vec<FinishedCommand>,
+}
+
+/// A shell command that ran at least [`LONG_COMMAND`] without an Agent in it, as its
+/// shell marked it (OSC 133).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FinishedCommand {
+    /// `None` when the shell gave none.
+    pub exit_code: Option<i32>,
+    pub duration: Duration,
 }
 
 /// A desktop notification a program asked for with OSC 9 or 777 (ADR 0054), its text
@@ -80,6 +91,7 @@ impl TerminalNoticeBatch {
             && self.clipboard.is_none()
             && self.progress.is_none()
             && self.notifications.is_empty()
+            && self.finished_commands.is_empty()
     }
 }
 
@@ -94,6 +106,7 @@ impl TerminalNoticeProbe {
             clipboard: std::mem::take(&mut notices.clipboard),
             progress: notices.take_progress(),
             notifications: std::mem::take(&mut notices.notifications),
+            finished_commands: std::mem::take(&mut notices.finished_commands),
         }
     }
 }
@@ -179,6 +192,13 @@ impl TerminalAgentProbe {
                 AgentPublish::Nothing => {}
                 next => publish = next,
             }
+        }
+        // A command an Agent ran in says nothing when it ends (ADR 0055): the Agent's own
+        // states already did.
+        if notices.agent.agent().is_some()
+            && let Some(command) = notices.command.as_mut()
+        {
+            command.agent = true;
         }
         // An exit-tail hook belongs to the job that just left, not to the bare shell.
         if process == Some(ProcessProbeResult::ShellOnly) {

@@ -86,28 +86,68 @@ impl Condr {
         body: String,
         cx: &mut App,
     ) {
+        let title = title.or_else(|| self.connection(key)?.pane_title(pane_id));
+        self.notify_pane(key, pane_id, title, Some(body), cx);
+    }
+
+    /// A long shell command ended in a Pane the user is not looking at (ADR 0055).
+    pub(super) fn notify_command(
+        &self,
+        key: ConnectionKey,
+        pane_id: PaneId,
+        exit_code: Option<i32>,
+        duration_secs: u64,
+        cx: &mut App,
+    ) {
+        let title = match exit_code {
+            Some(code) if code != 0 => format!("Command failed with exit code {code}"),
+            _ => "Command finished".to_owned(),
+        };
+        let took = match duration_secs {
+            0..60 => format!("after {duration_secs}s"),
+            60..3600 => format!("after {}m {}s", duration_secs / 60, duration_secs % 60),
+            _ => format!(
+                "after {}h {}m",
+                duration_secs / 3600,
+                duration_secs / 60 % 60
+            ),
+        };
+        let pane = self
+            .connection(key)
+            .and_then(|connection| connection.pane_title(pane_id));
+        let body = [Some(took), pane].into_iter().flatten().collect::<Vec<_>>();
+        self.notify_pane(key, pane_id, Some(title), Some(body.join(" · ")), cx);
+    }
+
+    /// Posts one notification for the Pane under the notifications switch, unless the
+    /// Pane is in front: `title` or "Terminal" heads it, the Workspace ends its text.
+    fn notify_pane(
+        &self,
+        key: ConnectionKey,
+        pane_id: PaneId,
+        title: Option<String>,
+        body: Option<String>,
+        cx: &mut App,
+    ) {
         if !self.notifications || self.terminal_input.focused == Some((key, pane_id)) {
             return;
         }
         let Some(connection) = self.connection(key) else {
             return;
         };
-        let title = title
-            .or_else(|| connection.pane_title(pane_id))
-            .unwrap_or_else(|| "Terminal".into());
         let workspace = connection.session().and_then(|session| {
             session
                 .workspace_for_pane(pane_id)
                 .map(|workspace| workspace.name().to_owned())
         });
-        let body = [(!body.is_empty()).then_some(body), workspace]
+        let body = [body.filter(|body| !body.is_empty()), workspace]
             .into_iter()
             .flatten()
             .collect::<Vec<_>>()
             .join(" · ");
         cx.show_system_notification(SystemNotification {
             tag: pane_notification_tag(key, pane_id),
-            title: title.into(),
+            title: title.unwrap_or_else(|| "Terminal".into()).into(),
             body: body.into(),
             actions: Vec::new(),
         });

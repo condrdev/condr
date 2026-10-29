@@ -257,6 +257,30 @@ fn a_done_nobody_looked_at_waits_for_a_focus_from_any_client() {
 }
 
 #[test]
+fn new_shells_get_the_shell_integration_only_while_the_setting_has_it_on() {
+    let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
+    let directory = std::env::temp_dir().join("condr-shell-integration-setting");
+    state.shell_integration_dir = Some(directory.clone());
+    let pane_id = PaneId::from_u64(7);
+    state.settings.shell_integration = true;
+    assert_eq!(
+        state
+            .shell_launch()
+            .pane_environment(pane_id)
+            .shell_integration,
+        Some(directory)
+    );
+    state.settings.shell_integration = false;
+    assert_eq!(
+        state
+            .shell_launch()
+            .pane_environment(pane_id)
+            .shell_integration,
+        None
+    );
+}
+
+#[test]
 fn terminal_progress_is_published_per_change_and_cleared_with_the_terminals_reports() {
     let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
     state
@@ -361,6 +385,28 @@ fn program_notifications_reach_clients_unless_the_panes_agent_reports_its_state(
         bodies(&state),
         ["plain shell", "silent agent"],
         "a reporting Agent is notified of by Condr itself"
+    );
+
+    // A long command's end the shell marked (ADR 0055); the reader already left out
+    // commands an Agent ran in.
+    apply_terminal_notices(
+        &mut state,
+        pane_id,
+        TerminalNoticeBatch {
+            finished_commands: vec![condr_core::FinishedCommand {
+                exit_code: Some(1),
+                duration: Duration::from_secs(42),
+            }],
+            ..TerminalNoticeBatch::default()
+        },
+    );
+    assert_eq!(
+        state.events.back().map(|event| &event.event),
+        Some(&SessionEvent::CommandFinished {
+            pane_id,
+            exit_code: Some(1),
+            duration_secs: 42,
+        })
     );
 }
 
@@ -1389,6 +1435,11 @@ fn load_shell_reads_the_nested_table() {
     .unwrap();
     assert_eq!(load_shell(Some(&path)), "nu");
     assert_eq!(load_shell(None), "");
+    assert!(load_shell_integration(Some(&path)), "on unless turned off");
+    assert!(load_shell_integration(None));
+    save_shell_integration(&path, false).unwrap();
+    assert!(!load_shell_integration(Some(&path)));
+    assert_eq!(load_shell(Some(&path)), "nu", "the rest stays");
     let _ = std::fs::remove_file(path);
 }
 

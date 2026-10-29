@@ -81,6 +81,9 @@ impl TerminalRuntime {
         let mut command = shell_command(&program);
         if let Some(pane) = pane {
             pane.apply(&mut command);
+            if let Some(directory) = &pane.shell_integration {
+                shell_integration::apply(&mut command, &program, directory);
+            }
         }
         command.cwd(cwd);
         Self::spawn(command, size)
@@ -363,7 +366,34 @@ impl TerminalRuntime {
                         shift: true,
                         ..TerminalModifiers::default()
                     };
-                if only_shift
+                // Cmd or Ctrl with Up or Down jumps between the shell's prompts while it
+                // waits at one (ADR 0055); anywhere else the program gets the key.
+                let prompt_jump = matches!(key, TerminalKey::Up | TerminalKey::Down)
+                    && [
+                        TerminalModifiers {
+                            platform: true,
+                            ..TerminalModifiers::default()
+                        },
+                        TerminalModifiers {
+                            control: true,
+                            ..TerminalModifiers::default()
+                        },
+                    ]
+                    .contains(&modifiers);
+                let jumped = if prompt_jump && kind != TerminalKeyEventKind::Release {
+                    let prompts = if key == TerminalKey::Up { -1 } else { 1 };
+                    lock_pane(&self.terminal)?.scroll_prompts(prompts)
+                } else if prompt_jump {
+                    // The press jumped, so the program never saw it or its release.
+                    lock_pane(&self.terminal)?.scroll_prompts(0).map(|_| false)
+                } else {
+                    None
+                };
+                if let Some(moved) = jumped {
+                    if moved {
+                        publish_view(&self.revision, &self.update_sender);
+                    }
+                } else if only_shift
                     && !modes.contains(TermMode::ALT_SCREEN)
                     && matches!(key, TerminalKey::PageUp | TerminalKey::PageDown)
                 {

@@ -44,7 +44,10 @@ use condr_core::{
     TerminalViewSource, WorkspaceId, create_worktree, discover_repository, open_worktree,
     remove_worktree, validate_worktree_removal,
 };
-use config::{load_shell, load_worktree_root, save_proxy, save_shell};
+use config::{
+    load_shell, load_shell_integration, load_worktree_root, save_proxy, save_shell,
+    save_shell_integration,
+};
 use layout::*;
 #[cfg(test)]
 use local::snapshot_path_for_endpoint;
@@ -553,6 +556,8 @@ struct RuntimeState {
     /// connection's, not its subscription's, so it outlives a `SubscriptionRejected`; a
     /// Client absent here gets every Pane.
     watched_terminals: std::collections::HashMap<u64, std::collections::HashSet<PaneId>>,
+    /// Where the Server wrote the shell integration when it started (ADR 0055).
+    shell_integration_dir: Option<PathBuf>,
     /// The colours the last desktop Client draws terminals with; every Pane answers colour
     /// queries with them (ADR 0054). Until one sends any, Condr's defaults.
     terminal_colors: Option<TerminalColors>,
@@ -585,6 +590,8 @@ struct RuntimeState {
 pub(super) struct ShellLaunch {
     shell: String,
     socket_path: String,
+    /// Where the shell integration lives, when the setting has it on (ADR 0055).
+    shell_integration: Option<PathBuf>,
 }
 
 impl ShellLaunch {
@@ -596,6 +603,7 @@ impl ShellLaunch {
         PaneEnvironment {
             pane_id,
             socket_path: self.socket_path.clone(),
+            shell_integration: self.shell_integration.clone(),
         }
     }
 }
@@ -724,6 +732,7 @@ impl RuntimeState {
             subscribers: std::collections::HashMap::new(),
             watched_terminals: std::collections::HashMap::new(),
             terminal_colors: None,
+            shell_integration_dir: None,
             tcp_peers: std::collections::HashMap::new(),
             p2p: None,
             pushes: None,
@@ -742,6 +751,11 @@ impl RuntimeState {
         ShellLaunch {
             shell: self.settings.shell.clone(),
             socket_path: self.socket_path.clone(),
+            shell_integration: self
+                .settings
+                .shell_integration
+                .then(|| self.shell_integration_dir.clone())
+                .flatten(),
         }
     }
 

@@ -1445,7 +1445,10 @@ fn set_server_setting(
         setting => setting,
     };
     // The proxy carries Peer-to-peer's relay connection, so it decides reachability too.
-    let reachability = !matches!(setting, ServerSetting::Shell(_));
+    let reachability = matches!(
+        setting,
+        ServerSetting::ProxyMode(_) | ServerSetting::ProxyUrl(_)
+    );
     if reachability && !may_administer {
         return refuse("only a local or SSH connection may change the proxy".into());
     }
@@ -1453,6 +1456,7 @@ fn set_server_setting(
         ServerSetting::Shell(shell) => (shell.as_str(), "shell preference"),
         ServerSetting::ProxyMode(mode) => (mode.as_str(), "proxy"),
         ServerSetting::ProxyUrl(url) => (url.as_str(), "proxy"),
+        ServerSetting::ShellIntegration(_) => ("", "shell integration"),
     };
     if value.len() > MAX_SETTING_BYTES {
         return refuse(format!("{what} setting exceeds {MAX_SETTING_BYTES} bytes"));
@@ -1476,6 +1480,7 @@ fn set_server_setting(
             ServerSetting::Shell(shell) => settings.shell.clone_from(shell),
             ServerSetting::ProxyMode(mode) => settings.proxy.mode = *mode,
             ServerSetting::ProxyUrl(url) => settings.proxy.url.clone_from(url),
+            ServerSetting::ShellIntegration(on) => settings.shell_integration = *on,
         }
         if settings == state.settings {
             return false;
@@ -1487,6 +1492,7 @@ fn set_server_setting(
             ServerSetting::Shell(shell) => save_shell(&path, shell),
             ServerSetting::ProxyMode(mode) => save_proxy(&path, "mode", mode.as_str()),
             ServerSetting::ProxyUrl(url) => save_proxy(&path, "url", url),
+            ServerSetting::ShellIntegration(on) => save_shell_integration(&path, *on),
         };
         if let Err(error) = saved {
             return refuse(format!(

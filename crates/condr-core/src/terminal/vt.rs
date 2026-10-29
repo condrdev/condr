@@ -213,6 +213,18 @@ impl Vt {
         self.terminal.scrollbar().offset != before
     }
 
+    /// Moves the viewport by shell prompts (OSC 133) and says whether it moved, or `None`
+    /// when the cursor is not at a marked prompt, so the key belongs to the program.
+    pub(super) fn scroll_prompts(&mut self, prompts: isize) -> Option<bool> {
+        if !self.terminal.cursor_at_prompt() {
+            return None;
+        }
+        let before = self.terminal.scrollbar().offset;
+        self.terminal
+            .scroll_viewport(ghostty::Scroll::Prompts(prompts));
+        Some(self.terminal.scrollbar().offset != before)
+    }
+
     /// A viewport position as the Client saw it, at its display offset, in screen rows.
     fn screen_point(&self, position: TerminalPosition, display_offset: u32) -> Point {
         let bar = self.terminal.scrollbar();

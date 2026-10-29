@@ -21,7 +21,7 @@ Condr 采用分层配置架构：
 
 | 页面 | 作用于 | 说明 |
 | :--- | :--- | :--- |
-| **General** | 设备 | **Status**：版本、运行时间、会话指标（Workspace 和 Pane 数量）以及最近错误日志。**Terminal**：新 Pane 启动的默认 Shell（留空则继承系统环境）。最下方是 **Restart Condr** |
+| **General** | 设备 | **Status**：版本、运行时间、会话指标（Workspace 和 Pane 数量）以及最近错误日志。**Terminal**：新 Pane 启动的默认 Shell（留空则继承系统环境）和 **Shell integration** 开关。最下方是 **Restart Condr** |
 | **Appearance** | 本机 | 外观主题（跟随系统、浅色、深色）、终端字体与配色，以及 Preview 和 Diff 的语法高亮与字号 |
 | **Notifications** | 本机 | 系统通知总开关及测试通知按钮 |
 | **Power** | 本机 | 保持屏幕常亮（与侧边栏底部的咖啡杯图标联动） |
@@ -200,11 +200,13 @@ enabled = true
 ```toml
 [server.terminal]
 shell = "/opt/homebrew/bin/fish"
+shell_integration = true
 ```
 
 | 键 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `shell` | path | 空 | 新 Pane 派生进程的可执行路径。缺省状态下，Unix-like 系统读取 `$SHELL`，Windows 依序探测 `pwsh.exe`、`powershell.exe` 与 `%ComSpec%` |
+| `shell_integration` | bool | `true` | 给 zsh、bash 和 fish 加载 Condr 的 [Shell 集成](/zh-cn/docs/using/preferences/#shell-集成)。对之后新建的 Pane 生效 |
 
 若在 **Settings › General** 界面中修改 Shell，系统将直接热更新：后续新建的 Pane 立即生效，无须重启 Server。
 

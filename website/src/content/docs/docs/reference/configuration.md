@@ -21,7 +21,7 @@ The Settings window configures one Device at a time. Use the picker at the top t
 
 | Page | Applies to | Description |
 | :--- | :--- | :--- |
-| **General** | Device | **Status**: version, uptime, session metrics (Workspace and Pane counts) and recent errors. **Terminal**: default shell for new Panes (defaults to the system environment if left blank). **Restart Condr** below them |
+| **General** | Device | **Status**: version, uptime, session metrics (Workspace and Pane counts) and recent errors. **Terminal**: default shell for new Panes (defaults to the system environment if left blank) and the **Shell integration** switch. **Restart Condr** below them |
 | **Appearance** | This machine | Theme (follow system, light or dark), terminal fonts and colors, syntax highlighting and font sizes for Preview and Diff |
 | **Notifications** | This machine | System notification toggle and test notification button |
 | **Power** | This machine | Keep display awake (mirrors the coffee cup icon in the sidebar footer) |
@@ -200,11 +200,13 @@ enabled = true
 ```toml
 [server.terminal]
 shell = "/opt/homebrew/bin/fish"
+shell_integration = true
 ```
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
 | `shell` | path | Empty | The executable new Panes start. When empty, Unix-like systems read `$SHELL`, and Windows tries `pwsh.exe`, `powershell.exe` and `%ComSpec%` in that order |
+| `shell_integration` | bool | `true` | Load Condr's [shell integration](/docs/using/preferences/#shell-integration) into zsh, bash and fish. Applies to new Panes |
 
 A shell changed under **Settings › General** applies right away: the next new Pane uses it, with no Server restart.
 

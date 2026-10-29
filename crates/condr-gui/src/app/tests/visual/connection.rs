@@ -1270,14 +1270,14 @@ fn an_unwatched_agent_completion_posts_a_system_notification_for_its_pane() {
 }
 
 #[test]
-fn a_programs_notification_posts_for_its_pane_unless_the_pane_is_in_front() {
+fn programs_and_long_commands_notify_for_their_pane_unless_the_pane_is_in_front() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
     cx.update(gpui_kit::init);
     cx.update(|cx| cx.set_app_identity("dev.condr.gui", "Condr"));
     let (view, window, _server) = connected_condr(&mut cx);
     let pane_id = crate::app::tests::pane_id();
-    let notify = |title: Option<&str>, focused: bool, window: &mut VisualTestContext| {
+    let send = |event: SessionEvent, focused: bool, window: &mut VisualTestContext| {
         window.update(|_, cx| {
             view.update(cx, |this, cx| {
                 this.terminal_input.focused = focused.then_some((1, pane_id));
@@ -1287,22 +1287,43 @@ fn a_programs_notification_posts_for_its_pane_unless_the_pane_is_in_front() {
                     server_id: connection.model.server_id.unwrap(),
                     session_id: connection.model.session_id.unwrap(),
                     sequence: connection.model.sequence + 1,
-                    event: SessionEvent::TerminalNotification {
-                        pane_id,
-                        title: title.map(Into::into),
-                        body: "Build finished".into(),
-                    },
+                    event,
                 };
                 this.handle_incoming(1, generation, Incoming::Message(event), cx);
             });
         });
     };
+    let notify = |title: Option<&str>, focused: bool, window: &mut VisualTestContext| {
+        let event = SessionEvent::TerminalNotification {
+            pane_id,
+            title: title.map(Into::into),
+            body: "Build finished".into(),
+        };
+        send(event, focused, window);
+    };
+    let finished = |exit_code, window: &mut VisualTestContext| {
+        let event = SessionEvent::CommandFinished {
+            pane_id,
+            exit_code,
+            duration_secs: 75,
+        };
+        send(event, false, window);
+    };
 
     notify(Some("in front"), true, window);
     notify(Some("cargo"), false, window);
     notify(None, false, window);
+    finished(Some(2), window);
+    finished(None, window);
     let shown = cx.shown_system_notifications();
-    assert_eq!(shown.len(), 2, "none for the Pane in front: {shown:?}");
+    assert_eq!(shown.len(), 4, "none for the Pane in front: {shown:?}");
+    assert_eq!(shown[2].title.as_ref(), "Command failed with exit code 2");
+    assert!(
+        shown[2].body.starts_with("after 1m 15s"),
+        "{:?}",
+        shown[2].body
+    );
+    assert_eq!(shown[3].title.as_ref(), "Command finished");
     assert_eq!(shown[0].title.as_ref(), "cargo");
     assert!(shown[0].body.starts_with("Build finished"));
     assert_eq!(

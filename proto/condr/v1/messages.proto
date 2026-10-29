@@ -225,6 +225,7 @@ message SetServerSettings {
     string shell = 2;
     ProxyMode proxy_mode = 3;
     string proxy_url = 4;
+    bool shell_integration = 5;
   }
 }
 
@@ -490,6 +491,9 @@ message ServerSettings {
   string default_shell = 2;
   // Absent from a Server older than ADR 0038: the default.
   ProxySetting proxy = 3;
+  // Whether new shells get Condr's shell integration (ADR 0055); false from a Server
+  // that has none.
+  bool shell_integration = 4;
 }
 
 message BootstrapHeader {
@@ -634,6 +638,7 @@ message SessionEvent {
     AgentUnseenChanged agent_unseen_changed = 11;
     TerminalProgressChanged terminal_progress_changed = 12;
     TerminalNotification terminal_notification = 13;
+    CommandFinished command_finished = 14;
   }
 }
 
@@ -670,6 +675,15 @@ message TerminalNotification {
   // Absent when the program gave none.
   optional string title = 2;
   string body = 3;
+}
+
+// A shell command that ran for 10 seconds or more ended, without an Agent in it, as its
+// shell marked it with OSC 133 (ADR 0055).
+message CommandFinished {
+  uint64 pane_id = 1;
+  // Absent when the shell gave none.
+  optional sint32 exit_code = 2;
+  uint64 duration_secs = 3;
 }
 
 message TerminalAttentionChanged {

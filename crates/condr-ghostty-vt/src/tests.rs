@@ -302,3 +302,38 @@ fn progress_reports_arrive_as_events() {
         ]
     );
 }
+
+#[test]
+fn shell_marks_report_commands_and_the_viewport_jumps_between_prompts() {
+    let mut terminal = terminal(20, 3);
+    assert!(!terminal.cursor_at_prompt(), "no marks, no prompt");
+    let mut events = Vec::new();
+    for command in 0..6 {
+        events.extend(terminal.write(
+            format!("\x1b]133;A\x07$ \x1b]133;B\x07cmd{command}\r\n\x1b]133;C\x07out{command}\r\n\x1b]133;D;{command}\x07").as_bytes(),
+        ));
+    }
+    events.extend(terminal.write(b"\x1b]133;A\x07$ \x1b]133;B\x07"));
+    assert_eq!(
+        &events[..3],
+        [
+            Event::PromptStart,
+            Event::CommandStart,
+            Event::CommandEnd(Some(0))
+        ]
+    );
+    assert!(terminal.cursor_at_prompt());
+
+    let bottom = terminal.scrollbar().offset;
+    terminal.scroll_viewport(Scroll::Prompts(-2));
+    let up_two = terminal.scrollbar().offset;
+    assert!(up_two < bottom, "{up_two} < {bottom}");
+    terminal.scroll_viewport(Scroll::Prompts(1));
+    assert!(terminal.scrollbar().offset > up_two);
+
+    terminal.write(b"\x1b[?1049h");
+    assert!(
+        !terminal.cursor_at_prompt(),
+        "the alternate screen has no prompt"
+    );
+}

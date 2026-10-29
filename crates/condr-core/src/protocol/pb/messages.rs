@@ -124,6 +124,7 @@ fn encode_settings(settings: &ServerSettings) -> super::ServerSettings {
         shell: settings.shell.clone(),
         default_shell: settings.default_shell.clone(),
         proxy: Some(encode_proxy(&settings.proxy)),
+        shell_integration: settings.shell_integration,
     }
 }
 
@@ -132,6 +133,7 @@ fn decode_settings(settings: super::ServerSettings) -> WireResult<ServerSettings
         shell: settings.shell,
         default_shell: settings.default_shell,
         proxy: decode_proxy(settings.proxy)?,
+        shell_integration: settings.shell_integration,
     })
 }
 
@@ -498,6 +500,7 @@ impl TryFrom<&ClientMessage> for super::ClientMessage {
                             Setting::ProxyMode(encode_proxy_mode(*mode))
                         }
                         ServerSetting::ProxyUrl(url) => Setting::ProxyUrl(url.clone()),
+                        ServerSetting::ShellIntegration(on) => Setting::ShellIntegration(*on),
                     }),
                 })
             }
@@ -681,6 +684,7 @@ fn decode_client_message(message: super::ClientMessage) -> WireResult<ClientMess
                             ServerSetting::ProxyMode(proxy_mode(enum_value(mode, "proxy mode")?))
                         }
                         Setting::ProxyUrl(url) => ServerSetting::ProxyUrl(url),
+                        Setting::ShellIntegration(on) => ServerSetting::ShellIntegration(on),
                     },
                 }
             }
@@ -1373,6 +1377,15 @@ impl TryFrom<&SessionEvent> for super::SessionEvent {
                 title: title.clone(),
                 body: body.clone(),
             }),
+            SessionEvent::CommandFinished {
+                pane_id,
+                exit_code,
+                duration_secs,
+            } => Event::CommandFinished(super::CommandFinished {
+                pane_id: pane_id.as_u64(),
+                exit_code: *exit_code,
+                duration_secs: *duration_secs,
+            }),
             SessionEvent::TerminalAttentionChanged { pane_id, attention } => {
                 Event::TerminalAttentionChanged(super::TerminalAttentionChanged {
                     pane_id: pane_id.as_u64(),
@@ -1437,6 +1450,11 @@ impl TryFrom<super::SessionEvent> for SessionEvent {
                 pane_id: pane(notification.pane_id),
                 title: notification.title,
                 body: notification.body,
+            },
+            Event::CommandFinished(finished) => Self::CommandFinished {
+                pane_id: pane(finished.pane_id),
+                exit_code: finished.exit_code,
+                duration_secs: finished.duration_secs,
             },
             Event::TerminalAttentionChanged(changed) => Self::TerminalAttentionChanged {
                 pane_id: pane(changed.pane_id),

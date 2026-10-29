@@ -119,13 +119,40 @@ pub(super) fn server_general_page(
         .default_open(true)
         .group(server_status_group(this, cx))
         .group(
-            SettingGroup::new().title("Terminal").item(
-                SettingItem::new(
-                    "Shell",
-                    text_field_row(settings, TextFieldId::Shell, Some("".into())),
+            SettingGroup::new()
+                .title("Terminal")
+                .item(
+                    SettingItem::new(
+                        "Shell",
+                        text_field_row(settings, TextFieldId::Shell, Some("".into())),
+                    )
+                    .description("Empty uses the system default."),
                 )
-                .description("Empty uses the system default."),
-            ),
+                .item(
+                    SettingItem::new(
+                        "Shell integration",
+                        SettingField::switch(
+                            {
+                                let settings = settings.clone();
+                                move |cx| {
+                                    selected_connection(&settings, cx, |c| {
+                                        c.model.settings.shell_integration
+                                    })
+                                    .unwrap_or_default()
+                                }
+                            },
+                            {
+                                let settings = settings.clone();
+                                move |on, cx| set_shell_integration(&settings, on, cx)
+                            },
+                        ),
+                    )
+                    .description(
+                        "Jump between prompts, and hear when a long command finishes. \
+                         zsh, bash and fish, in new terminals.",
+                    )
+                    .keywords(["prompt", "osc 133", "zsh", "bash", "fish"]),
+                ),
         )
         // Restart is the Device's own lifecycle, so it lives here for good, apart from
         // the read-only Status; Connections repeats it only while a change waits for it.
@@ -239,6 +266,20 @@ pub(in crate::app) fn set_proxy_mode(
         let key = this.selected_server;
         let _ = this.owner.update(cx, |owner, _| {
             owner.set_server_setting(key, ServerSetting::ProxyMode(mode))
+        });
+    });
+}
+
+/// What flipping Shell integration does (ADR 0055); tests call it without the widget.
+pub(in crate::app) fn set_shell_integration(
+    settings: &Entity<SettingsWindow>,
+    on: bool,
+    cx: &mut App,
+) {
+    settings.update(cx, |this, cx| {
+        let key = this.selected_server;
+        let _ = this.owner.update(cx, |owner, _| {
+            owner.set_server_setting(key, ServerSetting::ShellIntegration(on))
         });
     });
 }

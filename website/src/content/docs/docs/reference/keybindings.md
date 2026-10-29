@@ -110,9 +110,11 @@ Every key combination not declared on this page passes through to the child proc
 | :--- | :--- | :--- |
 | Page up through scrollback | `Shift + PageUp` | `Shift + PageUp` |
 | Page down through scrollback | `Shift + PageDown` | `Shift + PageDown` |
+| Jump to the previous / next shell prompt | `Cmd + ↑` / `Cmd + ↓` | `Ctrl + ↑` / `Ctrl + ↓` |
 | Scroll line by line | Mouse wheel | Mouse wheel |
 
 * **Snap to bottom**: while you browse the scrollback, any key typed into the terminal jumps straight back to the newest line.
+* **Prompt jumps**: work while the shell waits at its prompt and needs [shell integration](/docs/using/preferences/#shell-integration). Anywhere else, such as inside vim, the keys go to the program.
 * **Alt screen mode (vim, less and the like)**: `Shift + PageUp / PageDown` pass through to the TUI program; the mouse wheel is translated into `↑` / `↓` arrow key events.
 * **Mouse reporting**: when the foreground program explicitly turns on mouse tracking, its own event loop takes over wheel events.
 

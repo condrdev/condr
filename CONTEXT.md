@@ -105,6 +105,10 @@ _Avoid_: Log, commit list
 **Terminal**:
 The interactive command-line environment presented by a Pane. A Terminal remains useful whether or not it currently contains an Agent. Closing a Terminal, or its shell exiting, ends every process started in it except one that detached on purpose: its own session on Unix, a breakaway from the Terminal's Job on Windows (ADR 0030).
 
+**Shell Integration**:
+The small scripts Condr loads into the zsh, bash or fish a Terminal starts, so the shell marks each prompt and command (OSC 133) for prompt jumps and long-command notifications. On unless turned off under Settings › General (ADR 0055).
+_Avoid_: shell hooks, prompt hooks
+
 **Agent**:
 A recognized agent CLI process running inside a Terminal. It does not own or create the Pane that presents it. Its state (`Unknown`, `Idle`, `Working`, `Blocked`, `Done`, `Error`) comes only from the CLI itself, in-band on its own PTY: its Program Status Protocol reports, OSC 7501, once it sends one (ADR 0044), otherwise hooks Condr installed into it, delivered as OSC 777 (ADR 0014); an Agent that has not reported is `Unknown`, never guessed. A `Blocked` or `Error` Agent may carry `detail`, what it said it waits for (a tool and command, a question, a login) or why it halted, cleared with the state (ADR 0024, ADR 0044).
 _Avoid_: Pane, blocked_on

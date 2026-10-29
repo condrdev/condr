@@ -216,6 +216,10 @@ pub enum Event {
     ProgramStatus(ProgramStatus),
     /// OSC 133 started a primary prompt.
     PromptStart,
+    /// OSC 133 said a command's output starts: the command runs.
+    CommandStart,
+    /// OSC 133 said the command ended, with its exit code when the shell gave one.
+    CommandEnd(Option<i32>),
     /// RIS reset the terminal.
     Reset,
     /// A synchronized update (mode 2026) began or ended.
@@ -280,6 +284,8 @@ pub enum Scroll {
     Bottom,
     /// Rows down (positive) or up (negative).
     Delta(isize),
+    /// Shell prompts (OSC 133) down (positive) or up (negative).
+    Prompts(isize),
 }
 
 /// Where the viewport sits in the screen's rows.
@@ -569,6 +575,12 @@ impl Terminal {
         self.get_value(sys::GhosttyTerminalData::GHOSTTY_TERMINAL_DATA_KITTY_KEYBOARD_FLAGS)
     }
 
+    /// Whether the cursor sits at a shell prompt the shell marked (OSC 133); never on the
+    /// alternate screen.
+    pub fn cursor_at_prompt(&self) -> bool {
+        self.get_value(sys::GhosttyTerminalData::GHOSTTY_TERMINAL_DATA_CURSOR_AT_PROMPT)
+    }
+
     pub fn alternate_screen(&self) -> bool {
         let mut screen = sys::GhosttyTerminalScreen::GHOSTTY_TERMINAL_SCREEN_PRIMARY;
         let _ = self.get(
@@ -626,7 +638,12 @@ impl Terminal {
                 sys::GhosttyTerminalScrollViewportTag::GHOSTTY_SCROLL_VIEWPORT_DELTA,
                 delta,
             ),
+            Scroll::Prompts(prompts) => (
+                sys::GhosttyTerminalScrollViewportTag::GHOSTTY_SCROLL_VIEWPORT_DELTA_PROMPT,
+                prompts,
+            ),
         };
+        // `delta` and `delta_prompt` share the union's first word.
         let behavior = sys::GhosttyTerminalScrollViewport {
             tag,
             value: sys::GhosttyTerminalScrollViewportValue { delta },
@@ -1133,11 +1150,19 @@ extern "C" fn semantic_prompt(
     guarded(userdata, (), |callbacks| {
         // SAFETY: an event valid for the call's duration.
         let event = unsafe { &*event };
-        if event.kind == sys::GhosttySemanticPromptKind::GHOSTTY_SEMANTIC_PROMPT_PROMPT_START
-            && event.prompt_kind
-                == sys::GhosttySemanticPromptPromptKind::GHOSTTY_SEMANTIC_PROMPT_PROMPT_PRIMARY
-        {
-            callbacks.events.push(Event::PromptStart);
+        use sys::GhosttySemanticPromptKind as Kind;
+        match event.kind {
+            Kind::GHOSTTY_SEMANTIC_PROMPT_PROMPT_START
+                if event.prompt_kind
+                    == sys::GhosttySemanticPromptPromptKind::GHOSTTY_SEMANTIC_PROMPT_PROMPT_PRIMARY =>
+            {
+                callbacks.events.push(Event::PromptStart);
+            }
+            Kind::GHOSTTY_SEMANTIC_PROMPT_OUTPUT_START => callbacks.events.push(Event::CommandStart),
+            Kind::GHOSTTY_SEMANTIC_PROMPT_COMMAND_END => callbacks
+                .events
+                .push(Event::CommandEnd(event.has_exit_code.then_some(event.exit_code))),
+            _ => {}
         }
     });
 }

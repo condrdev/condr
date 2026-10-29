@@ -20,6 +20,9 @@ pub(super) struct TerminalNotices {
     pub(super) progress_at: Option<Instant>,
     /// OSC 9 and 777 notifications the program sent, oldest first (ADR 0054).
     pub(super) notifications: Vec<TerminalNotification>,
+    /// The shell command running now, as its shell marked it (ADR 0055).
+    pub(super) command: Option<RunningCommand>,
+    pub(super) finished_commands: Vec<FinishedCommand>,
     /// What the agent said since the agent probe last drained them, oldest first.
     pub(super) agent_events: Vec<AgentNotice>,
     pub(super) agent: AgentDetector,
@@ -65,6 +68,16 @@ impl AgentNotice {
 
 /// How long a progress lasts without a new report, as in Ghostty (ADR 0054).
 pub(super) const PROGRESS_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// How long a shell command runs before its end is worth a notification (ADR 0055).
+pub const LONG_COMMAND: Duration = Duration::from_secs(10);
+
+#[derive(Clone, Copy, Debug)]
+pub(super) struct RunningCommand {
+    pub(super) started: Instant,
+    /// Whether an Agent was seen in the Pane while it ran.
+    pub(super) agent: bool,
+}
 
 /// A notification's text beyond this is cut; an OS shows a few lines of it anyway.
 const MAX_NOTIFICATION_BODY_CHARS: usize = 1024;
@@ -128,6 +141,30 @@ impl TerminalNotices {
         }
         self.notifications
             .push(TerminalNotification { title, body });
+    }
+
+    fn record_command_start(&mut self) {
+        self.command = Some(RunningCommand {
+            started: Instant::now(),
+            agent: self.agent.agent().is_some(),
+        });
+    }
+
+    fn record_command_end(&mut self, exit_code: Option<i32>) {
+        let Some(command) = self.command.take() else {
+            return;
+        };
+        let duration = command.started.elapsed();
+        if command.agent || self.agent.agent().is_some() || duration < LONG_COMMAND {
+            return;
+        }
+        if self.finished_commands.len() == MAX_QUEUED_NOTIFICATIONS {
+            self.finished_commands.remove(0);
+        }
+        self.finished_commands.push(FinishedCommand {
+            exit_code,
+            duration,
+        });
     }
 
     fn record_clipboard(&mut self, text: String) {
@@ -205,6 +242,8 @@ pub(super) fn apply_terminal_events(
                     notices.record_agent_event(AgentNotice::PromptStart);
                 }
             }
+            Event::CommandStart => notices.record_command_start(),
+            Event::CommandEnd(exit_code) => notices.record_command_end(exit_code),
             Event::Progress(progress) => {
                 notices.record_progress(progress.map(|progress| TerminalProgress {
                     state: match progress.state {
@@ -220,6 +259,7 @@ pub(super) fn apply_terminal_events(
                 // RIS clears the title and progress without reports of their own.
                 notices.record_title(None);
                 notices.record_progress(None);
+                notices.command = None;
                 if notices.agent.reports_program_status() {
                     notices.record_agent_event(AgentNotice::Reset);
                 }

@@ -32,6 +32,8 @@ mod runtime;
 #[cfg(feature = "runtime")]
 mod shell;
 #[cfg(feature = "runtime")]
+mod shell_integration;
+#[cfg(feature = "runtime")]
 mod view_source;
 #[cfg(feature = "runtime")]
 mod vt;
@@ -63,12 +65,12 @@ pub(crate) use view::{
 pub use cursor_settle::CURSOR_POSITION_SETTLE;
 #[cfg(feature = "runtime")]
 pub use launch::TerminalLaunchProbe;
+pub use notices::LONG_COMMAND;
 #[cfg(feature = "runtime")]
 pub use portable_pty::CommandBuilder;
-#[cfg(feature = "runtime")]
 pub use probes::{
-    TerminalAgentProbe, TerminalCwdProbe, TerminalNoticeBatch, TerminalNoticeProbe,
-    TerminalNotification,
+    FinishedCommand, TerminalAgentProbe, TerminalCwdProbe, TerminalNoticeBatch,
+    TerminalNoticeProbe, TerminalNotification,
 };
 #[cfg(feature = "runtime")]
 pub use runtime::TerminalRuntime;
@@ -76,6 +78,8 @@ pub use runtime::TerminalRuntime;
 pub(crate) use shell::KNOWN_SHELLS;
 #[cfg(feature = "runtime")]
 pub use shell::{PaneEnvironment, default_shell_program};
+#[cfg(feature = "runtime")]
+pub use shell_integration::install_shell_integration;
 #[cfg(feature = "runtime")]
 pub use view_source::{TERMINAL_IDLE_CHECK, TerminalViewSource};
 

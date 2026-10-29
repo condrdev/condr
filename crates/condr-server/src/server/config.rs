@@ -103,6 +103,25 @@ pub(super) fn load_shell(path: Option<&std::path::Path>) -> String {
     .unwrap_or_default()
 }
 
+/// `[server.terminal] shell_integration` (ADR 0055), on unless the file says `false`.
+pub(super) fn load_shell_integration(path: Option<&std::path::Path>) -> bool {
+    path.and_then(|path| {
+        condr_core::read_config_value(path, &["server", "terminal"], "shell_integration")
+            .ok()??
+            .as_bool()
+    })
+    .unwrap_or(true)
+}
+
+/// Writes `[server.terminal] shell_integration` back, keeping the rest of the file.
+pub(super) fn save_shell_integration(path: &std::path::Path, on: bool) -> io::Result<()> {
+    condr_core::update_config_values(
+        path,
+        &["server", "terminal"],
+        [("shell_integration", Some(toml_edit::value(on)))],
+    )
+}
+
 /// `[server] worktree_root` from the Server's `config.toml`, as written: `condr_core::worktree_destination`
 /// expands a leading `~` and resolves a relative path against each repository. `None`
 /// (unset, blank, missing or malformed file) puts each checkout in `<repo>.worktrees/<branch>`

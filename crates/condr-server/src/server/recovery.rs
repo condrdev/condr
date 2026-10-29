@@ -1,5 +1,25 @@
 use super::*;
 
+/// Writes the shell integration beside the Server's socket, in its runtime directory, and
+/// says where; `None` on Windows, where no shell gets one yet, or when writing failed
+/// (ADR 0055).
+fn install_shell_integration(socket_path: &std::path::Path) -> Option<PathBuf> {
+    if cfg!(windows) {
+        return None;
+    }
+    let directory = socket_path.parent()?.join("shell-integration");
+    match condr_core::install_shell_integration(&directory) {
+        Ok(()) => Some(directory),
+        Err(error) => {
+            tracing::warn!(
+                "shell integration not written to {}: {error}",
+                directory.display()
+            );
+            None
+        }
+    }
+}
+
 impl RuntimeState {
     pub(super) fn recover(
         socket_path: &std::path::Path,
@@ -10,10 +30,16 @@ impl RuntimeState {
             shell: load_shell(config_path.as_deref()),
             default_shell: condr_core::default_shell_program(),
             proxy: condr_core::ProxySetting::load(config_path.as_deref()),
+            shell_integration: load_shell_integration(config_path.as_deref()),
         };
+        let shell_integration_dir = install_shell_integration(socket_path);
         let launch = ShellLaunch {
             shell: settings.shell.clone(),
             socket_path: socket_path.to_string_lossy().into_owned(),
+            shell_integration: settings
+                .shell_integration
+                .then(|| shell_integration_dir.clone())
+                .flatten(),
         };
         let persistence = snapshot_path.map(SnapshotPersistence::open).transpose()?;
         let mut session = Session::new();
@@ -143,6 +169,7 @@ impl RuntimeState {
 
         let mut state =
             Self::with_session(socket_path, session, persistence, settings, config_path);
+        state.shell_integration_dir = shell_integration_dir;
         let workspace_roots = state
             .session
             .workspaces()

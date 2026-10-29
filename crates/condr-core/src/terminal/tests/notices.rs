@@ -44,6 +44,7 @@ fn title_and_bell_notices_are_recorded_once_per_change_and_counted() {
             clipboard: Some("world".into()),
             progress: None,
             notifications: Vec::new(),
+            finished_commands: Vec::new(),
         }
     );
     assert!(probe.take().is_empty());
@@ -97,6 +98,7 @@ fn terminal_reply_to_a_stopped_writer_ends_the_reader_cleanly_and_keeps_tail_not
             clipboard: Some("tail copy".into()),
             progress: None,
             notifications: Vec::new(),
+            finished_commands: Vec::new(),
         }
     );
 }
@@ -204,4 +206,41 @@ fn program_notifications_are_queued_but_condrs_own_agent_events_are_not() {
     let queued = probe.take().notifications;
     assert_eq!(queued.len(), 8, "a flood keeps the newest");
     assert_eq!(queued.last().unwrap().body, "n19");
+}
+
+#[test]
+fn a_long_shell_command_is_reported_when_it_ends_unless_an_agent_ran_in_it() {
+    let mut vt = Vt::new(TerminalSize::new(4, 12)).unwrap();
+    let notices = SharedTerminalNotices::default();
+    let probe = TerminalNoticeProbe {
+        notices: Arc::clone(&notices),
+    };
+    let age = |notices: &SharedTerminalNotices| {
+        let mut notices = notices.lock().unwrap();
+        let command = notices.command.as_mut().expect("a command runs");
+        command.started = Instant::now().checked_sub(LONG_COMMAND).unwrap();
+    };
+
+    feed(&mut vt, &notices, b"\x1b]133;C\x07\x1b]133;D;0\x07");
+    assert!(probe.take().finished_commands.is_empty(), "a short one");
+
+    feed(&mut vt, &notices, b"\x1b]133;C\x07");
+    age(&notices);
+    feed(&mut vt, &notices, b"\x1b]133;D;2\x07");
+    let finished = probe.take().finished_commands;
+    assert_eq!(finished.len(), 1);
+    assert_eq!(finished[0].exit_code, Some(2));
+    assert!(finished[0].duration >= LONG_COMMAND);
+
+    feed(&mut vt, &notices, b"\x1b]133;C\x07");
+    age(&notices);
+    notices.lock().unwrap().command.as_mut().unwrap().agent = true;
+    feed(&mut vt, &notices, b"\x1b]133;D;0\x07");
+    assert!(
+        probe.take().finished_commands.is_empty(),
+        "an Agent's session"
+    );
+
+    feed(&mut vt, &notices, b"\x1b]133;D;0\x07");
+    assert!(probe.take().is_empty(), "an end without a start");
 }

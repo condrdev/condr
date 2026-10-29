@@ -330,6 +330,14 @@ impl Condr {
                         self.notify_program(key, pane_id, title, body, cx);
                         notify = false;
                     }
+                    SessionEvent::CommandFinished {
+                        pane_id,
+                        exit_code,
+                        duration_secs,
+                    } => {
+                        self.notify_command(key, pane_id, exit_code, duration_secs, cx);
+                        notify = false;
+                    }
                     SessionEvent::TerminalProgressChanged { pane_id, progress } => {
                         self.connections[index]
                             .model

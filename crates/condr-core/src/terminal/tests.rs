@@ -6,6 +6,8 @@ mod osc;
 mod process;
 mod replay;
 mod resize;
+#[cfg(unix)]
+mod shell_integration;
 mod view;
 
 use super::*;

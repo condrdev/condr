@@ -454,6 +454,13 @@ pub(super) fn apply_terminal_notices(
             });
         }
     }
+    for command in notices.finished_commands {
+        state.publish_background(SessionEvent::CommandFinished {
+            pane_id,
+            exit_code: command.exit_code,
+            duration_secs: command.duration.as_secs(),
+        });
+    }
     if let Some(progress) = notices.progress {
         let previous = match progress {
             Some(progress) => state.terminal_progress.insert(pane_id, progress),

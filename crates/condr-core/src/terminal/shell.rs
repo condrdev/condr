@@ -24,9 +24,13 @@ pub(crate) const KNOWN_SHELLS: &[&str] = &[
 #[cfg(any(windows, test))]
 const WINDOWS_POWERSHELL_CWD_HOOK: &str = r"if ($null -eq $global:__CondrOriginalPrompt) { $global:__CondrOriginalPrompt = $function:prompt; function global:prompt { $out = @(& $global:__CondrOriginalPrompt) -join ' '; $loc = $ExecutionContext.SessionState.Path.CurrentLocation; if ($loc.Provider.Name -eq 'FileSystem') { try { [Environment]::CurrentDirectory = $loc.ProviderPath } catch {}; $esc = [string][char]27; $out += $esc + ']9;9;' + $loc.ProviderPath + $esc + '\' }; $out } }";
 
-#[cfg(target_os = "linux")]
-const LINUX_BASH_CWD_WRAPPER: &str = r#"exec 3<<'__CONDR_BASHRC__'
+/// bash's rc file: the user's `~/.bashrc`, an exit trap that reports the last cwd, and
+/// the shell integration when the Server turned it on (ADR 0055).
+#[cfg(unix)]
+const BASH_RC_WRAPPER: &str = r#"exec 3<<'__CONDR_BASHRC__'
 if [[ -r "$HOME/.bashrc" ]]; then source "$HOME/.bashrc"; fi
+if [[ -n ${CONDR_BASH_INTEGRATION-} ]]; then source "$CONDR_BASH_INTEGRATION"; fi
+unset CONDR_BASH_INTEGRATION
 __condr_user_exit=
 __condr_trap=$(trap -p EXIT)
 if [[ -n $__condr_trap ]]; then
@@ -49,6 +53,8 @@ pub struct PaneEnvironment {
     /// The Server's endpoint as `CONDR_SOCKET_PATH`: a local socket or pipe path, or
     /// `tcp://host:port`.
     pub socket_path: String,
+    /// Where the Server wrote the shell integration, when it is on (ADR 0055).
+    pub shell_integration: Option<PathBuf>,
 }
 
 impl PaneEnvironment {
@@ -185,7 +191,7 @@ fn is_on_path(file_name: &str) -> bool {
 
 /// The shell's file name without `.exe`, lower-cased; both separators count so a
 /// Windows path classifies the same on every host.
-fn shell_name(program: &str) -> String {
+pub(super) fn shell_name(program: &str) -> String {
     let name = program
         .rsplit(['/', '\\'])
         .next()
@@ -195,14 +201,14 @@ fn shell_name(program: &str) -> String {
 }
 
 /// The interactive shell command, with cwd reporting for the shells we know how to
-/// hook: bash on Linux through a wrapper rc file, PowerShell on Windows through a
-/// prompt hook. Any other shell starts plain.
+/// hook: bash through a wrapper rc file, PowerShell on Windows through a prompt hook.
+/// Any other shell starts plain.
 pub(super) fn shell_command(program: &str) -> CommandBuilder {
     match shell_name(program).as_str() {
-        #[cfg(target_os = "linux")]
+        #[cfg(unix)]
         "bash" => {
             let mut command = CommandBuilder::new("/bin/sh");
-            command.args(["-c", LINUX_BASH_CWD_WRAPPER, "condr-shell", program]);
+            command.args(["-c", BASH_RC_WRAPPER, "condr-shell", program]);
             command
         }
         #[cfg(windows)]
@@ -240,7 +246,7 @@ mod shell_tests {
         assert_eq!(shell_command("fish").get_argv(), &["fish"]);
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     #[test]
     fn bash_is_wrapped_for_cwd_reporting() {
         let command = shell_command("/usr/local/bin/bash");
@@ -271,6 +277,7 @@ mod shell_tests {
         PaneEnvironment {
             pane_id: PaneId::from_u64(42),
             socket_path: "/run/condr.sock".into(),
+            shell_integration: None,
         }
         .apply(&mut command);
         assert_eq!(command.get_env("CONDR_ENV").unwrap(), "1");

@@ -610,6 +610,12 @@ fn only_a_local_connection_changes_the_proxy_and_one_field_leaves_the_others() {
     let settings = set(&mut paired, server_id, ServerSetting::Shell("fish".into())).unwrap();
     assert_eq!(settings.shell, "fish");
     assert_eq!(settings.proxy, ProxySetting::default());
+    let on = settings.shell_integration;
+    let settings = set(&mut paired, server_id, ServerSetting::ShellIntegration(!on)).unwrap();
+    assert_eq!(
+        settings.shell_integration, !on,
+        "a paired Device may set it"
+    );
 
     let (mut stream, server_id) = open(&local);
     assert!(

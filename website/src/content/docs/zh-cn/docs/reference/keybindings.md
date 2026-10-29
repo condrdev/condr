@@ -110,9 +110,11 @@ Condr 的快捷键分为两层逻辑：
 | :--- | :--- | :--- |
 | 缓冲区向上翻页 | `Shift + PageUp` | `Shift + PageUp` |
 | 缓冲区向下翻页 | `Shift + PageDown` | `Shift + PageDown` |
+| 跳到上一个 / 下一个 Shell 提示符 | `Cmd + ↑` / `Cmd + ↓` | `Ctrl + ↑` / `Ctrl + ↓` |
 | 逐行滚动 | 鼠标滚轮 | 鼠标滚轮 |
 
 * **自动沉底**：浏览历史缓冲区时，向终端输入任意按键均会立即复位滚动条至最新行。
+* **提示符跳转**：仅在 Shell 停在提示符时生效，需要开启 [Shell 集成](/zh-cn/docs/using/preferences/#shell-集成)。其他情况下（例如在 vim 里）按键照常交给程序。
 * **Alt Screen 模式（vim / less 等）**：`Shift + PageUp / PageDown` 透传至 TUI 程序内部处理；鼠标滚轮将自动转义为 `↑` / `↓` 方向键事件分发。
 * **鼠标报告模式（Mouse Reporting）**：前台程序显式开启鼠标追踪时，滚轮事件由其内部事件循环接管。
 

@@ -74,6 +74,19 @@ pub(super) const TERMINAL_PASTE_KEYS: &[&str] = if cfg!(target_os = "macos") {
     &["ctrl-shift-v", "shift-insert"]
 };
 
+/// What the Server takes as a jump between shell prompts while the shell waits at one
+/// (ADR 0055); it accepts Cmd and Ctrl alike, so these are the ones each platform shows.
+const PREVIOUS_PROMPT_KEYS: &[&str] = if cfg!(target_os = "macos") {
+    &["cmd-up"]
+} else {
+    &["ctrl-up"]
+};
+const NEXT_PROMPT_KEYS: &[&str] = if cfg!(target_os = "macos") {
+    &["cmd-down"]
+} else {
+    &["ctrl-down"]
+};
+
 /// The key context `bind_keys` registers the shortcuts under.
 pub(in crate::app) const SHORTCUT_CONTEXT: &str = "Condr";
 
@@ -108,16 +121,18 @@ pub(super) fn shortcuts_page() -> SettingPage {
         )
 }
 
-/// The terminal's clipboard keys, every key that does each, and the image paste that
-/// only a remote Pane takes (ADR 0012).
+/// The terminal's clipboard keys, every key that does each, the image paste that only a
+/// remote Pane takes (ADR 0012), and the prompt jumps.
 fn terminal_group() -> SettingGroup {
-    let rows: [(&str, &'static [&'static str]); 3] = [
+    let rows: [(&str, &'static [&'static str]); 5] = [
         ("Copy selection", TERMINAL_COPY_KEYS),
         ("Paste text", TERMINAL_PASTE_KEYS),
         (
             "Paste image to a remote Device",
             &[crate::app::terminal_input::IMAGE_PASTE_KEY],
         ),
+        ("Previous prompt", PREVIOUS_PROMPT_KEYS),
+        ("Next prompt", NEXT_PROMPT_KEYS),
     ];
     rows.into_iter().fold(
         SettingGroup::new().title("Terminal"),

@@ -292,6 +292,7 @@ fn the_proxy_setting_round_trips_and_an_older_or_newer_peer_reads_as_system() {
             mode: ProxyMode::Manual,
             url: "http://proxy:8080".into(),
         },
+        shell_integration: true,
     };
     let changed = SessionEvent::ServerSettingsChanged {
         settings: settings.clone(),
@@ -305,6 +306,7 @@ fn the_proxy_setting_round_trips_and_an_older_or_newer_peer_reads_as_system() {
                 shell: String::new(),
                 default_shell: String::new(),
                 proxy,
+                shell_integration: false,
             },
         )),
     };
