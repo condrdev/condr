@@ -1383,6 +1383,8 @@ version = "0.1.16"
 dependencies = [
  "dirs 6.0.0",
  "sha2 0.10.9",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

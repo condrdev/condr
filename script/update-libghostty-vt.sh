@@ -68,6 +68,7 @@ functions=(
   ghostty_render_state_set
   ghostty_render_state_update
   ghostty_row_get
+  ghostty_sys_set
   ghostty_terminal_compress
   ghostty_terminal_compression_activity
   ghostty_terminal_free
@@ -104,7 +105,10 @@ types=(
   GhosttySizeReportSize
   GhosttyString
   GhosttyStyle
+  GhosttySysLogLevel
+  GhosttySysOption
   GhosttyTerminalDesktopNotification
+  GhosttyTerminalMemoryUsage
   GhosttyTerminalModeConfig
   GhosttyTerminalProgramStatus
   GhosttyTerminalProgressReport

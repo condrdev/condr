@@ -320,6 +320,7 @@ unsafe impl Send for Terminal {}
 
 impl Terminal {
     pub fn new(options: Options) -> Result<Self, Error> {
+        route_library_log();
         let mut raw = ptr::null_mut();
         // SAFETY: a null allocator is the library's default; `raw` is read only once the
         // call succeeded.
@@ -824,7 +825,20 @@ impl Terminal {
         activity
     }
 
-    /// Compresses idle scrollback; `true` when nothing is left to do.
+    /// The physical memory the terminal's pages hold now, both screens together; idle
+    /// compression lowers it.
+    pub fn resident_bytes(&self) -> u64 {
+        // SAFETY: a zeroed sized struct with its size set, as the data key asks.
+        let mut usage: sys::GhosttyTerminalMemoryUsage = unsafe { std::mem::zeroed() };
+        usage.size = size_of::<sys::GhosttyTerminalMemoryUsage>();
+        let _ = self.get(
+            sys::GhosttyTerminalData::GHOSTTY_TERMINAL_DATA_MEMORY_USAGE,
+            &mut usage,
+        );
+        usage.primary_resident_bytes + usage.alternate_resident_bytes
+    }
+
+    /// One bounded step of compressing idle scrollback; `true` when nothing is left to do.
     pub fn compress(&mut self) -> bool {
         let mut result =
             sys::GhosttyTerminalCompressionResult::GHOSTTY_TERMINAL_COMPRESSION_RESULT_UNSUPPORTED;
@@ -914,6 +928,51 @@ unsafe fn take_allocated(text: *mut u8, len: usize) -> String {
 ///
 /// # Safety
 /// `data` must be null or point at `len` readable values that outlive `'a`.
+/// Sends libghostty-vt's own log to `tracing` (ADR 0019), once per process. The parser
+/// logs what it skips sequence by sequence, so only an error stays above debug: a
+/// program's output cannot flood the log.
+fn route_library_log() {
+    static ROUTED: std::sync::Once = std::sync::Once::new();
+    ROUTED.call_once(|| {
+        // SAFETY: a callback of the type the option names, safe to call from any thread.
+        unsafe {
+            sys::ghostty_sys_set(
+                sys::GhosttySysOption::GHOSTTY_SYS_OPT_LOG,
+                library_log as *const c_void,
+            );
+        }
+    });
+}
+
+extern "C" fn library_log(
+    _: *mut c_void,
+    level: sys::GhosttySysLogLevel,
+    scope: *const u8,
+    scope_len: usize,
+    message: *const u8,
+    message_len: usize,
+) {
+    use sys::GhosttySysLogLevel as Level;
+    let _ = panic::catch_unwind(|| {
+        // SAFETY: both valid for the call's duration.
+        let (scope, message) = unsafe {
+            (
+                String::from_utf8_lossy(borrowed(scope, scope_len)),
+                String::from_utf8_lossy(borrowed(message, message_len)),
+            )
+        };
+        match level {
+            Level::GHOSTTY_SYS_LOG_LEVEL_ERROR => {
+                tracing::error!(target: "libghostty", %scope, "{message}");
+            }
+            Level::GHOSTTY_SYS_LOG_LEVEL_WARNING | Level::GHOSTTY_SYS_LOG_LEVEL_INFO => {
+                tracing::debug!(target: "libghostty", %scope, "{message}");
+            }
+            _ => tracing::trace!(target: "libghostty", %scope, "{message}"),
+        }
+    });
+}
+
 unsafe fn borrowed<'a, T>(data: *const T, len: usize) -> &'a [T] {
     if data.is_null() || len == 0 {
         return &[];

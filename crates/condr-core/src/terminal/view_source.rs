@@ -12,8 +12,10 @@ pub struct TerminalViewSource {
 /// The frame last taken, which the next one is compared with cell by cell.
 pub(super) type TerminalDamageBaseline = TerminalView;
 
-/// How often an idle Pane's monitor looks whether its scrollback can be compressed.
-pub const TERMINAL_IDLE_CHECK: Duration = Duration::from_secs(10);
+/// How often an idle Pane's monitor looks whether its scrollback can be compressed: one
+/// to two seconds after output stops, where Ghostty waits a quarter of a second, and
+/// cheap when there is nothing to do (ADR 0051).
+pub const TERMINAL_IDLE_CHECK: Duration = Duration::from_secs(1);
 
 impl TerminalViewSource {
     pub fn view(&self) -> TerminalView {
@@ -38,10 +40,11 @@ impl TerminalViewSource {
         hold.into_iter().chain(settle).min()
     }
 
-    /// Compresses the Pane's scrollback once output has stopped since the last look.
+    /// Compresses the Pane's scrollback once output has stopped since the last look, one
+    /// bounded step per hold of the lock, so output that arrives meanwhile waits at most
+    /// one step and ends the pass (ADR 0051).
     pub fn compress_if_idle(&self) {
-        if let Ok(mut terminal) = lock_pane(&self.terminal) {
-            terminal.compress_if_idle();
+        while lock_pane(&self.terminal).is_ok_and(|mut terminal| terminal.compress_step_if_idle()) {
         }
     }
 

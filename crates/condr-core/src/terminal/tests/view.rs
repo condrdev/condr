@@ -113,6 +113,105 @@ fn server_selection_follows_scrolled_output_and_still_copies_it() {
     vt.select(None);
     assert_eq!(vt.view(size, 1, None).selection, None);
 }
+/// ADR 0051: a resize, which switching windows does (ADR 0036), keeps the selection, and
+/// an erase that touches it keeps it too; a screen swap still clears it (ADR 0008).
+#[test]
+fn a_selection_survives_a_resize_and_an_erase_but_not_a_screen_swap() {
+    let size = TerminalSize::new(3, 10);
+    let mut vt = terminal_showing(size, b"alpha\r\nbeta\r\ngamma");
+    let position = |row, column, side| TerminalPosition { row, column, side };
+    vt.select(Some(TerminalSelection {
+        start: position(1, 0, TerminalSide::Left),
+        end: position(1, 3, TerminalSide::Right),
+        display_offset: 0,
+    }));
+
+    let wider = TerminalSize::new(5, 30);
+    vt.resize(wider);
+    assert_eq!(vt.selection_text(None).as_deref(), Some("beta"));
+    vt.resize(TerminalSize::new(3, 6));
+    assert_eq!(vt.selection_text(None).as_deref(), Some("beta"));
+
+    vt.write(b"\x1b[2;3H\x1b[K");
+    assert!(vt.selection_text(None).is_some(), "an erase keeps it");
+
+    vt.write(b"\x1b[?1049h");
+    assert_eq!(
+        vt.selection_text(None),
+        None,
+        "the alternate screen drops it"
+    );
+}
+
+/// ADR 0051: frames wait while a program draws a synchronized update (mode 2026), and a
+/// program that dies inside one does not freeze its Pane past the hold timeout.
+#[test]
+fn a_synchronized_update_holds_frames_until_it_ends_or_times_out() {
+    let size = TerminalSize::new(4, 20);
+    let terminal = Arc::new(Mutex::new(terminal_showing(size, b"before")));
+    let revision = Arc::new(AtomicU64::new(1));
+    let source = source_for(&terminal, size, &revision);
+    let write = |bytes: &[u8]| {
+        terminal.lock().unwrap().write(bytes);
+        revision.fetch_add(1, Ordering::AcqRel);
+    };
+    assert!(source.take_frame().is_some());
+
+    write(b"\x1b[?2026h\r\nhalf");
+    assert!(
+        source.take_frame().is_none(),
+        "held while the program draws"
+    );
+    assert!(
+        source
+            .frame_wakeup()
+            .is_some_and(|wait| wait <= super::vt::RENDER_HOLD_TIMEOUT),
+        "the monitor wakes when the hold would time out"
+    );
+    write(b" done\x1b[?2026l");
+    assert!(source.take_frame().is_some(), "the update ended");
+
+    write(b"\x1b[?2026h\r\nstuck");
+    assert!(source.take_frame().is_none());
+    terminal.lock().unwrap().held_since =
+        Instant::now().checked_sub(super::vt::RENDER_HOLD_TIMEOUT);
+    assert!(source.take_frame().is_some(), "the hold timed out");
+    assert_eq!(source.frame_wakeup(), None);
+}
+
+/// ADR 0051: once output stops, the monitor's idle checks compress the whole scrollback,
+/// step by step, and the history reads back the same.
+#[test]
+fn idle_scrollback_is_compressed_to_the_end_and_reads_back_unchanged() {
+    let size = TerminalSize::new(24, 100);
+    let terminal = Arc::new(Mutex::new(Vt::new(size).unwrap()));
+    let revision = Arc::new(AtomicU64::new(1));
+    let source = source_for(&terminal, size, &revision);
+    let line = "fn main() { println!(\"a line of ordinary terminal output\"); }\r\n";
+    terminal
+        .lock()
+        .unwrap()
+        .write(line.repeat(40_000).as_bytes());
+    let before = terminal.lock().unwrap().resident_bytes();
+    let tail = terminal.lock().unwrap().recent_text(3);
+
+    source.compress_if_idle();
+    assert_eq!(
+        terminal.lock().unwrap().resident_bytes(),
+        before,
+        "the first look only notes activity"
+    );
+    source.compress_if_idle();
+    let after = terminal.lock().unwrap().resident_bytes();
+    if cfg!(any(target_os = "macos", target_os = "linux")) {
+        assert!(
+            after * 2 < before,
+            "compressed to the end: {after} of {before} bytes"
+        );
+    }
+    assert_eq!(terminal.lock().unwrap().recent_text(3), tail);
+}
+
 #[test]
 fn terminal_cell_text_keeps_short_content_unchanged() {
     let size = TerminalSize::new(1, 4);

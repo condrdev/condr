@@ -67,7 +67,7 @@ pub(super) struct Vt {
     keys: ghostty::KeyEncoder,
     mouse: ghostty::MouseEncoder,
     /// When the synchronized update now open began.
-    held_since: Option<Instant>,
+    pub(super) held_since: Option<Instant>,
     /// The library's activity token at the last idle check.
     compression_seen: Option<u64>,
 }
@@ -661,12 +661,18 @@ impl Vt {
 
     /// Compresses scrollback when the library's activity token has not moved since the
     /// last check; the library runs no timer of its own (ADR 0051).
-    pub(super) fn compress_if_idle(&mut self) {
+    /// One bounded step of compressing the scrollback, once no output has arrived since
+    /// the last look; `true` while more steps remain and the terminal is still idle.
+    pub(super) fn compress_step_if_idle(&mut self) -> bool {
         let activity = self.terminal.compression_activity();
-        if self.compression_seen == Some(activity) {
-            self.terminal.compress();
-        }
+        let idle = self.compression_seen == Some(activity);
         self.compression_seen = Some(activity);
+        idle && !self.terminal.compress()
+    }
+
+    #[cfg(test)]
+    pub(super) fn resident_bytes(&self) -> u64 {
+        self.terminal.resident_bytes()
     }
 }
 

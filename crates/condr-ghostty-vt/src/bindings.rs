@@ -774,6 +774,59 @@ const _: () = {
     ["Offset of field: GhosttyTerminalScrollbar::len"]
         [::std::mem::offset_of!(GhosttyTerminalScrollbar, len) - 16usize];
 };
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct GhosttyTerminalMemoryUsage {
+    pub size: usize,
+    pub compression_supported: bool,
+    pub primary_pages: u64,
+    pub primary_virtual_bytes: u64,
+    pub primary_resident_bytes: u64,
+    pub primary_compressed_pages: u64,
+    pub primary_compressed_bytes: u64,
+    pub primary_image_bytes: u64,
+    pub alternate_pages: u64,
+    pub alternate_virtual_bytes: u64,
+    pub alternate_resident_bytes: u64,
+    pub alternate_compressed_pages: u64,
+    pub alternate_compressed_bytes: u64,
+    pub alternate_image_bytes: u64,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of GhosttyTerminalMemoryUsage"]
+        [::std::mem::size_of::<GhosttyTerminalMemoryUsage>() - 112usize];
+    ["Alignment of GhosttyTerminalMemoryUsage"]
+        [::std::mem::align_of::<GhosttyTerminalMemoryUsage>() - 8usize];
+    ["Offset of field: GhosttyTerminalMemoryUsage::size"]
+        [::std::mem::offset_of!(GhosttyTerminalMemoryUsage, size) - 0usize];
+    ["Offset of field: GhosttyTerminalMemoryUsage::compression_supported"]
+        [::std::mem::offset_of!(GhosttyTerminalMemoryUsage, compression_supported) - 8usize];
+    ["Offset of field: GhosttyTerminalMemoryUsage::primary_pages"]
+        [::std::mem::offset_of!(GhosttyTerminalMemoryUsage, primary_pages) - 16usize];
+    ["Offset of field: GhosttyTerminalMemoryUsage::primary_virtual_bytes"]
+        [::std::mem::offset_of!(GhosttyTerminalMemoryUsage, primary_virtual_bytes) - 24usize];
+    ["Offset of field: GhosttyTerminalMemoryUsage::primary_resident_bytes"]
+        [::std::mem::offset_of!(GhosttyTerminalMemoryUsage, primary_resident_bytes) - 32usize];
+    ["Offset of field: GhosttyTerminalMemoryUsage::primary_compressed_pages"]
+        [::std::mem::offset_of!(GhosttyTerminalMemoryUsage, primary_compressed_pages) - 40usize];
+    ["Offset of field: GhosttyTerminalMemoryUsage::primary_compressed_bytes"]
+        [::std::mem::offset_of!(GhosttyTerminalMemoryUsage, primary_compressed_bytes) - 48usize];
+    ["Offset of field: GhosttyTerminalMemoryUsage::primary_image_bytes"]
+        [::std::mem::offset_of!(GhosttyTerminalMemoryUsage, primary_image_bytes) - 56usize];
+    ["Offset of field: GhosttyTerminalMemoryUsage::alternate_pages"]
+        [::std::mem::offset_of!(GhosttyTerminalMemoryUsage, alternate_pages) - 64usize];
+    ["Offset of field: GhosttyTerminalMemoryUsage::alternate_virtual_bytes"]
+        [::std::mem::offset_of!(GhosttyTerminalMemoryUsage, alternate_virtual_bytes) - 72usize];
+    ["Offset of field: GhosttyTerminalMemoryUsage::alternate_resident_bytes"]
+        [::std::mem::offset_of!(GhosttyTerminalMemoryUsage, alternate_resident_bytes) - 80usize];
+    ["Offset of field: GhosttyTerminalMemoryUsage::alternate_compressed_pages"]
+        [::std::mem::offset_of!(GhosttyTerminalMemoryUsage, alternate_compressed_pages) - 88usize];
+    ["Offset of field: GhosttyTerminalMemoryUsage::alternate_compressed_bytes"]
+        [::std::mem::offset_of!(GhosttyTerminalMemoryUsage, alternate_compressed_bytes) - 96usize];
+    ["Offset of field: GhosttyTerminalMemoryUsage::alternate_image_bytes"]
+        [::std::mem::offset_of!(GhosttyTerminalMemoryUsage, alternate_image_bytes) - 104usize];
+};
 impl GhosttyClipboardLocation {
     pub const GHOSTTY_CLIPBOARD_LOCATION_STANDARD: GhosttyClipboardLocation =
         GhosttyClipboardLocation(0);
@@ -1707,6 +1760,32 @@ impl GhosttySgrUnderline {
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct GhosttySgrUnderline(pub ::std::os::raw::c_int);
+impl GhosttySysLogLevel {
+    pub const GHOSTTY_SYS_LOG_LEVEL_ERROR: GhosttySysLogLevel = GhosttySysLogLevel(0);
+    pub const GHOSTTY_SYS_LOG_LEVEL_WARNING: GhosttySysLogLevel = GhosttySysLogLevel(1);
+    pub const GHOSTTY_SYS_LOG_LEVEL_INFO: GhosttySysLogLevel = GhosttySysLogLevel(2);
+    pub const GHOSTTY_SYS_LOG_LEVEL_DEBUG: GhosttySysLogLevel = GhosttySysLogLevel(3);
+    pub const GHOSTTY_SYS_LOG_LEVEL_MAX_VALUE: GhosttySysLogLevel = GhosttySysLogLevel(2147483647);
+}
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub struct GhosttySysLogLevel(pub ::std::os::raw::c_int);
+impl GhosttySysOption {
+    pub const GHOSTTY_SYS_OPT_USERDATA: GhosttySysOption = GhosttySysOption(0);
+    pub const GHOSTTY_SYS_OPT_DECODE_PNG: GhosttySysOption = GhosttySysOption(1);
+    pub const GHOSTTY_SYS_OPT_LOG: GhosttySysOption = GhosttySysOption(2);
+    pub const GHOSTTY_SYS_OPT_RANDOM_SECURE: GhosttySysOption = GhosttySysOption(3);
+    pub const GHOSTTY_SYS_OPT_MAX_VALUE: GhosttySysOption = GhosttySysOption(2147483647);
+}
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub struct GhosttySysOption(pub ::std::os::raw::c_int);
+unsafe extern "C" {
+    pub fn ghostty_sys_set(
+        option: GhosttySysOption,
+        value: *const ::std::os::raw::c_void,
+    ) -> GhosttyResult;
+}
 #[repr(C)]
 #[derive(Debug)]
 pub struct GhosttyKeyEventImpl {

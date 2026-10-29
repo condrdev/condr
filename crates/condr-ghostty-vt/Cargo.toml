@@ -8,12 +8,16 @@ repository.workspace = true
 publish = false
 links = "ghostty-vt"
 
+[dependencies]
+tracing.workspace = true
+
 [build-dependencies]
 dirs.workspace = true
 sha2.workspace = true
 
 [dev-dependencies]
 sha2.workspace = true
+tracing-subscriber.workspace = true
 
 [lints]
 workspace = true

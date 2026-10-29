@@ -337,3 +337,32 @@ fn shell_marks_report_commands_and_the_viewport_jumps_between_prompts() {
         "the alternate screen has no prompt"
     );
 }
+
+#[test]
+fn the_librarys_log_reaches_tracing() {
+    use std::sync::{Arc, Mutex};
+    #[derive(Clone, Default)]
+    struct Captured(Arc<Mutex<Vec<u8>>>);
+    impl std::io::Write for Captured {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let captured = Captured::default();
+    let writer = captured.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::TRACE)
+        .with_ansi(false)
+        .with_writer(move || writer.clone())
+        .finish();
+    tracing::subscriber::with_default(subscriber, || {
+        let mut terminal = terminal(20, 5);
+        terminal.write(b"\x1b[999;999z\x1b]9999;nothing\x07");
+    });
+    let log = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();
+    assert!(log.contains("libghostty"), "{log}");
+}
