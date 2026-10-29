@@ -1,8 +1,8 @@
 //! What Swift and Kotlin read: plain records built from the model when asked, never kept.
 
 use condr_core::{
-    AgentDisplayState, DEFAULT_ANSI_COLORS, DEFAULT_BACKGROUND_COLOR, DEFAULT_CURSOR_COLOR,
-    DEFAULT_FOREGROUND_COLOR, TerminalColor, TerminalView, default_indexed_color,
+    AgentDisplayState, DEFAULT_BACKGROUND_COLOR, DEFAULT_CURSOR_COLOR, DEFAULT_FOREGROUND_COLOR,
+    TerminalColor, TerminalView, default_indexed_color,
 };
 
 /// What changed since the last [`crate::Companion::take_changes`]; the app re-reads those.
@@ -194,15 +194,6 @@ pub enum Key {
     },
 }
 
-// The cell flags the Server sends: alacritty's bits.
-const INVERSE: u16 = 1 << 0;
-const BOLD: u16 = 1 << 1;
-const ITALIC: u16 = 1 << 2;
-const UNDERLINE: u16 = 1 << 3;
-const WIDE_CHAR_SPACER: u16 = 1 << 6;
-const HIDDEN: u16 = 1 << 8;
-const LEADING_WIDE_CHAR_SPACER: u16 = 1 << 10;
-
 /// The default scheme's selection, GitHub Dark Default's: what the desktop draws there too.
 const SELECTION_BACKGROUND: u32 = 0xe6edf3;
 const SELECTION_TEXT: u32 = 0x0d1117;
@@ -216,8 +207,11 @@ pub(crate) fn screen(view: &TerminalView) -> TerminalScreen {
         .map(|(index, cell)| {
             let mut foreground = color(cell.foreground, true);
             let mut background = color(cell.background, false);
-            if cell.flags & INVERSE != 0 {
+            if cell.flags & condr_core::CELL_INVERSE != 0 {
                 std::mem::swap(&mut foreground, &mut background);
+            }
+            if cell.flags & condr_core::CELL_FAINT != 0 {
+                foreground = faint(foreground, background);
             }
             let (row, column) = (index / usize::from(columns), index % usize::from(columns));
             if view.selection.is_some_and(|selection| {
@@ -226,7 +220,7 @@ pub(crate) fn screen(view: &TerminalView) -> TerminalScreen {
                 foreground = SELECTION_TEXT;
                 background = SELECTION_BACKGROUND;
             }
-            let blank = cell.flags & (HIDDEN | WIDE_CHAR_SPACER | LEADING_WIDE_CHAR_SPACER) != 0;
+            let blank = cell.is_spacer() || cell.flags & condr_core::CELL_INVISIBLE != 0;
             ScreenCell {
                 text: if blank {
                     String::new()
@@ -235,9 +229,9 @@ pub(crate) fn screen(view: &TerminalView) -> TerminalScreen {
                 },
                 foreground,
                 background,
-                bold: cell.flags & BOLD != 0,
-                italic: cell.flags & ITALIC != 0,
-                underline: cell.flags & UNDERLINE != 0,
+                bold: cell.flags & condr_core::CELL_BOLD != 0,
+                italic: cell.flags & condr_core::CELL_ITALIC != 0,
+                underline: cell.flags & condr_core::CELL_UNDERLINE != 0,
                 link: cell.hyperlink.as_ref().map(ToString::to_string),
             }
         })
@@ -268,13 +262,18 @@ fn color(color: TerminalColor, foreground: bool) -> u32 {
             (u32::from(red) << 16) | (u32::from(green) << 8) | u32::from(blue)
         }
         TerminalColor::Indexed(index) => default_indexed_color(index),
-        TerminalColor::Named(index @ 0..=15) => DEFAULT_ANSI_COLORS[usize::from(index)],
-        TerminalColor::Named(index @ 259..=266) => DEFAULT_ANSI_COLORS[usize::from(index - 259)],
-        TerminalColor::Named(257) => DEFAULT_BACKGROUND_COLOR,
-        TerminalColor::Named(258) => DEFAULT_CURSOR_COLOR,
-        TerminalColor::Named(_) if foreground => DEFAULT_FOREGROUND_COLOR,
-        TerminalColor::Named(_) => DEFAULT_BACKGROUND_COLOR,
+        TerminalColor::Default if foreground => DEFAULT_FOREGROUND_COLOR,
+        TerminalColor::Default => DEFAULT_BACKGROUND_COLOR,
     }
+}
+
+/// Faint text, as the desktop draws it: the foreground at 65% over the background.
+fn faint(foreground: u32, background: u32) -> u32 {
+    let channel = |shift: u32| {
+        let (front, back) = ((foreground >> shift) & 0xff, (background >> shift) & 0xff);
+        ((front * 65 + back * 35) / 100) << shift
+    };
+    channel(16) | channel(8) | channel(0)
 }
 
 #[cfg(test)]

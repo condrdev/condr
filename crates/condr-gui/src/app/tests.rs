@@ -51,8 +51,9 @@ pub(super) fn keystroke(keys: &str) -> Keystroke {
 fn terminal_cell(text: &str) -> TerminalCell {
     TerminalCell {
         text: text.into(),
-        foreground: TerminalColor::Named(0),
-        background: TerminalColor::Named(0),
+        foreground: TerminalColor::Default,
+        background: TerminalColor::Default,
+        underline_color: TerminalColor::Default,
         flags: 0,
         hyperlink: None,
     }

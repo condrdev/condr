@@ -57,10 +57,11 @@ message TerminalSelection {
 }
 
 // Cells as parallel packed columns, one entry per cell, so a frame is one message decode
-// and no per-cell allocation. A color is `value << 2 | kind`: kind 1 named (value is the
-// named index), 2 indexed, 3 rgb (value is 0xRRGGBB). A hyperlink is its index in the
-// frame's table plus one, 0 for none. `flags` and `hyperlink` may be empty, meaning zero
-// for every cell.
+// and no per-cell allocation. A color is `value << 2 | kind`: 0 is the default color, kind
+// 2 indexed, 3 rgb (value is 0xRRGGBB); kind 1, a named color, is no longer sent and reads
+// as the default. A hyperlink is its index in the frame's table plus one, 0 for none.
+// `flags` lay out the cell's width, underline style and attributes (ADR 0051). `flags`,
+// `hyperlink` and `underline` may be empty, meaning zero for every cell.
 message TerminalCells {
   // The text of every cell, concatenated.
   string text = 1;
@@ -70,6 +71,8 @@ message TerminalCells {
   repeated uint32 background = 4;
   repeated uint32 flags = 5;
   repeated uint32 hyperlink = 6;
+  // The underline's color, the text's when 0.
+  repeated uint32 underline = 7;
 }
 
 message TerminalView {

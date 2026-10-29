@@ -54,20 +54,24 @@ pub use session::{
     Workspace, WorkspaceId, WorktreeAssociation, valid_diff_path,
 };
 pub use snapshot::{SessionSnapshot, SnapshotError};
+pub use terminal::{
+    CELL_BLINK, CELL_BOLD, CELL_FAINT, CELL_INVERSE, CELL_INVISIBLE, CELL_ITALIC, CELL_OVERLINE,
+    CELL_SPACER_HEAD, CELL_SPACER_TAIL, CELL_STRIKETHROUGH, CELL_UNDERLINE, CELL_UNDERLINE_CURLY,
+    CELL_UNDERLINE_DASHED, CELL_UNDERLINE_DOTTED, CELL_UNDERLINE_DOUBLE, CELL_UNDERLINE_SINGLE,
+    CELL_WIDE, CELL_WIDTH, CELL_WRAPPED, DEFAULT_ANSI_COLORS, DEFAULT_BACKGROUND_COLOR,
+    DEFAULT_CURSOR_COLOR, DEFAULT_FOREGROUND_COLOR, DETECTED_LINK_FLAG, TerminalCell,
+    TerminalCellRun, TerminalColor, TerminalCommand, TerminalCursor, TerminalCursorShape,
+    TerminalFrameError, TerminalHyperlinkBudget, TerminalKey, TerminalKeyEventKind,
+    TerminalModifiers, TerminalMouseButton, TerminalMouseEvent, TerminalMousePosition,
+    TerminalMouseTracking, TerminalMouseWheel, TerminalPosition, TerminalScroll, TerminalSelection,
+    TerminalSelectionUnit, TerminalSide, TerminalSize, TerminalUpdate, TerminalView,
+    TerminalViewDelta, TerminalViewFrame, default_indexed_color,
+};
 #[cfg(feature = "runtime")]
 pub use terminal::{
     CURSOR_POSITION_SETTLE, CommandBuilder, PaneEnvironment, TERMINAL_IDLE_CHECK,
     TerminalAgentProbe, TerminalCwdProbe, TerminalLaunchProbe, TerminalNoticeBatch,
     TerminalNoticeProbe, TerminalRuntime, TerminalViewSource, default_shell_program,
-};
-pub use terminal::{
-    DEFAULT_ANSI_COLORS, DEFAULT_BACKGROUND_COLOR, DEFAULT_CURSOR_COLOR, DEFAULT_FOREGROUND_COLOR,
-    DETECTED_LINK_FLAG, TerminalCell, TerminalCellRun, TerminalColor, TerminalCommand,
-    TerminalCursor, TerminalCursorShape, TerminalFrameError, TerminalHyperlinkBudget, TerminalKey,
-    TerminalKeyEventKind, TerminalModifiers, TerminalMouseButton, TerminalMouseEvent,
-    TerminalMousePosition, TerminalMouseTracking, TerminalMouseWheel, TerminalPosition,
-    TerminalScroll, TerminalSelection, TerminalSelectionUnit, TerminalSide, TerminalSize,
-    TerminalUpdate, TerminalView, TerminalViewDelta, TerminalViewFrame, default_indexed_color,
 };
 
 pub const APP_NAME: &str = "Condr";

@@ -307,8 +307,9 @@ fn terminal_test_view(revision: u64, text: &str) -> TerminalView {
         .chars()
         .map(|character| condr_core::TerminalCell {
             text: character.to_string().into(),
-            foreground: condr_core::TerminalColor::Named(0),
-            background: condr_core::TerminalColor::Named(0),
+            foreground: condr_core::TerminalColor::Default,
+            background: condr_core::TerminalColor::Default,
+            underline_color: condr_core::TerminalColor::Default,
             flags: 0,
             hyperlink: None,
         })

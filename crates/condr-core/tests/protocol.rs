@@ -588,8 +588,9 @@ fn terminal_snapshot(pane_id: PaneId, text: String) -> PaneTerminalSnapshot {
             mouse_tracking: condr_core::TerminalMouseTracking::None,
             cells: vec![condr_core::TerminalCell {
                 text: text.into(),
-                foreground: condr_core::TerminalColor::Named(0),
-                background: condr_core::TerminalColor::Named(0),
+                foreground: condr_core::TerminalColor::Default,
+                background: condr_core::TerminalColor::Default,
+                underline_color: condr_core::TerminalColor::Default,
                 flags: 0,
                 hyperlink: None,
             }],
@@ -610,8 +611,9 @@ fn large_terminal_snapshot(pane_id: PaneId) -> PaneTerminalSnapshot {
     view.cells = vec![
         condr_core::TerminalCell {
             text: "x".repeat(40).into(),
-            foreground: condr_core::TerminalColor::Named(0),
-            background: condr_core::TerminalColor::Named(0),
+            foreground: condr_core::TerminalColor::Default,
+            background: condr_core::TerminalColor::Default,
+            underline_color: condr_core::TerminalColor::Default,
             flags: 0,
             hyperlink: None,
         };
@@ -771,7 +773,12 @@ fn the_largest_terminal_record_fits_the_record_limit() {
                 green: 255,
                 blue: 255,
             },
-            flags: u16::MAX,
+            underline_color: condr_core::TerminalColor::Rgb {
+                red: 255,
+                green: 255,
+                blue: 255,
+            },
+            flags: u32::MAX,
             hyperlink: Some(format!("{:08}{}", index % links, "x".repeat(URI - 8)).into()),
         })
         .collect();

@@ -1859,8 +1859,9 @@ fn selected_block_elements_stay_visible_in_the_selection_text_color() {
 
     let cell = |text: &str| TerminalCell {
         text: text.into(),
-        foreground: TerminalColor::Named(256),
-        background: TerminalColor::Named(257),
+        foreground: TerminalColor::Default,
+        background: TerminalColor::Default,
+        underline_color: TerminalColor::Default,
         flags: 0,
         hyperlink: None,
     };
@@ -2147,8 +2148,8 @@ fn a_program_that_asks_for_key_event_types_receives_repeats_and_releases() {
     let stroke = keystroke;
 
     // Disambiguation and event types (3): Ctrl+C pressed, held and let go is
-    // CSI 99;5:1u, CSI 99;5:2u, CSI 99;5:3u.
-    read_key_bytes(window, &view, pane_id, "CONDR_EVENTS", 3, 27);
+    // CSI 99;5u, CSI 99;5:2u, CSI 99;5:3u, a press left unnumbered.
+    read_key_bytes(window, &view, pane_id, "CONDR_EVENTS", 3, 25);
     window.simulate_keystrokes("ctrl-c");
     window.simulate_event(KeyDownEvent {
         keystroke: stroke("ctrl-c"),
@@ -2165,7 +2166,7 @@ fn a_program_that_asks_for_key_event_types_receives_repeats_and_releases() {
                 &view,
                 1,
                 pane_id,
-                "CONDR_EVENTS_BYTES_1b5b39393b353a31751b5b39393b353a32751b5b39393b353a3375",
+                "CONDR_EVENTS_BYTES_1b5b39393b35751b5b39393b353a32751b5b39393b353a3375",
             )
         }),
         "a program with kitty event types must receive the press, the repeat and the release"
@@ -2197,7 +2198,7 @@ fn a_program_that_asks_for_key_event_types_receives_repeats_and_releases() {
     // Ctrl+Left after it is the next byte.
     #[cfg(target_os = "macos")]
     {
-        read_key_bytes(window, &view, pane_id, "CONDR_CMD", 3, 26);
+        read_key_bytes(window, &view, pane_id, "CONDR_CMD", 3, 24);
         window.simulate_keystrokes("cmd-c");
         window.simulate_event(KeyUpEvent {
             keystroke: stroke("cmd-c"),
@@ -2214,7 +2215,7 @@ fn a_program_that_asks_for_key_event_types_receives_repeats_and_releases() {
                     &view,
                     1,
                     pane_id,
-                    "CONDR_CMD_BYTES_1b5b39393b393a31751b5b39393b393a33751b5b313b353a3144",
+                    "CONDR_CMD_BYTES_1b5b39393b39751b5b39393b393a33751b5b313b353a3144",
                 )
             }),
             "Cmd+C's release must follow its press, and a kept press must have no release"

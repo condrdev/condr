@@ -8,11 +8,12 @@ use cache::{ShapedCell, TerminalRenderCacheKey, cell_font};
 use colors::{ContrastMemo, is_app_chosen_exact_color, is_decorative_character, terminal_color};
 use condr_core::protocol::RuntimeEpoch;
 use condr_core::{
-    DEFAULT_ANSI_COLORS, DEFAULT_BACKGROUND_COLOR, DEFAULT_CURSOR_COLOR, DEFAULT_FOREGROUND_COLOR,
-    DETECTED_LINK_FLAG, PaneId, TerminalColor, TerminalCursorShape, TerminalModifiers,
-    TerminalMouseButton, TerminalMouseEvent, TerminalMousePosition, TerminalMouseTracking,
-    TerminalMouseWheel, TerminalPosition, TerminalSelection, TerminalSide, TerminalSize,
-    TerminalView, default_indexed_color,
+    CELL_FAINT, CELL_INVERSE, CELL_INVISIBLE, CELL_STRIKETHROUGH, CELL_UNDERLINE,
+    CELL_UNDERLINE_CURLY, CELL_UNDERLINE_SINGLE, DEFAULT_ANSI_COLORS, DEFAULT_BACKGROUND_COLOR,
+    DEFAULT_CURSOR_COLOR, DEFAULT_FOREGROUND_COLOR, DETECTED_LINK_FLAG, PaneId, TerminalColor,
+    TerminalCursorShape, TerminalModifiers, TerminalMouseButton, TerminalMouseEvent,
+    TerminalMousePosition, TerminalMouseTracking, TerminalMouseWheel, TerminalPosition,
+    TerminalSelection, TerminalSide, TerminalSize, TerminalView, default_indexed_color,
 };
 use geometry::*;
 use gpui_kit::{
@@ -38,18 +39,6 @@ use std::sync::Arc;
 pub(crate) use cache::TerminalRenderCache;
 pub(crate) use colors::TerminalPalette;
 pub(crate) use input::link_at;
-
-const INVERSE: u16 = 1 << 0;
-const BOLD: u16 = 1 << 1;
-const ITALIC: u16 = 1 << 2;
-const UNDERLINE: u16 = 1 << 3;
-const WIDE_CHAR_SPACER: u16 = 1 << 6;
-const DIM: u16 = 1 << 7;
-const HIDDEN: u16 = 1 << 8;
-const STRIKEOUT: u16 = 1 << 9;
-const LEADING_WIDE_CHAR_SPACER: u16 = 1 << 10;
-const UNDERCURL: u16 = 1 << 12;
-const ALL_UNDERLINES: u16 = 0b0111_1000_0000_1000;
 
 pub(crate) struct TerminalElement {
     view: Entity<Condr>,
@@ -235,8 +224,8 @@ impl Element for TerminalElement {
                     || hovered_range
                         .as_ref()
                         .is_some_and(|range| range.contains(&(cache_index as u32)));
-                let flags = if linked {
-                    cell.flags | UNDERLINE
+                let flags = if linked && cell.flags & CELL_UNDERLINE == 0 {
+                    cell.flags | CELL_UNDERLINE_SINGLE
                 } else {
                     cell.flags
                 };
@@ -249,7 +238,7 @@ impl Element for TerminalElement {
                 );
                 let mut foreground = terminal_color(cell.foreground, true, &palette);
                 let mut background = terminal_color(cell.background, false, &palette);
-                if flags & INVERSE != 0 {
+                if flags & CELL_INVERSE != 0 {
                     std::mem::swap(&mut foreground, &mut background);
                 }
                 if background != palette.background {
@@ -267,8 +256,9 @@ impl Element for TerminalElement {
                         _ => background_regions.push(region),
                     }
                 }
-                if flags & (HIDDEN | WIDE_CHAR_SPACER | LEADING_WIDE_CHAR_SPACER) != 0
-                    || (cell.text == " " && flags & (ALL_UNDERLINES | STRIKEOUT) == 0)
+                if cell.is_spacer()
+                    || flags & CELL_INVISIBLE != 0
+                    || (cell.text == " " && flags & (CELL_UNDERLINE | CELL_STRIKETHROUGH) == 0)
                 {
                     continue;
                 }
@@ -278,7 +268,7 @@ impl Element for TerminalElement {
                     (Some(character), None) => Some(character),
                     _ => None,
                 };
-                let foreground_source = if flags & INVERSE != 0 {
+                let foreground_source = if flags & CELL_INVERSE != 0 {
                     cell.background
                 } else {
                     cell.foreground
@@ -288,7 +278,7 @@ impl Element for TerminalElement {
                 {
                     foreground = contrast_memo.ensure(foreground, background);
                 }
-                if flags & DIM != 0 {
+                if flags & CELL_FAINT != 0 {
                     foreground = foreground.opacity(0.65);
                 }
                 // Before block elements turn into quads, so a selected █ takes the
@@ -313,15 +303,16 @@ impl Element for TerminalElement {
 
                 let line = render_cache.shaped_line(&cell.text, foreground, flags, || {
                     let font = cell_font(style.font(), &cell.text, flags);
-                    let underline = (flags & ALL_UNDERLINES != 0).then_some(UnderlineStyle {
+                    let underline = (flags & CELL_UNDERLINE != 0).then_some(UnderlineStyle {
                         thickness: px(1.),
                         color: Some(foreground),
-                        wavy: flags & UNDERCURL != 0,
+                        wavy: flags & CELL_UNDERLINE == CELL_UNDERLINE_CURLY,
                     });
-                    let strikethrough = (flags & STRIKEOUT != 0).then_some(StrikethroughStyle {
-                        thickness: px(1.),
-                        color: Some(foreground),
-                    });
+                    let strikethrough =
+                        (flags & CELL_STRIKETHROUGH != 0).then_some(StrikethroughStyle {
+                            thickness: px(1.),
+                            color: Some(foreground),
+                        });
                     window.text_system().shape_line(
                         cell.text.as_str().into(),
                         font_size,
@@ -381,7 +372,7 @@ impl Element for TerminalElement {
                 bounds.left() + cell_size.width * usize::from(cursor.column),
                 bounds.top() + cell_size.height * usize::from(cursor.row),
             );
-            let cursor_color = terminal_color(TerminalColor::Named(258), true, &palette);
+            let cursor_color = palette.cursor;
             // Shape the character under the cursor so a block cursor can
             // repaint it in the background color, and so the cursor grows to
             // cover wide characters instead of splitting them.
@@ -886,8 +877,9 @@ mod tests {
     fn hyperlink_runs_resolve_to_cell_ranges() {
         let cell = |text: &str, hyperlink: Option<&str>, flags| condr_core::TerminalCell {
             text: text.into(),
-            foreground: TerminalColor::Named(0),
-            background: TerminalColor::Named(0),
+            foreground: TerminalColor::Default,
+            background: TerminalColor::Default,
+            underline_color: TerminalColor::Default,
             flags,
             hyperlink: hyperlink.map(SmolStr::new),
         };
@@ -1060,11 +1052,11 @@ mod tests {
         let palette = TerminalPalette::default();
 
         assert_eq!(
-            terminal_color(TerminalColor::Named(256), true, &palette),
+            terminal_color(TerminalColor::Default, true, &palette),
             palette.foreground
         );
         assert_eq!(
-            terminal_color(TerminalColor::Named(257), false, &palette),
+            terminal_color(TerminalColor::Default, false, &palette),
             palette.background
         );
         assert_eq!(

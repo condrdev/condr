@@ -250,10 +250,11 @@ impl TerminalHyperlinkBudget {
     }
 }
 
-/// A cell color as one varint: the kind in the low two bits, its value above them.
+/// A cell color as one varint: the kind in the low two bits, its value above them. Zero is
+/// the default colour.
 fn encode_color(color: TerminalColor) -> u32 {
     match color {
-        TerminalColor::Named(value) => u32::from(value) << 2 | 1,
+        TerminalColor::Default => 0,
         TerminalColor::Indexed(value) => u32::from(value) << 2 | 2,
         TerminalColor::Rgb { red, green, blue } => {
             (u32::from(red) << 16 | u32::from(green) << 8 | u32::from(blue)) << 2 | 3
@@ -264,7 +265,9 @@ fn encode_color(color: TerminalColor) -> u32 {
 fn decode_color(value: u32) -> WireResult<TerminalColor> {
     let payload = value >> 2;
     Ok(match value & 3 {
-        1 => TerminalColor::Named(narrow(payload, "named color")?),
+        0 if payload == 0 => TerminalColor::Default,
+        // Kind 1 was a named colour, the default foreground or background nearly always.
+        1 => TerminalColor::Default,
         2 => TerminalColor::Indexed(narrow(payload, "indexed color")?),
         3 if payload <= 0xff_ffff => TerminalColor::Rgb {
             red: (payload >> 16) as u8,
@@ -275,8 +278,8 @@ fn decode_color(value: u32) -> WireResult<TerminalColor> {
     })
 }
 
-/// Writes cells into columns, interning their hyperlinks. `flags` and `hyperlink` stay
-/// empty until a cell needs them, since most frames have neither.
+/// Writes cells into columns, interning their hyperlinks. `flags`, `underline` and
+/// `hyperlink` stay empty until a cell needs them, since most frames have none.
 fn encode_cells<'a>(
     cells: impl ExactSizeIterator<Item = &'a TerminalCell>,
     hyperlinks: &mut WireHyperlinks,
@@ -289,8 +292,9 @@ fn encode_cells<'a>(
         background: Vec::with_capacity(count),
         flags: Vec::new(),
         hyperlink: Vec::new(),
+        underline: Vec::new(),
     };
-    let (mut any_flags, mut any_hyperlink) = (false, false);
+    let (mut any_flags, mut any_hyperlink, mut any_underline) = (false, false, false);
     for (index, cell) in cells.enumerate() {
         columns.text.push_str(&cell.text);
         columns.text_len.push(cell.text.len() as u32);
@@ -302,7 +306,16 @@ fn encode_cells<'a>(
             columns.flags.resize(index, 0);
         }
         if any_flags {
-            columns.flags.push(u32::from(cell.flags));
+            columns.flags.push(cell.flags);
+        }
+        let underline = encode_color(cell.underline_color);
+        if underline != 0 && !any_underline {
+            any_underline = true;
+            columns.underline.reserve(count);
+            columns.underline.resize(index, 0);
+        }
+        if any_underline {
+            columns.underline.push(underline);
         }
         let hyperlink = cell
             .hyperlink
@@ -343,6 +356,7 @@ impl<'a> CellReader<'a> {
             || columns.background.len() != count
             || !optional(&columns.flags)
             || !optional(&columns.hyperlink)
+            || !optional(&columns.underline)
         {
             return Err(malformed(
                 "terminal cell columns disagree on the cell count",
@@ -377,16 +391,16 @@ impl<'a> CellReader<'a> {
                     })?,
             ),
         };
-        let flags = match self.columns.flags.get(index) {
-            Some(&flags) => narrow(flags, "terminal cell flags")?,
-            None => 0,
-        };
+        let flags = self.columns.flags.get(index).copied().unwrap_or(0);
+        let underline_color =
+            decode_color(self.columns.underline.get(index).copied().unwrap_or(0))?;
         self.index += 1;
         self.offset = end;
         Ok(TerminalCell {
             text: SmolStr::new(text),
             foreground: decode_color(self.columns.foreground[index])?,
             background: decode_color(self.columns.background[index])?,
+            underline_color,
             flags,
             hyperlink,
         })

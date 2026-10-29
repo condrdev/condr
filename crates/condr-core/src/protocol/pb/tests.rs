@@ -25,7 +25,8 @@ fn view(cells: TerminalCells, rows: u32, columns: u32) -> super::TerminalView {
     }
 }
 
-/// Two cells, "a" and "bc", named colors, no flags, the first linked.
+/// Two cells, "a" and "bc", default colors as a peer from before names them, no flags,
+/// the first linked.
 fn cells() -> TerminalCells {
     TerminalCells {
         text: "abc".into(),
@@ -34,6 +35,7 @@ fn cells() -> TerminalCells {
         background: vec![257 << 2 | 1, 257 << 2 | 1],
         flags: Vec::new(),
         hyperlink: vec![1, 0],
+        underline: Vec::new(),
     }
 }
 

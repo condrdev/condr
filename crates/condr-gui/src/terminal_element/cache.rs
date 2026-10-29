@@ -19,7 +19,7 @@ pub(super) struct TerminalCellShapeKey {
     pub(super) text: SmolStr,
     /// `Hsla` bit patterns; colors reaching here are already exact.
     pub(super) foreground: [u32; 4],
-    pub(super) flags: u16,
+    pub(super) flags: u32,
 }
 
 /// Shared, not cloned: a `ShapedLine` carries ~3 KB of inline decoration runs, so by
@@ -71,7 +71,7 @@ impl TerminalRenderCache {
         &mut self,
         text: &SmolStr,
         foreground: Hsla,
-        flags: u16,
+        flags: u32,
         shape: impl FnOnce() -> ShapedLine,
     ) -> Rc<ShapedLine> {
         let key = TerminalCellShapeKey {
@@ -113,11 +113,11 @@ pub(super) struct ShapedCell {
     pub(super) line: Rc<ShapedLine>,
 }
 
-pub(super) fn cell_font(mut font: Font, text: &str, flags: u16) -> Font {
-    if flags & BOLD != 0 {
+pub(super) fn cell_font(mut font: Font, text: &str, flags: u32) -> Font {
+    if flags & condr_core::CELL_BOLD != 0 {
         font = font.bold();
     }
-    if flags & ITALIC != 0 {
+    if flags & condr_core::CELL_ITALIC != 0 {
         font = font.italic();
     }
     if let Some(family) = TEXT_SYMBOL_FONT
@@ -201,7 +201,7 @@ mod tests {
         cache.shaped_line(
             &SmolStr::new_inline("x"),
             foreground,
-            BOLD,
+            condr_core::CELL_BOLD,
             ShapedLine::default,
         );
         assert_eq!(cache.shaped_cells(), 4);

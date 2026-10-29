@@ -36,9 +36,15 @@ pub enum TerminalCursorShape {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum TerminalColor {
-    Named(u16),
+    /// The Client's own default foreground or background, or for an underline, the text's.
+    Default,
+    /// An entry of the Client's 256-colour palette.
     Indexed(u8),
-    Rgb { red: u8, green: u8, blue: u8 },
+    Rgb {
+        red: u8,
+        green: u8,
+        blue: u8,
+    },
 }
 
 /// The palette used when nothing else decides a color: OSC 4/10/11 replies to programs that
@@ -81,7 +87,10 @@ pub struct TerminalCell {
     pub text: SmolStr,
     pub foreground: TerminalColor,
     pub background: TerminalColor,
-    pub flags: u16,
+    pub underline_color: TerminalColor,
+    /// Width, underline style and the other attributes, as the `CELL_*` constants lay
+    /// them out (ADR 0051).
+    pub flags: u32,
     /// OSC 8 target URI. Terminal view wire formats intern these per frame.
     pub hyperlink: Option<SmolStr>,
 }
@@ -406,7 +415,40 @@ impl TerminalSize {
     }
 }
 
+/// A cell's width, in its flags' two low bits.
+pub const CELL_WIDTH: u32 = 0b11;
+pub const CELL_WIDE: u32 = 1;
+/// The second cell of a wide character.
+pub const CELL_SPACER_TAIL: u32 = 2;
+/// The last cell of a row that a wide character wrapped away from.
+pub const CELL_SPACER_HEAD: u32 = 3;
+/// A cell's underline style, in the next three bits: 1 single, 2 double, 3 curly,
+/// 4 dotted, 5 dashed.
+pub const CELL_UNDERLINE: u32 = 0b111 << 2;
+pub const CELL_UNDERLINE_SINGLE: u32 = 1 << 2;
+pub const CELL_UNDERLINE_DOUBLE: u32 = 2 << 2;
+pub const CELL_UNDERLINE_CURLY: u32 = 3 << 2;
+pub const CELL_UNDERLINE_DOTTED: u32 = 4 << 2;
+pub const CELL_UNDERLINE_DASHED: u32 = 5 << 2;
+pub const CELL_BOLD: u32 = 1 << 5;
+pub const CELL_ITALIC: u32 = 1 << 6;
+/// Faint text, which the Client dims itself.
+pub const CELL_FAINT: u32 = 1 << 7;
+pub const CELL_BLINK: u32 = 1 << 8;
+pub const CELL_INVERSE: u32 = 1 << 9;
+pub const CELL_INVISIBLE: u32 = 1 << 10;
+pub const CELL_STRIKETHROUGH: u32 = 1 << 11;
+pub const CELL_OVERLINE: u32 = 1 << 12;
 /// Set alongside `hyperlink` on cells whose link the Server found in plain text rather than
-/// received via OSC 8, so clients can underline those only on hover. The one bit the cell
-/// flags leave free until the cell format is redesigned (ADR 0051).
-pub const DETECTED_LINK_FLAG: u16 = 1 << 15;
+/// received via OSC 8, so clients can underline those only on hover.
+pub const DETECTED_LINK_FLAG: u32 = 1 << 13;
+/// On a row's last cell: its text continues on the next row, a soft wrap.
+pub const CELL_WRAPPED: u32 = 1 << 14;
+
+impl TerminalCell {
+    /// A wide character's second cell, or the cell one wrapped away from: it shows nothing
+    /// of its own.
+    pub fn is_spacer(&self) -> bool {
+        self.flags & CELL_WIDTH >= CELL_SPACER_TAIL
+    }
+}

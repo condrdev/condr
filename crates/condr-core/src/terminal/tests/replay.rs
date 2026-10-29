@@ -15,8 +15,6 @@ const MIN_CHECKPOINT_BYTES: usize = 512;
 const PIECE_BYTES: usize = 256;
 const SYNCHRONIZED_BEGIN: &[u8] = b"\x1b[?2026h";
 const SYNCHRONIZED_END: &[u8] = b"\x1b[?2026l";
-/// A wide character's second cell and the cell a wide character wrapped away from.
-const SPACER_FLAGS: u16 = 1 << 6 | 1 << 10;
 
 #[test]
 fn recorded_sessions_show_the_screens_they_showed_before() {
@@ -93,7 +91,7 @@ fn screen(fed: usize, view: &TerminalView) -> String {
     for row in 0..view.size.rows {
         let text: String = (0..view.size.columns)
             .filter_map(|column| view.cell(row, column))
-            .filter(|cell| cell.flags & SPACER_FLAGS == 0)
+            .filter(|cell| !cell.is_spacer())
             .map(|cell| cell.text.as_str())
             .collect();
         writeln!(screen, "|{}", text.trim_end()).unwrap();

@@ -11,8 +11,9 @@ pub(in crate::terminal) fn publish_view(
 pub(in crate::terminal) fn blank_cell() -> TerminalCell {
     TerminalCell {
         text: SmolStr::new_static(" "),
-        foreground: TerminalColor::Named(256),
-        background: TerminalColor::Named(257),
+        foreground: TerminalColor::Default,
+        background: TerminalColor::Default,
+        underline_color: TerminalColor::Default,
         flags: 0,
         hyperlink: None,
     }

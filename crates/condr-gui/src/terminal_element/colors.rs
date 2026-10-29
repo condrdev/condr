@@ -63,7 +63,7 @@ pub(super) fn is_app_chosen_exact_color(color: TerminalColor) -> bool {
     match color {
         TerminalColor::Rgb { .. } => true,
         TerminalColor::Indexed(index) => index >= 16,
-        TerminalColor::Named(_) => false,
+        TerminalColor::Default => false,
     }
 }
 
@@ -102,16 +102,8 @@ pub(super) fn terminal_color(
             rgb((u32::from(red) << 16) | (u32::from(green) << 8) | u32::from(blue)).into()
         }
         TerminalColor::Indexed(index) => indexed_color(index, palette),
-        TerminalColor::Named(256 | 267) => palette.foreground,
-        TerminalColor::Named(257) => palette.background,
-        TerminalColor::Named(258) => palette.cursor,
-        TerminalColor::Named(index @ 259..=266) => {
-            palette.normal[usize::from(index - 259)].opacity(0.65)
-        }
-        TerminalColor::Named(268) => palette.foreground.opacity(0.65),
-        TerminalColor::Named(index @ 0..=15) => indexed_color(index as u8, palette),
-        TerminalColor::Named(_) if foreground => palette.foreground,
-        TerminalColor::Named(_) => palette.background,
+        TerminalColor::Default if foreground => palette.foreground,
+        TerminalColor::Default => palette.background,
     }
 }
 

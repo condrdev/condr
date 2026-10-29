@@ -1294,8 +1294,9 @@ fn wide_view(revision: u64, bytes: usize) -> TerminalView {
         cells: vec![
             condr_core::TerminalCell {
                 text: "x".repeat(200).into(),
-                foreground: condr_core::TerminalColor::Named(0),
-                background: condr_core::TerminalColor::Named(0),
+                foreground: condr_core::TerminalColor::Default,
+                background: condr_core::TerminalColor::Default,
+                underline_color: condr_core::TerminalColor::Default,
                 flags: 0,
                 hyperlink: None,
             };

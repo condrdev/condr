@@ -17,30 +17,6 @@ const SCROLLBACK_BYTES: usize = 50 * 1024 * 1024;
 /// alacritty's set without `:`, so a double-click keeps URLs and Windows paths whole.
 const WORD_BOUNDARIES: &str = ",│`|\"' ()[]{}<>\t";
 
-/// The cell flag bits the wire carries: alacritty's layout, which the GUI and the
-/// Companion read, until the cell format is redesigned (ADR 0051).
-pub(super) mod flag {
-    pub const INVERSE: u16 = 1;
-    pub const BOLD: u16 = 1 << 1;
-    pub const ITALIC: u16 = 1 << 2;
-    pub const UNDERLINE: u16 = 1 << 3;
-    pub const WRAPLINE: u16 = 1 << 4;
-    pub const WIDE_CHAR: u16 = 1 << 5;
-    pub const WIDE_CHAR_SPACER: u16 = 1 << 6;
-    pub const DIM: u16 = 1 << 7;
-    pub const HIDDEN: u16 = 1 << 8;
-    pub const STRIKEOUT: u16 = 1 << 9;
-    pub const LEADING_WIDE_CHAR_SPACER: u16 = 1 << 10;
-    pub const DOUBLE_UNDERLINE: u16 = 1 << 11;
-    pub const UNDERCURL: u16 = 1 << 12;
-    pub const DOTTED_UNDERLINE: u16 = 1 << 13;
-    pub const DASHED_UNDERLINE: u16 = 1 << 14;
-}
-/// alacritty's named colour numbers the wire carries for the default foreground and
-/// background.
-const NAMED_FOREGROUND: u16 = 256;
-const NAMED_BACKGROUND: u16 = 257;
-
 /// The modes key and mouse encoding read, as flags.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(super) struct TermMode(u32);
@@ -481,7 +457,7 @@ impl Vt {
                 }
                 let mut mapped = terminal_cell(&cell, &colors);
                 if wrapped && x + 1 == columns {
-                    mapped.flags |= flag::WRAPLINE;
+                    mapped.flags |= CELL_WRAPPED;
                 }
                 if cell.hyperlink {
                     linked.push((start + x, cell.x, row_y));
@@ -579,11 +555,9 @@ impl Vt {
             .map(|row| {
                 let text: String = (0..size.columns)
                     .filter_map(|column| view.cell(row, column))
-                    .filter(|cell| {
-                        cell.flags & (flag::WIDE_CHAR_SPACER | flag::LEADING_WIDE_CHAR_SPACER) == 0
-                    })
+                    .filter(|cell| !cell.is_spacer())
                     .map(|cell| {
-                        if cell.flags & flag::HIDDEN != 0 {
+                        if cell.flags & CELL_INVISIBLE != 0 {
                             " "
                         } else {
                             cell.text.as_str()
@@ -728,9 +702,9 @@ struct Colors {
 }
 
 impl Colors {
-    fn color(&self, color: VtColor, default: u16) -> TerminalColor {
+    fn color(&self, color: VtColor) -> TerminalColor {
         match color {
-            VtColor::Default => TerminalColor::Named(default),
+            VtColor::Default => TerminalColor::Default,
             VtColor::Palette(index)
                 if self.palette[usize::from(index)] == self.default_palette[usize::from(index)] =>
             {
@@ -752,37 +726,39 @@ fn rgb_color(rgb: ghostty::Rgb) -> TerminalColor {
 
 fn terminal_cell(cell: &ghostty::Cell<'_>, colors: &Colors) -> TerminalCell {
     let style = cell.style;
-    let mut flags = 0;
+    let mut flags = match cell.width {
+        CellWidth::Narrow => 0,
+        CellWidth::Wide => CELL_WIDE,
+        CellWidth::SpacerTail => CELL_SPACER_TAIL,
+        CellWidth::SpacerHead => CELL_SPACER_HEAD,
+    };
+    flags |= match style.underline {
+        Underline::None => 0,
+        Underline::Single => CELL_UNDERLINE_SINGLE,
+        Underline::Double => CELL_UNDERLINE_DOUBLE,
+        Underline::Curly => CELL_UNDERLINE_CURLY,
+        Underline::Dotted => CELL_UNDERLINE_DOTTED,
+        Underline::Dashed => CELL_UNDERLINE_DASHED,
+    };
     for (set, bit) in [
-        (style.inverse, flag::INVERSE),
-        (style.bold, flag::BOLD),
-        (style.italic, flag::ITALIC),
-        (style.faint, flag::DIM),
-        (style.invisible, flag::HIDDEN),
-        (style.strikethrough, flag::STRIKEOUT),
-        (cell.width == CellWidth::Wide, flag::WIDE_CHAR),
-        (cell.width == CellWidth::SpacerTail, flag::WIDE_CHAR_SPACER),
-        (
-            cell.width == CellWidth::SpacerHead,
-            flag::LEADING_WIDE_CHAR_SPACER,
-        ),
+        (style.bold, CELL_BOLD),
+        (style.italic, CELL_ITALIC),
+        (style.faint, CELL_FAINT),
+        (style.blink, CELL_BLINK),
+        (style.inverse, CELL_INVERSE),
+        (style.invisible, CELL_INVISIBLE),
+        (style.strikethrough, CELL_STRIKETHROUGH),
+        (style.overline, CELL_OVERLINE),
     ] {
         if set {
             flags |= bit;
         }
     }
-    flags |= match style.underline {
-        Underline::None => 0,
-        Underline::Single => flag::UNDERLINE,
-        Underline::Double => flag::DOUBLE_UNDERLINE,
-        Underline::Curly => flag::UNDERCURL,
-        Underline::Dotted => flag::DOTTED_UNDERLINE,
-        Underline::Dashed => flag::DASHED_UNDERLINE,
-    };
     TerminalCell {
         text: cell_text(cell.text),
-        foreground: colors.color(style.foreground, NAMED_FOREGROUND),
-        background: colors.color(style.background, NAMED_BACKGROUND),
+        foreground: colors.color(style.foreground),
+        background: colors.color(style.background),
+        underline_color: colors.color(style.underline_color),
         flags,
         hyperlink: None,
     }
@@ -813,7 +789,6 @@ fn detect_links(view: &mut TerminalView) {
     });
     let columns = usize::from(view.size.columns);
     let rows = usize::from(view.size.rows);
-    let spacer = flag::WIDE_CHAR_SPACER | flag::LEADING_WIDE_CHAR_SPACER;
     // Rows kept from the last frame still carry the links found then.
     for cell in &mut view.cells {
         if cell.flags & DETECTED_LINK_FLAG != 0 {
@@ -825,7 +800,7 @@ fn detect_links(view: &mut TerminalView) {
     while row < rows {
         // One logical line: this row and every row its predecessor wrapped into.
         let first = row;
-        while row + 1 < rows && view.cells[(row + 1) * columns - 1].flags & flag::WRAPLINE != 0 {
+        while row + 1 < rows && view.cells[(row + 1) * columns - 1].flags & CELL_WRAPPED != 0 {
             row += 1;
         }
         let cells = first * columns..(row + 1) * columns;
@@ -835,7 +810,7 @@ fn detect_links(view: &mut TerminalView) {
         let mut owners = Vec::new();
         for index in cells.clone() {
             let cell = &view.cells[index];
-            if cell.flags & spacer == 0 {
+            if !cell.is_spacer() {
                 let character = cell.text.chars().next().unwrap_or(' ');
                 owners.push((text.len(), index));
                 text.push(character);

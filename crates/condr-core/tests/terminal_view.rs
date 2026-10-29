@@ -4,8 +4,9 @@ use smol_str::SmolStr;
 fn blank_cell() -> TerminalCell {
     TerminalCell {
         text: " ".into(),
-        foreground: TerminalColor::Named(256),
-        background: TerminalColor::Named(257),
+        foreground: TerminalColor::Default,
+        background: TerminalColor::Default,
+        underline_color: TerminalColor::Default,
         flags: 0,
         hyperlink: None,
     }

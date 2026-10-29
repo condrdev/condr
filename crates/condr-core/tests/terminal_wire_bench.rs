@@ -35,8 +35,9 @@ fn cells() -> Vec<TerminalCell> {
     let mut random = Lcg(7);
     let blank = TerminalCell {
         text: SmolStr::new_static(" "),
-        foreground: TerminalColor::Named(256),
-        background: TerminalColor::Named(257),
+        foreground: TerminalColor::Default,
+        background: TerminalColor::Default,
+        underline_color: TerminalColor::Default,
         flags: 0,
         hyperlink: None,
     };
@@ -60,13 +61,14 @@ fn cells() -> Vec<TerminalCell> {
                     green: (r >> 8) as u8,
                     blue: (r >> 16) as u8,
                 },
-                _ => TerminalColor::Named(256),
+                _ => TerminalColor::Default,
             };
             cells.push(TerminalCell {
                 text: SmolStr::new(character.to_string()),
                 foreground,
-                background: TerminalColor::Named(257),
-                flags: u16::from(r.is_multiple_of(15)),
+                background: TerminalColor::Default,
+                underline_color: TerminalColor::Default,
+                flags: u32::from(r.is_multiple_of(15)),
                 hyperlink: None,
             });
         }

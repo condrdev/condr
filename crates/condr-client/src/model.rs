@@ -339,8 +339,9 @@ mod tests {
     fn cell() -> TerminalCell {
         TerminalCell {
             text: "x".into(),
-            foreground: TerminalColor::Named(0),
-            background: TerminalColor::Named(0),
+            foreground: TerminalColor::Default,
+            background: TerminalColor::Default,
+            underline_color: TerminalColor::Default,
             flags: 0,
             hyperlink: None,
         }
