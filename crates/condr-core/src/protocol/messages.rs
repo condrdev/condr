@@ -697,6 +697,14 @@ pub enum SessionEvent {
         pane_id: PaneId,
         progress: Option<TerminalProgress>,
     },
+    /// A desktop notification a program asked for with OSC 9 or 777. The Server sends none
+    /// from a Pane whose Agent reports its state, which Condr notifies of itself
+    /// (ADR 0054).
+    TerminalNotification {
+        pane_id: PaneId,
+        title: Option<String>,
+        body: String,
+    },
     /// The ordered, coalesced BEL attention state for this Pane (ADR 0036).
     TerminalAttentionChanged {
         pane_id: PaneId,

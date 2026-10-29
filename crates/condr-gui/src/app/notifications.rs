@@ -1,15 +1,16 @@
 use super::*;
 use gpui_kit::{SystemNotification, SystemNotificationResponse};
 
-const AGENT_TAG_PREFIX: &str = "agent:";
+const PANE_TAG_PREFIX: &str = "pane:";
 
-/// One notification per Pane: a later change replaces the earlier toast.
-pub(super) fn agent_notification_tag(key: ConnectionKey, pane_id: PaneId) -> SharedString {
-    format!("{AGENT_TAG_PREFIX}{key}:{}", pane_id.as_u64()).into()
+/// One notification per Pane, an Agent's or a program's: a later one replaces the
+/// earlier toast, and clicking it opens the Pane.
+pub(super) fn pane_notification_tag(key: ConnectionKey, pane_id: PaneId) -> SharedString {
+    format!("{PANE_TAG_PREFIX}{key}:{}", pane_id.as_u64()).into()
 }
 
-pub(super) fn parse_agent_notification_tag(tag: &str) -> Option<(ConnectionKey, PaneId)> {
-    let (key, pane_id) = tag.strip_prefix(AGENT_TAG_PREFIX)?.split_once(':')?;
+pub(super) fn parse_pane_notification_tag(tag: &str) -> Option<(ConnectionKey, PaneId)> {
+    let (key, pane_id) = tag.strip_prefix(PANE_TAG_PREFIX)?.split_once(':')?;
     Some((key.parse().ok()?, PaneId::from_u64(pane_id.parse().ok()?)))
 }
 
@@ -58,7 +59,7 @@ impl Condr {
         .collect::<Vec<_>>()
         .join(" · ");
         cx.show_system_notification(SystemNotification {
-            tag: agent_notification_tag(key, pane_id),
+            tag: pane_notification_tag(key, pane_id),
             title: title.into(),
             body: body.into(),
             actions: Vec::new(),
@@ -72,6 +73,43 @@ impl Condr {
         let window = self.main_window();
         cx.defer(move |cx| {
             let _ = window.update(cx, |_, window, _| window.request_attention());
+        });
+    }
+
+    /// A program in a Pane the user is not looking at asked for a desktop notification
+    /// with OSC 9 or 777 (ADR 0054). Its title, or the Pane's, heads the toast.
+    pub(super) fn notify_program(
+        &self,
+        key: ConnectionKey,
+        pane_id: PaneId,
+        title: Option<String>,
+        body: String,
+        cx: &mut App,
+    ) {
+        if !self.notifications || self.terminal_input.focused == Some((key, pane_id)) {
+            return;
+        }
+        let Some(connection) = self.connection(key) else {
+            return;
+        };
+        let title = title
+            .or_else(|| connection.pane_title(pane_id))
+            .unwrap_or_else(|| "Terminal".into());
+        let workspace = connection.session().and_then(|session| {
+            session
+                .workspace_for_pane(pane_id)
+                .map(|workspace| workspace.name().to_owned())
+        });
+        let body = [(!body.is_empty()).then_some(body), workspace]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" · ");
+        cx.show_system_notification(SystemNotification {
+            tag: pane_notification_tag(key, pane_id),
+            title: title.into(),
+            body: body.into(),
+            actions: Vec::new(),
         });
     }
 
@@ -102,7 +140,7 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some((key, pane_id)) = parse_agent_notification_tag(&response.tag) else {
+        let Some((key, pane_id)) = parse_pane_notification_tag(&response.tag) else {
             return;
         };
         window.activate_window();
@@ -112,17 +150,17 @@ impl Condr {
 
 #[cfg(test)]
 mod tests {
-    use super::{agent_notification_tag, parse_agent_notification_tag};
+    use super::{pane_notification_tag, parse_pane_notification_tag};
     use condr_core::PaneId;
 
     #[test]
-    fn agent_notification_tag_round_trips_and_rejects_foreign_tags() {
-        let tag = agent_notification_tag(3, PaneId::from_u64(42));
+    fn pane_notification_tag_round_trips_and_rejects_foreign_tags() {
+        let tag = pane_notification_tag(3, PaneId::from_u64(42));
         assert_eq!(
-            parse_agent_notification_tag(&tag),
+            parse_pane_notification_tag(&tag),
             Some((3, PaneId::from_u64(42)))
         );
-        assert_eq!(parse_agent_notification_tag("agent:3"), None);
-        assert_eq!(parse_agent_notification_tag("update:3:42"), None);
+        assert_eq!(parse_pane_notification_tag("pane:3"), None);
+        assert_eq!(parse_pane_notification_tag("update:3:42"), None);
     }
 }

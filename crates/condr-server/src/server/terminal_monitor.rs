@@ -439,6 +439,21 @@ pub(super) fn apply_terminal_notices(
     if let Some(text) = notices.clipboard {
         state.broadcast_clipboard(pane_id, text);
     }
+    // An Agent that reports its state is notified of by Condr already; its own "turn
+    // complete" would say it twice (ADR 0054).
+    let reporting_agent = state
+        .agents
+        .get(&pane_id)
+        .is_some_and(|agent| agent.state != condr_core::AgentState::Unknown);
+    if !reporting_agent {
+        for notification in notices.notifications {
+            state.publish_background(SessionEvent::TerminalNotification {
+                pane_id,
+                title: notification.title,
+                body: notification.body,
+            });
+        }
+    }
     if let Some(progress) = notices.progress {
         let previous = match progress {
             Some(progress) => state.terminal_progress.insert(pane_id, progress),

@@ -72,7 +72,8 @@ pub use terminal::{
 pub use terminal::{
     CURSOR_POSITION_SETTLE, CommandBuilder, PaneEnvironment, TERMINAL_IDLE_CHECK,
     TerminalAgentProbe, TerminalCwdProbe, TerminalLaunchProbe, TerminalNoticeBatch,
-    TerminalNoticeProbe, TerminalRuntime, TerminalViewSource, default_shell_program,
+    TerminalNoticeProbe, TerminalNotification, TerminalRuntime, TerminalViewSource,
+    default_shell_program,
 };
 
 pub const APP_NAME: &str = "Condr";

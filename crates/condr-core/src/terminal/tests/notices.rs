@@ -43,6 +43,7 @@ fn title_and_bell_notices_are_recorded_once_per_change_and_counted() {
             bells: 2,
             clipboard: Some("world".into()),
             progress: None,
+            notifications: Vec::new(),
         }
     );
     assert!(probe.take().is_empty());
@@ -95,6 +96,7 @@ fn terminal_reply_to_a_stopped_writer_ends_the_reader_cleanly_and_keeps_tail_not
             bells: 1,
             clipboard: Some("tail copy".into()),
             progress: None,
+            notifications: Vec::new(),
         }
     );
 }
@@ -162,4 +164,44 @@ fn progress_is_recorded_once_per_change_and_cleared_by_remove_reset_and_silence(
         "a silent program loses its bar"
     );
     assert!(probe.take().is_empty());
+}
+
+#[test]
+fn program_notifications_are_queued_but_condrs_own_agent_events_are_not() {
+    let mut vt = Vt::new(TerminalSize::new(4, 12)).unwrap();
+    let notices = SharedTerminalNotices::default();
+    let probe = TerminalNoticeProbe {
+        notices: Arc::clone(&notices),
+    };
+    let event = AgentEvent::new(AgentKind::Codex, AgentEventKind::Stop, None, None);
+    let mut stream = event.encode();
+    stream.extend_from_slice(
+        b"\x1b]9;Build done\x07\x1b]777;notify;Deploy;  prod \x07\x1b]777;notify;;\x07",
+    );
+    feed(&mut vt, &notices, &stream);
+    assert_eq!(
+        probe.take().notifications,
+        [
+            TerminalNotification {
+                title: None,
+                body: "Build done".into(),
+            },
+            TerminalNotification {
+                title: Some("Deploy".into()),
+                body: "prod".into(),
+            },
+        ],
+        "the hook event is not one, an empty one is dropped"
+    );
+    assert_eq!(
+        notices.lock().unwrap().agent_events,
+        [AgentNotice::Hook(event)]
+    );
+
+    for index in 0..20 {
+        feed(&mut vt, &notices, format!("\x1b]9;n{index}\x07").as_bytes());
+    }
+    let queued = probe.take().notifications;
+    assert_eq!(queued.len(), 8, "a flood keeps the newest");
+    assert_eq!(queued.last().unwrap().body, "n19");
 }

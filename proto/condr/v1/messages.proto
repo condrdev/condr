@@ -633,6 +633,7 @@ message SessionEvent {
     Empty omitted = 10;
     AgentUnseenChanged agent_unseen_changed = 11;
     TerminalProgressChanged terminal_progress_changed = 12;
+    TerminalNotification terminal_notification = 13;
   }
 }
 
@@ -660,6 +661,15 @@ message TerminalProgressChanged {
   uint64 pane_id = 1;
   // Absent: the progress was removed, timed out or reset.
   TerminalProgress progress = 2;
+}
+
+// A desktop notification a program asked for with OSC 9 or 777, from a Pane whose Agent
+// does not report its state (ADR 0054).
+message TerminalNotification {
+  uint64 pane_id = 1;
+  // Absent when the program gave none.
+  optional string title = 2;
+  string body = 3;
 }
 
 message TerminalAttentionChanged {

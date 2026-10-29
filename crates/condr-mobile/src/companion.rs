@@ -1111,6 +1111,8 @@ fn apply_message(
                     };
                     changes.push(device_change());
                 }
+                // A program's own notification reaches the desktop only (ADR 0054).
+                SessionEvent::TerminalNotification { .. } => {}
                 // Kept for when the apps draw it (ADR 0054).
                 SessionEvent::TerminalProgressChanged { pane_id, progress } => {
                     model.apply_progress(pane_id, progress);

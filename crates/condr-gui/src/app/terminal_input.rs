@@ -284,7 +284,7 @@ impl Condr {
         {
             // Returning to the window shows this Pane: its completion has been seen.
             self.mark_pane_seen(key, pane_id);
-            cx.dismiss_system_notification(&notifications::agent_notification_tag(key, pane_id));
+            cx.dismiss_system_notification(&notifications::pane_notification_tag(key, pane_id));
             self.clear_pane_attention(key, pane_id);
             cx.notify();
         }

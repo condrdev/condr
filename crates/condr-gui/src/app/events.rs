@@ -322,6 +322,14 @@ impl Condr {
                         }
                         notify = true;
                     }
+                    SessionEvent::TerminalNotification {
+                        pane_id,
+                        title,
+                        body,
+                    } => {
+                        self.notify_program(key, pane_id, title, body, cx);
+                        notify = false;
+                    }
                     SessionEvent::TerminalProgressChanged { pane_id, progress } => {
                         self.connections[index]
                             .model

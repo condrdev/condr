@@ -18,6 +18,8 @@ pub(super) struct TerminalNotices {
     pub(super) progress_changed: bool,
     /// When the program last reported its progress, for [`PROGRESS_TIMEOUT`].
     pub(super) progress_at: Option<Instant>,
+    /// OSC 9 and 777 notifications the program sent, oldest first (ADR 0054).
+    pub(super) notifications: Vec<TerminalNotification>,
     /// What the agent said since the agent probe last drained them, oldest first.
     pub(super) agent_events: Vec<AgentNotice>,
     pub(super) agent: AgentDetector,
@@ -64,6 +66,11 @@ impl AgentNotice {
 /// How long a progress lasts without a new report, as in Ghostty (ADR 0054).
 pub(super) const PROGRESS_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// A notification's text beyond this is cut; an OS shows a few lines of it anyway.
+const MAX_NOTIFICATION_BODY_CHARS: usize = 1024;
+/// Notifications a program sends faster than the monitor drains them; the oldest go.
+const MAX_QUEUED_NOTIFICATIONS: usize = 8;
+
 /// More queued notices than this means nobody is draining them; the oldest go.
 const MAX_QUEUED_AGENT_EVENTS: usize = 64;
 
@@ -100,6 +107,27 @@ impl TerminalNotices {
             self.record_progress(None);
         }
         std::mem::take(&mut self.progress_changed).then_some(self.progress)
+    }
+
+    fn record_notification(&mut self, title: &str, body: &str) {
+        let body = body
+            .chars()
+            .filter(|character| !character.is_control())
+            .collect::<String>();
+        let body = body
+            .trim()
+            .chars()
+            .take(MAX_NOTIFICATION_BODY_CHARS)
+            .collect::<String>();
+        let title = sanitize_terminal_title(title);
+        if body.is_empty() && title.is_none() {
+            return;
+        }
+        if self.notifications.len() == MAX_QUEUED_NOTIFICATIONS {
+            self.notifications.remove(0);
+        }
+        self.notifications
+            .push(TerminalNotification { title, body });
     }
 
     fn record_clipboard(&mut self, text: String) {
@@ -156,12 +184,15 @@ pub(super) fn apply_terminal_events(
                 }
             }
             Event::ClipboardWrite(text) => notices.record_clipboard(text),
+            // Condr's own Agent events travel as OSC 777 notifications too.
             Event::Notification { title, body } => {
                 let payload = format!("{AGENT_EVENT_OSC_PREFIX}{body}");
-                if format!("777;notify;{title};") == AGENT_EVENT_OSC_PREFIX
-                    && let Some(event) = AgentEvent::decode(payload.as_bytes())
-                {
-                    notices.record_agent_event(AgentNotice::Hook(event));
+                if format!("777;notify;{title};") == AGENT_EVENT_OSC_PREFIX {
+                    if let Some(event) = AgentEvent::decode(payload.as_bytes()) {
+                        notices.record_agent_event(AgentNotice::Hook(event));
+                    }
+                } else {
+                    notices.record_notification(&title, &body);
                 }
             }
             Event::ProgramStatus(status) => {

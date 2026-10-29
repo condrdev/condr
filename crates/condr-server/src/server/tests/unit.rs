@@ -308,6 +308,63 @@ fn terminal_progress_is_published_per_change_and_cleared_with_the_terminals_repo
 }
 
 #[test]
+fn program_notifications_reach_clients_unless_the_panes_agent_reports_its_state() {
+    let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
+    state
+        .session
+        .create_workspace(std::env::temp_dir())
+        .expect("Workspace capacity");
+    let pane_id = state.session.workspaces()[0].tabs()[0]
+        .focused_pane()
+        .unwrap()
+        .id();
+    let notify = |state: &mut RuntimeState, body: &str| {
+        apply_terminal_notices(
+            state,
+            pane_id,
+            TerminalNoticeBatch {
+                notifications: vec![condr_core::TerminalNotification {
+                    title: None,
+                    body: body.into(),
+                }],
+                ..TerminalNoticeBatch::default()
+            },
+        );
+    };
+    let bodies = |state: &RuntimeState| {
+        state
+            .events
+            .iter()
+            .filter_map(|event| match &event.event {
+                SessionEvent::TerminalNotification { body, .. } => Some(body.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let agent = |agent_state| AgentSnapshot {
+        session_id: None,
+        kind: condr_core::AgentKind::Codex,
+        state: agent_state,
+        detail: None,
+    };
+
+    notify(&mut state, "plain shell");
+    state
+        .agents
+        .insert(pane_id, agent(condr_core::AgentState::Unknown));
+    notify(&mut state, "silent agent");
+    state
+        .agents
+        .insert(pane_id, agent(condr_core::AgentState::Working));
+    notify(&mut state, "turn complete");
+    assert_eq!(
+        bodies(&state),
+        ["plain shell", "silent agent"],
+        "a reporting Agent is notified of by Condr itself"
+    );
+}
+
+#[test]
 fn terminal_notices_publish_title_changes_once_and_collapse_bells() {
     let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
     state

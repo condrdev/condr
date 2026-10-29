@@ -60,6 +60,17 @@ pub struct TerminalNoticeBatch {
     pub clipboard: Option<String>,
     /// The progress, when it changed (ADR 0054).
     pub progress: Option<Option<TerminalProgress>>,
+    /// OSC 9 and 777 notifications, oldest first (ADR 0054).
+    pub notifications: Vec<TerminalNotification>,
+}
+
+/// A desktop notification a program asked for with OSC 9 or 777 (ADR 0054), its text
+/// stripped of control characters and capped.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TerminalNotification {
+    /// `None` when the program gave none (OSC 9 never does).
+    pub title: Option<String>,
+    pub body: String,
 }
 
 impl TerminalNoticeBatch {
@@ -68,6 +79,7 @@ impl TerminalNoticeBatch {
             && self.bells == 0
             && self.clipboard.is_none()
             && self.progress.is_none()
+            && self.notifications.is_empty()
     }
 }
 
@@ -81,6 +93,7 @@ impl TerminalNoticeProbe {
             bells: std::mem::take(&mut notices.bells),
             clipboard: std::mem::take(&mut notices.clipboard),
             progress: notices.take_progress(),
+            notifications: std::mem::take(&mut notices.notifications),
         }
     }
 }

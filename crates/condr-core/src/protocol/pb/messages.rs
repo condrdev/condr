@@ -1364,6 +1364,15 @@ impl TryFrom<&SessionEvent> for super::SessionEvent {
                     progress: progress.map(encode_progress),
                 })
             }
+            SessionEvent::TerminalNotification {
+                pane_id,
+                title,
+                body,
+            } => Event::TerminalNotification(super::TerminalNotification {
+                pane_id: pane_id.as_u64(),
+                title: title.clone(),
+                body: body.clone(),
+            }),
             SessionEvent::TerminalAttentionChanged { pane_id, attention } => {
                 Event::TerminalAttentionChanged(super::TerminalAttentionChanged {
                     pane_id: pane_id.as_u64(),
@@ -1423,6 +1432,11 @@ impl TryFrom<super::SessionEvent> for SessionEvent {
             Event::TerminalProgressChanged(changed) => Self::TerminalProgressChanged {
                 pane_id: pane(changed.pane_id),
                 progress: changed.progress.map(decode_progress).transpose()?,
+            },
+            Event::TerminalNotification(notification) => Self::TerminalNotification {
+                pane_id: pane(notification.pane_id),
+                title: notification.title,
+                body: notification.body,
             },
             Event::TerminalAttentionChanged(changed) => Self::TerminalAttentionChanged {
                 pane_id: pane(changed.pane_id),

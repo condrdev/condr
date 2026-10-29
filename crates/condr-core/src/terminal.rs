@@ -66,7 +66,10 @@ pub use launch::TerminalLaunchProbe;
 #[cfg(feature = "runtime")]
 pub use portable_pty::CommandBuilder;
 #[cfg(feature = "runtime")]
-pub use probes::{TerminalAgentProbe, TerminalCwdProbe, TerminalNoticeBatch, TerminalNoticeProbe};
+pub use probes::{
+    TerminalAgentProbe, TerminalCwdProbe, TerminalNoticeBatch, TerminalNoticeProbe,
+    TerminalNotification,
+};
 #[cfg(feature = "runtime")]
 pub use runtime::TerminalRuntime;
 #[cfg(feature = "runtime")]
