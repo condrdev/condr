@@ -1,39 +1,39 @@
 use super::*;
 
+/// Feeds `stream` to a VT and applies what it reported, as the PTY reader does.
+fn feed(vt: &mut Vt, notices: &SharedTerminalNotices, stream: &[u8]) -> Vec<u8> {
+    apply_terminal_events(
+        vt.write(stream),
+        notices,
+        &Mutex::new(ReportedCwd::default()),
+    )
+}
+
 #[test]
 fn terminal_color_replies_use_the_render_palette_and_preserve_order() {
-    let size = TerminalSize::new(4, 12);
-    let shared_size = Arc::new(Mutex::new(size));
-    let (event_proxy, pending_replies, _notices) =
-        TerminalEventProxy::new(Arc::clone(&shared_size));
-    let terminal = Arc::new(Mutex::new(Term::new(Config::default(), &size, event_proxy)));
-    let (input, receiver) = TerminalInput::channel();
-    let mut parser: Processor = Processor::new();
-
-    parser.advance(
-        &mut *terminal.lock().expect("terminal state lock poisoned"),
+    let mut vt = Vt::new(TerminalSize::new(4, 12)).unwrap();
+    let replies = feed(
+        &mut vt,
+        &SharedTerminalNotices::default(),
         b"\x1b]11;?\x07\x1b[5n\x1b]4;1;#123456\x07\x1b]4;1;?\x07",
     );
-    flush_terminal_replies(&terminal, &input, &pending_replies).unwrap();
-
     assert_eq!(
-        receiver.recv().unwrap().bytes,
-        b"\x1b]11;rgb:0d0d/1111/1717\x07\x1b[0n\x1b]4;1;rgb:1212/3434/5656\x07"
+        String::from_utf8(replies).unwrap(),
+        "\x1b]11;rgb:0d0d/1111/1717\x07\x1b[0n\x1b]4;1;rgb:1212/3434/5656\x07"
     );
 }
 
 #[test]
 fn title_and_bell_notices_are_recorded_once_per_change_and_counted() {
-    let size = TerminalSize::new(4, 12);
-    let shared_size = Arc::new(Mutex::new(size));
-    let (event_proxy, _pending_replies, notices) =
-        TerminalEventProxy::new(Arc::clone(&shared_size));
-    let probe = TerminalNoticeProbe { notices };
-    let mut terminal = Term::new(Config::default(), &size, event_proxy);
-    let mut parser: Processor = Processor::new();
+    let mut vt = Vt::new(TerminalSize::new(4, 12)).unwrap();
+    let notices = SharedTerminalNotices::default();
+    let probe = TerminalNoticeProbe {
+        notices: Arc::clone(&notices),
+    };
 
-    parser.advance(
-        &mut terminal,
+    feed(
+        &mut vt,
+        &notices,
         b"\x1b]2;\xe2\x9c\xb3 fix tests\x07\x07\x07\x1b]52;c;aGVsbG8=\x07\x1b]52;c;d29ybGQ=\x07",
     );
     assert_eq!(
@@ -47,13 +47,13 @@ fn title_and_bell_notices_are_recorded_once_per_change_and_counted() {
     assert!(probe.take().is_empty());
 
     // A spinner frame is part of the title, as Windows Terminal shows it.
-    parser.advance(&mut terminal, b"\x1b]2;\xe2\x9c\xbb fix tests\x07");
+    feed(&mut vt, &notices, b"\x1b]2;\xe2\x9c\xbb fix tests\x07");
     assert_eq!(probe.take().title, Some(Some("\u{273b} fix tests".into())));
 
-    parser.advance(&mut terminal, b"\x1b]2;\x07");
+    feed(&mut vt, &notices, b"\x1b]2;\x07");
     assert_eq!(probe.take().title, Some(None));
 
-    parser.advance(&mut terminal, b"\x1b]52;c;\x07");
+    feed(&mut vt, &notices, b"\x1b]52;c;\x07");
     assert_eq!(probe.take().clipboard.as_deref(), Some(""));
 }
 
@@ -62,10 +62,10 @@ fn title_and_bell_notices_are_recorded_once_per_change_and_counted() {
 #[test]
 fn terminal_reply_to_a_stopped_writer_ends_the_reader_cleanly_and_keeps_tail_notices() {
     let size = TerminalSize::new(4, 12);
-    let shared_size = Arc::new(Mutex::new(size));
-    let (event_proxy, pending_replies, notices) = TerminalEventProxy::new(Arc::clone(&shared_size));
-    let probe = TerminalNoticeProbe { notices };
-    let terminal = Arc::new(Mutex::new(Term::new(Config::default(), &size, event_proxy)));
+    let notices = SharedTerminalNotices::default();
+    let probe = TerminalNoticeProbe {
+        notices: Arc::clone(&notices),
+    };
     let (input, input_receiver) = TerminalInput::channel();
     drop(input_receiver);
     let (updates, update_receiver) = mpsc::channel();
@@ -74,14 +74,13 @@ fn terminal_reply_to_a_stopped_writer_ends_the_reader_cleanly_and_keeps_tail_not
         reader: Box::new(io::Cursor::new(
             b"\x1b]2;tail title\x07\x07\x1b]52;c;dGFpbCBjb3B5\x07\x1b[5n".to_vec(),
         )),
-        terminal,
+        terminal: Arc::new(Mutex::new(Vt::new(size).unwrap())),
         input,
-        pending_replies,
         revision: Arc::new(AtomicU64::new(0)),
         updates,
         reported_cwd: Arc::new(Mutex::new(ReportedCwd::default())),
-        notices: SharedTerminalNotices::default(),
-        size: shared_size,
+        notices,
+        size: Arc::new(Mutex::new(size)),
         cursor_settle: Arc::new(Mutex::new(Default::default())),
     })
     .unwrap();

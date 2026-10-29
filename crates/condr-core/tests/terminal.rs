@@ -262,14 +262,17 @@ fn the_program_status_query_is_answered_before_primary_device_attributes() {
     command.arg(
         r#"stty raw -echo
 printf '\033]7501;?\033\\\033[c'
-reply=$(dd bs=1 count=15 2>/dev/null | od -An -tx1 | tr -d ' \n')
+reply=$(dd bs=1 count=89 2>/dev/null | od -An -tx1 | tr -d ' \n')
 stty sane
+# Compared here: the answer is longer than a row, and the screen would wrap it.
+[ "$reply" = "1b5d373530313b3f3a7374617465733d69646c652c776f726b696e672c646f6e652c626c6f636b65642c6572726f723a6b696e64733d7065726d697373696f6e2c7175657374696f6e2c617574681b5c1b5b3f36323b323263" ] && reply=ok
 printf '\r\nreply=%s\r\n' "$reply""#,
     );
     command.cwd(std::env::temp_dir());
     let mut runtime = TerminalRuntime::spawn(command, TerminalSize::new(24, 80)).unwrap();
-    // `ESC ] 7501 ; ? ESC \` then `ESC [ ? 6 c`.
-    wait_for_text(&runtime, "reply=1b5d373530313b3f1b5c1b5b3f3663");
+    // The VT's answer, listing the states and kinds it accepts with the query's own
+    // terminator, then the DA1 reply `ESC [ ? 62 ; 22 c` (ADR 0044, ADR 0051).
+    wait_for_text(&runtime, "reply=ok");
     assert!(runtime.wait().unwrap().success());
 }
 

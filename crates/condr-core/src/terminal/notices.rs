@@ -1,12 +1,6 @@
 use super::*;
-use alacritty_terminal::vte::ansi::Rgb;
-
-#[derive(Clone)]
-pub(super) struct TerminalEventProxy {
-    pub(super) size: Arc<Mutex<TerminalSize>>,
-    pub(super) pending_replies: PendingTerminalReplies,
-    pub(super) notices: SharedTerminalNotices,
-}
+use crate::agent::program_status::{BlockedKind, ProgramState};
+use condr_ghostty_vt::{BlockedKind as VtBlockedKind, Event, ProgramState as VtProgramState};
 
 /// Out-of-band signals the VT emits alongside grid changes: the OSC 0/2 title, BEL and
 /// OSC 52 copies. The monitor drains them with [`TerminalNoticeProbe::take`]; bells are
@@ -101,124 +95,94 @@ pub(super) fn sanitize_terminal_title(raw: &str) -> Option<String> {
     (!title.is_empty()).then_some(title)
 }
 
-pub(super) enum PendingTerminalReply {
-    Bytes(Vec<u8>),
-    Color(usize, Arc<dyn Fn(Rgb) -> String + Sync + Send + 'static>),
-}
-
-pub(super) type PendingTerminalReplies = Arc<Mutex<Vec<PendingTerminalReply>>>;
-
-impl TerminalEventProxy {
-    pub(super) fn new(
-        size: Arc<Mutex<TerminalSize>>,
-    ) -> (Self, PendingTerminalReplies, SharedTerminalNotices) {
-        let pending_replies = Arc::new(Mutex::new(Vec::new()));
-        let notices = SharedTerminalNotices::default();
-        (
-            Self {
-                size,
-                pending_replies: Arc::clone(&pending_replies),
-                notices: Arc::clone(&notices),
-            },
-            pending_replies,
-            notices,
-        )
+/// Applies what the VT reported while it parsed one chunk and returns its answers for the
+/// PTY, in stream order. Runs on the PTY reader, after the terminal's lock is released.
+pub(super) fn apply_terminal_events(
+    events: Vec<Event>,
+    notices: &SharedTerminalNotices,
+    reported_cwd: &Mutex<ReportedCwd>,
+) -> Vec<u8> {
+    let mut replies = Vec::new();
+    if events.is_empty() {
+        return replies;
     }
-
-    /// `None` once a panic ended the Pane: the proxy also runs under `print_notice`, on
-    /// a thread other than the Pane's own (ADR 0053).
-    fn notices(&self) -> Option<std::sync::MutexGuard<'_, TerminalNotices>> {
-        lock_pane(&self.notices).ok()
-    }
-}
-
-impl EventListener for TerminalEventProxy {
-    fn send_event(&self, event: Event) {
-        let reply = match event {
-            Event::Title(title) => {
-                if let Some(mut notices) = self.notices() {
-                    notices.record_title(sanitize_terminal_title(&title));
+    let mut notices = notices.lock().expect("terminal notices lock poisoned");
+    let mut events = events.into_iter().peekable();
+    while let Some(event) = events.next() {
+        match event {
+            // RIS reports a clear of every record just ahead of the reset itself; that is
+            // the reset, not a program speaking OSC 7501, and must not mark a plain shell
+            // as one that does.
+            Event::ProgramStatus(status)
+                if status.state == VtProgramState::Clear
+                    && status.id.is_empty()
+                    && matches!(events.peek(), Some(Event::Reset)) => {}
+            Event::WritePty(bytes) => replies.extend(bytes),
+            Event::Bell => notices.bells = notices.bells.saturating_add(1),
+            Event::TitleChanged(title) => notices.record_title(sanitize_terminal_title(&title)),
+            Event::PwdChanged(pwd) => {
+                if let Some(cwd) = reported_cwd_of(&pwd) {
+                    record_reported_cwd(reported_cwd, cwd);
                 }
-                return;
             }
-            Event::ResetTitle => {
-                if let Some(mut notices) = self.notices() {
-                    notices.record_title(None);
+            Event::ClipboardWrite(text) => notices.record_clipboard(text),
+            Event::Notification { title, body } => {
+                let payload = format!("{AGENT_EVENT_OSC_PREFIX}{body}");
+                if format!("777;notify;{title};") == AGENT_EVENT_OSC_PREFIX
+                    && let Some(event) = AgentEvent::decode(payload.as_bytes())
+                {
+                    notices.record_agent_event(AgentNotice::Hook(event));
                 }
-                return;
             }
-            Event::Bell => {
-                if let Some(mut notices) = self.notices() {
-                    notices.bells = notices.bells.saturating_add(1);
+            Event::ProgramStatus(status) => {
+                notices.record_agent_event(AgentNotice::Status(program_status(status)));
+            }
+            // A prompt or a reset only matters to records the protocol keeps; a plain
+            // shell's prompt marks must not wake the process probe.
+            Event::PromptStart => {
+                if notices.agent.reports_program_status() {
+                    notices.record_agent_event(AgentNotice::PromptStart);
                 }
-                return;
             }
-            Event::ClipboardStore(_, text) => {
-                if let Some(mut notices) = self.notices() {
-                    notices.record_clipboard(text);
+            Event::Reset => {
+                // RIS clears the title without a title change of its own.
+                notices.record_title(None);
+                if notices.agent.reports_program_status() {
+                    notices.record_agent_event(AgentNotice::Reset);
                 }
-                return;
             }
-            Event::PtyWrite(text) => Some(PendingTerminalReply::Bytes(text.into_bytes())),
-            Event::TextAreaSizeRequest(formatter) => {
-                let size = pane_size(&self.size);
-                Some(PendingTerminalReply::Bytes(
-                    formatter(size.window_size()).into_bytes(),
-                ))
-            }
-            Event::ColorRequest(index, formatter) => {
-                Some(PendingTerminalReply::Color(index, formatter))
-            }
-            _ => None,
-        };
-        if let (Some(reply), Ok(mut replies)) = (reply, lock_pane(&self.pending_replies)) {
-            replies.push(reply);
+            Event::RenderHold(_) => {}
         }
     }
+    replies
 }
 
-pub(super) fn flush_terminal_replies(
-    terminal: &Arc<Mutex<Terminal>>,
-    input: &TerminalInput,
-    pending_replies: &PendingTerminalReplies,
-) -> io::Result<()> {
-    let replies = std::mem::take(
-        &mut *pending_replies
-            .lock()
-            .expect("terminal reply queue lock poisoned"),
-    );
+fn program_status(status: condr_ghostty_vt::ProgramStatus) -> ProgramStatus {
+    let present = |text: String| (!text.is_empty()).then_some(text);
+    ProgramStatus {
+        state: match status.state {
+            VtProgramState::Idle => ProgramState::Idle,
+            VtProgramState::Working => ProgramState::Working,
+            VtProgramState::Done => ProgramState::Done,
+            VtProgramState::Blocked => ProgramState::Blocked,
+            VtProgramState::Error => ProgramState::Error,
+            VtProgramState::Clear => ProgramState::Clear,
+        },
+        id: present(status.id),
+        kind: status.kind.map(|kind| match kind {
+            VtBlockedKind::Permission => BlockedKind::Permission,
+            VtBlockedKind::Question => BlockedKind::Question,
+            VtBlockedKind::Auth => BlockedKind::Auth,
+        }),
+        app: present(status.app),
+        msg: present(status.message),
+    }
+}
+
+/// Writes the VT's answers to the program, ahead of queued user input.
+pub(super) fn write_terminal_replies(input: &TerminalInput, replies: Vec<u8>) -> io::Result<()> {
     if replies.is_empty() {
         return Ok(());
     }
-    let terminal = terminal.lock().expect("terminal state lock poisoned");
-    let mut bytes = Vec::new();
-    for reply in replies {
-        match reply {
-            PendingTerminalReply::Bytes(reply) => bytes.extend(reply),
-            PendingTerminalReply::Color(index, formatter) => {
-                let color = terminal.colors()[index].or_else(|| default_terminal_color(index));
-                let Some(color) = color else {
-                    continue;
-                };
-                bytes.extend(formatter(color).bytes());
-            }
-        }
-    }
-    drop(terminal);
-    input.write_terminal_reply(bytes)
-}
-
-fn default_terminal_color(index: usize) -> Option<Rgb> {
-    let value = match u8::try_from(index) {
-        Ok(index) => default_indexed_color(index),
-        Err(_) if index == NamedColor::Foreground as usize => DEFAULT_FOREGROUND_COLOR,
-        Err(_) if index == NamedColor::Background as usize => DEFAULT_BACKGROUND_COLOR,
-        Err(_) if index == NamedColor::Cursor as usize => DEFAULT_CURSOR_COLOR,
-        Err(_) => return None,
-    };
-    Some(Rgb {
-        r: (value >> 16) as u8,
-        g: (value >> 8) as u8,
-        b: value as u8,
-    })
+    input.write_terminal_reply(replies)
 }

@@ -26,40 +26,30 @@ fn frame_test_view(revision: u64, text: &str) -> TerminalView {
 #[test]
 fn decscusr_shape_and_blink_reach_the_snapshot_cursor() {
     let size = TerminalSize::new(1, 4);
-    let (event_proxy, _pending_replies, _notices) =
-        TerminalEventProxy::new(Arc::new(Mutex::new(size)));
-    let mut terminal = Term::new(Config::default(), &size, event_proxy);
-    let mut parser: Processor = Processor::new();
+    let mut vt = Vt::new(size).unwrap();
+    let cursor = |vt: &mut Vt| vt.view(size, 1, None).cursor.unwrap();
+    assert_eq!(cursor(&mut vt).shape, TerminalCursorShape::Block);
+    assert!(!cursor(&mut vt).blinking, "default cursor stays steady");
 
-    let cursor = |terminal: &Terminal| snapshot_terminal(terminal, size, 1).cursor.unwrap();
-    assert_eq!(cursor(&terminal).shape, TerminalCursorShape::Block);
-    assert!(!cursor(&terminal).blinking, "default cursor stays steady");
+    vt.write(b"\x1b[5 q");
+    assert_eq!(cursor(&mut vt).shape, TerminalCursorShape::Beam);
+    assert!(cursor(&mut vt).blinking);
 
-    parser.advance(&mut terminal, b"\x1b[5 q");
-    assert_eq!(cursor(&terminal).shape, TerminalCursorShape::Beam);
-    assert!(cursor(&terminal).blinking);
+    vt.write(b"\x1b[4 q");
+    assert_eq!(cursor(&mut vt).shape, TerminalCursorShape::Underline);
+    assert!(!cursor(&mut vt).blinking);
 
-    parser.advance(&mut terminal, b"\x1b[4 q");
-    assert_eq!(cursor(&terminal).shape, TerminalCursorShape::Underline);
-    assert!(!cursor(&terminal).blinking);
-
-    parser.advance(&mut terminal, b"\x1b[?25l");
-    assert_eq!(cursor(&terminal).shape, TerminalCursorShape::Hidden);
+    vt.write(b"\x1b[?25l");
+    assert_eq!(cursor(&mut vt).shape, TerminalCursorShape::Hidden);
 }
-
 #[test]
 fn osc8_hyperlinks_are_carried_per_cell() {
     let size = TerminalSize::new(1, 4);
-    let (event_proxy, _pending_replies, _notices) =
-        TerminalEventProxy::new(Arc::new(Mutex::new(size)));
-    let mut terminal = Term::new(Config::default(), &size, event_proxy);
-    let mut parser: Processor = Processor::new();
-    parser.advance(
-        &mut terminal,
+    let mut vt = terminal_showing(
+        size,
         b"\x1b]8;;https://example.com/a-long-shared-target\x1b\\ab\x1b]8;;\x1b\\c",
     );
-
-    let view = snapshot_terminal(&terminal, size, 1);
+    let view = vt.view(size, 1, None);
     let link = |column| view.cell(0, column).unwrap().hyperlink.clone();
     assert_eq!(
         link(0).as_deref(),
@@ -76,56 +66,26 @@ fn osc8_hyperlinks_are_carried_per_cell() {
     );
     assert_eq!(link(2), None);
 }
-
 #[test]
 fn terminal_hyperlinks_stay_within_the_frame_byte_budget() {
-    let size = TerminalSize::new(1, 1);
-    let (event_proxy, _pending_replies, _notices) =
-        TerminalEventProxy::new(Arc::new(Mutex::new(size)));
-    let terminal = Term::new(Config::default(), &size, event_proxy);
-    let mut hyperlinks = SnapshotHyperlinks::default();
+    let mut hyperlinks = super::vt::Hyperlinks::default();
     hyperlinks.bytes = MAX_TERMINAL_HYPERLINK_BYTES - 3;
-    let mut cell = Cell::default();
-    cell.set_hyperlink(Some(Hyperlink::new(Some("first"), "abc".into())));
-
+    assert_eq!(hyperlinks.intern("abc").as_deref(), Some("abc"));
     assert_eq!(
-        terminal_cell(&cell, terminal.colors(), &mut hyperlinks, None)
-            .hyperlink
-            .as_deref(),
-        Some("abc")
+        hyperlinks.intern("abc").as_deref(),
+        Some("abc"),
+        "a URI already kept costs nothing"
     );
-
-    cell.set_hyperlink(Some(Hyperlink::new(Some("new-id"), "abc".into())));
+    assert_eq!(hyperlinks.intern("d"), None);
     assert_eq!(
-        terminal_cell(&cell, terminal.colors(), &mut hyperlinks, None)
-            .hyperlink
-            .as_deref(),
-        Some("abc")
-    );
-
-    cell.set_hyperlink(Some(Hyperlink::new(Some("second"), "d".into())));
-    assert_eq!(
-        terminal_cell(&cell, terminal.colors(), &mut hyperlinks, None).hyperlink,
-        None
-    );
-
-    cell.set_hyperlink(Some(Hyperlink::new(
-        Some("oversized"),
-        "x".repeat(MAX_TERMINAL_HYPERLINK_URI_BYTES + 1),
-    )));
-    assert_eq!(
-        terminal_cell(&cell, terminal.colors(), &mut hyperlinks, None).hyperlink,
+        hyperlinks.intern(&"x".repeat(MAX_TERMINAL_HYPERLINK_URI_BYTES + 1)),
         None
     );
 }
-
 #[test]
 fn server_selection_follows_scrolled_output_and_still_copies_it() {
     let size = TerminalSize::new(3, 10);
-    let (event_proxy, _replies, _notices) = TerminalEventProxy::new(Arc::new(Mutex::new(size)));
-    let mut terminal = Term::new(Config::default(), &size, event_proxy);
-    let mut parser: Processor = Processor::new();
-    parser.advance(&mut terminal, b"alpha\r\nbeta\r\ngamma");
+    let mut vt = terminal_showing(size, b"alpha\r\nbeta\r\ngamma");
     let position = |row, column, side| TerminalPosition { row, column, side };
     let selection = TerminalSelection {
         start: position(1, 0, TerminalSide::Left),
@@ -133,73 +93,50 @@ fn server_selection_follows_scrolled_output_and_still_copies_it() {
         display_offset: 0,
     };
 
-    terminal.selection = Some(super::runtime::grid_selection(&terminal, selection));
-    assert_eq!(viewport_selection(&terminal, size), Some(selection));
-    assert_eq!(terminal.selection_to_string().as_deref(), Some("beta"));
+    vt.select(Some(selection));
+    assert_eq!(vt.view(size, 1, None).selection, Some(selection));
+    assert_eq!(vt.selection_text(None).as_deref(), Some("beta"));
 
-    parser.advance(&mut terminal, b"\r\ndelta");
-    let moved = viewport_selection(&terminal, size).unwrap();
+    vt.write(b"\r\ndelta");
+    let moved = vt.view(size, 1, None).selection.unwrap();
     assert_eq!((moved.start.row, moved.end.row), (0, 0));
-    assert_eq!(terminal.selection_to_string().as_deref(), Some("beta"));
+    assert_eq!(vt.selection_text(None).as_deref(), Some("beta"));
 
-    parser.advance(&mut terminal, b"\r\nepsilon");
+    vt.write(b"\r\nepsilon");
     // Scrolled out of view: still reported (so a copy is offered) but matches no cell.
-    let hidden = viewport_selection(&terminal, size).unwrap();
+    let hidden = vt.view(size, 1, None).selection.unwrap();
     assert_eq!((hidden.start.row, hidden.end.row), (size.rows, size.rows));
     assert!(hidden.selected_cell_range(size.columns).is_some());
     assert!((0..size.rows).all(|row| !hidden.contains_cell(row, 0, size.columns)));
-    assert_eq!(terminal.selection_to_string().as_deref(), Some("beta"));
+    assert_eq!(vt.selection_text(None).as_deref(), Some("beta"));
 
-    terminal.selection = None;
-    assert_eq!(viewport_selection(&terminal, size), None);
+    vt.select(None);
+    assert_eq!(vt.view(size, 1, None).selection, None);
 }
-
 #[test]
 fn terminal_cell_text_keeps_short_content_unchanged() {
-    let mut cell = Cell {
-        c: 'e',
-        ..Cell::default()
-    };
-    cell.push_zerowidth('\u{301}');
-    cell.push_zerowidth('\u{327}');
-
-    assert_eq!(terminal_cell_text(&cell), "e\u{301}\u{327}");
+    let size = TerminalSize::new(1, 4);
+    let mut vt = terminal_showing(size, "e\u{301}\u{327}".as_bytes());
+    assert_eq!(
+        vt.view(size, 1, None).cell(0, 0).unwrap().text,
+        "e\u{301}\u{327}"
+    );
 }
-
 #[test]
 fn terminal_cell_text_truncates_long_combining_sequences() {
-    let mut cell = Cell {
-        c: 'a',
-        ..Cell::default()
-    };
-    for _ in 0..200 {
-        cell.push_zerowidth('\u{301}');
-    }
-
-    let text = terminal_cell_text(&cell);
+    let text = super::vt::cell_text(&format!("a{}", "\u{301}".repeat(200)));
     assert_eq!(text.len(), 255);
     assert_eq!(text.chars().count(), 128);
     assert_eq!(text.chars().next(), Some('a'));
     assert!(text.chars().skip(1).all(|character| character == '\u{301}'));
 }
-
 #[test]
 fn terminal_cell_text_truncation_preserves_utf8_boundaries_and_base() {
-    let mut cell = Cell {
-        c: '\u{754c}',
-        ..Cell::default()
-    };
-    for _ in 0..100 {
-        cell.push_zerowidth('\u{1d165}');
-    }
-
-    let text = terminal_cell_text(&cell);
+    let text = super::vt::cell_text(&format!("\u{754c}{}", "\u{1d165}".repeat(100)));
     assert_eq!(text.len(), 255);
     assert_eq!(text.chars().count(), 64);
     assert_eq!(text.chars().next(), Some('\u{754c}'));
-    assert_eq!(std::str::from_utf8(text.as_bytes()).unwrap(), text.as_str());
 }
-
 #[test]
 fn terminal_frame_wire_drops_hyperlinks_over_budget_without_losing_text() {
     let budgeted_links = MAX_TERMINAL_HYPERLINK_BYTES / MAX_TERMINAL_HYPERLINK_URI_BYTES;
@@ -270,29 +207,19 @@ fn terminal_frame_wire_drops_hyperlinks_over_budget_without_losing_text() {
 }
 
 #[test]
-fn alacritty_damage_produces_a_sparse_frame_against_the_last_take() {
+fn changed_rows_produce_a_sparse_frame_against_the_last_take() {
     let size = TerminalSize::new(4, 12);
-    let shared_size = Arc::new(Mutex::new(size));
-    let (event_proxy, _pending_replies, _notices) =
-        TerminalEventProxy::new(Arc::clone(&shared_size));
-    let terminal = Arc::new(Mutex::new(Term::new(Config::default(), &size, event_proxy)));
+    let terminal = Arc::new(Mutex::new(Vt::new(size).unwrap()));
     let revision = Arc::new(AtomicU64::new(0));
-    let source = TerminalViewSource {
-        terminal: Arc::clone(&terminal),
-        size: shared_size,
-        revision: Arc::clone(&revision),
-        damage_baseline: Arc::new(Mutex::new(None)),
-        cursor_settle: Arc::new(Mutex::new(Default::default())),
-    };
+    let source = source_for(&terminal, size, &revision);
 
     let TerminalViewFrame::Full(mut retained) = source.take_frame().unwrap() else {
-        panic!("the first damage frame must establish a full baseline");
+        panic!("the first frame must establish a full baseline");
     };
-    let mut parser: Processor = Processor::new();
-    parser.advance(
-        &mut *terminal.lock().expect("terminal state lock poisoned"),
-        b"\x1b]8;;https://example.com/a-long-shared-target\x1b\\abc\x1b]8;;\x1b\\",
-    );
+    terminal
+        .lock()
+        .unwrap()
+        .write(b"\x1b]8;;https://example.com/a-long-shared-target\x1b\\abc\x1b]8;;\x1b\\");
     revision.store(1, Ordering::Release);
 
     let frame = source.take_frame().unwrap();
@@ -303,7 +230,7 @@ fn alacritty_damage_produces_a_sparse_frame_against_the_last_take() {
         ..
     }) = &frame
     else {
-        panic!("partial damage must produce a delta");
+        panic!("a small change must produce a delta");
     };
     assert!(runs.iter().map(|run| run.cells.len()).sum::<usize>() < retained.cells.len());
     let links = runs
@@ -315,25 +242,32 @@ fn alacritty_damage_produces_a_sparse_frame_against_the_last_take() {
     assert_eq!(
         links[0].as_ptr(),
         links[1].as_ptr(),
-        "linked cells in one damage frame must share long URI storage"
+        "linked cells in one frame must share long URI storage"
     );
     retained.apply_frame(frame).unwrap();
     assert_eq!(retained, source.view());
 }
 
-fn terminal_showing(size: TerminalSize, bytes: &[u8]) -> Terminal {
-    let (event_proxy, _pending_replies, _notices) =
-        TerminalEventProxy::new(Arc::new(Mutex::new(size)));
-    let mut terminal = Term::new(terminal_config(), &size, event_proxy);
-    {
-        let mut parser: Processor = Processor::new();
-        parser.advance(&mut terminal, bytes);
+fn source_for(
+    terminal: &Arc<Mutex<Terminal>>,
+    size: TerminalSize,
+    revision: &Arc<AtomicU64>,
+) -> TerminalViewSource {
+    TerminalViewSource {
+        terminal: Arc::clone(terminal),
+        size: Arc::new(Mutex::new(size)),
+        revision: Arc::clone(revision),
+        damage_baseline: Arc::new(Mutex::new(None)),
+        cursor_settle: Arc::new(Mutex::new(CursorSettle::default())),
     }
-    terminal
 }
-
+fn terminal_showing(size: TerminalSize, bytes: &[u8]) -> Terminal {
+    let mut vt = Vt::new(size).unwrap();
+    vt.write(bytes);
+    vt
+}
 fn selected_at(
-    terminal: &mut Terminal,
+    vt: &mut Terminal,
     size: TerminalSize,
     (row, column): (u16, u16),
     unit: TerminalSelectionUnit,
@@ -343,19 +277,13 @@ fn selected_at(
         column,
         side: TerminalSide::Left,
     };
-    let ty = match unit {
-        TerminalSelectionUnit::Word => SelectionType::Semantic,
-        TerminalSelectionUnit::Line => SelectionType::Lines,
-    };
-    let point = viewport_point(terminal, position, 0);
-    terminal.selection = Some(Selection::new(ty, point, side(position.side)));
-    let selection = viewport_selection(terminal, size).unwrap();
+    vt.select_at(position, 0, unit);
+    let selection = vt.view(size, 1, None).selection.unwrap();
     (
         (selection.start.row, selection.start.column),
         (selection.end.row, selection.end.column),
     )
 }
-
 #[test]
 fn word_and_line_selections_follow_soft_wraps_and_keep_urls_whole() {
     let size = TerminalSize::new(2, 20);
@@ -372,15 +300,16 @@ fn word_and_line_selections_follow_soft_wraps_and_keep_urls_whole() {
     );
     assert_eq!(
         selected_at(&mut terminal, size, (0, 5), TerminalSelectionUnit::Line),
-        ((0, 0), (1, 19))
+        ((0, 0), (1, 14)),
+        "a line ends at its last character, as Ghostty selects one"
     );
 }
 
 #[test]
 fn plain_text_urls_are_detected_trimmed_and_flagged() {
     let size = TerminalSize::new(1, 40);
-    let terminal = terminal_showing(size, b"see https://example.com/a?b=1. now");
-    let view = snapshot_terminal(&terminal, size, 1);
+    let mut terminal = terminal_showing(size, b"see https://example.com/a?b=1. now");
+    let view = terminal.view(size, 1, None);
     let link = |column| view.cell(0, column).unwrap().hyperlink.clone();
     assert_eq!(link(4).as_deref(), Some("https://example.com/a?b=1"));
     assert_eq!(link(28).as_deref(), Some("https://example.com/a?b=1"));
@@ -398,8 +327,8 @@ fn plain_text_urls_are_detected_trimmed_and_flagged() {
         (b"mailto:user@example.com", "mailto:user@example.com"),
     ];
     for (bytes, expected) in cases {
-        let terminal = terminal_showing(size, bytes);
-        let view = snapshot_terminal(&terminal, size, 1);
+        let mut terminal = terminal_showing(size, bytes);
+        let view = terminal.view(size, 1, None);
         let linked = view
             .cells
             .iter()
@@ -412,9 +341,10 @@ fn plain_text_urls_are_detected_trimmed_and_flagged() {
             String::from_utf8_lossy(bytes)
         );
     }
-    let terminal = terminal_showing(size, b"http:/nope");
+    let mut terminal = terminal_showing(size, b"http:/nope");
     assert!(
-        snapshot_terminal(&terminal, size, 1)
+        terminal
+            .view(size, 1, None)
             .cells
             .iter()
             .all(|cell| cell.hyperlink.is_none())
@@ -424,23 +354,23 @@ fn plain_text_urls_are_detected_trimmed_and_flagged() {
 #[test]
 fn detected_urls_continue_across_soft_wraps_only_and_yield_to_osc8() {
     let size = TerminalSize::new(3, 8);
-    let terminal = terminal_showing(size, b"https://example.com/path");
-    let view = snapshot_terminal(&terminal, size, 1);
+    let mut terminal = terminal_showing(size, b"https://example.com/path");
+    let view = terminal.view(size, 1, None);
     assert!(
         view.cells
             .iter()
             .all(|cell| cell.hyperlink.as_deref() == Some("https://example.com/path"))
     );
 
-    let terminal = terminal_showing(size, b"https://\r\nexample.com");
-    let view = snapshot_terminal(&terminal, size, 1);
+    let mut terminal = terminal_showing(size, b"https://\r\nexample.com");
+    let view = terminal.view(size, 1, None);
     assert!(view.cells.iter().all(|cell| cell.hyperlink.is_none()));
 
-    let terminal = terminal_showing(
+    let mut terminal = terminal_showing(
         size,
         b"\x1b]8;;https://other\x1b\\https://\x1b]8;;\x1b\\x.y/z",
     );
-    let view = snapshot_terminal(&terminal, size, 1);
+    let view = terminal.view(size, 1, None);
     let cell = view.cell(0, 0).unwrap();
     assert_eq!(cell.hyperlink.as_deref(), Some("https://other"));
     assert_eq!(cell.flags & DETECTED_LINK_FLAG, 0);
@@ -451,13 +381,7 @@ fn link_changes_reach_delta_frames_without_text_damage() {
     let size = TerminalSize::new(4, 12);
     let terminal = Arc::new(Mutex::new(terminal_showing(size, b"https://examp")));
     let revision = Arc::new(AtomicU64::new(1));
-    let source = TerminalViewSource {
-        terminal: Arc::clone(&terminal),
-        size: Arc::new(Mutex::new(size)),
-        revision: Arc::clone(&revision),
-        damage_baseline: Arc::new(Mutex::new(None)),
-        cursor_settle: Arc::new(Mutex::new(CursorSettle::default())),
-    };
+    let source = source_for(&terminal, size, &revision);
     let Some(TerminalViewFrame::Full(view)) = source.take_frame() else {
         panic!("the first frame is full");
     };
@@ -466,11 +390,8 @@ fn link_changes_reach_delta_frames_without_text_damage() {
         Some("https://examp")
     );
 
-    // Blank the wrapped tail: alacritty damages row 1 only, yet row 0's URL shrank.
-    {
-        let mut parser: Processor = Processor::new();
-        parser.advance(&mut *terminal.lock().unwrap(), b"\x1b[2;1H ");
-    }
+    // Blank the wrapped tail: only row 1's text changes, yet row 0's URL shrank.
+    terminal.lock().unwrap().write(b"\x1b[2;1H ");
     revision.fetch_add(1, Ordering::AcqRel);
     let Some(TerminalViewFrame::Delta(delta)) = source.take_frame() else {
         panic!("a small change is a delta");
@@ -509,19 +430,12 @@ fn a_status_line_burst_coalesces_into_sparse_frames_and_keeps_the_last_revision(
         + "\x1b[22;1H";
     let terminal = Arc::new(Mutex::new(terminal_showing(size, screen.as_bytes())));
     let revision = Arc::new(AtomicU64::new(1));
-    let source = TerminalViewSource {
-        terminal: Arc::clone(&terminal),
-        size: Arc::new(Mutex::new(size)),
-        revision: Arc::clone(&revision),
-        damage_baseline: Arc::new(Mutex::new(None)),
-        cursor_settle: Arc::new(Mutex::new(CursorSettle::default())),
-    };
+    let source = source_for(&terminal, size, &revision);
     let Some(TerminalViewFrame::Full(mut retained)) = source.take_frame() else {
         panic!("the first frame is full");
     };
 
     let spinner = ['|', '/', '-', '\\'];
-    let mut parser: Processor = Processor::new();
     let (mut frames, mut delta_cells) = (0u64, 0usize);
     let started = std::time::Instant::now();
     for chunk in 1..=CHUNKS {
@@ -530,7 +444,7 @@ fn a_status_line_burst_coalesces_into_sparse_frames_and_keeps_the_last_revision(
             spinner[usize::try_from(chunk % 4).unwrap()],
             chunk / 10
         );
-        parser.advance(&mut *terminal.lock().unwrap(), tick.as_bytes());
+        terminal.lock().unwrap().write(tick.as_bytes());
         revision.fetch_add(1, Ordering::AcqRel);
         if chunk % CHUNKS_PER_FRAME != 0 && chunk != CHUNKS {
             continue;
@@ -575,14 +489,9 @@ fn a_status_line_burst_coalesces_into_sparse_frames_and_keeps_the_last_revision(
 
 #[test]
 fn programs_negotiate_the_kitty_keyboard_protocol() {
-    let size = TerminalSize::new(2, 8);
-    let (event_proxy, _pending_replies, _notices) =
-        TerminalEventProxy::new(Arc::new(Mutex::new(size)));
-    let mut terminal = Term::new(terminal_config(), &size, event_proxy);
-    let mut parser: Processor = Processor::new();
-
-    parser.advance(&mut terminal, b"\x1b[>1u");
-    assert!(terminal.mode().contains(TermMode::DISAMBIGUATE_ESC_CODES));
-    parser.advance(&mut terminal, b"\x1b[<u");
-    assert!(!terminal.mode().contains(TermMode::DISAMBIGUATE_ESC_CODES));
+    let mut vt = Vt::new(TerminalSize::new(2, 8)).unwrap();
+    vt.write(b"\x1b[>1u");
+    assert!(vt.modes().contains(TermMode::DISAMBIGUATE_ESC_CODES));
+    vt.write(b"\x1b[<u");
+    assert!(!vt.modes().contains(TermMode::DISAMBIGUATE_ESC_CODES));
 }

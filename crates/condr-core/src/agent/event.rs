@@ -93,10 +93,22 @@ impl AgentEvent {
         }
     }
 
-    /// The complete OSC sequence a hook writes to its controlling terminal.
+    /// The complete OSC sequence a hook writes to its controlling terminal, within
+    /// [`MAX_AGENT_EVENT_BYTES`]: what matters least is dropped until it fits, and the
+    /// required fields alone always do.
     pub fn encode(&self) -> Vec<u8> {
-        let json = serde_json::to_string(self).expect("agent event serializes");
-        format!("\x1b]{AGENT_EVENT_OSC_PREFIX}{json}\x07").into_bytes()
+        let mut event = self.clone();
+        loop {
+            let json = serde_json::to_string(&event).expect("agent event serializes");
+            let sequence = format!("\x1b]{AGENT_EVENT_OSC_PREFIX}{json}\x07").into_bytes();
+            if sequence.len() <= MAX_AGENT_EVENT_BYTES
+                || (event.detail.take().is_none()
+                    && event.source.take().is_none()
+                    && event.prompt_id.take().is_none())
+            {
+                return sequence;
+            }
+        }
     }
 
     /// Decodes an OSC payload (everything between `ESC ]` and the terminator).
@@ -140,9 +152,12 @@ pub(super) fn valid_prompt_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 256 && !id.chars().any(char::is_control)
 }
 
-/// Characters a detail may carry; the bound keeps it, the session ID and the JSON
-/// framing together well under the PTY scanner's OSC cap.
+/// Characters a detail may carry.
 pub const MAX_DETAIL_CHARS: usize = 200;
+
+/// libghostty-vt reads an OSC 777 into a 2 KiB buffer and drops a longer one whole, so an
+/// encoded event stays below it (ADR 0051).
+pub const MAX_AGENT_EVENT_BYTES: usize = 2000;
 
 fn valid_detail(detail: &str) -> bool {
     !detail.is_empty()
@@ -176,4 +191,30 @@ pub fn bound_detail(raw: &str) -> Option<String> {
     let mut cut: String = detail.chars().take(MAX_DETAIL_CHARS - 1).collect();
     cut.push('…');
     Some(cut)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_encoded_event_fits_the_vts_osc_777_buffer() {
+        let mut event = AgentEvent::new(
+            AgentKind::Claude,
+            AgentEventKind::PermissionRequest,
+            Some("s".repeat(4000)),
+            Some("a".repeat(256)),
+        );
+        event.prompt_id = Some("\"".repeat(256));
+        event.detail = Some("界".repeat(MAX_DETAIL_CHARS));
+        let sequence = event.encode();
+        assert!(
+            sequence.len() <= MAX_AGENT_EVENT_BYTES,
+            "{} bytes",
+            sequence.len()
+        );
+        let decoded = AgentEvent::decode(&sequence[2..sequence.len() - 1]).unwrap();
+        assert_eq!(decoded.session_id, event.session_id);
+        assert_eq!(decoded.event, event.event);
+    }
 }

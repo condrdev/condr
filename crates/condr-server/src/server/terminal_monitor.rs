@@ -72,21 +72,19 @@ fn publish_frames(
         .checked_sub(TERMINAL_FRAME_INTERVAL)
         .unwrap_or_else(Instant::now);
     loop {
-        let update = if view_source.cursor_settle_pending() {
-            // herdr re-renders after its settle window. Here a synthetic wakeup lets
-            // take_frame re-observe the held cursor and publish it once it stays put.
-            match updates.recv_timeout(condr_core::CURSOR_POSITION_SETTLE) {
-                Ok(update) => update,
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    TerminalUpdate::View(view_source.revision())
-                }
-                Err(mpsc::RecvTimeoutError::Disconnected) => return false,
+        // A held cursor move or an open synchronized update times out without new output;
+        // an idle Pane's scrollback is compressed once output has stopped (ADR 0051).
+        let wait = view_source.frame_wakeup();
+        let update = match updates.recv_timeout(wait.unwrap_or(condr_core::TERMINAL_IDLE_CHECK)) {
+            Ok(update) => update,
+            Err(mpsc::RecvTimeoutError::Timeout) if wait.is_some() => {
+                TerminalUpdate::View(view_source.revision())
             }
-        } else {
-            let Ok(update) = updates.recv() else {
-                return false;
-            };
-            update
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                view_source.compress_if_idle();
+                continue;
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => return false,
         };
         let update =
             coalesce_terminal_update(update, updates, last_view_publish + TERMINAL_FRAME_INTERVAL);

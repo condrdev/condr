@@ -5,8 +5,8 @@ impl TerminalRuntime {
         let (modes, display_offset, screen_lines) = {
             let terminal = lock_pane(&self.terminal)?;
             (
-                *terminal.mode(),
-                terminal.grid().display_offset(),
+                terminal.modes(),
+                terminal.display_offset(),
                 terminal.screen_lines(),
             )
         };
@@ -209,7 +209,7 @@ impl TerminalRuntime {
     }
 
     pub fn release_mouse(&self) -> io::Result<()> {
-        let modes = *lock_pane(&self.terminal)?.mode();
+        let modes = lock_pane(&self.terminal)?.modes();
         let mut reported = lock_pane(&self.reported_mouse_press)?;
         let Some(press) = *reported else {
             return Ok(());

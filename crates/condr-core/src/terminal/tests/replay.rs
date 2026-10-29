@@ -126,25 +126,18 @@ fn first_difference(expected: &str, actual: &str) -> Option<String> {
 }
 
 /// The engine under test, fed the stream with no PTY behind it.
-struct ReplayTerminal {
-    terminal: Terminal,
-    parser: Processor,
-}
+struct ReplayTerminal(Vt);
 
 impl ReplayTerminal {
     fn new(size: TerminalSize) -> Self {
-        let (event_proxy, _replies, _notices) = TerminalEventProxy::new(Arc::new(Mutex::new(size)));
-        Self {
-            terminal: Term::new(terminal_config(), &size, event_proxy),
-            parser: Processor::new(),
-        }
+        Self(Vt::new(size).unwrap())
     }
 
     fn write(&mut self, bytes: &[u8]) {
-        self.parser.advance(&mut self.terminal, bytes);
+        self.0.write(bytes);
     }
 
-    fn view(&self) -> TerminalView {
-        snapshot_terminal(&self.terminal, SIZE, 0)
+    fn view(&mut self) -> TerminalView {
+        self.0.view(SIZE, 0, None)
     }
 }

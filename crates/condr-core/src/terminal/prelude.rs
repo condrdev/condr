@@ -9,40 +9,25 @@ pub(super) use super::job::Job;
 pub(super) use super::mouse::{MAX_MOUSE_WHEEL_STEPS, encode_mouse};
 pub(super) use super::notices::*;
 pub(super) use super::osc::*;
-pub(super) use super::probes::recent_text;
 pub(super) use super::process::*;
 pub(super) use super::pty_io::*;
 #[cfg(unix)]
 pub(super) use super::pty_unix::*;
 pub(super) use super::resize::*;
-#[cfg(test)]
-pub(super) use super::runtime::terminal_config;
 pub(super) use super::shell::shell_command;
-pub(super) use super::view::{
-    SnapshotHyperlinks, detect_links, publish_view, side, snapshot_terminal,
-    snapshot_terminal_with_links, terminal_cell, terminal_cursor, viewport_point,
-    viewport_selection,
-};
 #[cfg(test)]
-pub(super) use super::view::{blank_cell, terminal_cell_text};
+pub(super) use super::view::blank_cell;
+pub(super) use super::view::publish_view;
 pub(super) use super::view_source::TerminalDamageBaseline;
+pub(super) use super::vt::Vt;
 pub(super) use crate::agent::{
     AGENT_EVENT_OSC_PREFIX, AGENT_POLL_INTERVAL, AgentDetector, AgentEvent, AgentPublish,
-    ProcessInfo, ProcessProbeResult, ProgramStatus, ProgramStatusReport, identify_agent_process,
-    program_status::{PROGRAM_STATUS_OSC_PREFIX, PROGRAM_STATUS_REPLY},
+    ProcessInfo, ProcessProbeResult, ProgramStatus, identify_agent_process,
 };
 pub(super) use crate::{AgentKind, AgentSnapshot, PaneId};
-pub(super) use alacritty_terminal::Term;
-pub(super) use alacritty_terminal::event::{Event, EventListener, WindowSize};
-pub(super) use alacritty_terminal::grid::{Dimensions, Scroll};
-pub(super) use alacritty_terminal::index::{Boundary, Column, Direction, Line, Point, Side};
-pub(super) use alacritty_terminal::selection::{Selection, SelectionType};
-#[cfg(test)]
-pub(super) use alacritty_terminal::term::cell::Hyperlink;
-pub(super) use alacritty_terminal::term::cell::{Cell, Flags};
-pub(super) use alacritty_terminal::term::search::{RegexIter, RegexSearch};
-pub(super) use alacritty_terminal::term::{Config, Osc52, TermDamage, TermMode};
-pub(super) use alacritty_terminal::vte::ansi::{Color, CursorShape, NamedColor, Processor};
+/// The modes key and mouse encoding read, in alacritty's flags until the encoders move to
+/// libghostty-vt (ADR 0051).
+pub(super) use alacritty_terminal::term::TermMode;
 #[cfg(unix)]
 pub(super) use filedescriptor::FileDescriptor;
 #[cfg(unix)]
@@ -52,7 +37,6 @@ pub(super) use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
 #[cfg(unix)]
 pub(super) use nix::unistd::{Pid as UnixPid, getpgid, getsid};
 pub(super) use portable_pty::{Child, ExitStatus, MasterPty, PtySize, native_pty_system};
-pub(super) use smol_str::SmolStrBuilder;
 pub(super) use std::collections::VecDeque;
 pub(super) use std::io::{self, Read, Write};
 pub(super) use std::path::{Path, PathBuf};
@@ -72,7 +56,6 @@ pub(super) use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, Upd
 
 // Process identity is refreshed separately from the state reported by agent hooks.
 pub(super) const PROCESS_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
-pub(super) const MAX_OSC_CWD_BYTES: usize = 4 * 1024;
 pub(super) const MAX_TERMINAL_TITLE_CHARS: usize = 256;
 pub(super) const MAX_PENDING_CLIPBOARD_BYTES: usize = 1024 * 1024;
 pub(super) const INPUT_QUEUE_CAPACITY: usize = 64;

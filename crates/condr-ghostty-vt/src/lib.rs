@@ -619,9 +619,9 @@ impl Terminal {
         }
     }
 
-    /// The selected text, soft wraps joined and trailing blanks trimmed, as Ghostty
-    /// copies it; `range` instead of the current selection when given.
-    pub fn selection_text(&self, range: Option<(Point, Point)>) -> Option<String> {
+    /// The selected text, trailing blanks trimmed, `range` instead of the current
+    /// selection when given. `unwrap` joins soft-wrapped rows, as Ghostty copies.
+    pub fn selection_text(&self, range: Option<(Point, Point)>, unwrap: bool) -> Option<String> {
         let selection = match range {
             Some((start, end)) => Some(self.selection_between(start, end)?),
             None if self.has_selection() => None,
@@ -630,7 +630,7 @@ impl Terminal {
         let options = sys::GhosttyTerminalSelectionFormatOptions {
             size: size_of::<sys::GhosttyTerminalSelectionFormatOptions>(),
             emit: sys::GhosttyFormatterFormat::GHOSTTY_FORMATTER_FORMAT_PLAIN,
-            unwrap: true,
+            unwrap,
             trim: true,
             selection: selection.as_ref().map_or(ptr::null(), ptr::from_ref),
         };
@@ -769,6 +769,18 @@ unsafe fn take_allocated(text: *mut u8, len: usize) -> String {
     copied
 }
 
+/// A borrowed array the library passed, which it may give as a null pointer when empty.
+///
+/// # Safety
+/// `data` must be null or point at `len` readable values that outlive `'a`.
+unsafe fn borrowed<'a, T>(data: *const T, len: usize) -> &'a [T] {
+    if data.is_null() || len == 0 {
+        return &[];
+    }
+    // SAFETY: the caller's contract.
+    unsafe { slice::from_raw_parts(data, len) }
+}
+
 /// # Safety
 /// `string` must be empty or describe `len` readable bytes.
 unsafe fn string_lossy(string: sys::GhosttyString) -> String {
@@ -805,7 +817,7 @@ extern "C" fn write_pty(
 ) {
     guarded(userdata, (), |callbacks| {
         // SAFETY: the library passes `len` readable bytes for the call's duration.
-        let bytes = unsafe { slice::from_raw_parts(data, len) };
+        let bytes = unsafe { borrowed(data, len) };
         match callbacks.events.last_mut() {
             Some(Event::WritePty(pending)) => pending.extend_from_slice(bytes),
             _ => callbacks.events.push(Event::WritePty(bytes.to_vec())),
@@ -865,7 +877,12 @@ extern "C" fn clipboard_write(
             // SAFETY: the library passes a request valid for the call's duration.
             let request = unsafe { &*write };
             // SAFETY: `contents` holds `contents_len` entries for the same duration.
-            let contents = unsafe { slice::from_raw_parts(request.contents, request.contents_len) };
+            let contents = unsafe { borrowed(request.contents, request.contents_len) };
+            // No contents at all is a program clearing the clipboard (an empty OSC 52).
+            if contents.is_empty() {
+                callbacks.events.push(Event::ClipboardWrite(String::new()));
+                return Result::GHOSTTY_CLIPBOARD_WRITE_RESULT_SUCCESS;
+            }
             let text = contents.iter().find_map(|content| {
                 // SAFETY: borrowed strings, copied before the callback returns.
                 let mime = unsafe { string_lossy(content.mime) };

@@ -159,9 +159,8 @@ impl TerminalRuntime {
 
         let (input, input_receiver) = TerminalInput::channel();
         let current_size = Arc::new(Mutex::new(size));
-        let (event_proxy, pending_replies, notices) =
-            TerminalEventProxy::new(Arc::clone(&current_size));
-        let terminal = Arc::new(Mutex::new(Term::new(terminal_config(), &size, event_proxy)));
+        let notices = SharedTerminalNotices::default();
+        let terminal = Arc::new(Mutex::new(Vt::new(size)?));
         let revision = Arc::new(AtomicU64::new(0));
         let damage_baseline = Arc::new(Mutex::new(None));
         let cursor_settle = Arc::new(Mutex::new(CursorSettle::default()));
@@ -242,7 +241,6 @@ impl TerminalRuntime {
                 reader,
                 terminal: reader_terminal,
                 input: reader_input,
-                pending_replies,
                 revision: reader_revision,
                 updates: reader_updates,
                 reported_cwd: reader_reported_cwd,
@@ -288,7 +286,7 @@ impl TerminalRuntime {
 
     /// Paste and delayed Enter share one queue entry, so another client cannot split them.
     pub fn submit(&self, text: &str) -> io::Result<()> {
-        let modes = *lock_pane(&self.terminal)?.mode();
+        let modes = lock_pane(&self.terminal)?.modes();
         let bytes = encode_paste(text, modes.contains(TermMode::BRACKETED_PASTE));
         let enter = encode_key_in_mode(
             &TerminalKey::Enter,
@@ -310,7 +308,7 @@ impl TerminalRuntime {
         let Ok(mut terminal) = lock_pane(&self.terminal) else {
             return;
         };
-        if terminal.selection.take().is_some() {
+        if terminal.clear_selection() {
             drop(terminal);
             publish_view(&self.revision, &self.update_sender);
         }
@@ -347,7 +345,7 @@ impl TerminalRuntime {
                 modifiers,
                 kind,
             } => {
-                let modes = *lock_pane(&self.terminal)?.mode();
+                let modes = lock_pane(&self.terminal)?.modes();
                 let only_shift = modifiers
                     == TerminalModifiers {
                         shift: true,
@@ -385,13 +383,13 @@ impl TerminalRuntime {
                 Ok(None)
             }
             TerminalCommand::Text(text) => {
-                let modes = *lock_pane(&self.terminal)?.mode();
+                let modes = lock_pane(&self.terminal)?.modes();
                 self.write(encode_text_in_mode(&text, modes))?;
                 Ok(None)
             }
             TerminalCommand::Paste(text) => {
                 let bracketed = lock_pane(&self.terminal)?
-                    .mode()
+                    .modes()
                     .contains(TermMode::BRACKETED_PASTE);
                 self.write(encode_paste(&text, bracketed))?;
                 Ok(None)
@@ -412,7 +410,7 @@ impl TerminalRuntime {
             }
             TerminalCommand::Focus(focused) => {
                 let focus_reporting = lock_pane(&self.terminal)?
-                    .mode()
+                    .modes()
                     .contains(TermMode::FOCUS_IN_OUT);
                 if !focused {
                     self.release_mouse()?;
@@ -476,46 +474,18 @@ impl TerminalRuntime {
     }
 
     pub fn visible_text(&self) -> String {
-        let Ok(terminal) = lock_pane(&self.terminal) else {
-            return String::new();
-        };
-        let mut lines = vec![String::new(); terminal.screen_lines()];
-
-        for cell in terminal.renderable_content().display_iter {
-            let line = cell.point.line.0 + terminal.grid().display_offset() as i32;
-            let Ok(line) = usize::try_from(line) else {
-                continue;
-            };
-            if cell
-                .flags
-                .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)
-            {
-                continue;
-            }
-            if cell.flags.contains(Flags::HIDDEN) {
-                lines[line].push(' ');
-            } else {
-                lines[line].push(cell.c);
-                if let Some(zerowidth) = cell.zerowidth() {
-                    lines[line].extend(zerowidth);
-                }
-            }
-        }
-
-        for line in &mut lines {
-            line.truncate(line.trim_end_matches(' ').len());
-        }
-        while lines.last().is_some_and(String::is_empty) {
-            lines.pop();
-        }
-        lines.join("\n")
+        let size = self.size();
+        lock_pane(&self.terminal).map_or_else(
+            |_| String::new(),
+            |mut terminal| terminal.visible_text(size),
+        )
     }
 
     /// The last `lines` rows of the active screen and its scrollback, oldest first,
     /// with trailing blank rows dropped. Ignores the viewport scroll position.
     pub fn recent_text(&self, lines: usize) -> String {
         lock_pane(&self.terminal)
-            .map_or_else(|_| String::new(), |terminal| recent_text(&terminal, lines))
+            .map_or_else(|_| String::new(), |terminal| terminal.recent_text(lines))
     }
 
     /// A Server launch failure is visible in the same Pane as native CLI failures.
@@ -524,11 +494,7 @@ impl TerminalRuntime {
         let Ok(mut terminal) = lock_pane(&self.terminal) else {
             return;
         };
-        let mut processor: Processor = Processor::new();
-        processor.advance(
-            &mut *terminal,
-            format!("\r\n[Condr] {message}\r\n").as_bytes(),
-        );
+        terminal.write(format!("\r\n[Condr] {message}\r\n").as_bytes());
         drop(terminal);
         publish_view(&self.revision, &self.update_sender);
     }
@@ -574,50 +540,33 @@ impl TerminalRuntime {
     }
 
     pub fn scroll(&self, scroll: TerminalScroll) {
-        let scroll = match scroll {
-            TerminalScroll::Lines(lines) => Scroll::Delta(lines),
-            TerminalScroll::PageUp => Scroll::PageUp,
-            TerminalScroll::PageDown => Scroll::PageDown,
-            TerminalScroll::Top => Scroll::Top,
-            TerminalScroll::Bottom => Scroll::Bottom,
-        };
         let Ok(mut terminal) = lock_pane(&self.terminal) else {
             return;
         };
-        let before = terminal.grid().display_offset();
-        terminal.scroll_display(scroll);
-        if terminal.grid().display_offset() != before {
+        if terminal.scroll(scroll) {
             drop(terminal);
             publish_view(&self.revision, &self.update_sender);
         }
     }
 
     pub fn copy_range(&self, selection: Option<TerminalSelection>) -> Option<String> {
-        let mut terminal = lock_pane(&self.terminal).ok()?;
-        let Some(selection) = selection else {
-            return terminal.selection_to_string();
-        };
-        let previous = terminal.selection.take();
-        terminal.selection = Some(grid_selection(&terminal, selection));
-        let text = terminal.selection_to_string();
-        terminal.selection = previous;
-        text
+        lock_pane(&self.terminal).ok()?.selection_text(selection)
     }
 
-    /// Hands the selection to alacritty, which rotates it with scrolled output and drops
-    /// it on resize or screen swaps, so the published viewport selection stays on the
-    /// text the user picked.
+    /// Hands the selection to the VT, which keeps it on its text as output scrolls and
+    /// the screen reflows and drops it on a screen swap, so the published viewport
+    /// selection stays on the text the user picked (ADR 0008, ADR 0051).
     fn select(&self, selection: Option<TerminalSelection>) {
         let Ok(mut terminal) = lock_pane(&self.terminal) else {
             return;
         };
-        terminal.selection = selection.map(|selection| grid_selection(&terminal, selection));
+        terminal.select(selection);
         drop(terminal);
         publish_view(&self.revision, &self.update_sender);
     }
 
-    /// A word or line selection anchored at one cell. alacritty expands it, to the semantic
-    /// escape characters in [`terminal_config`] or the matching bracket, across soft wraps.
+    /// A word or line selection anchored at one cell, which the VT expands across soft
+    /// wraps.
     fn select_at(
         &self,
         position: TerminalPosition,
@@ -627,12 +576,7 @@ impl TerminalRuntime {
         let Ok(mut terminal) = lock_pane(&self.terminal) else {
             return;
         };
-        let point = viewport_point(&terminal, position, display_offset);
-        let ty = match unit {
-            TerminalSelectionUnit::Word => SelectionType::Semantic,
-            TerminalSelectionUnit::Line => SelectionType::Lines,
-        };
-        terminal.selection = Some(Selection::new(ty, point, side(position.side)));
+        terminal.select_at(position, display_offset, unit);
         drop(terminal);
         publish_view(&self.revision, &self.update_sender);
     }
@@ -641,8 +585,7 @@ impl TerminalRuntime {
         let Ok(mut terminal) = lock_pane(&self.terminal) else {
             return;
         };
-        if terminal.grid().display_offset() != 0 {
-            terminal.scroll_display(Scroll::Bottom);
+        if terminal.scroll(TerminalScroll::Bottom) {
             drop(terminal);
             publish_view(&self.revision, &self.update_sender);
         }
@@ -730,28 +673,6 @@ impl TerminalRuntime {
             combine_cleanup_results(writer_result, resize_result, "stop terminal resizer");
         combine_cleanup_results(writer_and_resize, reader_result, "stop terminal reader")
     }
-}
-
-pub(super) fn terminal_config() -> Config {
-    Config {
-        // Copy only: a program may fill the user's clipboard (like tmux `set-clipboard on`),
-        // never read it. See ADR 0007.
-        osc52: Osc52::OnlyCopy,
-        // alacritty's set without `:`, so a double-click keeps URLs and Windows paths whole.
-        semantic_escape_chars: ",│`|\"' ()[]{}<>\t".into(),
-        // Answer the kitty keyboard protocol query and honour pushed flags; without this
-        // alacritty ignores them and `encode_key_in_mode` never sees a negotiated mode.
-        kitty_keyboard: true,
-        ..Config::default()
-    }
-}
-
-pub(super) fn grid_selection(terminal: &Terminal, selection: TerminalSelection) -> Selection {
-    let start = viewport_point(terminal, selection.start, selection.display_offset);
-    let end = viewport_point(terminal, selection.end, selection.display_offset);
-    let mut range = Selection::new(SelectionType::Simple, start, side(selection.start.side));
-    range.update(end, side(selection.end.side));
-    range
 }
 
 type SharedChild = Arc<Mutex<Option<Box<dyn Child + Send + Sync>>>>;

@@ -56,9 +56,9 @@ pub use session::{
 pub use snapshot::{SessionSnapshot, SnapshotError};
 #[cfg(feature = "runtime")]
 pub use terminal::{
-    CURSOR_POSITION_SETTLE, CommandBuilder, PaneEnvironment, TerminalAgentProbe, TerminalCwdProbe,
-    TerminalLaunchProbe, TerminalNoticeBatch, TerminalNoticeProbe, TerminalRuntime,
-    TerminalViewSource, default_shell_program,
+    CURSOR_POSITION_SETTLE, CommandBuilder, PaneEnvironment, TERMINAL_IDLE_CHECK,
+    TerminalAgentProbe, TerminalCwdProbe, TerminalLaunchProbe, TerminalNoticeBatch,
+    TerminalNoticeProbe, TerminalRuntime, TerminalViewSource, default_shell_program,
 };
 pub use terminal::{
     DEFAULT_ANSI_COLORS, DEFAULT_BACKGROUND_COLOR, DEFAULT_CURSOR_COLOR, DEFAULT_FOREGROUND_COLOR,

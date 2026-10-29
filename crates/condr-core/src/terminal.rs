@@ -35,6 +35,8 @@ mod runtime;
 mod shell;
 #[cfg(feature = "runtime")]
 mod view_source;
+#[cfg(feature = "runtime")]
+mod vt;
 
 #[cfg(feature = "runtime")]
 use prelude::*;
@@ -69,7 +71,7 @@ pub(crate) use shell::KNOWN_SHELLS;
 #[cfg(feature = "runtime")]
 pub use shell::{PaneEnvironment, default_shell_program};
 #[cfg(feature = "runtime")]
-pub use view_source::TerminalViewSource;
+pub use view_source::{TERMINAL_IDLE_CHECK, TerminalViewSource};
 
 const MAX_TERMINAL_CELLS: usize = 65_536;
 const MAX_TERMINAL_CELL_TEXT_BYTES: usize = 256;

@@ -8,14 +8,8 @@ use smol_str::SmolStr;
 use std::collections::HashMap;
 use std::io;
 
-#[cfg(all(test, feature = "runtime"))]
-pub(super) use snapshot::terminal_cell_text;
 #[cfg(feature = "runtime")]
-pub(super) use snapshot::{
-    DetectedLinks, SnapshotHyperlinks, blank_cell, detect_links, publish_view, side,
-    snapshot_terminal, snapshot_terminal_with_links, terminal_cell, terminal_cursor,
-    viewport_point, viewport_selection,
-};
+pub(super) use snapshot::{blank_cell, publish_view};
 pub use wire::TerminalHyperlinkBudget;
 pub(crate) use wire::{
     decode_position, decode_selection, decode_size, encode_position, encode_selection,

@@ -26,13 +26,7 @@ fn resize_worker_failure_stops_accepting_requests() {
     let control = Arc::new(ResizeControl::default());
     control.request(requested_size).unwrap();
     let current_size = Arc::new(Mutex::new(initial_size));
-    let (event_proxy, _pending_replies, _notices) =
-        TerminalEventProxy::new(Arc::clone(&current_size));
-    let terminal = Arc::new(Mutex::new(Term::new(
-        Config::default(),
-        &initial_size,
-        event_proxy,
-    )));
+    let terminal = Arc::new(Mutex::new(Vt::new(initial_size).unwrap()));
     let (updates, _update_receiver) = mpsc::channel();
 
     let error = resize_loop(
@@ -57,13 +51,7 @@ fn terminal_is_resized_before_the_pty() {
     let initial_size = TerminalSize::new(5, 20);
     let requested_size = TerminalSize::new(10, 40);
     let current_size = Arc::new(Mutex::new(initial_size));
-    let (event_proxy, _pending_replies, _notices) =
-        TerminalEventProxy::new(Arc::clone(&current_size));
-    let terminal = Arc::new(Mutex::new(Term::new(
-        Config::default(),
-        &initial_size,
-        event_proxy,
-    )));
+    let terminal = Arc::new(Mutex::new(Vt::new(initial_size).unwrap()));
     let revision = AtomicU64::new(0);
     let (updates, _update_receiver) = mpsc::channel();
     let mut size_seen_by_pty = None;
@@ -95,13 +83,7 @@ fn failed_pty_resize_still_publishes_the_new_vt_size() {
     let initial_size = TerminalSize::new(5, 20);
     let requested_size = TerminalSize::new(10, 40);
     let current_size = Arc::new(Mutex::new(initial_size));
-    let (event_proxy, _pending_replies, _notices) =
-        TerminalEventProxy::new(Arc::clone(&current_size));
-    let terminal = Arc::new(Mutex::new(Term::new(
-        Config::default(),
-        &initial_size,
-        event_proxy,
-    )));
+    let terminal = Arc::new(Mutex::new(Vt::new(initial_size).unwrap()));
     let revision = AtomicU64::new(0);
     let (updates, update_receiver) = mpsc::channel();
 

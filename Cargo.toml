@@ -22,6 +22,7 @@ async-channel = "2.5"
 atomicwrites = "0.4.4"
 base64 = "0.22"
 clap = { version = "4.5", features = ["derive"] }
+condr-ghostty-vt = { path = "crates/condr-ghostty-vt" }
 # Wire and Snapshot encoding (ADR 0028); the compiler pair runs only in condr-core's build.rs.
 prost = "0.14"
 prost-build = "0.14"
@@ -75,6 +76,8 @@ url = "2"
 syntect = { version = "5.3", default-features = false, features = ["plist-load"] }
 two-face = { version = "0.5", default-features = false, features = ["syntect-onig"] }
 relative-path = { version = "2.0", features = ["serde"] }
+# Plain-text URL detection in terminal frames; already built for gix and tracing-subscriber.
+regex-automata = "0.4"
 # Which emoji characters Unicode draws as text, for the terminal's font on Windows; already
 # built for GPUI.
 unicode-properties = { version = "0.1", default-features = false, features = ["emoji"] }

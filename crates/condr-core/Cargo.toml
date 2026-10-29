@@ -15,12 +15,14 @@ default = ["runtime"]
 runtime = [
     "dep:alacritty_terminal",
     "dep:atomicwrites",
+    "dep:condr-ghostty-vt",
     "dep:core-foundation-sys",
     "dep:dirs",
     "dep:filedescriptor",
     "dep:gix",
     "dep:nix",
     "dep:portable-pty",
+    "dep:regex-automata",
     "dep:sysinfo",
     "dep:toml",
     "dep:toml_edit",
@@ -31,10 +33,12 @@ runtime = [
 alacritty_terminal = { workspace = true, optional = true }
 atomicwrites = { workspace = true, optional = true }
 base64.workspace = true
+condr-ghostty-vt = { workspace = true, optional = true }
 dirs = { workspace = true, optional = true }
 gix = { workspace = true, optional = true }
 portable-pty = { workspace = true, optional = true }
 prost.workspace = true
+regex-automata = { workspace = true, optional = true }
 relative-path.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -36,8 +36,6 @@ pub use event::{AgentEvent, AgentEventKind};
 pub(crate) use process::is_shell;
 #[cfg(feature = "runtime")]
 pub use process::{ProcessInfo, identify_agent_among, identify_agent_process};
-#[cfg(feature = "runtime")]
-pub(crate) use program_status::ProgramStatusReport;
 pub use program_status::{BlockedKind, ProgramState, ProgramStatus};
 
 /// Everything Condr knows about one supported agent CLI (ADR 0035). Each agent's module

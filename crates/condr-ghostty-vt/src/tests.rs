@@ -130,13 +130,13 @@ fn a_selection_follows_its_text_and_copies_it() {
     let mut terminal = terminal(10, 3);
     terminal.write(b"one two\r\nthree");
     terminal.select_word(Point::Viewport { x: 5, y: 0 }, &[]);
-    assert_eq!(terminal.selection_text(None).as_deref(), Some("two"));
+    assert_eq!(terminal.selection_text(None, true).as_deref(), Some("two"));
     terminal.write(b"\r\nfour\r\nfive");
     let mut render = RenderState::new().unwrap();
     render.update(&terminal).unwrap();
     assert_eq!(screen(&mut render), ["three", "four", "five"]);
     assert_eq!(
-        terminal.selection_text(None).as_deref(),
+        terminal.selection_text(None, true).as_deref(),
         Some("two"),
         "scrolled into history"
     );
@@ -147,7 +147,7 @@ fn a_selection_follows_its_text_and_copies_it() {
         Point::Viewport { x: 3, y: 2 },
     );
     assert_eq!(
-        terminal.selection_text(Some(range)).as_deref(),
+        terminal.selection_text(Some(range), true).as_deref(),
         Some("four\nfive")
     );
 }
