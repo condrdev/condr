@@ -130,5 +130,11 @@ fn a_panic_on_a_pane_thread_ends_the_pane_without_reading_its_terminal() {
     assert!(view.cells.iter().all(|cell| *cell == blank_cell()));
     assert_eq!(runtime.copy_range(None), None);
     assert_eq!(runtime.visible_text(), "");
-    runtime.close().unwrap();
+    // The Pane's own reader may meet the poisoned lock too, which ends it the same way.
+    if let Err(error) = runtime.close() {
+        assert!(
+            error.to_string().contains("terminal reader panicked"),
+            "{error}"
+        );
+    }
 }
