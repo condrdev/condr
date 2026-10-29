@@ -24,8 +24,11 @@ pub(super) struct TerminalDamageBaseline {
 
 impl TerminalViewSource {
     pub fn view(&self) -> TerminalView {
-        let terminal = self.terminal.lock().expect("terminal state lock poisoned");
-        let size = *self.size.lock().expect("terminal size lock poisoned");
+        let Ok(terminal) = lock_pane(&self.terminal) else {
+            return blank_view(pane_size(&self.size), self.revision.load(Ordering::Acquire));
+        };
+        // Read under the terminal lock, which a resize holds while it sets both.
+        let size = pane_size(&self.size);
         let mut view = snapshot_terminal(&terminal, size, self.revision.load(Ordering::Acquire));
         view.cursor = self.settled_cursor(view.cursor);
         view
@@ -39,11 +42,7 @@ impl TerminalViewSource {
     /// publishes it once it has stayed put.
     pub fn cursor_settle_pending(&self) -> bool {
         CURSOR_POSITION_SETTLE_ENABLED
-            && self
-                .cursor_settle
-                .lock()
-                .expect("cursor settle lock poisoned")
-                .pending()
+            && lock_pane(&self.cursor_settle).is_ok_and(|settle| settle.pending())
     }
 
     pub(super) fn settled_cursor(&self, cursor: Option<TerminalCursor>) -> Option<TerminalCursor> {
@@ -51,26 +50,22 @@ impl TerminalViewSource {
             return cursor;
         }
         let now = Instant::now();
-        let mut settle = self
-            .cursor_settle
-            .lock()
-            .expect("cursor settle lock poisoned");
+        let Ok(mut settle) = lock_pane(&self.cursor_settle) else {
+            return cursor;
+        };
         settle.observe(cursor, now);
         settle.reported(cursor, now)
     }
 
     pub fn take_frame(&self) -> Option<TerminalViewFrame> {
-        let mut terminal = self.terminal.lock().expect("terminal state lock poisoned");
-        let size = *self.size.lock().expect("terminal size lock poisoned");
+        let mut terminal = lock_pane(&self.terminal).ok()?;
+        let size = pane_size(&self.size);
         let mut revision = self.revision.load(Ordering::Acquire);
         let damage = match terminal.damage() {
             TermDamage::Full => None,
             TermDamage::Partial(lines) => Some(lines.collect::<Vec<_>>()),
         };
-        let mut baseline = self
-            .damage_baseline
-            .lock()
-            .expect("terminal damage baseline lock poisoned");
+        let mut baseline = lock_pane(&self.damage_baseline).ok()?;
         let content = terminal.renderable_content();
         let display_offset = u32::try_from(content.display_offset).unwrap_or(u32::MAX);
         let mouse_tracking = TerminalMouseTracking::from_term_mode(*terminal.mode());
@@ -186,5 +181,19 @@ impl TerminalViewSource {
         drop(baseline);
         terminal.reset_damage();
         frame
+    }
+}
+
+/// What a Pane whose terminal a panic ended shows: a blank grid at its last size
+/// (ADR 0053).
+fn blank_view(size: TerminalSize, revision: u64) -> TerminalView {
+    TerminalView {
+        revision,
+        size,
+        display_offset: 0,
+        mouse_tracking: TerminalMouseTracking::None,
+        cells: vec![super::view::blank_cell(); usize::from(size.columns) * usize::from(size.rows)],
+        cursor: None,
+        selection: None,
     }
 }

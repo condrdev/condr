@@ -181,10 +181,7 @@ impl TerminalInput {
                 "terminal writer stopped",
             ));
         }
-        let mut replies = self
-            .terminal_replies
-            .lock()
-            .expect("terminal reply queue lock poisoned");
+        let mut replies = lock_pane(&self.terminal_replies)?;
         if !self.accepting.load(Ordering::Acquire) {
             return Err(io::Error::new(
                 io::ErrorKind::BrokenPipe,

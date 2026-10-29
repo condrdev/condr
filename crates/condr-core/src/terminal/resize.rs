@@ -14,7 +14,7 @@ pub(super) struct ResizeControl {
 
 impl ResizeControl {
     pub(super) fn request(&self, size: TerminalSize) -> io::Result<()> {
-        let mut state = self.state.lock().expect("terminal resize lock poisoned");
+        let mut state = lock_pane(&self.state)?;
         if state.stopping {
             return Err(io::Error::new(
                 io::ErrorKind::BrokenPipe,
@@ -27,7 +27,9 @@ impl ResizeControl {
     }
 
     pub(super) fn stop(&self) {
-        let mut state = self.state.lock().expect("terminal resize lock poisoned");
+        let Ok(mut state) = lock_pane(&self.state) else {
+            return;
+        };
         state.stopping = true;
         state.pending = None;
         self.wake.notify_all();

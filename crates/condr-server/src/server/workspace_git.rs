@@ -319,10 +319,7 @@ impl GitWatcher {
     }
 
     fn terminal_activity(&self, workspace_id: WorkspaceId, activity: Instant) {
-        let mut pending = self
-            .terminal_activity
-            .lock()
-            .expect("Git activity lock poisoned");
+        let mut pending = self.terminal_activity.lock().or_abort();
         // Keep the latest timestamp without adding another wakeup to the inbox.
         match pending.entry(workspace_id) {
             std::collections::hash_map::Entry::Occupied(mut entry) => {
@@ -502,10 +499,7 @@ fn run_watcher(
                 }
             }
             Some(WatchMessage::TerminalActivity(workspace_id)) => {
-                let activity = terminal_activity
-                    .lock()
-                    .expect("Git activity lock poisoned")
-                    .remove(&workspace_id);
+                let activity = terminal_activity.lock().or_abort().remove(&workspace_id);
                 if let Some(activity) = activity
                     && let Some(entry) = watched.get_mut(&workspace_id)
                 {
@@ -581,7 +575,7 @@ fn refresh_workspace(
         let Some(shared) = state.upgrade() else {
             return false;
         };
-        let state = shared.lock().expect("server state lock poisoned");
+        let state = shared.lock().or_abort();
         if state
             .session
             .workspace(workspace_id)
@@ -651,7 +645,7 @@ fn refresh_workspace(
     let Some(shared) = state.upgrade() else {
         return false;
     };
-    let mut state = shared.lock().expect("server state lock poisoned");
+    let mut state = shared.lock().or_abort();
     if apply_workspace_git_refresh(&mut state, workspace_id, &entry.root, next)
         && working_tree_changed
     {

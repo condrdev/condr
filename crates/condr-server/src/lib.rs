@@ -8,6 +8,7 @@ pub mod logging;
 pub mod noise;
 pub mod p2p;
 pub(crate) mod persistence;
+mod poison;
 mod server;
 pub mod ssh;
 #[cfg(test)]

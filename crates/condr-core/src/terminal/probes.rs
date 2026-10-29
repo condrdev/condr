@@ -15,10 +15,9 @@ impl TerminalCwdProbe {
     }
 
     pub fn observe(&self) -> (Option<PathBuf>, u64) {
-        let mut last_known = self
-            .last_known_cwd
-            .lock()
-            .expect("Terminal cwd lock poisoned");
+        let Ok(mut last_known) = lock_pane(&self.last_known_cwd) else {
+            return (None, 0);
+        };
 
         #[cfg(unix)]
         let foreground = self
@@ -26,11 +25,9 @@ impl TerminalCwdProbe {
             .as_ref()
             .and_then(Weak::upgrade)
             .and_then(|master| self.process.foreground_cwd(&master));
-        let reported = self
-            .reported_cwd
-            .lock()
-            .expect("Terminal cwd lock poisoned")
-            .clone();
+        let Ok(reported) = lock_pane(&self.reported_cwd).map(|reported| reported.clone()) else {
+            return (None, 0);
+        };
         let reported_generation = reported.generation;
         let reported_cwd = reported.cwd.and_then(existing_absolute_directory);
 
@@ -71,7 +68,9 @@ impl TerminalNoticeBatch {
 
 impl TerminalNoticeProbe {
     pub fn take(&self) -> TerminalNoticeBatch {
-        let mut notices = self.notices.lock().expect("terminal notices lock poisoned");
+        let Ok(mut notices) = lock_pane(&self.notices) else {
+            return TerminalNoticeBatch::default();
+        };
         TerminalNoticeBatch {
             title: std::mem::take(&mut notices.title_changed).then(|| notices.title.clone()),
             bells: std::mem::take(&mut notices.bells),
@@ -97,27 +96,16 @@ pub struct TerminalAgentProbe {
 
 impl TerminalAgentProbe {
     pub fn poll_interval(&self) -> Duration {
-        self.notices
-            .lock()
-            .expect("terminal notices lock poisoned")
-            .agent
-            .poll_interval()
+        lock_pane(&self.notices)
+            .map_or(AGENT_POLL_INTERVAL, |notices| notices.agent.poll_interval())
     }
 
     pub fn agent(&self) -> Option<AgentKind> {
-        self.notices
-            .lock()
-            .expect("terminal notices lock poisoned")
-            .agent
-            .agent()
+        lock_pane(&self.notices).ok()?.agent.agent()
     }
 
     pub fn resume(&self) -> Option<Option<crate::AgentResume>> {
-        self.notices
-            .lock()
-            .expect("terminal notices lock poisoned")
-            .agent
-            .resume()
+        lock_pane(&self.notices).ok()?.agent.resume()
     }
 
     /// One tick. `Some(None)` means the agent left; `Some(Some(_))` is the agent and state
@@ -130,7 +118,7 @@ impl TerminalAgentProbe {
         let output_changed = self.activity_revision != Some(revision);
         self.activity_revision = Some(revision);
         let (probe, event_count) = {
-            let mut notices = self.notices.lock().expect("terminal notices lock poisoned");
+            let mut notices = lock_pane(&self.notices).ok()?;
             if notices.agent_stopping {
                 return None;
             }
@@ -155,7 +143,7 @@ impl TerminalAgentProbe {
             }
             self.probe_process()
         });
-        let mut notices = self.notices.lock().expect("terminal notices lock poisoned");
+        let mut notices = lock_pane(&self.notices).ok()?;
         if notices.agent_stopping {
             return None;
         }

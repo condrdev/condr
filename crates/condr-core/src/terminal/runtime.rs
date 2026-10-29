@@ -3,6 +3,7 @@ mod mouse;
 mod tests;
 
 use super::*;
+use std::panic::{self, AssertUnwindSafe};
 
 const CHILD_EXIT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -258,6 +259,8 @@ impl TerminalRuntime {
         Ok(runtime)
     }
 
+    /// Every thread the Pane owns. A panic on one ends the Pane like its program exiting,
+    /// then the thread; other threads find the locks it held poisoned (ADR 0053).
     fn start_thread<T: Send + 'static>(
         &self,
         name: &'static str,
@@ -265,9 +268,16 @@ impl TerminalRuntime {
     ) -> io::Result<JoinHandle<T>> {
         #[cfg(test)]
         tests::before_thread_start(self, name)?;
+        let exited = self.update_sender.clone();
         thread::Builder::new()
             .name(format!("condr-pty-{name}"))
-            .spawn(run)
+            .spawn(move || {
+                panic::catch_unwind(AssertUnwindSafe(run)).unwrap_or_else(|panic| {
+                    tracing::error!("the terminal {name} panicked; ending its Pane");
+                    let _ = exited.send(TerminalUpdate::Exited);
+                    panic::resume_unwind(panic)
+                })
+            })
     }
 
     pub fn write(&self, bytes: impl Into<Vec<u8>>) -> io::Result<()> {
@@ -278,11 +288,7 @@ impl TerminalRuntime {
 
     /// Paste and delayed Enter share one queue entry, so another client cannot split them.
     pub fn submit(&self, text: &str) -> io::Result<()> {
-        let modes = *self
-            .terminal
-            .lock()
-            .expect("terminal state lock poisoned")
-            .mode();
+        let modes = *lock_pane(&self.terminal)?.mode();
         let bytes = encode_paste(text, modes.contains(TermMode::BRACKETED_PASTE));
         let enter = encode_key_in_mode(
             &TerminalKey::Enter,
@@ -301,7 +307,9 @@ impl TerminalRuntime {
     }
 
     fn clear_selection(&self) {
-        let mut terminal = self.terminal.lock().expect("terminal state lock poisoned");
+        let Ok(mut terminal) = lock_pane(&self.terminal) else {
+            return;
+        };
         if terminal.selection.take().is_some() {
             drop(terminal);
             publish_view(&self.revision, &self.update_sender);
@@ -322,7 +330,7 @@ impl TerminalRuntime {
         TerminalCwdProbe {
             #[cfg(unix)]
             master: self.master.as_ref().map(Arc::downgrade),
-            process: if lock_child(&self.child).is_some() {
+            process: if lock_child(&self.child).is_ok_and(|child| child.is_some()) {
                 self.process.clone()
             } else {
                 ProcessProbe::new(None)
@@ -339,11 +347,7 @@ impl TerminalRuntime {
                 modifiers,
                 kind,
             } => {
-                let modes = *self
-                    .terminal
-                    .lock()
-                    .expect("terminal state lock poisoned")
-                    .mode();
+                let modes = *lock_pane(&self.terminal)?.mode();
                 let only_shift = modifiers
                     == TerminalModifiers {
                         shift: true,
@@ -381,19 +385,12 @@ impl TerminalRuntime {
                 Ok(None)
             }
             TerminalCommand::Text(text) => {
-                let modes = *self
-                    .terminal
-                    .lock()
-                    .expect("terminal state lock poisoned")
-                    .mode();
+                let modes = *lock_pane(&self.terminal)?.mode();
                 self.write(encode_text_in_mode(&text, modes))?;
                 Ok(None)
             }
             TerminalCommand::Paste(text) => {
-                let bracketed = self
-                    .terminal
-                    .lock()
-                    .expect("terminal state lock poisoned")
+                let bracketed = lock_pane(&self.terminal)?
                     .mode()
                     .contains(TermMode::BRACKETED_PASTE);
                 self.write(encode_paste(&text, bracketed))?;
@@ -414,10 +411,7 @@ impl TerminalRuntime {
                 Ok(None)
             }
             TerminalCommand::Focus(focused) => {
-                let focus_reporting = self
-                    .terminal
-                    .lock()
-                    .expect("terminal state lock poisoned")
+                let focus_reporting = lock_pane(&self.terminal)?
                     .mode()
                     .contains(TermMode::FOCUS_IN_OUT);
                 if !focused {
@@ -464,7 +458,7 @@ impl TerminalRuntime {
     }
 
     pub fn size(&self) -> TerminalSize {
-        *self.size.lock().expect("terminal size lock poisoned")
+        pane_size(&self.size)
     }
 
     pub fn view(&self) -> TerminalView {
@@ -482,7 +476,9 @@ impl TerminalRuntime {
     }
 
     pub fn visible_text(&self) -> String {
-        let terminal = self.terminal.lock().expect("terminal state lock poisoned");
+        let Ok(terminal) = lock_pane(&self.terminal) else {
+            return String::new();
+        };
         let mut lines = vec![String::new(); terminal.screen_lines()];
 
         for cell in terminal.renderable_content().display_iter {
@@ -518,14 +514,16 @@ impl TerminalRuntime {
     /// The last `lines` rows of the active screen and its scrollback, oldest first,
     /// with trailing blank rows dropped. Ignores the viewport scroll position.
     pub fn recent_text(&self, lines: usize) -> String {
-        let terminal = self.terminal.lock().expect("terminal state lock poisoned");
-        recent_text(&terminal, lines)
+        lock_pane(&self.terminal)
+            .map_or_else(|_| String::new(), |terminal| recent_text(&terminal, lines))
     }
 
     /// A Server launch failure is visible in the same Pane as native CLI failures.
     pub fn print_notice(&self, message: &str) {
         let message: String = message.chars().filter(|ch| !ch.is_control()).collect();
-        let mut terminal = self.terminal.lock().expect("terminal state lock poisoned");
+        let Ok(mut terminal) = lock_pane(&self.terminal) else {
+            return;
+        };
         let mut processor: Processor = Processor::new();
         processor.advance(
             &mut *terminal,
@@ -550,26 +548,23 @@ impl TerminalRuntime {
     }
 
     pub fn restore_agent(&self, resume: crate::AgentResume) {
-        self.notices
-            .lock()
-            .expect("terminal notices lock poisoned")
-            .agent
-            .restore(resume);
+        if let Ok(mut notices) = lock_pane(&self.notices) {
+            notices.agent.restore(resume);
+        }
     }
 
     /// Freeze process tracking before shutdown so stopping our own processes cannot
     /// turn the last live conversation into an ordinary agent exit.
     pub fn prepare_agent_shutdown(&self) {
-        self.notices
-            .lock()
-            .expect("terminal notices lock poisoned")
-            .agent_stopping = true;
+        if let Ok(mut notices) = lock_pane(&self.notices) {
+            notices.agent_stopping = true;
+        }
     }
 
     /// Returns the last hook decision even if its monitor has not committed it yet.
     /// After closing, merges tail hooks using the identity frozen before signalling.
     pub fn agent_resume(&self) -> Option<Option<crate::AgentResume>> {
-        let mut notices = self.notices.lock().expect("terminal notices lock poisoned");
+        let mut notices = lock_pane(&self.notices).ok()?;
         if notices.agent_stopping {
             for event in std::mem::take(&mut notices.agent_events) {
                 event.apply(&mut notices.agent);
@@ -586,7 +581,9 @@ impl TerminalRuntime {
             TerminalScroll::Top => Scroll::Top,
             TerminalScroll::Bottom => Scroll::Bottom,
         };
-        let mut terminal = self.terminal.lock().expect("terminal state lock poisoned");
+        let Ok(mut terminal) = lock_pane(&self.terminal) else {
+            return;
+        };
         let before = terminal.grid().display_offset();
         terminal.scroll_display(scroll);
         if terminal.grid().display_offset() != before {
@@ -596,7 +593,7 @@ impl TerminalRuntime {
     }
 
     pub fn copy_range(&self, selection: Option<TerminalSelection>) -> Option<String> {
-        let mut terminal = self.terminal.lock().expect("terminal state lock poisoned");
+        let mut terminal = lock_pane(&self.terminal).ok()?;
         let Some(selection) = selection else {
             return terminal.selection_to_string();
         };
@@ -611,7 +608,9 @@ impl TerminalRuntime {
     /// it on resize or screen swaps, so the published viewport selection stays on the
     /// text the user picked.
     fn select(&self, selection: Option<TerminalSelection>) {
-        let mut terminal = self.terminal.lock().expect("terminal state lock poisoned");
+        let Ok(mut terminal) = lock_pane(&self.terminal) else {
+            return;
+        };
         terminal.selection = selection.map(|selection| grid_selection(&terminal, selection));
         drop(terminal);
         publish_view(&self.revision, &self.update_sender);
@@ -625,7 +624,9 @@ impl TerminalRuntime {
         display_offset: u32,
         unit: TerminalSelectionUnit,
     ) {
-        let mut terminal = self.terminal.lock().expect("terminal state lock poisoned");
+        let Ok(mut terminal) = lock_pane(&self.terminal) else {
+            return;
+        };
         let point = viewport_point(&terminal, position, display_offset);
         let ty = match unit {
             TerminalSelectionUnit::Word => SelectionType::Semantic,
@@ -637,7 +638,9 @@ impl TerminalRuntime {
     }
 
     fn scroll_to_bottom(&self) {
-        let mut terminal = self.terminal.lock().expect("terminal state lock poisoned");
+        let Ok(mut terminal) = lock_pane(&self.terminal) else {
+            return;
+        };
         if terminal.grid().display_offset() != 0 {
             terminal.scroll_display(Scroll::Bottom);
             drop(terminal);
@@ -647,7 +650,7 @@ impl TerminalRuntime {
 
     pub fn wait(&mut self) -> io::Result<ExitStatus> {
         let status = {
-            let mut child = lock_child(&self.child);
+            let mut child = lock_child(&self.child)?;
             let status = child
                 .as_mut()
                 .ok_or_else(|| io::Error::other("terminal child exit was already reported"))?
@@ -660,7 +663,7 @@ impl TerminalRuntime {
     }
 
     pub fn shutdown(&mut self) -> io::Result<ExitStatus> {
-        let mut child = lock_child(&self.child)
+        let mut child = lock_child(&self.child)?
             .take()
             .ok_or_else(|| io::Error::other("terminal child exit was already reported"))?;
         let status = self.stop_process_and_io(Some(&mut *child))?;
@@ -669,7 +672,7 @@ impl TerminalRuntime {
 
     /// Stops the Terminal runtime and releases its PTY resources. Repeated calls are harmless.
     pub fn close(&mut self) -> io::Result<()> {
-        if lock_child(&self.child).is_some() {
+        if lock_child(&self.child).is_ok_and(|child| child.is_some()) {
             self.shutdown().map(drop)
         } else {
             self.stop_process_and_io(None).map(drop)
@@ -753,8 +756,10 @@ pub(super) fn grid_selection(terminal: &Terminal, selection: TerminalSelection) 
 
 type SharedChild = Arc<Mutex<Option<Box<dyn Child + Send + Sync>>>>;
 
-fn lock_child(child: &SharedChild) -> MutexGuard<'_, Option<Box<dyn Child + Send + Sync>>> {
-    child.lock().expect("terminal child lock poisoned")
+fn lock_child(
+    child: &SharedChild,
+) -> io::Result<MutexGuard<'_, Option<Box<dyn Child + Send + Sync>>>> {
+    lock_pane(child)
 }
 
 fn live_mouse_position(
@@ -784,7 +789,7 @@ fn child_exit_watch(
             return;
         };
         {
-            let mut child = lock_child(&child);
+            let mut child = lock_child(&child).expect("terminal child lock poisoned");
             let Some(child) = child.as_mut() else {
                 // Reaped by `wait` or `shutdown`.
                 return;

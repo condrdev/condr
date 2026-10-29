@@ -27,8 +27,8 @@ pub(super) use super::view::{
 pub(super) use super::view::{blank_cell, terminal_cell_text};
 pub(super) use super::view_source::TerminalDamageBaseline;
 pub(super) use crate::agent::{
-    AGENT_EVENT_OSC_PREFIX, AgentDetector, AgentEvent, AgentPublish, ProcessInfo,
-    ProcessProbeResult, ProgramStatus, ProgramStatusReport, identify_agent_process,
+    AGENT_EVENT_OSC_PREFIX, AGENT_POLL_INTERVAL, AgentDetector, AgentEvent, AgentPublish,
+    ProcessInfo, ProcessProbeResult, ProgramStatus, ProgramStatusReport, identify_agent_process,
     program_status::{PROGRAM_STATUS_OSC_PREFIX, PROGRAM_STATUS_REPLY},
 };
 pub(super) use crate::{AgentKind, AgentSnapshot, PaneId};
@@ -90,6 +90,22 @@ pub(super) const PROCESS_SHUTDOWN_GRACE: Duration = Duration::from_millis(250);
 pub(super) const PROCESS_KILL_GRACE: Duration = Duration::from_secs(2);
 #[cfg(unix)]
 pub(super) const MAX_CANCEL_DRAIN_READS: u8 = 4;
+
+/// A Pane's lock as any thread but the Pane's own takes it. Poisoned means a panic ended
+/// the Pane, and what the lock guards may be half-changed, so it is not read (ADR 0053).
+pub(super) fn lock_pane<T>(mutex: &Mutex<T>) -> io::Result<MutexGuard<'_, T>> {
+    mutex
+        .lock()
+        .map_err(|_| io::Error::other("the terminal ended after an internal error"))
+}
+
+/// The size lock only ever holds a whole `TerminalSize` copied in or out, so even a
+/// poisoned one holds a size the Pane had (ADR 0053).
+pub(super) fn pane_size(size: &Mutex<crate::TerminalSize>) -> crate::TerminalSize {
+    *size
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 pub(super) fn join(thread: &mut Option<JoinHandle<io::Result<()>>>, name: &str) -> io::Result<()> {
     match thread.take() {

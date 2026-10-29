@@ -84,3 +84,51 @@ fn thread_start_failure_reaps_child_and_releases_io_for_every_stage() {
         assert_eq!(resources.resize.strong_count(), 0, "{stage}: resizer");
     }
 }
+
+#[test]
+#[cfg(any(unix, windows))]
+fn a_panic_on_a_pane_thread_ends_the_pane_without_reading_its_terminal() {
+    #[cfg(unix)]
+    let command = {
+        let mut command = CommandBuilder::new("sh");
+        command.args(["-c", "exec sleep 60"]);
+        command
+    };
+    #[cfg(windows)]
+    let command = {
+        let mut command = CommandBuilder::new("powershell.exe");
+        command.args(["-NoProfile", "-Command", "Start-Sleep -Seconds 60"]);
+        command
+    };
+    let size = TerminalSize::new(24, 80);
+    let mut runtime = TerminalRuntime::spawn(command, size).unwrap();
+    let updates = runtime.take_updates().unwrap();
+
+    // As a reader that failed halfway through a chunk: the panic leaves the lock poisoned.
+    let terminal = Arc::clone(&runtime.terminal);
+    let panicked = runtime
+        .start_thread("reader", move || {
+            let _terminal = terminal.lock().unwrap();
+            panic!("injected reader panic");
+        })
+        .unwrap();
+    assert!(panicked.join().is_err());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let wait = deadline.saturating_duration_since(Instant::now());
+        match updates.recv_timeout(wait) {
+            Ok(TerminalUpdate::Exited) => break,
+            Ok(TerminalUpdate::View(_)) => {}
+            Err(error) => panic!("the Pane never ended: {error}"),
+        }
+    }
+
+    assert!(runtime.execute(TerminalCommand::Text("x".into())).is_err());
+    let view = runtime.view();
+    assert_eq!(view.size, size);
+    assert_eq!(view.cells.len(), 24 * 80);
+    assert!(view.cells.iter().all(|cell| *cell == blank_cell()));
+    assert_eq!(runtime.copy_range(None), None);
+    assert_eq!(runtime.visible_text(), "");
+    runtime.close().unwrap();
+}

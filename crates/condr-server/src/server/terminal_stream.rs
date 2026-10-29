@@ -165,11 +165,7 @@ impl ClientSubscriber {
 
 pub(super) fn flush_terminal_render(state: &Arc<Mutex<RuntimeState>>, client_id: u64) {
     loop {
-        let Some(snapshot) = state
-            .lock()
-            .expect("server state lock poisoned")
-            .terminal_render_snapshot(client_id)
-        else {
+        let Some(snapshot) = state.lock().or_abort().terminal_render_snapshot(client_id) else {
             return;
         };
         let mut prepared = prepare_terminal_render(snapshot);
@@ -187,7 +183,7 @@ pub(super) fn flush_terminal_render(state: &Arc<Mutex<RuntimeState>>, client_id:
         };
         let outcome = state
             .lock()
-            .expect("server state lock poisoned")
+            .or_abort()
             .commit_terminal_render(prepared, frames);
         if matches!(outcome, TerminalRenderCommit::Done) {
             return;

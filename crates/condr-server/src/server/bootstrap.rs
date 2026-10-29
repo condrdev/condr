@@ -47,7 +47,7 @@ pub(super) fn queue_runtime_bootstrap(
         queue_message(outbound, message)
     };
     let probes = {
-        let state = state.lock().expect("server state lock poisoned");
+        let state = state.lock().or_abort();
         if session_id != state.session_id {
             return reject(ServerMessage::SnapshotRejected {
                 server_id: state.server_id,
@@ -59,7 +59,7 @@ pub(super) fn queue_runtime_bootstrap(
     };
     let observations = observe_terminal_cwds(probes);
     let (capture, fenced) = {
-        let mut state = state.lock().expect("server state lock poisoned");
+        let mut state = state.lock().or_abort();
         if session_id != state.session_id {
             return reject(ServerMessage::SnapshotRejected {
                 server_id: state.server_id,
@@ -82,10 +82,7 @@ pub(super) fn queue_runtime_bootstrap(
         Ok(framed) => framed,
         Err(error) => {
             if fenced {
-                state
-                    .lock()
-                    .expect("server state lock poisoned")
-                    .abort_bootstrap(client_id);
+                state.lock().or_abort().abort_bootstrap(client_id);
             }
             let _ = reject(ServerMessage::SnapshotRejected {
                 server_id: bootstrap_server_id,
@@ -97,7 +94,7 @@ pub(super) fn queue_runtime_bootstrap(
     };
 
     let result = if fenced {
-        let mut state = state.lock().expect("server state lock poisoned");
+        let mut state = state.lock().or_abort();
         // Fenced and encoded: reopening now puts the Bootstrap right behind the lag notice.
         outbound.resume_after_lag();
         let result = state.finish_bootstrap(client_id, framed);
@@ -122,7 +119,7 @@ pub(super) fn send_welcome(
     refusal: Option<Refusal>,
 ) -> io::Result<()> {
     let (server_id, session_id) = {
-        let state = state.lock().expect("server state lock poisoned");
+        let state = state.lock().or_abort();
         (state.server_id, state.session_id)
     };
     let welcome = Welcome::new(server_id, session_id, refusal, crate::noise::device_name());

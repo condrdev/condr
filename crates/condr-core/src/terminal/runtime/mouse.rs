@@ -3,7 +3,7 @@ use super::*;
 impl TerminalRuntime {
     pub(super) fn handle_mouse(&self, event: TerminalMouseEvent) -> io::Result<()> {
         let (modes, display_offset, screen_lines) = {
-            let terminal = self.terminal.lock().expect("terminal state lock poisoned");
+            let terminal = lock_pane(&self.terminal)?;
             (
                 *terminal.mode(),
                 terminal.grid().display_offset(),
@@ -85,10 +85,7 @@ impl TerminalRuntime {
                     modifiers,
                 };
                 if self.write_mouse_report(event, modes)? {
-                    *self
-                        .reported_mouse_press
-                        .lock()
-                        .expect("reported mouse press lock poisoned") = Some(ReportedMousePress {
+                    *lock_pane(&self.reported_mouse_press)? = Some(ReportedMousePress {
                         button,
                         position,
                         modifiers,
@@ -101,10 +98,7 @@ impl TerminalRuntime {
                 position,
                 modifiers,
             } => {
-                let mut reported = self
-                    .reported_mouse_press
-                    .lock()
-                    .expect("reported mouse press lock poisoned");
+                let mut reported = lock_pane(&self.reported_mouse_press)?;
                 let Some(press) = *reported else {
                     return Ok(());
                 };
@@ -133,10 +127,7 @@ impl TerminalRuntime {
                 else {
                     return Ok(());
                 };
-                let mut reported = self
-                    .reported_mouse_press
-                    .lock()
-                    .expect("reported mouse press lock poisoned");
+                let mut reported = lock_pane(&self.reported_mouse_press)?;
                 let Some(press) = reported.as_mut() else {
                     return Ok(());
                 };
@@ -209,25 +200,17 @@ impl TerminalRuntime {
     }
 
     pub(super) fn clear_reported_mouse_press(&self, button: TerminalMouseButton) {
-        let mut reported = self
-            .reported_mouse_press
-            .lock()
-            .expect("reported mouse press lock poisoned");
+        let Ok(mut reported) = lock_pane(&self.reported_mouse_press) else {
+            return;
+        };
         if reported.is_some_and(|press| press.button == button) {
             *reported = None;
         }
     }
 
     pub fn release_mouse(&self) -> io::Result<()> {
-        let modes = *self
-            .terminal
-            .lock()
-            .expect("terminal state lock poisoned")
-            .mode();
-        let mut reported = self
-            .reported_mouse_press
-            .lock()
-            .expect("reported mouse press lock poisoned");
+        let modes = *lock_pane(&self.terminal)?.mode();
+        let mut reported = lock_pane(&self.reported_mouse_press)?;
         let Some(press) = *reported else {
             return Ok(());
         };

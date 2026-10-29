@@ -20,6 +20,7 @@ use crate::endpoint::{
 };
 use crate::noise::{DeviceKey, ServerIdentity};
 use crate::persistence::{SnapshotLoad, SnapshotPersistence};
+use crate::poison::OrAbort;
 use agents::AgentControl;
 use bootstrap::*;
 use client::*;
@@ -127,18 +128,11 @@ impl ServerHandle {
     }
 
     pub fn snapshot(&self) -> condr_core::SessionSnapshot {
-        self.state
-            .lock()
-            .expect("server state lock poisoned")
-            .session
-            .snapshot()
+        self.state.lock().or_abort().session.snapshot()
     }
 
     pub fn server_id(&self) -> ServerId {
-        self.state
-            .lock()
-            .expect("server state lock poisoned")
-            .server_id
+        self.state.lock().or_abort().server_id
     }
 }
 
@@ -207,7 +201,7 @@ impl BoundServer {
         };
         let state = Arc::new(Mutex::new(state));
         {
-            let mut runtime = state.lock().expect("server state lock poisoned");
+            let mut runtime = state.lock().or_abort();
             runtime.running_listen = config.listen.map(|address| address.to_string());
             runtime.start_git_watcher(Arc::downgrade(&state));
         }
@@ -290,13 +284,7 @@ impl BoundServer {
                 .send(EndpointStream::P2p(stream))
                 .map_err(|_| io::Error::other("the Server stopped accepting"))
         });
-        let proxy = self
-            .state
-            .lock()
-            .expect("server state lock poisoned")
-            .settings
-            .proxy
-            .clone();
+        let proxy = self.state.lock().or_abort().settings.proxy.clone();
         let p2p = crate::p2p::P2pNode::new(
             tokio::runtime::Handle::current(),
             Arc::clone(&identity) as _,
@@ -309,7 +297,7 @@ impl BoundServer {
         {
             tracing::error!("p2p endpoint not bound: {error}");
         }
-        self.state.lock().expect("server state lock poisoned").p2p = Some(Arc::clone(&p2p));
+        self.state.lock().or_abort().p2p = Some(Arc::clone(&p2p));
         if let Some(base_url) = self.cloud_url.take() {
             match push::Pushes::start(
                 &tokio::runtime::Handle::current(),
@@ -318,10 +306,7 @@ impl BoundServer {
                 &proxy,
             ) {
                 Ok(pushes) => {
-                    self.state
-                        .lock()
-                        .expect("server state lock poisoned")
-                        .pushes = Some(pushes);
+                    self.state.lock().or_abort().pushes = Some(pushes);
                 }
                 Err(error) => tracing::error!("pushes to Condr Cloud are off: {error}"),
             }
@@ -341,7 +326,7 @@ impl BoundServer {
             if Instant::now() >= agent_expiry_due {
                 self.state
                     .lock()
-                    .expect("server state lock poisoned")
+                    .or_abort()
                     .expire_agent_operations(Instant::now());
                 agent_expiry_due = Instant::now() + Duration::from_millis(50);
             }
@@ -387,7 +372,7 @@ impl BoundServer {
         self.stop.store(true, Ordering::Release);
         self.lifecycle.wait_for_operations();
         let (mut terminals, git_watcher) = {
-            let mut state = self.state.lock().expect("server state lock poisoned");
+            let mut state = self.state.lock().or_abort();
             state.stop_agent_waits();
             clipboard_image::remove(
                 std::mem::take(&mut state.staged_images)
@@ -432,7 +417,7 @@ impl BoundServer {
             }
         }
         let mut persistence = {
-            let mut state = self.state.lock().expect("server state lock poisoned");
+            let mut state = self.state.lock().or_abort();
             state.record_terminal_cwds(final_cwds);
             for (pane_id, resume) in final_resumes {
                 state.record_agent_resume(pane_id, resume);
@@ -476,7 +461,7 @@ struct ServerLifecycleState {
 
 impl ServerLifecycle {
     fn begin_operation(self: &Arc<Self>) -> Option<OperationGuard> {
-        let mut state = self.state.lock().expect("server lifecycle lock poisoned");
+        let mut state = self.state.lock().or_abort();
         if state.stopping {
             return None;
         }
@@ -487,25 +472,19 @@ impl ServerLifecycle {
     }
 
     fn begin_stop(&self) {
-        self.state
-            .lock()
-            .expect("server lifecycle lock poisoned")
-            .stopping = true;
+        self.state.lock().or_abort().stopping = true;
     }
 
     fn is_stopping(&self) -> bool {
-        self.state
-            .lock()
-            .expect("server lifecycle lock poisoned")
-            .stopping
+        self.state.lock().or_abort().stopping
     }
 
     fn wait_for_operations(&self) {
-        let state = self.state.lock().expect("server lifecycle lock poisoned");
+        let state = self.state.lock().or_abort();
         let _state = self
             .idle
             .wait_while(state, |state| state.operations != 0)
-            .expect("server lifecycle lock poisoned");
+            .or_abort();
     }
 }
 
@@ -515,11 +494,7 @@ struct OperationGuard {
 
 impl Drop for OperationGuard {
     fn drop(&mut self) {
-        let mut state = self
-            .lifecycle
-            .state
-            .lock()
-            .expect("server lifecycle lock poisoned");
+        let mut state = self.lifecycle.state.lock().or_abort();
         state.operations -= 1;
         if state.operations == 0 {
             self.lifecycle.idle.notify_all();

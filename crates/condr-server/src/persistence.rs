@@ -1,7 +1,9 @@
+use crate::poison::{OrAbort, abort_server};
 use atomicwrites::{AllowOverwrite, AtomicFile};
 use condr_core::SessionSnapshot;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
+use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
@@ -111,7 +113,14 @@ impl SnapshotPersistence {
         let worker_path = path.clone();
         let worker = thread::Builder::new()
             .name("condr-snapshot".into())
-            .spawn(move || run_worker_with(worker_path, worker_shared, write_snapshot))?;
+            .spawn(move || {
+                // A worker that died would leave every later change unsaved without a
+                // word, so its panic ends the Server instead (ADR 0053).
+                panic::catch_unwind(AssertUnwindSafe(|| {
+                    run_worker_with(worker_path, worker_shared, write_snapshot)
+                }))
+                .unwrap_or_else(|_| abort_server("the Session Snapshot worker stopped"))
+            })?;
 
         Ok(Self {
             path,
@@ -180,11 +189,7 @@ impl SnapshotPersistence {
     }
 
     pub(crate) fn schedule(&self, snapshot: SessionSnapshot) {
-        let mut state = self
-            .shared
-            .state
-            .lock()
-            .expect("Snapshot worker lock poisoned");
+        let mut state = self.shared.state.lock().or_abort();
         if state.stopping {
             return;
         }
@@ -198,11 +203,7 @@ impl SnapshotPersistence {
             return Ok(());
         };
         {
-            let mut state = self
-                .shared
-                .state
-                .lock()
-                .expect("Snapshot worker lock poisoned");
+            let mut state = self.shared.state.lock().or_abort();
             state.stopping = true;
             self.shared.wake.notify_one();
         }
@@ -237,7 +238,7 @@ fn run_worker_with(
         match write(&path, &snapshot) {
             Ok(()) => shutdown_write_attempts = 0,
             Err(error) => {
-                let mut state = shared.state.lock().expect("Snapshot worker lock poisoned");
+                let mut state = shared.state.lock().or_abort();
                 if state.stopping {
                     if state.pending.is_some() {
                         shutdown_write_attempts = 0;
@@ -264,7 +265,7 @@ fn run_worker_with(
             }
         }
 
-        let state = shared.state.lock().expect("Snapshot worker lock poisoned");
+        let state = shared.state.lock().or_abort();
         if state.stopping && state.pending.is_none() {
             return Ok(());
         }
@@ -272,16 +273,13 @@ fn run_worker_with(
 }
 
 fn wait_for_snapshot(shared: &Shared) -> Option<SessionSnapshot> {
-    let mut state = shared.state.lock().expect("Snapshot worker lock poisoned");
+    let mut state = shared.state.lock().or_abort();
     loop {
         if state.stopping {
             return state.pending.take();
         }
         let Some(deadline) = state.deadline else {
-            state = shared
-                .wake
-                .wait(state)
-                .expect("Snapshot worker lock poisoned");
+            state = shared.wake.wait(state).or_abort();
             continue;
         };
         let now = Instant::now();
@@ -289,10 +287,7 @@ fn wait_for_snapshot(shared: &Shared) -> Option<SessionSnapshot> {
             state.deadline = None;
             return state.pending.take();
         }
-        let (next, _) = shared
-            .wake
-            .wait_timeout(state, deadline - now)
-            .expect("Snapshot worker lock poisoned");
+        let (next, _) = shared.wake.wait_timeout(state, deadline - now).or_abort();
         state = next;
     }
 }

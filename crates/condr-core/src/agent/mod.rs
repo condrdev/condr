@@ -26,6 +26,8 @@ pub mod program_status;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
+#[cfg(feature = "runtime")]
+pub(crate) use detector::AGENT_POLL_INTERVAL;
 pub use detector::{AgentDetector, AgentPublish, ProcessProbeResult};
 #[cfg(feature = "runtime")]
 pub(crate) use event::AGENT_EVENT_OSC_PREFIX;

@@ -9,7 +9,7 @@ impl Drop for PeerRegistration {
     fn drop(&mut self) {
         self.state
             .lock()
-            .expect("server state lock poisoned")
+            .or_abort()
             .tcp_peers
             .remove(&self.client_id);
     }
@@ -24,11 +24,7 @@ fn tunnel(
     device: [u8; 32],
     invite: Option<[u8; 32]>,
 ) {
-    let node = state
-        .lock()
-        .expect("server state lock poisoned")
-        .p2p
-        .clone();
+    let node = state.lock().or_abort().p2p.clone();
     let mut local = local;
     let Some(node) = node else {
         let _ = send_welcome(
@@ -190,7 +186,7 @@ pub(super) fn handle_client(
     let mut peer_registration = None;
     if let Some(peer_key) = stream.peer_key() {
         let Ok(peer) = stream.try_clone() else { return };
-        let mut state_guard = state.lock().expect("server state lock poisoned");
+        let mut state_guard = state.lock().or_abort();
         match stream.peer_authorized() {
             Ok(true) => {
                 state_guard.tcp_peers.insert(client_id, (peer_key, peer));
@@ -227,7 +223,7 @@ pub(super) fn handle_client(
         return;
     }
     let (server_id, session_id) = {
-        let state = state.lock().expect("server state lock poisoned");
+        let state = state.lock().or_abort();
         (state.server_id, state.session_id)
     };
     tracing::info!(name = %hello.client_name, build = %hello.build, "connected");
@@ -332,7 +328,7 @@ pub(super) fn handle_client(
             ClientMessage::SnapshotRequest { session_id } => layouts.snapshot(session_id),
             ClientMessage::OverviewRequest { session_id } => {
                 let response = {
-                    let state = state.lock().expect("server state lock poisoned");
+                    let state = state.lock().or_abort();
                     if session_id == state.session_id {
                         ServerMessage::Overview(SessionOverview {
                             server_id: state.server_id,
@@ -385,7 +381,7 @@ pub(super) fn handle_client(
                     .get_ref()
                     .set_read_timeout(Some(SUBSCRIBER_READ_TIMEOUT));
                 let shared_state = Arc::clone(&state);
-                let mut state = state.lock().expect("server state lock poisoned");
+                let mut state = state.lock().or_abort();
                 let (responses, should_subscribe) = {
                     if session_id != state.session_id {
                         (
@@ -458,7 +454,7 @@ pub(super) fn handle_client(
                 queued == Err(ReliableSendError::Disconnected)
             }
             ClientMessage::Ping { server_id, nonce } => {
-                let state = state.lock().expect("server state lock poisoned");
+                let state = state.lock().or_abort();
                 if server_id != state.server_id {
                     queue_message(
                         &outbound,
@@ -489,7 +485,7 @@ pub(super) fn handle_client(
                 pane_id,
                 command,
             } => {
-                let mut state = state.lock().expect("server state lock poisoned");
+                let mut state = state.lock().or_abort();
                 let is_copy = matches!(&command, TerminalCommand::Copy { .. });
                 // Every Client may do everything: the last one to scroll or select sets it
                 // for all, and sizes come from the window last focused (ADR 0036).
@@ -616,7 +612,7 @@ pub(super) fn handle_client(
                     }
                 };
                 let checked = {
-                    let state = state.lock().expect("server state lock poisoned");
+                    let state = state.lock().or_abort();
                     target(&state)
                         .map(|()| state.terminal_instances.get(&pane_id).copied())
                         .map_err(str::to_owned)
@@ -635,7 +631,7 @@ pub(super) fn handle_client(
                             .map_err(|error| format!("could not stage image: {error}"))
                     })
                     .and_then(|(path, instance_id)| {
-                        let mut state = state.lock().expect("server state lock poisoned");
+                        let mut state = state.lock().or_abort();
                         let pasted = target(&state).map_err(str::to_owned).and_then(|()| {
                             if state.terminal_instances.get(&pane_id).copied() != instance_id {
                                 return Err("terminal changed during image upload".to_owned());
@@ -669,7 +665,7 @@ pub(super) fn handle_client(
                 pane_id,
                 lines,
             } => {
-                let state = state.lock().expect("server state lock poisoned");
+                let state = state.lock().or_abort();
                 let error = if server_id != state.server_id {
                     Some("unknown Server")
                 } else if session_id != state.session_id {
@@ -704,7 +700,7 @@ pub(super) fn handle_client(
                 commit,
             } => {
                 let repository = {
-                    let state = state.lock().expect("server state lock poisoned");
+                    let state = state.lock().or_abort();
                     if server_id != state.server_id {
                         Err("unknown Server".to_string())
                     } else if session_id != state.session_id {
@@ -838,7 +834,7 @@ pub(super) fn handle_client(
             } => {
                 // The listing reads the disk: never under the state lock.
                 let repository = {
-                    let state = state.lock().expect("server state lock poisoned");
+                    let state = state.lock().or_abort();
                     state
                         .workspace_git
                         .get(&workspace_id)
@@ -973,7 +969,7 @@ pub(super) fn handle_client(
                 } = command
                 {
                     let probe = {
-                        let state = state.lock().expect("server state lock poisoned");
+                        let state = state.lock().or_abort();
                         state.terminal_instances.get(&pane_id).copied().zip(
                             state
                                 .terminals
@@ -990,7 +986,7 @@ pub(super) fn handle_client(
                 } else {
                     None
                 };
-                let mut state = state.lock().expect("server state lock poisoned");
+                let mut state = state.lock().or_abort();
                 if server_id != state.server_id
                     || session_id != state.session_id
                     || lifecycle.is_stopping()
@@ -1018,7 +1014,7 @@ pub(super) fn handle_client(
                 &outbound,
             ),
             ClientMessage::StopServer { server_id } => {
-                let known_server = state.lock().expect("server state lock poisoned").server_id;
+                let known_server = state.lock().or_abort().server_id;
                 // A paired Device that stopped the Server could not start it again.
                 if !stream.get_ref().may_administer() {
                     queue_message(
@@ -1051,7 +1047,7 @@ pub(super) fn handle_client(
                         message: "only the Server host may revoke devices".into(),
                     }
                 } else if let Ok(key) = crate::noise::PublicKey::parse(&key) {
-                    let state = state.lock().expect("server state lock poisoned");
+                    let state = state.lock().or_abort();
                     let mut disconnected = 0;
                     for (id, (peer_key, peer)) in &state.tcp_peers {
                         if *id != client_id && *peer_key == key {
@@ -1073,7 +1069,7 @@ pub(super) fn handle_client(
                         message: "only the Server host may list connected devices".into(),
                     }
                 } else {
-                    let state = state.lock().expect("server state lock poisoned");
+                    let state = state.lock().or_abort();
                     let mut keys = state
                         .tcp_peers
                         .values()
@@ -1109,7 +1105,7 @@ pub(super) fn handle_client(
                     ServerMessage::Error {
                         message: "a device cannot revoke itself".into(),
                     }
-                } else if state.lock().expect("server state lock poisoned").server_id != server_id {
+                } else if state.lock().or_abort().server_id != server_id {
                     ServerMessage::Error {
                         message: "unknown Server".into(),
                     }
@@ -1151,10 +1147,7 @@ pub(super) fn handle_client(
                 queue_message(&outbound, response)
             }
             ClientMessage::WatchTerminals { panes } => {
-                state
-                    .lock()
-                    .expect("server state lock poisoned")
-                    .watch_terminals(client_id, panes);
+                state.lock().or_abort().watch_terminals(client_id, panes);
                 flush_terminal_render(&state, client_id);
                 false
             }
@@ -1165,7 +1158,7 @@ pub(super) fn handle_client(
         }
     }
 
-    let mut state = state.lock().expect("server state lock poisoned");
+    let mut state = state.lock().or_abort();
     state.agent_control.waiters.remove(&client_id);
     state.subscribers.remove(&client_id);
     state.watched_terminals.remove(&client_id);
@@ -1198,7 +1191,7 @@ fn workspace_repository(
     workspace_root(state, server_id, session_id, workspace_id)?;
     state
         .lock()
-        .expect("server state lock poisoned")
+        .or_abort()
         .workspace_git
         .get(&workspace_id)
         .map(|git| git.repository.clone())
@@ -1211,7 +1204,7 @@ fn workspace_root(
     session_id: SessionId,
     workspace_id: WorkspaceId,
 ) -> Result<PathBuf, String> {
-    let state = state.lock().expect("server state lock poisoned");
+    let state = state.lock().or_abort();
     if server_id != state.server_id {
         Err("unknown Server".into())
     } else if session_id != state.session_id {
@@ -1234,11 +1227,7 @@ pub(super) fn refresh_workspace(
     workspace_id: WorkspaceId,
 ) -> Result<(), String> {
     workspace_root(state, server_id, session_id, workspace_id)?;
-    if let Some(watcher) = &state
-        .lock()
-        .expect("server state lock poisoned")
-        .git_watcher
-    {
+    if let Some(watcher) = &state.lock().or_abort().git_watcher {
         watcher.refresh(workspace_id);
     }
     Ok(())
@@ -1259,7 +1248,7 @@ pub(super) fn files_mutated(
     ) {
         return;
     }
-    let mut state = state.lock().expect("server state lock poisoned");
+    let mut state = state.lock().or_abort();
     if let (FileMutation::Rename { from, to }, FileMutationResult::Done { .. }) = (mutation, result)
     {
         let mut candidate = state.session.clone();
@@ -1283,12 +1272,12 @@ fn server_admin(
     use condr_core::protocol::{ServerAdminCommand, ServerAdminResponse, ServerClientInfo};
     let config_path = state
         .lock()
-        .expect("server state lock poisoned")
+        .or_abort()
         .config_path
         .clone()
         .or_else(|| condr_core::config_directory().map(|root| root.join("config.toml")));
     let connected = || {
-        let state = state.lock().expect("server state lock poisoned");
+        let state = state.lock().or_abort();
         let mut keys = state
             .tcp_peers
             .values()
@@ -1301,7 +1290,7 @@ fn server_admin(
     match command {
         ServerAdminCommand::Status => {
             let connected = connected();
-            let state = state.lock().expect("server state lock poisoned");
+            let state = state.lock().or_abort();
             let workspaces = state.session.workspaces();
             let tabs = workspaces.iter().flat_map(|workspace| workspace.tabs());
             Ok(ServerAdminResponse::Status {
@@ -1396,7 +1385,7 @@ fn server_admin(
                     "no paired device matches that fingerprint",
                 ));
             };
-            let state = state.lock().expect("server state lock poisoned");
+            let state = state.lock().or_abort();
             let mut disconnected = 0;
             for (peer_key, peer) in state.tcp_peers.values() {
                 if *peer_key == key {
@@ -1443,17 +1432,12 @@ fn set_server_setting(
     {
         return refuse(error);
     }
-    let settings_write = Arc::clone(
-        &state
-            .lock()
-            .expect("server state lock poisoned")
-            .settings_write,
-    );
+    let settings_write = Arc::clone(&state.lock().or_abort().settings_write);
     // Keep disk completion and the published value in the same order across clients,
     // without holding the Session lock during file or lock I/O.
-    let _write = settings_write.lock().expect("settings write lock poisoned");
+    let _write = settings_write.lock().or_abort();
     let (path, settings) = {
-        let state = state.lock().expect("server state lock poisoned");
+        let state = state.lock().or_abort();
         if server_id != state.server_id {
             return refuse("unknown Server".into());
         }
@@ -1483,6 +1467,6 @@ fn set_server_setting(
     }
     state
         .lock()
-        .expect("server state lock poisoned")
+        .or_abort()
         .set_settings(settings, Some((client_id, outbound)))
 }

@@ -417,9 +417,8 @@ impl ProcessProbe {
         &self,
         master: &Mutex<Box<dyn MasterPty + Send>>,
     ) -> Option<PathBuf> {
-        let foreground_group = master
-            .lock()
-            .expect("PTY master lock poisoned")
+        let foreground_group = lock_pane(master)
+            .ok()?
             .process_group_leader()
             .map(UnixPid::from_raw)?;
         let leader = u32::try_from(foreground_group.as_raw()).ok()?;
@@ -455,9 +454,8 @@ impl ProcessProbe {
         &self,
         master: &Mutex<Box<dyn MasterPty + Send>>,
     ) -> Option<UnixPid> {
-        master
-            .lock()
-            .expect("PTY master lock poisoned")
+        lock_pane(master)
+            .ok()?
             .process_group_leader()
             .map(UnixPid::from_raw)
             .or_else(|| {
@@ -581,15 +579,23 @@ pub(super) fn root_agent<T: Copy + Eq>(
 
 pub(super) fn process_snapshot() -> std::sync::MutexGuard<'static, ProcessSnapshot> {
     static SNAPSHOT: OnceLock<Mutex<ProcessSnapshot>> = OnceLock::new();
-    let mut snapshot = SNAPSHOT
-        .get_or_init(|| {
-            Mutex::new(ProcessSnapshot {
-                system: System::new(),
-                refreshed_at: None,
-            })
+    let shared = SNAPSHOT.get_or_init(|| {
+        Mutex::new(ProcessSnapshot {
+            system: System::new(),
+            refreshed_at: None,
         })
-        .lock()
-        .expect("process snapshot lock poisoned");
+    });
+    let mut snapshot = shared.lock().unwrap_or_else(|poisoned| {
+        // A cache of the OS process table every Pane shares: after a panic poisoned it,
+        // it is read again from the OS rather than trusted (ADR 0053).
+        shared.clear_poison();
+        let mut snapshot = poisoned.into_inner();
+        *snapshot = ProcessSnapshot {
+            system: System::new(),
+            refreshed_at: None,
+        };
+        snapshot
+    });
     let now = Instant::now();
     if snapshot
         .refreshed_at

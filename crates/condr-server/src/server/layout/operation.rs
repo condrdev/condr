@@ -57,8 +57,8 @@ impl ClientLayouts {
         request_id: u64,
         command: LayoutCommand,
     ) -> bool {
-        let mut running = self.external_running.lock().expect("layout lock poisoned");
-        let state = self.state.lock().expect("server state lock poisoned");
+        let mut running = self.external_running.lock().or_abort();
+        let state = self.state.lock().or_abort();
         let request = LayoutRequest {
             server_id: state.server_id,
             session_id: state.session_id,
@@ -96,10 +96,7 @@ impl ClientLayouts {
                     .unwrap_or_else(|reason| request.reject(reason));
                 // A Client may send its next Layout as soon as it reads this response.
                 // Queue it and release the slot under one lock, after all resource work.
-                let mut running = client
-                    .external_running
-                    .lock()
-                    .expect("layout lock poisoned");
+                let mut running = client.external_running.lock().or_abort();
                 queue_message(&client.outbound, response);
                 *running = false;
             });
@@ -117,7 +114,7 @@ impl ClientLayouts {
         // A capture may materialize outside the Session lock. Do not let this
         // connection's Layout commit overtake its older Bootstrap, even when the
         // requester has not subscribed. Git preparation never holds this fence.
-        let _fence = self.external_running.lock().expect("layout lock poisoned");
+        let _fence = self.external_running.lock().or_abort();
         queue_runtime_bootstrap(&self.state, self.client_id, session_id, &self.outbound)
     }
 
@@ -127,12 +124,12 @@ impl ClientLayouts {
         command: LayoutCommand,
     ) -> Result<ServerMessage, String> {
         let probes = {
-            let state = self.state.lock().expect("server state lock poisoned");
+            let state = self.state.lock().or_abort();
             request.validate(&state, self.lifecycle.is_stopping())?;
             state.terminal_cwd_probes_for_layout(&command)
         };
         let observations = observe_terminal_cwds(probes);
-        let mut state = self.state.lock().expect("server state lock poisoned");
+        let mut state = self.state.lock().or_abort();
         request.validate(&state, self.lifecycle.is_stopping())?;
         state.record_terminal_cwd_observations(observations);
         let effect = apply_layout_command(&mut state, command)?;
@@ -161,8 +158,8 @@ impl ClientLayouts {
         request: LayoutRequest,
         prepared: PreparedExternalLayout,
     ) -> Result<ServerMessage, String> {
-        let fence = self.external_running.lock().expect("layout lock poisoned");
-        let mut state = self.state.lock().expect("server state lock poisoned");
+        let fence = self.external_running.lock().or_abort();
+        let mut state = self.state.lock().or_abort();
         // Git removal cannot be rolled back. Its corresponding Session close must
         // commit even when shutdown began while the terminals and worktree were closing.
         let stopping = self.lifecycle.is_stopping()
@@ -198,7 +195,7 @@ impl ClientLayouts {
         prepared: &mut PreparedExternalLayout,
     ) -> Result<(), String> {
         let probes = {
-            let state = self.state.lock().expect("server state lock poisoned");
+            let state = self.state.lock().or_abort();
             request.validate(&state, self.lifecycle.is_stopping())?;
             match prepared {
                 PreparedExternalLayout::RemoveWorktreeReady { workspace_id, .. } => {
@@ -208,7 +205,7 @@ impl ClientLayouts {
             }
         };
         let observations = observe_terminal_cwds(probes);
-        let mut state = self.state.lock().expect("server state lock poisoned");
+        let mut state = self.state.lock().or_abort();
         request.validate(&state, self.lifecycle.is_stopping())?;
         state.record_terminal_cwd_observations(observations);
         approve_external_layout(&mut state, prepared)
@@ -249,7 +246,7 @@ impl ClientLayouts {
         } = failure;
         let mut started = Vec::new();
         let mut discarded = Vec::new();
-        let mut state = self.state.lock().expect("server state lock poisoned");
+        let mut state = self.state.lock().or_abort();
         state.record_terminal_cwds(cwds);
         if self.lifecycle.is_stopping() {
             drop(state);

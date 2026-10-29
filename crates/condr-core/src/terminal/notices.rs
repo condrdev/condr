@@ -125,8 +125,10 @@ impl TerminalEventProxy {
         )
     }
 
-    fn notices(&self) -> std::sync::MutexGuard<'_, TerminalNotices> {
-        self.notices.lock().expect("terminal notices lock poisoned")
+    /// `None` once a panic ended the Pane: the proxy also runs under `print_notice`, on
+    /// a thread other than the Pane's own (ADR 0053).
+    fn notices(&self) -> Option<std::sync::MutexGuard<'_, TerminalNotices>> {
+        lock_pane(&self.notices).ok()
     }
 }
 
@@ -134,25 +136,32 @@ impl EventListener for TerminalEventProxy {
     fn send_event(&self, event: Event) {
         let reply = match event {
             Event::Title(title) => {
-                self.notices().record_title(sanitize_terminal_title(&title));
+                if let Some(mut notices) = self.notices() {
+                    notices.record_title(sanitize_terminal_title(&title));
+                }
                 return;
             }
             Event::ResetTitle => {
-                self.notices().record_title(None);
+                if let Some(mut notices) = self.notices() {
+                    notices.record_title(None);
+                }
                 return;
             }
             Event::Bell => {
-                let mut notices = self.notices();
-                notices.bells = notices.bells.saturating_add(1);
+                if let Some(mut notices) = self.notices() {
+                    notices.bells = notices.bells.saturating_add(1);
+                }
                 return;
             }
             Event::ClipboardStore(_, text) => {
-                self.notices().record_clipboard(text);
+                if let Some(mut notices) = self.notices() {
+                    notices.record_clipboard(text);
+                }
                 return;
             }
             Event::PtyWrite(text) => Some(PendingTerminalReply::Bytes(text.into_bytes())),
             Event::TextAreaSizeRequest(formatter) => {
-                let size = *self.size.lock().expect("terminal size lock poisoned");
+                let size = pane_size(&self.size);
                 Some(PendingTerminalReply::Bytes(
                     formatter(size.window_size()).into_bytes(),
                 ))
@@ -162,11 +171,8 @@ impl EventListener for TerminalEventProxy {
             }
             _ => None,
         };
-        if let Some(reply) = reply {
-            self.pending_replies
-                .lock()
-                .expect("terminal reply queue lock poisoned")
-                .push(reply);
+        if let (Some(reply), Ok(mut replies)) = (reply, lock_pane(&self.pending_replies)) {
+            replies.push(reply);
         }
     }
 }

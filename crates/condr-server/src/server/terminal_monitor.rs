@@ -53,7 +53,7 @@ pub(super) fn monitor_terminal(monitor: TerminalMonitor) {
             );
             let notices = notice_probe.take();
             if !notices.is_empty() {
-                let mut state = state.lock().expect("server state lock poisoned");
+                let mut state = state.lock().or_abort();
                 if !state.terminal_is_current(pane_id, instance_id) {
                     break;
                 }
@@ -77,7 +77,7 @@ pub(super) fn monitor_terminal(monitor: TerminalMonitor) {
                     };
                     let cwd_before_shutdown = cwd_probe.observe();
                     let runtime = {
-                        let mut state = state.lock().expect("server state lock poisoned");
+                        let mut state = state.lock().or_abort();
                         if !state.terminal_is_current(pane_id, instance_id) {
                             None
                         } else {
@@ -95,7 +95,7 @@ pub(super) fn monitor_terminal(monitor: TerminalMonitor) {
                     let cwd = shutdown_cwd(cwd_before_shutdown, cwd_probe.observe());
                     let final_view = view_source.view();
                     let clients = {
-                        let mut state = state.lock().expect("server state lock poisoned");
+                        let mut state = state.lock().or_abort();
                         if state.session.pane(pane_id).is_none()
                             || state.terminals.contains_key(&pane_id)
                         {
@@ -150,7 +150,7 @@ fn probe_terminal(
                 Ok(()) => {
                     let now = Instant::now();
                     cwd_scan_due = Some(now + CWD_SCAN_INTERVAL);
-                    let state = state.lock().expect("server state lock poisoned");
+                    let state = state.lock().or_abort();
                     if !state.terminal_is_current(pane_id, instance_id) {
                         break;
                     }
@@ -176,7 +176,7 @@ fn probe_terminal(
                 None
             };
             if agent_update.is_some() || cwd.is_some() || agent_resume.is_some() {
-                let mut state = state.lock().expect("server state lock poisoned");
+                let mut state = state.lock().or_abort();
                 if !state.terminal_is_current(pane_id, instance_id) {
                     break;
                 }
@@ -203,7 +203,7 @@ pub(super) fn publish_terminal_frame(
     frame: TerminalViewFrame,
 ) -> bool {
     let clients = {
-        let mut state = state.lock().expect("server state lock poisoned");
+        let mut state = state.lock().or_abort();
         if !state.terminal_is_current(pane_id, instance_id) {
             return false;
         }
@@ -213,7 +213,7 @@ pub(super) fn publish_terminal_frame(
         Some(clients) => clients,
         None => {
             let full = TerminalViewFrame::Full(view_source.view());
-            let mut state = state.lock().expect("server state lock poisoned");
+            let mut state = state.lock().or_abort();
             if !state.terminal_is_current(pane_id, instance_id) {
                 return false;
             }

@@ -80,7 +80,7 @@ pub(super) fn handle_hooks(
     action: condr_core::agent_hooks::HooksAction,
 ) {
     let operation = {
-        let state = state.lock().expect("server state lock poisoned");
+        let state = state.lock().or_abort();
         (server_id == state.server_id && session_id == state.session_id)
             .then(|| lifecycle.begin_operation())
             .flatten()
@@ -121,7 +121,7 @@ pub(super) fn resume_agent(
     instance_id: u64,
 ) -> bool {
     let (resume, probe) = {
-        let state = state.lock().expect("server state lock poisoned");
+        let state = state.lock().or_abort();
         if !state.terminal_is_current(pane_id, instance_id)
             || state.closing_terminals.contains(&pane_id)
             || state.agent_control.live.contains_key(&pane_id)
@@ -148,7 +148,7 @@ pub(super) fn resume_agent(
             resume.resume.args().join(" "),
         ))
     };
-    let mut state = state.lock().expect("server state lock poisoned");
+    let mut state = state.lock().or_abort();
     if !state.terminal_is_current(pane_id, instance_id)
         || state.closing_terminals.contains(&pane_id)
         || state.agent_control.live.contains_key(&pane_id)
