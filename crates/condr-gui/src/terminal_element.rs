@@ -1,5 +1,6 @@
 mod cache;
 mod colors;
+mod decoration;
 mod geometry;
 mod input;
 
@@ -8,14 +9,18 @@ use cache::{ShapedCell, TerminalRenderCacheKey, cell_font};
 use colors::{ContrastMemo, is_app_chosen_exact_color, is_decorative_character, terminal_color};
 use condr_core::protocol::RuntimeEpoch;
 use condr_core::{
-    CELL_FAINT, CELL_INVERSE, CELL_INVISIBLE, CELL_STRIKETHROUGH, CELL_UNDERLINE,
-    CELL_UNDERLINE_CURLY, CELL_UNDERLINE_SINGLE, DEFAULT_ANSI_COLORS, DEFAULT_BACKGROUND_COLOR,
+    CELL_FAINT, CELL_INVERSE, CELL_INVISIBLE, CELL_OVERLINE, CELL_STRIKETHROUGH, CELL_UNDERLINE,
+    CELL_UNDERLINE_CURLY, CELL_UNDERLINE_DASHED, CELL_UNDERLINE_DOTTED, CELL_UNDERLINE_DOUBLE,
+    CELL_UNDERLINE_SINGLE, CELL_WIDE, CELL_WIDTH, DEFAULT_ANSI_COLORS, DEFAULT_BACKGROUND_COLOR,
     DEFAULT_CURSOR_COLOR, DEFAULT_FOREGROUND_COLOR, DETECTED_LINK_FLAG, PaneId, TerminalColor,
     TerminalColors, TerminalCursorShape, TerminalModifiers, TerminalMouseButton,
     TerminalMouseEvent, TerminalMousePosition, TerminalMouseTracking, TerminalMouseWheel,
     TerminalPosition, TerminalSelection, TerminalSide, TerminalSize, TerminalView,
     default_indexed_color,
 };
+pub(crate) use decoration::Decorations;
+#[cfg(test)]
+pub(crate) use decoration::{Decoration, LineStyle};
 use geometry::*;
 use gpui_kit::{
     App, BorderStyle, Bounds, ClipboardItem, ContentMask, CursorStyle, Element, ElementId,
@@ -78,6 +83,10 @@ pub(crate) struct PrepaintState {
     /// repainted on top of it.
     overlay_quads: Vec<PaintQuad>,
     overlay_cells: Vec<ShapedCell>,
+    /// Underlines and overlines, painted over `cells`; tests read them.
+    pub(crate) decorations: Decorations,
+    /// How far below a row's top an underline sits, as shaped text would put it.
+    underline_y: Pixels,
     cell_size: Size<Pixels>,
 }
 
@@ -146,6 +155,8 @@ impl Element for TerminalElement {
             None,
         );
         let cell_size = size(measure.width().max(px(1.)), line_height);
+        let underline_y =
+            gpui_kit::underline_y_offset(line_height, measure.ascent, measure.descent);
         let rows = terminal_grid_extent(bounds.size.height, cell_size.height, 1);
         let columns = terminal_grid_extent(bounds.size.width, cell_size.width, 2);
         let terminal_size = TerminalSize {
@@ -198,6 +209,7 @@ impl Element for TerminalElement {
         let mut cells = render_cache.take_cells();
         let mut block_regions = Vec::new();
         let mut background_regions: Vec<BlockRegion> = Vec::new();
+        let mut decorations = Decorations::default();
         let mut contrast_memo = ContrastMemo::default();
         let hovered_range = self
             .props
@@ -259,7 +271,8 @@ impl Element for TerminalElement {
                 }
                 if cell.is_spacer()
                     || flags & CELL_INVISIBLE != 0
-                    || (cell.text == " " && flags & (CELL_UNDERLINE | CELL_STRIKETHROUGH) == 0)
+                    || (cell.text == " "
+                        && flags & (CELL_UNDERLINE | CELL_OVERLINE | CELL_STRIKETHROUGH) == 0)
                 {
                     continue;
                 }
@@ -289,6 +302,21 @@ impl Element for TerminalElement {
                 {
                     foreground = *color;
                 }
+                // A link keeps its underline in the text's colour.
+                let underline = match cell.underline_color {
+                    TerminalColor::Default => foreground,
+                    _ if linked => foreground,
+                    color => terminal_color(color, true, &palette),
+                };
+                let span = if cell.flags & CELL_WIDTH == CELL_WIDE {
+                    2
+                } else {
+                    1
+                };
+                decorations.add((row, column, span), flags, underline, foreground);
+                if cell.text == " " && flags & CELL_STRIKETHROUGH == 0 {
+                    continue;
+                }
                 if !linked
                     && let Some(character) = single_character
                     && collect_block_element_regions(
@@ -302,13 +330,11 @@ impl Element for TerminalElement {
                     continue;
                 }
 
-                let line = render_cache.shaped_line(&cell.text, foreground, flags, || {
+                // The lines are `decorations`', so the same text shapes once whatever its
+                // underline.
+                let shape_flags = flags & !(CELL_UNDERLINE | CELL_OVERLINE);
+                let line = render_cache.shaped_line(&cell.text, foreground, shape_flags, || {
                     let font = cell_font(style.font(), &cell.text, flags);
-                    let underline = (flags & CELL_UNDERLINE != 0).then_some(UnderlineStyle {
-                        thickness: px(1.),
-                        color: Some(foreground),
-                        wavy: flags & CELL_UNDERLINE == CELL_UNDERLINE_CURLY,
-                    });
                     let strikethrough =
                         (flags & CELL_STRIKETHROUGH != 0).then_some(StrikethroughStyle {
                             thickness: px(1.),
@@ -322,7 +348,7 @@ impl Element for TerminalElement {
                             font,
                             color: foreground,
                             background_color: None,
-                            underline,
+                            underline: None,
                             strikethrough,
                         }],
                         None,
@@ -476,6 +502,8 @@ impl Element for TerminalElement {
             cells,
             overlay_quads,
             overlay_cells,
+            decorations,
+            underline_y,
             cell_size,
         }
     }
@@ -520,6 +548,12 @@ impl Element for TerminalElement {
                     )
                     .ok();
             }
+            prepaint.decorations.paint(
+                bounds.origin,
+                prepaint.cell_size,
+                prepaint.underline_y,
+                window,
+            );
             // The positioned cells are done; hand the allocation back for the next frame.
             self.props.render_cache.borrow_mut().scratch_cells =
                 std::mem::take(&mut prepaint.cells);

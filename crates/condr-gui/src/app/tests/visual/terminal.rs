@@ -1292,9 +1292,10 @@ fn terminal_link_hover_and_modified_click_open_the_url() {
         )),
         "moving over a URL must cache it without Ctrl/Cmd"
     );
-    assert!(
-        render_cache.borrow().shaped_cells() > shaped_before_hover,
-        "hovering a URL must render its underline"
+    assert_eq!(
+        render_cache.borrow().shaped_cells(),
+        shaped_before_hover,
+        "hovering a URL underlines it without shaping it again"
     );
 
     window.simulate_mouse_down(link_cell, MouseButton::Left, Modifiers::default());
@@ -1845,6 +1846,130 @@ fn an_active_window_resends_a_size_dropped_for_a_heartbeat() {
     assert!(
         sent(window).is_none_or(|sent| sent > stale),
         "the repainted Panel sends its size again"
+    );
+}
+
+/// SGR 4 styles, 53 and 58 (ADR 0051): each underline gets its own style and colour, runs
+/// merge, an overline takes the text's colour, and none of it reshapes the text.
+#[test]
+fn underlines_and_overlines_are_drawn_apart_from_the_text_in_their_own_colour() {
+    use crate::terminal_element::{Decoration, LineStyle};
+    use condr_core::{
+        CELL_OVERLINE, CELL_UNDERLINE_CURLY, CELL_UNDERLINE_DOTTED, CELL_UNDERLINE_DOUBLE,
+    };
+    let _serial_guard = acquire_visual_test_lock();
+    let workspace_root = TestDirectory::new("terminal-decorations");
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                root_directory: workspace_root.0.clone(),
+            });
+        });
+    });
+    let mut pane_id = None;
+    assert!(wait_until_event_driven(window, |window| {
+        pane_id = window.read(|app| {
+            let session = view.read(app).active_session()?;
+            Some(
+                session
+                    .workspaces()
+                    .first()?
+                    .tabs()
+                    .first()?
+                    .focused_pane()?
+                    .id(),
+            )
+        });
+        pane_id.is_some()
+    }));
+    let pane_id = pane_id.unwrap();
+
+    let red = TerminalColor::Rgb {
+        red: 0xff,
+        green: 0,
+        blue: 0,
+    };
+    let cell = |text: &str, flags, underline_color| TerminalCell {
+        text: text.into(),
+        foreground: TerminalColor::Default,
+        background: TerminalColor::Default,
+        underline_color,
+        flags,
+        hyperlink: None,
+    };
+    let terminal = TerminalView {
+        selection: None,
+        revision: 1,
+        size: TerminalSize::new(2, 4),
+        display_offset: 0,
+        mouse_tracking: TerminalMouseTracking::None,
+        cells: vec![
+            cell("a", CELL_UNDERLINE_CURLY, red),
+            cell("b", CELL_UNDERLINE_CURLY, red),
+            cell(" ", CELL_UNDERLINE_CURLY, red),
+            cell(
+                "c",
+                CELL_UNDERLINE_DOTTED | CELL_OVERLINE,
+                TerminalColor::Default,
+            ),
+            cell("a", 0, TerminalColor::Default),
+            cell("b", CELL_UNDERLINE_DOUBLE, TerminalColor::Default),
+            cell(" ", 0, TerminalColor::Default),
+            cell(" ", 0, TerminalColor::Default),
+        ],
+        cursor: None,
+    };
+    let cache = Rc::new(RefCell::new(TerminalRenderCache::default()));
+    let (_, prepaint) = window.draw(point(px(0.), px(0.)), size(px(200.), px(60.)), |_, cx| {
+        TerminalElement::new(
+            view.clone(),
+            TerminalElementProps {
+                focus_handle: cx.focus_handle(),
+                connection_key: 1,
+                pane_id,
+                terminal: std::sync::Arc::new(terminal),
+                marked_text: None,
+                selection: None,
+                // The plain `a` on the second row is a hovered URL.
+                hovered_link: Some(crate::terminal_element::HoveredTerminalLink {
+                    range: 4..5,
+                    uri: "https://example.com".into(),
+                    position: TerminalMousePosition { row: 1, column: 0 },
+                }),
+                runtime_epoch: None,
+                cursor_blink_hidden: false,
+                render_cache: cache.clone(),
+                scroll_remainder: Rc::new(RefCell::new(point(0., 0.))),
+            },
+        )
+    });
+
+    let red: gpui_kit::Hsla = gpui_kit::rgb(0xff0000).into();
+    let runs = &prepaint.decorations.0;
+    assert_eq!(
+        runs.iter()
+            .map(|run| (run.row, run.start, run.end, run.style))
+            .collect::<Vec<_>>(),
+        [
+            (0, 0, 3, LineStyle::Curly),
+            (0, 3, 4, LineStyle::Dotted),
+            (0, 3, 4, LineStyle::Over),
+            (1, 0, 1, LineStyle::Single),
+            (1, 1, 2, LineStyle::Double),
+        ],
+        "an underlined space continues its run; a hovered URL is underlined"
+    );
+    let Decoration { color, .. } = &runs[0];
+    assert_eq!(*color, red, "SGR 58 colours the underline, not the text");
+    assert_ne!(runs[2].color, red, "an overline takes the text's colour");
+    assert_eq!(
+        cache.borrow().shaped_cells(),
+        3,
+        "a, b and c shape once each, underlined or not"
     );
 }
 
