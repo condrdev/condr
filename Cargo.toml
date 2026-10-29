@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/condr-core",
+    "crates/condr-ghostty-vt",
     "crates/condr-client",
     "crates/condr-server",
     "crates/condr-gui",

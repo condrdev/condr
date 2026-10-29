@@ -64,6 +64,15 @@ jobs:
         run: |
           "TEMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
           "TMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
+      # libghostty-vt builds with the Zig its manifest names (ADR 0051); setup-zig also
+      # keeps Zig's caches between runs, which rust-cache does not for a workspace member.
+      - name: Read the Zig version libghostty-vt needs
+        id: zig
+        shell: bash
+        run: echo "version=$(sed -n 's/^zig = "\(.*\)"$/\1/p' crates/condr-ghostty-vt/ghostty.toml)" >> "$GITHUB_OUTPUT"
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ steps.zig.outputs.version }}
       - uses: Swatinem/rust-cache@v2
         with:
           # PR branches only restore main's cache; saving per branch would evict it.

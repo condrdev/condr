@@ -1401,6 +1401,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "condr-ghostty-vt"
+version = "0.1.16"
+dependencies = [
+ "dirs 6.0.0",
+ "sha2 0.10.9",
+]
+
+[[package]]
 name = "condr-gui"
 version = "0.1.16"
 dependencies = [

@@ -1,0 +1,7 @@
+# The libghostty-vt condr-ghostty-vt builds (ADR 0051). Written by
+# script/update-libghostty-vt.sh; move it only with that script.
+version = "1.4.0-main+83fb956"
+commit = "83fb95624b0439ee660c2679b43b38c8b63769cd"
+source_sha256 = "ed57ae9b95581c88f2614e976c1d3f146c02d443a3c26139200eb9de6e645eb4"
+zig = "0.17.0"
+headers_sha256 = "f0f3d01541691833e8309421f68b32ecee8e7a6660403f5bf8d6e43bc0abe881"
