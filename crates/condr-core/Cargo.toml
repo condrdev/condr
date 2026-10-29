@@ -13,7 +13,6 @@ default = ["runtime"]
 # (ADR 0039). Without it the crate is the protocol, the Session and the domain types,
 # which is all `condr-client` and the Companion's library take.
 runtime = [
-    "dep:alacritty_terminal",
     "dep:atomicwrites",
     "dep:condr-ghostty-vt",
     "dep:core-foundation-sys",
@@ -30,7 +29,6 @@ runtime = [
 ]
 
 [dependencies]
-alacritty_terminal = { workspace = true, optional = true }
 atomicwrites = { workspace = true, optional = true }
 base64.workspace = true
 condr-ghostty-vt = { workspace = true, optional = true }

@@ -1,7 +1,7 @@
 //! Logging for the Server and the GUI (ADR 0019).
 //!
 //! Both processes call [`init`] once from `main`. Events go through `tracing`; records
-//! that `alacritty_terminal`, `portable-pty`, `notify` and gpui emit through `log` are
+//! that `portable-pty`, `notify` and gpui emit through `log` are
 //! bridged into the same pipeline. The file layer writes off the calling thread, so a
 //! PTY or render thread never waits on disk.
 //!

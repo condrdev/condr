@@ -41,6 +41,63 @@ pub(super) mod flag {
 const NAMED_FOREGROUND: u16 = 256;
 const NAMED_BACKGROUND: u16 = 257;
 
+/// The modes key and mouse encoding read, as flags.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(super) struct TermMode(u32);
+
+impl TermMode {
+    pub(super) const APP_CURSOR: Self = Self(1);
+    pub(super) const BRACKETED_PASTE: Self = Self(1 << 1);
+    pub(super) const ALT_SCREEN: Self = Self(1 << 2);
+    pub(super) const FOCUS_IN_OUT: Self = Self(1 << 3);
+    pub(super) const ALTERNATE_SCROLL: Self = Self(1 << 4);
+    pub(super) const MOUSE_REPORT_CLICK: Self = Self(1 << 5);
+    pub(super) const MOUSE_DRAG: Self = Self(1 << 6);
+    pub(super) const MOUSE_MOTION: Self = Self(1 << 7);
+    pub(super) const MOUSE_MODE: Self =
+        Self(Self::MOUSE_REPORT_CLICK.0 | Self::MOUSE_DRAG.0 | Self::MOUSE_MOTION.0);
+    pub(super) const SGR_MOUSE: Self = Self(1 << 8);
+    pub(super) const UTF8_MOUSE: Self = Self(1 << 9);
+    pub(super) const DISAMBIGUATE_ESC_CODES: Self = Self(1 << 10);
+    pub(super) const REPORT_EVENT_TYPES: Self = Self(1 << 11);
+    pub(super) const REPORT_ALTERNATE_KEYS: Self = Self(1 << 12);
+    pub(super) const REPORT_ALL_KEYS_AS_ESC: Self = Self(1 << 13);
+    pub(super) const REPORT_ASSOCIATED_TEXT: Self = Self(1 << 14);
+    pub(super) const KITTY_KEYBOARD_PROTOCOL: Self = Self(
+        Self::DISAMBIGUATE_ESC_CODES.0
+            | Self::REPORT_EVENT_TYPES.0
+            | Self::REPORT_ALTERNATE_KEYS.0
+            | Self::REPORT_ALL_KEYS_AS_ESC.0
+            | Self::REPORT_ASSOCIATED_TEXT.0,
+    );
+
+    pub(super) const fn empty() -> Self {
+        Self(0)
+    }
+
+    pub(super) const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+
+    pub(super) const fn intersects(self, other: Self) -> bool {
+        self.0 & other.0 != 0
+    }
+}
+
+impl std::ops::BitOr for TermMode {
+    type Output = Self;
+
+    fn bitor(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+}
+
+impl std::ops::BitOrAssign for TermMode {
+    fn bitor_assign(&mut self, other: Self) {
+        self.0 |= other.0;
+    }
+}
+
 pub(super) struct Vt {
     terminal: ghostty::Terminal,
     render: ghostty::RenderState,
@@ -114,8 +171,6 @@ impl Vt {
         self.terminal.mode(ghostty::Mode::dec(number))
     }
 
-    /// The modes key and mouse encoding read, in alacritty's flags until the encoders
-    /// move to libghostty-vt.
     pub(super) fn modes(&self) -> TermMode {
         let mut modes = TermMode::empty();
         for (number, flag) in [

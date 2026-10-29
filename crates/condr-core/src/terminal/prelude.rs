@@ -19,15 +19,12 @@ pub(super) use super::shell::shell_command;
 pub(super) use super::view::blank_cell;
 pub(super) use super::view::publish_view;
 pub(super) use super::view_source::TerminalDamageBaseline;
-pub(super) use super::vt::Vt;
+pub(super) use super::vt::{TermMode, Vt};
 pub(super) use crate::agent::{
     AGENT_EVENT_OSC_PREFIX, AGENT_POLL_INTERVAL, AgentDetector, AgentEvent, AgentPublish,
     ProcessInfo, ProcessProbeResult, ProgramStatus, identify_agent_process,
 };
 pub(super) use crate::{AgentKind, AgentSnapshot, PaneId};
-/// The modes key and mouse encoding read, in alacritty's flags until the encoders move to
-/// libghostty-vt (ADR 0051).
-pub(super) use alacritty_terminal::term::TermMode;
 #[cfg(unix)]
 pub(super) use filedescriptor::FileDescriptor;
 #[cfg(unix)]

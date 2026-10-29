@@ -112,8 +112,8 @@ pub struct TerminalView {
     pub mouse_tracking: TerminalMouseTracking,
     pub cells: Vec<TerminalCell>,
     pub cursor: Option<TerminalCursor>,
-    /// The Server-tracked selection clipped to this viewport. alacritty keeps it attached
-    /// to its text while output scrolls, which a viewport-anchored Client copy cannot.
+    /// The Server-tracked selection clipped to this viewport. The VT keeps it attached to
+    /// its text while output scrolls, which a viewport-anchored Client copy cannot.
     pub selection: Option<TerminalSelection>,
 }
 
@@ -359,8 +359,8 @@ impl TerminalSelection {
     }
 }
 
-/// What a multi-click selects around its anchor. The Server expands it with alacritty's
-/// semantic search, which follows soft-wrapped lines and matching brackets.
+/// What a multi-click selects around its anchor. The Server's VT expands it across
+/// soft-wrapped lines.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum TerminalSelectionUnit {
     Word,
@@ -407,6 +407,6 @@ impl TerminalSize {
 }
 
 /// Set alongside `hyperlink` on cells whose link the Server found in plain text rather than
-/// received via OSC 8, so clients can underline those only on hover. The one flag bit
-/// alacritty leaves free.
+/// received via OSC 8, so clients can underline those only on hover. The one bit the cell
+/// flags leave free until the cell format is redesigned (ADR 0051).
 pub const DETECTED_LINK_FLAG: u16 = 1 << 15;

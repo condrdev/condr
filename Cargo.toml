@@ -17,7 +17,6 @@ license = "Apache-2.0"
 repository = "https://github.com/condrdev/condr"
 
 [workspace.dependencies]
-alacritty_terminal = { version = "0.26.0", default-features = false }
 async-channel = "2.5"
 atomicwrites = "0.4.4"
 base64 = "0.22"
@@ -106,7 +105,6 @@ codegen-units = 16
 debug = "limited"
 
 [profile.dev.package]
-alacritty_terminal = { opt-level = 3 }
 bytes = { opt-level = 3 }
 prost = { opt-level = 3 }
 gpui-pre = { opt-level = 3 }
