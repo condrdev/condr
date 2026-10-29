@@ -4,6 +4,7 @@ mod job;
 mod notices;
 mod osc;
 mod process;
+mod replay;
 mod resize;
 mod view;
 

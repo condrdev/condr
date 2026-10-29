@@ -1,0 +1,156 @@
+@ 512 bytes
+cursor 3,26 Block
+|bold italic underline curly inverse strike faint hidden
+|309040 319141 329242 339343 349444 359545 369646 379747
+|256-orange truecolor bg-index
+|CJK 中文字符 宽字符 | emoj
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+@ 1024 bytes
+cursor 9,48 Block
+|bold italic underline curly inverse strike faint hidden
+|309040 319141 329242 339343 349444 359545 369646 379747
+|256-orange truecolor bg-index
+|CJK 中文字符 宽字符 | emoji 😀👍🏽 | ZWJ 👨‍👩‍👧 | combining é ä
+|tab	    stops	  at	     columns
+| long-1 long-2 long-3 long-4 long-5 long-6 long-7 long-8 long-9 long-10 long-11
+|long-12 long-13 long-14 long-15 long-16 long-17 long-18 long-19 long-20 long-1 l
+|ong-2 long-3 long-4 long-5 long-6 long-7 long-8 long-9 long-10 long-11 long-12 l
+|ong-13 long-14 long-15 long-16 long-17 long-18 long-19 long-20
+|* c45efcd (tag: v0.1.16, tag: companion-v0.1.16)
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+@ 1536 bytes
+cursor 17,23 Block
+|bold italic underline curly inverse strike faint hidden
+|309040 319141 329242 339343 349444 359545 369646 379747
+|256-orange truecolor bg-index
+|CJK 中文字符 宽字符 | emoji 😀👍🏽 | ZWJ 👨‍👩‍👧 | combining é ä
+|tab	    stops	  at	     columns
+| long-1 long-2 long-3 long-4 long-5 long-6 long-7 long-8 long-9 long-10 long-11
+|long-12 long-13 long-14 long-15 long-16 long-17 long-18 long-19 long-20 long-1 l
+|ong-2 long-3 long-4 long-5 long-6 long-7 long-8 long-9 long-10 long-11 long-12 l
+|ong-13 long-14 long-15 long-16 long-17 long-18 long-19 long-20
+|* c45efcd (tag: v0.1.16, tag: companion-v0.1.16) chore: release 0.1.16
+|* 92fba36 docs: the privacy page covers the Android app and says how to delete y
+|our data
+|* 506770b ci: the Companion's release also builds the bundle Google Play takes,
+|signed with the same key
+|* d46f6d1 refactor: the modifier for numbered Tabs is one constant
+|* 5035286 fix: History's branch dims like Changes' button when there is no base
+|branch to compare with
+|* 62ff903 fix: a window
+|
+|
+|
+|
+|
+|
+@ 2048 bytes
+cursor 23,0 Block
+|309040 319141 329242 339343 349444 359545 369646 379747
+|256-orange truecolor bg-index
+|CJK 中文字符 宽字符 | emoji 😀👍🏽 | ZWJ 👨‍👩‍👧 | combining é ä
+|tab	    stops	  at	     columns
+| long-1 long-2 long-3 long-4 long-5 long-6 long-7 long-8 long-9 long-10 long-11
+|long-12 long-13 long-14 long-15 long-16 long-17 long-18 long-19 long-20 long-1 l
+|ong-2 long-3 long-4 long-5 long-6 long-7 long-8 long-9 long-10 long-11 long-12 l
+|ong-13 long-14 long-15 long-16 long-17 long-18 long-19 long-20
+|* c45efcd (tag: v0.1.16, tag: companion-v0.1.16) chore: release 0.1.16
+|* 92fba36 docs: the privacy page covers the Android app and says how to delete y
+|our data
+|* 506770b ci: the Companion's release also builds the bundle Google Play takes,
+|signed with the same key
+|* d46f6d1 refactor: the modifier for numbered Tabs is one constant
+|* 5035286 fix: History's branch dims like Changes' button when there is no base
+|branch to compare with
+|* 62ff903 fix: a window that reconnects in the background keeps showing a Done n
+|obody looked at
+|* 846083e (tag: nightly) fix: restarting the GUI or the app no longer shows ever
+|y finished Agent as Done again
+|* 2920826 fix: Alt+N switches Tabs again right after it lands on a Preview or Di
+|ff Tab
+|* e982a4a feat: History's branch reads like the Changes header, and ↑ ↓ show ahe
+|
+@ 2560 bytes
+cursor 23,11 Block
+|obody looked at
+|* 846083e (tag: nightly) fix: restarting the GUI or the app no longer shows ever
+|y finished Agent as Done again
+|* 2920826 fix: Alt+N switches Tabs again right after it lands on a Preview or Di
+|ff Tab
+|* e982a4a feat: History's branch reads like the Changes header, and ↑ ↓ show ahe
+|ad in green and behind in amber
+|* df77f6d feat: Bring Back shows an arrow into a square, in the title bar and on
+| the page
+|* 0ea536b docs: ADR 0051, the Server's terminals run on libghostty-vt
+|* c58fcf6 fix: a detached Tab's window follows its splits and its Diff's file
+|CSI
+|CoreDuetDaemonConfig.bundle
+|ans2_dummy_dir
+|com.apple.languageassetd
+|cracklib
+|cups
+|dict
+|doc
+|examples
+|file
+|firmlinks
+|firmware
+|an OSC 8 li
+@ 2643 bytes
+cursor 23,0 Block
+|y finished Agent as Done again
+|* 2920826 fix: Alt+N switches Tabs again right after it lands on a Preview or Di
+|ff Tab
+|* e982a4a feat: History's branch reads like the Changes header, and ↑ ↓ show ahe
+|ad in green and behind in amber
+|* df77f6d feat: Bring Back shows an arrow into a square, in the title bar and on
+| the page
+|* 0ea536b docs: ADR 0051, the Server's terminals run on libghostty-vt
+|* c58fcf6 fix: a detached Tab's window follows its splits and its Diff's file
+|CSI
+|CoreDuetDaemonConfig.bundle
+|ans2_dummy_dir
+|com.apple.languageassetd
+|cracklib
+|cups
+|dict
+|doc
+|examples
+|file
+|firmlinks              xx
+|firmware
+|an OSC 8 link and https://example.com/path?x=1.
+|done
+|

@@ -1,0 +1,32 @@
+[1mbold[0m [3mitalic[0m [4munderline[0m [4:3mcurly[0m [7minverse[0m [9mstrike[0m [2mfaint[0m [8mhidden[0m
+[30m30[0m[90m90[0m[40m40[0m [31m31[0m[91m91[0m[41m41[0m [32m32[0m[92m92[0m[42m42[0m [33m33[0m[93m93[0m[43m43[0m [34m34[0m[94m94[0m[44m44[0m [35m35[0m[95m95[0m[45m45[0m [36m36[0m[96m96[0m[46m46[0m [37m37[0m[97m97[0m[47m47[0m 
+[38;5;208m256-orange[0m [38;2;10;200;120mtruecolor[0m [48;5;24mbg-index[0m
+CJK 中文字符 宽字符 | emoji 😀👍🏽 | ZWJ 👨‍👩‍👧 | combining é ä
+tab	stops	at	columns
+ long-1 long-2 long-3 long-4 long-5 long-6 long-7 long-8 long-9 long-10 long-11 long-12 long-13 long-14 long-15 long-16 long-17 long-18 long-19 long-20 long-1 long-2 long-3 long-4 long-5 long-6 long-7 long-8 long-9 long-10 long-11 long-12 long-13 long-14 long-15 long-16 long-17 long-18 long-19 long-20
+[?1h=* [33mc45efcd[m[33m ([m[1;33mtag: [m[1;33mv0.1.16[m[33m, [m[1;33mtag: [m[1;33mcompanion-v0.1.16[m[33m)[m chore: release 0.1.16[m
+* [33m92fba36[m docs: the privacy page covers the Android app and says how to delete y[m [33m[mour data[m
+* [33m506770b[m ci: the Companion's release also builds the bundle Google Play takes, [m [33m[msigned with the same key[m
+* [33md46f6d1[m refactor: the modifier for numbered Tabs is one constant[m
+* [33m5035286[m fix: History's branch dims like Changes' button when there is no base [m [33m[mbranch to compare with[m
+* [33m62ff903[m fix: a window that reconnects in the background keeps showing a Done n[m [33m[mobody looked at[m
+* [33m846083e[m[33m ([m[1;33mtag: [m[1;33mnightly[m[33m)[m fix: restarting the GUI or the app no longer shows ever[m [33m[m[33m[m[1;33m[m[1;33m[m[33m[my finished Agent as Done again[m
+* [33m2920826[m fix: Alt+N switches Tabs again right after it lands on a Preview or Di[m [33m[mff Tab[m
+* [33me982a4a[m feat: History's branch reads like the Changes header, and ↑ ↓ show ahe[m [33m[mad in green and behind in amber[m
+* [33mdf77f6d[m feat: Bring Back shows an arrow into a square, in the title bar and on[m [33m[m the page[m
+* [33m0ea536b[m docs: ADR 0051, the Server's terminals run on libghostty-vt[m
+* [33mc58fcf6[m fix: a detached Tab's window follows its splits and its Diff's file[m
+[K[?1l>CSI
+CoreDuetDaemonConfig.bundle
+ans2_dummy_dir
+com.apple.languageassetd
+cracklib
+cups
+dict
+doc
+examples
+file
+firmlinks
+firmware
+]8;;https://condr.dev\an OSC 8 link]8;;\ and https://example.com/path?x=1.
+cursor moves:[3A[10Cxx[3B[Kdone

@@ -1,0 +1,156 @@
+@ 512 bytes
+cursor 4,15 Hidden
+|  1 // A sample file the vim fixture edits.
+|  2 use std::collections::HashMap;
+|  3
+|  4 /// Counts words in a line.
+|  5 fn count(li
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|"/tmp/condr-fixture/sample.rs" 18L, 443B
+@ 1024 bytes
+cursor 11,0 Hidden
+|  1 // A sample file the vim fixture edits.
+|  2 use std::collections::HashMap;
+|  3
+|  4 /// Counts words in a line.
+|  5 fn count(line: &str) -> HashMap<&str, usize> {
+|  6     let mut counts = HashMap::new();
+|  7     for word in line.split_whitespace() {
+|  8         *counts.entry(word).or_insert(0) += 1;
+|  9     }
+| 10     counts
+| 11 }
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|"/tmp/condr-fixture/sample.rs" 18L, 443B
+@ 1536 bytes
+cursor 19,62 Hidden
+|  1 // A sample file the vim fixture edits.
+|  2 use std::collections::HashMap;
+|  3
+|  4 /// Counts words in a line.
+|  5 fn count(line: &str) -> HashMap<&str, usize> {
+|  6     let mut counts = HashMap::new();
+|  7     for word in line.split_whitespace() {
+|  8         *counts.entry(word).or_insert(0) += 1;
+|  9     }
+| 10     counts
+| 11 }
+| 12
+| 13 fn main() {
+| 14     let text = "the quick brown fox jumps over the lazy dog";
+| 15     for (word, n) in count(text) {
+| 16         println!("{word}: {n}");
+| 17     }
+| 18 }
+|~
+|~
+|
+|
+|
+|"/tmp/condr-fixture/sample.rs" 18L, 443B
+@ 2048 bytes
+cursor 23,53 Hidden
+|  1 // A sample file the vim fixture edits.
+|  2 use std::collections::HashMap;
+|  3
+|  4 /// Counts words in a line.
+|  5 fn count(line: &str) -> HashMap<&str, usize> {
+|  6     let mut counts = HashMap::new();
+|  7     for word in line.split_whitespace() {
+|  8         *counts.entry(word).or_insert(0) += 1;
+|  9     }
+| 10     counts
+| 11 }
+| 12
+| 13 fn main() {
+| 14     let text = "the quick brown fox jumps over the lazy dog";
+| 15     for (word, n) in count(text) {
+| 16         println!("{word}: {n}");
+| 17     }
+| 18 }
+|~
+|~
+|~
+|~
+|~
+|"/tmp/condr-fixture/sample.rs" 18L, 443B            o         18,1          All
+@ 2560 bytes
+cursor 7,33 Hidden
+|  1 // A sample file the vim fixture edits.
+|  2 use std::collections::HashMap;
+|  3
+|  4 /// Counts tokens in a line.
+|  5 fn count(line: &str) -> HashMap<&str, usize> {
+|  6     let mut counts = HashMap::new();
+|  7     for token in line.split_whitespace() {
+|  8         *counts.entry(token).r_insert(0) += 1;
+|  9     }
+| 10     counts
+| 11 }
+| 12
+| 13 fn main() {
+| 14     let text = "the quick brown fox jumps over the lazy dog";
+| 15     for (word, n) in count(text) {
+| 16         println!("{word}: {n}");
+| 17     }
+| 18 }
+| 19 // 加一行中文注释 and an emoji 😀
+|~
+|~
+|~
+|~
+|5 substitutions on 5 lines
+@ 3045 bytes
+cursor 0,0 Block
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|

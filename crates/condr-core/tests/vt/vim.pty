@@ -1,0 +1,17 @@
+[?1049h[>4;2m[?1h=[?2004h[?1004h[1;24r[?12h[?12l[22;2t[22;1t[27m[23m[29m[m[H[2J[?25l[24;1H"/tmp/condr-fixture/sample.rs" 18L, 443B[2;1H▽[6n[2;1H  [3;1HPzz\[0%m[6n[3;1H           [1;1H[>c[1;1H[38;5;130m  1 [m[34m// A sample file the vim fixture edits.[m
+[38;5;130m  2 use[m [35mstd[m[35m::[m[35mcollections[m[35m::[mHashMap;[2;35H[K[3;1H[38;5;130m  3 [m[3;5H[K[4;1H[38;5;130m  4 [m[35m/// Counts words in a line.[m
+[38;5;130m  5 fn[m [36mcount[m(line: [32m&str[m) [38;5;130m->[m HashMap[38;5;130m<[m[32m&str[m, [32musize[m[38;5;130m>[m {
+[38;5;130m  6 [m    [38;5;130mlet[m [32mmut[m counts [38;5;130m=[m [35mHashMap[m[35m::[m[36mnew[m();
+[38;5;130m  7 [m    [38;5;130mfor[m word [38;5;130min[m line.[36msplit_whitespace[m() {
+[38;5;130m  8 [m[8C[32m*[mcounts.[36mentry[m(word).[36mor_insert[m([31m0[m) [38;5;130m+=[m [31m1[m;
+[38;5;130m  9 [m    }
+[38;5;130m 10 [m    counts
+[38;5;130m 11 [m}
+[38;5;130m 12 
+ 13 fn[m [36mmain[m() {
+[38;5;130m 14 [m    [38;5;130mlet[m text [38;5;130m=[m [31m"the quick brown fox jumps over the lazy dog"[m;
+[38;5;130m 15 [m    [38;5;130mfor[m (word, n) [38;5;130min[m [36mcount[m(text) {
+[38;5;130m 16 [m[8C[35mprintln![m([31m"{word}: {n}"[m);
+[38;5;130m 17 [m    }
+[38;5;130m 18 [m}
+[94m~                                                                               [20;1H~                                                                               [21;1H~                                                                               [22;1H~                                                                               [23;1H~                                                                               [m[24;63H1,1[11CAll[1;5H[?25h[?4mP+q436f\P+q6b75\P+q6b64\P+q6b72\P+q6b6c\P+q2332\P+q2334\P+q2569\P+q2a37\P+q6b31\P$q q\[?12$p[?25l[24;53HG[1;5H[24;53H [18;5H[24;64H8,1[18;5H[?25h[?25l[24;53Ho[18;5H[24;53H [19;5H[24;1H[1m-- INSERT --[m[24;13H[K[24;63H19,1[10CAll[19;1H[38;5;130m 19 [m[19;5H[K[19;5H[?25h[?25l[34m// 加一行中文注释 and an emoji 😀[m[24;66H43-34[19;38H[?25h[24;1H[K[19;36H[?25l[24;53H^[[19;36H[?25h[?25l[24;53H  [19;38H[24;63H19,39-32      All[19;36H[?25h[?25l[24;63H[K[24;1H:%s/word/token/g[?25h[?25l5 substitutions on 5 lines[4;16H[35mtokens in a line.[m[7;13Htoken [38;5;130min[m line.[36msplit_whitespace[m() {[8;27Htoken).[36mor_insert[m([31m0[m) [38;5;130m+=[m [31m1[m;[15;14Htoken, n) [38;5;130min[m [36mcount[m(text) {[16;24H[31mtoken}: {n}"[m);[24;63H16,9[10CAll[24;63H[K[24;63H16,9[10CAll[16;13H[?25h[?25l[24;53Hg[16;13H[?25h[?25l[24;54Hg[16;13H[24;53H  [1;5H[24;64H,1 [1;5H[?25h[?25l[24;53H^D[1;5H[24;53H  [12;5H[24;64H2,0-1[12;5H[?25h[?25l[24;1H[K[24;1H:q![?25h[?25l[?2004l[>4;m[23;2t[23;1t[24;1H[K[24;1H[?1004l[?2004l[?1l>[?1049l[?25h[>4;m
