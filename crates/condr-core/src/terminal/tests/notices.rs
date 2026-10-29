@@ -244,3 +244,52 @@ fn a_long_shell_command_is_reported_when_it_ends_unless_an_agent_ran_in_it() {
     feed(&mut vt, &notices, b"\x1b]133;D;0\x07");
     assert!(probe.take().is_empty(), "an end without a start");
 }
+
+#[test]
+fn a_programs_own_status_percentage_shows_as_its_progress_until_a_report_moves_on() {
+    let mut vt = Vt::new(TerminalSize::new(4, 12)).unwrap();
+    let notices = SharedTerminalNotices::default();
+    let probe = TerminalNoticeProbe {
+        notices: Arc::clone(&notices),
+    };
+    let progress = |state, percent| {
+        Some(Some(TerminalProgress {
+            state,
+            percent: Some(percent),
+        }))
+    };
+    let mut feed = |stream: &[u8]| {
+        feed(&mut vt, &notices, stream);
+        probe.take().progress
+    };
+
+    assert_eq!(
+        feed(b"\x1b]7501;state=working:progress=40\x07"),
+        progress(TerminalProgressState::Normal, 40)
+    );
+    assert_eq!(
+        feed(b"\x1b]7501;state=blocked:kind=permission:progress=40\x07"),
+        progress(TerminalProgressState::Paused, 40)
+    );
+    assert_eq!(
+        feed(b"\x1b]7501;state=working:id=sync:progress=90\x07"),
+        None,
+        "a child record's progress is not the Pane's"
+    );
+    assert_eq!(feed(b"\x1b]7501;state=working\x07"), Some(None), "moved on");
+
+    assert_eq!(
+        feed(b"\x1b]9;4;1;30\x07"),
+        progress(TerminalProgressState::Normal, 30)
+    );
+    assert_eq!(
+        feed(b"\x1b]7501;state=done\x07"),
+        None,
+        "an OSC 9;4 progress is not the report's to end"
+    );
+    assert_eq!(
+        feed(b"\x1b]7501;state=working:progress=10\x07"),
+        progress(TerminalProgressState::Normal, 10)
+    );
+    assert_eq!(feed(b"\x1b]133;A\x07"), Some(None), "a prompt ends it");
+}

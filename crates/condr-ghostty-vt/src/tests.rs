@@ -67,7 +67,7 @@ fn queries_are_answered_in_stream_order_with_condrs_identity() {
 fn program_reports_arrive_as_events() {
     let mut terminal = terminal(20, 5);
     let events = terminal.write(
-        b"\x07\x1b]0;a title\x07\x1b]7501;state=blocked:kind=question:app=claude:msg=d2hpY2g/\x1b\\\x1b]777;notify;condr://agent;body\x07\x1b]133;A\x07\x1b]52;c;aGk=\x07",
+        b"\x07\x1b]0;a title\x07\x1b]7501;state=blocked:kind=question:progress=75:app=claude:msg=d2hpY2g/\x1b\\\x1b]777;notify;condr://agent;body\x07\x1b]133;A\x07\x1b]52;c;aGk=\x07",
     );
     assert_eq!(
         events,
@@ -77,6 +77,7 @@ fn program_reports_arrive_as_events() {
             Event::ProgramStatus(ProgramStatus {
                 state: ProgramState::Blocked,
                 kind: Some(BlockedKind::Question),
+                progress: Some(75),
                 id: String::new(),
                 app: "claude".into(),
                 message: "which?".into(),

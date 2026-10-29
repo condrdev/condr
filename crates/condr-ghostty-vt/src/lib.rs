@@ -247,6 +247,8 @@ pub enum ProgressState {
 pub struct ProgramStatus {
     pub state: ProgramState,
     pub kind: Option<BlockedKind>,
+    /// 0 through 100, for a `working` or `blocked` report that gave one.
+    pub progress: Option<u8>,
     pub id: String,
     pub app: String,
     pub message: String,
@@ -1194,6 +1196,7 @@ extern "C" fn program_status(
         callbacks.events.push(Event::ProgramStatus(ProgramStatus {
             state,
             kind,
+            progress: u8::try_from(report.progress).ok(),
             id,
             app,
             message,

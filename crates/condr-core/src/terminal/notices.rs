@@ -16,6 +16,9 @@ pub(super) struct TerminalNotices {
     pub(super) clipboard: Option<String>,
     pub(super) progress: Option<TerminalProgress>,
     pub(super) progress_changed: bool,
+    /// The progress came from the program's own OSC 7501 report, not OSC 9;4, so the
+    /// report that moves on ends it (ADR 0054).
+    pub(super) progress_from_status: bool,
     /// When the program last reported its progress, for [`PROGRESS_TIMEOUT`].
     pub(super) progress_at: Option<Instant>,
     /// OSC 9 and 777 notifications the program sent, oldest first (ADR 0054).
@@ -107,6 +110,36 @@ impl TerminalNotices {
         if self.progress != progress {
             self.progress = progress;
             self.progress_changed = true;
+        }
+    }
+
+    fn record_osc_progress(&mut self, progress: Option<TerminalProgress>) {
+        self.progress_from_status = false;
+        self.record_progress(progress);
+    }
+
+    /// A program's root OSC 7501 record with a percentage shows as its progress: working
+    /// as progress, blocked as paused. A root report without one ends a progress an
+    /// earlier report gave, and leaves an OSC 9;4 progress alone (ADR 0054).
+    fn record_status_progress(&mut self, status: &condr_ghostty_vt::ProgramStatus) {
+        let state = match status.state {
+            VtProgramState::Working => TerminalProgressState::Normal,
+            VtProgramState::Blocked => TerminalProgressState::Paused,
+            _ => return self.end_status_progress(),
+        };
+        let Some(percent) = status.progress else {
+            return self.end_status_progress();
+        };
+        self.progress_from_status = true;
+        self.record_progress(Some(TerminalProgress {
+            state,
+            percent: Some(percent),
+        }));
+    }
+
+    fn end_status_progress(&mut self) {
+        if std::mem::take(&mut self.progress_from_status) {
+            self.record_progress(None);
         }
     }
 
@@ -233,6 +266,9 @@ pub(super) fn apply_terminal_events(
                 }
             }
             Event::ProgramStatus(status) => {
+                if status.id.is_empty() {
+                    notices.record_status_progress(&status);
+                }
                 notices.record_agent_event(AgentNotice::Status(program_status(status)));
             }
             // A prompt or a reset only matters to records the protocol keeps; a plain
@@ -241,11 +277,13 @@ pub(super) fn apply_terminal_events(
                 if notices.agent.reports_program_status() {
                     notices.record_agent_event(AgentNotice::PromptStart);
                 }
+                // A prompt ends the program's records, its progress among them.
+                notices.end_status_progress();
             }
             Event::CommandStart => notices.record_command_start(),
             Event::CommandEnd(exit_code) => notices.record_command_end(exit_code),
             Event::Progress(progress) => {
-                notices.record_progress(progress.map(|progress| TerminalProgress {
+                notices.record_osc_progress(progress.map(|progress| TerminalProgress {
                     state: match progress.state {
                         VtProgressState::Normal => TerminalProgressState::Normal,
                         VtProgressState::Error => TerminalProgressState::Error,
@@ -259,6 +297,7 @@ pub(super) fn apply_terminal_events(
                 // RIS clears the title and progress without reports of their own.
                 notices.record_title(None);
                 notices.record_progress(None);
+                notices.progress_from_status = false;
                 notices.command = None;
                 if notices.agent.reports_program_status() {
                     notices.record_agent_event(AgentNotice::Reset);
