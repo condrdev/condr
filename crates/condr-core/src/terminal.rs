@@ -65,9 +65,11 @@ pub(crate) use view::{
 pub use cursor_settle::CURSOR_POSITION_SETTLE;
 #[cfg(feature = "runtime")]
 pub use launch::TerminalLaunchProbe;
+#[cfg(feature = "runtime")]
 pub use notices::LONG_COMMAND;
 #[cfg(feature = "runtime")]
 pub use portable_pty::CommandBuilder;
+#[cfg(feature = "runtime")]
 pub use probes::{
     FinishedCommand, TerminalAgentProbe, TerminalCwdProbe, TerminalNoticeBatch,
     TerminalNoticeProbe, TerminalNotification,

@@ -10,4 +10,3 @@ Condr therefore splits the interaction. The drag in progress, and every hit test
 
 Consequences: the Server holds one selection per Terminal, owned by the controller; a read-only viewer sees the controller's highlight. (ADR 0036 removed the controller: the selection is every Client's, the last one to select sets it, and it stays when a Client leaves.) Selection changes ride the existing visual stream and do not invalidate shaping caches.
 
-> ADR 0051 moves the VT to libghostty-vt, whose selection follows output and reflow and is cleared on a screen swap, but is kept on resize and when an erase touches it; a double click on a bracket selects a word, not the bracketed span. The rest stands.

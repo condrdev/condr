@@ -266,7 +266,9 @@ fn decode_color(value: u32) -> WireResult<TerminalColor> {
     let payload = value >> 2;
     Ok(match value & 3 {
         0 if payload == 0 => TerminalColor::Default,
-        // Kind 1 was a named colour, the default foreground or background nearly always.
+        // compat(0.1.16): kind 1 was a 0.1 peer's named colour, the default foreground or
+        // background nearly always; delete this arm, making kind 1 malformed, once 0.1
+        // Clients and Servers no longer meet 0.2 ones (ADR 0051).
         1 => TerminalColor::Default,
         2 => TerminalColor::Indexed(narrow(payload, "indexed color")?),
         3 if payload <= 0xff_ffff => TerminalColor::Rgb {

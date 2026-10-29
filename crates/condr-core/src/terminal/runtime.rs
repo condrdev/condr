@@ -98,6 +98,16 @@ impl TerminalRuntime {
             .and_then(resolve_initial_cwd);
         command.env("TERM", "xterm-256color");
         command.env("COLORTERM", "truecolor");
+        // Condr names no terminal program (ADR 0051), so a Server started from another
+        // terminal must not pass that one's name on to its Panes.
+        for inherited in [
+            "TERM_PROGRAM",
+            "TERM_PROGRAM_VERSION",
+            "LC_TERMINAL",
+            "LC_TERMINAL_VERSION",
+        ] {
+            command.env_remove(inherited);
+        }
         #[cfg(target_os = "macos")]
         shell::set_missing_locale(&mut command);
 
@@ -220,6 +230,11 @@ impl TerminalRuntime {
         let resize_size = Arc::clone(&runtime.size);
         let resize_revision = Arc::clone(&runtime.revision);
         let resize_updates = runtime.update_sender.clone();
+        let (resize_notices, resize_cwd, resize_input) = (
+            Arc::clone(&runtime.notices),
+            Arc::clone(&runtime.reported_cwd),
+            runtime.input.clone(),
+        );
         runtime.resizer = Some(runtime.start_thread("resizer", move || {
             resize_loop(
                 resize_control,
@@ -228,6 +243,11 @@ impl TerminalRuntime {
                 resize_size,
                 resize_revision,
                 resize_updates,
+                // What the resize reported goes out as the reader's reports do.
+                |events| {
+                    let replies = apply_terminal_events(events, &resize_notices, &resize_cwd);
+                    let _ = write_terminal_replies(&resize_input, replies);
+                },
             )
         })?);
 

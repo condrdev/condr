@@ -275,6 +275,27 @@ fn an_unknown_bootstrap_record_is_skipped_and_an_omitted_event_round_trips() {
             pane_id: crate::PaneId::from_u64(3),
             unseen: true,
         },
+        SessionEvent::TerminalProgressChanged {
+            pane_id: crate::PaneId::from_u64(3),
+            progress: Some(crate::TerminalProgress {
+                state: crate::TerminalProgressState::Error,
+                percent: None,
+            }),
+        },
+        SessionEvent::TerminalProgressChanged {
+            pane_id: crate::PaneId::from_u64(3),
+            progress: None,
+        },
+        SessionEvent::TerminalNotification {
+            pane_id: crate::PaneId::from_u64(3),
+            title: None,
+            body: "Build finished".into(),
+        },
+        SessionEvent::CommandFinished {
+            pane_id: crate::PaneId::from_u64(3),
+            exit_code: Some(-1),
+            duration_secs: 42,
+        },
     ] {
         let encoded = super::SessionEvent::try_from(&event).unwrap();
         assert_eq!(SessionEvent::try_from(encoded).unwrap(), event);
@@ -590,4 +611,72 @@ fn history_replies_round_trip() {
             message
         );
     }
+}
+
+/// ADR 0051: every cell column round-trips: widths, underline styles, the other style
+/// bits, the soft wrap, and default, indexed and RGB colours in all three colour columns.
+#[test]
+fn the_cell_columns_round_trip() {
+    use crate::{
+        CELL_FAINT, CELL_OVERLINE, CELL_SPACER_HEAD, CELL_SPACER_TAIL, CELL_UNDERLINE_CURLY,
+        CELL_UNDERLINE_DASHED, CELL_WIDE, CELL_WRAPPED, TerminalCell, TerminalColor, TerminalSize,
+    };
+    let rgb = TerminalColor::Rgb {
+        red: 1,
+        green: 2,
+        blue: 3,
+    };
+    let cell = |text: &str, flags, underline_color| TerminalCell {
+        text: text.into(),
+        foreground: TerminalColor::Indexed(196),
+        background: rgb,
+        underline_color,
+        flags,
+        hyperlink: None,
+    };
+    let view = TerminalView {
+        revision: 7,
+        size: TerminalSize::new(1, 4),
+        display_offset: 0,
+        mouse_tracking: TerminalMouseTracking::None,
+        cells: vec![
+            cell("中", CELL_WIDE | CELL_UNDERLINE_CURLY, rgb),
+            cell("", CELL_SPACER_TAIL, TerminalColor::Default),
+            cell(
+                "a",
+                CELL_FAINT | CELL_OVERLINE | CELL_UNDERLINE_DASHED,
+                TerminalColor::Indexed(4),
+            ),
+            cell("", CELL_SPACER_HEAD | CELL_WRAPPED, TerminalColor::Default),
+        ],
+        cursor: None,
+        selection: None,
+    };
+    let encoded = super::TerminalView::from(&view);
+    assert_eq!(TerminalView::try_from(encoded).unwrap(), view);
+}
+
+/// A progress state from a newer peer reads as indeterminate (ADR 0054).
+#[test]
+fn an_unknown_progress_state_reads_as_indeterminate() {
+    let event = super::SessionEvent {
+        event: Some(session_event::Event::TerminalProgressChanged(
+            super::TerminalProgressChanged {
+                pane_id: 3,
+                progress: Some(super::TerminalProgress {
+                    state: 99,
+                    percent: Some(40),
+                }),
+            },
+        )),
+    };
+    let SessionEvent::TerminalProgressChanged {
+        progress: Some(progress),
+        ..
+    } = SessionEvent::try_from(event).unwrap()
+    else {
+        unreachable!()
+    };
+    assert_eq!(progress.state, crate::TerminalProgressState::Indeterminate);
+    assert_eq!(progress.percent, Some(40));
 }

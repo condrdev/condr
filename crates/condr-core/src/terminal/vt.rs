@@ -13,7 +13,7 @@ use std::sync::LazyLock;
 /// Pane (ADR 0051).
 pub(super) const RENDER_HOLD_TIMEOUT: Duration = Duration::from_secs(1);
 /// Ghostty's default: history kept in the library's logical bytes, compressed when idle.
-const SCROLLBACK_BYTES: usize = 50 * 1024 * 1024;
+const SCROLLBACK_BYTES: usize = 50_000_000;
 /// The most wheel steps one event reports, so a flung wheel cannot flood the program.
 pub(super) const MAX_MOUSE_WHEEL_STEPS: u16 = 64;
 /// alacritty's set without `:`, so a double-click keeps URLs and Windows paths whole.
@@ -116,7 +116,11 @@ impl Vt {
     /// Parses program output and returns what the program reported meanwhile, a
     /// synchronized update's start and end kept here.
     pub(super) fn write(&mut self, bytes: &[u8]) -> Vec<Event> {
-        let mut events = self.terminal.write(bytes);
+        let events = self.terminal.write(bytes);
+        self.keep_holds(events)
+    }
+
+    fn keep_holds(&mut self, mut events: Vec<Event>) -> Vec<Event> {
         events.retain(|event| match event {
             Event::RenderHold(held) => {
                 self.held_since = held.then(Instant::now);
@@ -139,13 +143,19 @@ impl Vt {
         self.terminal.set_colors(&vt_colors(colors)).ok().flatten()
     }
 
-    pub(super) fn resize(&mut self, size: TerminalSize) {
-        let _ = self.terminal.resize(
-            size.columns.max(1),
-            size.rows.max(1),
-            u32::from(size.cell_width),
-            u32::from(size.cell_height),
-        );
+    /// Resizes the grid and returns what that reported, such as the in-band size report
+    /// a program that turned on mode 2048 reads.
+    pub(super) fn resize(&mut self, size: TerminalSize) -> Vec<Event> {
+        let events = self
+            .terminal
+            .resize(
+                size.columns.max(1),
+                size.rows.max(1),
+                u32::from(size.cell_width),
+                u32::from(size.cell_height),
+            )
+            .unwrap_or_default();
+        self.keep_holds(events)
     }
 
     pub(super) fn mode(&self, number: u16) -> bool {
@@ -496,9 +506,10 @@ impl Vt {
         })
     }
 
-    /// The viewport as the wire carries it. With `previous`, only rows the library marks
-    /// changed are read again and the marks are cleared; without, every row is read and
-    /// the marks are left for the frame path, the render state's one consumer.
+    /// The viewport as the wire carries it. With `previous`, the frame path, the marks are
+    /// cleared once read, and only rows the library marks changed are read again unless
+    /// the whole state is marked or the size moved; without, every row is read and the
+    /// marks are left for the frame path, the render state's one consumer.
     pub(super) fn view(
         &mut self,
         size: TerminalSize,
@@ -506,10 +517,11 @@ impl Vt {
         previous: Option<&TerminalView>,
     ) -> TerminalView {
         let _ = self.render.update(&self.terminal);
+        let clearing = previous.is_some();
         let previous = previous.filter(|previous| {
             previous.size == size && self.render.dirty() != ghostty::Dirty::Full
         });
-        let clearing = previous.is_some();
+        let narrowing = previous.is_some();
         let columns = usize::from(size.columns);
         let mut cells = previous.map_or_else(
             || vec![blank_cell(); usize::from(size.rows) * columns],
@@ -530,7 +542,7 @@ impl Vt {
             if let Some(range) = row.selection() {
                 selected.push((row.y, range));
             }
-            if clearing && !row.dirty() {
+            if narrowing && !row.dirty() {
                 return;
             }
             let wrapped = row.wrapped();
@@ -659,8 +671,6 @@ impl Vt {
         lines.join("\n")
     }
 
-    /// Compresses scrollback when the library's activity token has not moved since the
-    /// last check; the library runs no timer of its own (ADR 0051).
     /// One bounded step of compressing the scrollback, once no output has arrived since
     /// the last look; `true` while more steps remain and the terminal is still idle.
     pub(super) fn compress_step_if_idle(&mut self) -> bool {
@@ -668,6 +678,11 @@ impl Vt {
         let idle = self.compression_seen == Some(activity);
         self.compression_seen = Some(activity);
         idle && !self.terminal.compress()
+    }
+
+    #[cfg(test)]
+    pub(super) fn render_dirty(&self) -> ghostty::Dirty {
+        self.render.dirty()
     }
 
     #[cfg(test)]

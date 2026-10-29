@@ -113,6 +113,35 @@ fn server_selection_follows_scrolled_output_and_still_copies_it() {
     vt.select(None);
     assert_eq!(vt.view(size, 1, None).selection, None);
 }
+/// ADR 0004 and 0051: the frame path clears the render state's marks even after a full
+/// read, so the next frame reads only the rows output touched.
+#[test]
+fn frames_after_the_first_read_only_the_rows_that_changed() {
+    let size = TerminalSize::new(4, 20);
+    let mut vt = terminal_showing(size, b"one\r\ntwo");
+    let first = vt.view(size, 1, None);
+    assert_eq!(
+        vt.render_dirty(),
+        condr_ghostty_vt::Dirty::Full,
+        "left for the frame path"
+    );
+    let second = vt.view(size, 2, Some(&first));
+    assert_eq!(
+        vt.render_dirty(),
+        condr_ghostty_vt::Dirty::Clean,
+        "a full read clears too"
+    );
+    vt.write(b"!");
+    let third = vt.view(size, 3, Some(&second));
+    assert_eq!(vt.render_dirty(), condr_ghostty_vt::Dirty::Clean);
+    assert_eq!(third.cell(1, 3).unwrap().text, "!");
+    assert_eq!(
+        third.cell(0, 0).unwrap().text,
+        "o",
+        "an unread row comes from the last frame"
+    );
+}
+
 /// ADR 0051: a resize, which switching windows does (ADR 0036), keeps the selection, and
 /// an erase that touches it keeps it too; a screen swap still clears it (ADR 0008).
 #[test]

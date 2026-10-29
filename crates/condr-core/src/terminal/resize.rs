@@ -1,4 +1,5 @@
 use super::*;
+use condr_ghostty_vt::Event;
 
 #[derive(Default)]
 pub(super) struct ResizeState {
@@ -66,6 +67,7 @@ pub(super) fn resize_loop(
     current_size: Arc<Mutex<TerminalSize>>,
     revision: Arc<AtomicU64>,
     updates: mpsc::Sender<TerminalUpdate>,
+    reported: impl Fn(Vec<Event>),
 ) -> io::Result<()> {
     let _exit = ResizeWorkerGuard {
         control: Arc::clone(&control),
@@ -83,16 +85,16 @@ pub(super) fn resize_loop(
                 .resize(pty_size)
                 .map_err(other_error)
         };
-        if resize_terminal_and_pty(
+        let (events, resized) = resize_terminal_and_pty(
             &terminal,
             &current_size,
             &revision,
             &updates,
             size,
             |_, pty_size| resize_pty(pty_size),
-        )
-        .is_err()
-        {
+        );
+        reported(events);
+        if resized.is_err() {
             thread::sleep(PTY_RESIZE_RETRY_DELAY);
             let _ = resize_pty(size.into());
         }
@@ -107,12 +109,12 @@ pub(super) fn resize_terminal_and_pty(
     updates: &mpsc::Sender<TerminalUpdate>,
     size: TerminalSize,
     resize_pty: impl FnOnce(&Terminal, PtySize) -> io::Result<()>,
-) -> io::Result<()> {
+) -> (Vec<Event>, io::Result<()>) {
     let mut terminal = terminal.lock().expect("terminal state lock poisoned");
-    terminal.resize(size);
+    let events = terminal.resize(size);
     let resize_result = resize_pty(&terminal, size.into());
     *current_size.lock().expect("terminal size lock poisoned") = size;
     drop(terminal);
     publish_view(revision, updates);
-    resize_result
+    (events, resize_result)
 }

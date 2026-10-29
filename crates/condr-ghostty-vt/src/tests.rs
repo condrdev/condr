@@ -367,3 +367,14 @@ fn the_librarys_log_reaches_tracing() {
     let log = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();
     assert!(log.contains("libghostty"), "{log}");
 }
+
+#[test]
+fn kitty_graphics_and_glyph_queries_go_unanswered() {
+    let mut terminal = terminal(20, 5);
+    let replies = terminal
+        .write(b"\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b_25a1;s\x1b\\")
+        .into_iter()
+        .filter(|event| matches!(event, Event::WritePty(_)))
+        .count();
+    assert_eq!(replies, 0, "Condr shows neither images nor custom glyphs");
+}

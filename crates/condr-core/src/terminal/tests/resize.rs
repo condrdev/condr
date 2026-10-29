@@ -1,4 +1,5 @@
 use super::*;
+use condr_ghostty_vt::Event;
 
 #[test]
 fn pending_resize_keeps_only_the_latest_request() {
@@ -36,6 +37,7 @@ fn resize_worker_failure_stops_accepting_requests() {
         current_size,
         Arc::new(AtomicU64::new(0)),
         updates,
+        |_| {},
     )
     .unwrap_err();
 
@@ -67,6 +69,7 @@ fn terminal_is_resized_before_the_pty() {
             Ok(())
         },
     )
+    .1
     .unwrap();
 
     assert_eq!(
@@ -95,6 +98,7 @@ fn failed_pty_resize_still_publishes_the_new_vt_size() {
         requested_size,
         |_, _| Err(io::Error::other("PTY resize failed")),
     )
+    .1
     .unwrap_err();
 
     assert_eq!(error.to_string(), "PTY resize failed");
@@ -105,4 +109,27 @@ fn failed_pty_resize_still_publishes_the_new_vt_size() {
     drop(terminal);
     assert_eq!(revision.load(Ordering::Acquire), 1);
     assert_eq!(update_receiver.recv().unwrap(), TerminalUpdate::View(1));
+}
+
+/// A program that turned on in-band resize reports (mode 2048) hears the new size from
+/// the resize itself, not with its next output.
+#[test]
+fn a_resize_reports_the_new_size_to_a_program_that_asked() {
+    let size = TerminalSize::new(5, 20);
+    let terminal = Arc::new(Mutex::new(Vt::new(size).unwrap()));
+    terminal.lock().unwrap().write(b"\x1b[?2048h");
+    let (updates, _receiver) = mpsc::channel();
+    let (events, resized) = resize_terminal_and_pty(
+        &terminal,
+        &Arc::new(Mutex::new(size)),
+        &AtomicU64::new(0),
+        &updates,
+        TerminalSize::new(10, 40),
+        |_, _| Ok(()),
+    );
+    resized.unwrap();
+    let reported = events.into_iter().any(
+        |event| matches!(event, Event::WritePty(bytes) if bytes.starts_with(b"\x1b[48;10;40;")),
+    );
+    assert!(reported, "the size report is among the resize's events");
 }

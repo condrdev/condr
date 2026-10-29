@@ -48,6 +48,14 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang cmake pkg-config libfontconfig1-dev libfreetype6-dev libxcb1-dev libxkbcommon-x11-dev libwayland-dev libssl-dev libvulkan1 patchelf desktop-file-utils
+      # libghostty-vt builds with the Zig its manifest names (ADR 0051).
+      - name: Read the Zig version libghostty-vt needs
+        id: zig
+        shell: bash
+        run: echo "version=$(sed -n 's/^zig = "\(.*\)"$/\1/p' crates/condr-ghostty-vt/ghostty.toml)" >> "$GITHUB_OUTPUT"
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ steps.zig.outputs.version }}
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
       - name: Build GUI and condr
@@ -92,6 +100,14 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      # libghostty-vt builds with the Zig its manifest names (ADR 0051).
+      - name: Read the Zig version libghostty-vt needs
+        id: zig
+        shell: bash
+        run: echo "version=$(sed -n 's/^zig = "\(.*\)"$/\1/p' crates/condr-ghostty-vt/ghostty.toml)" >> "$GITHUB_OUTPUT"
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ steps.zig.outputs.version }}
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
       - name: Build GUI and condr
@@ -134,6 +150,14 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      # libghostty-vt builds with the Zig its manifest names (ADR 0051).
+      - name: Read the Zig version libghostty-vt needs
+        id: zig
+        shell: bash
+        run: echo "version=$(sed -n 's/^zig = "\(.*\)"$/\1/p' crates/condr-ghostty-vt/ghostty.toml)" >> "$GITHUB_OUTPUT"
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ steps.zig.outputs.version }}
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
       - name: Build GUI and condr

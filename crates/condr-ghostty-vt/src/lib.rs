@@ -465,6 +465,18 @@ impl Terminal {
             Opt::GHOSTTY_TERMINAL_OPT_RESIZE_PULL_SCROLLBACK,
             (&raw const options.resize_pulls_scrollback).cast(),
         )?;
+        // Condr draws no images and no custom glyphs (ADR 0051): a storage limit of zero
+        // turns the kitty graphics protocol off, so a probe hears nothing back.
+        let no_images = 0u64;
+        self.set(
+            Opt::GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT,
+            (&raw const no_images).cast(),
+        )?;
+        let no_glyphs = false;
+        self.set(
+            Opt::GHOSTTY_TERMINAL_OPT_GLYPH_PROTOCOL,
+            (&raw const no_glyphs).cast(),
+        )?;
         // Graphemes measured as Unicode clusters by default, as Ghostty does (mode 2027).
         let grapheme = sys::GhosttyTerminalModeConfig {
             mode: Mode::dec(2027).0,
@@ -508,7 +520,7 @@ impl Terminal {
         rows: u16,
         cell_width: u32,
         cell_height: u32,
-    ) -> Result<(), Error> {
+    ) -> Result<Vec<Event>, Error> {
         self.callbacks_mut().size = sys::GhosttySizeReportSize {
             rows,
             columns: cols,
@@ -518,7 +530,9 @@ impl Terminal {
         // SAFETY: a live terminal; `&mut self` serializes the call.
         check(unsafe {
             sys::ghostty_terminal_resize(self.raw, cols, rows, cell_width, cell_height)
-        })
+        })?;
+        // A resize reports itself in-band (mode 2048) and ends a synchronized update.
+        Ok(std::mem::take(&mut self.callbacks_mut().events))
     }
 
     fn get<T>(&self, data: sys::GhosttyTerminalData, out: &mut T) -> Result<(), Error> {

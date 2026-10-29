@@ -191,6 +191,24 @@ fn shell_without_a_locale_gets_the_system_one_and_a_set_one_is_kept() {
     }
 }
 
+/// A Server started from another terminal does not pass that terminal's name to its
+/// Panes (ADR 0051).
+#[cfg(unix)]
+#[test]
+fn panes_do_not_inherit_the_outer_terminals_name() {
+    let mut command = CommandBuilder::new("/bin/sh");
+    command.args([
+        "-c",
+        "printf 'tp=%s lc=%s\\n' \"${TERM_PROGRAM-unset}\" \"${LC_TERMINAL-unset}\"",
+    ]);
+    command.env("TERM_PROGRAM", "iTerm.app");
+    command.env("LC_TERMINAL", "iTerm2");
+    command.cwd(std::env::temp_dir());
+    let mut runtime = TerminalRuntime::spawn(command, TerminalSize::new(24, 80)).unwrap();
+    wait_for_text(&runtime, "tp=unset lc=unset");
+    assert!(runtime.wait().unwrap().success());
+}
+
 /// The colours a Client sent answer OSC 11 and `CSI ? 996 n`, and turning them from dark to
 /// light tells a program that subscribed (mode 2031) (ADR 0054).
 #[cfg(unix)]
@@ -285,8 +303,8 @@ stty size"#,
 
 /// A program detecting the Program Status Protocol sends its query and then primary
 /// device attributes, and takes a DA1 answer arriving first as "unsupported" (ADR 0044).
-/// Condr's answer is queued as the scanner reads the query, ahead of the VT's DA1 reply
-/// to the same chunk.
+/// The VT answers in stream order, so its answer goes out ahead of its DA1 reply to the
+/// same chunk (ADR 0051).
 #[cfg(unix)]
 #[test]
 fn the_program_status_query_is_answered_before_primary_device_attributes() {

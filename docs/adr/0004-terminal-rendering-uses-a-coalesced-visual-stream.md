@@ -1,6 +1,6 @@
 # Terminal Rendering Uses a Coalesced Visual Stream
 
-> ADR 0051 changes where the producer's damage comes from: libghostty-vt's render state marks whole rows dirty, and the Server compares each dirty row with the frame it last took, cell by cell, so a small change still sends only the cells that changed. A synchronized update (mode 2026) holds frames until it ends, or for a second at most.
+> ADR 0051 changes where the producer's damage comes from: libghostty-vt's render state marks whole rows dirty, and the Server compares each dirty row with the frame it last took, cell by cell, so a small change still sends only the cells that changed; the per-Client baselines are unchanged. A synchronized update (mode 2026) holds frames until it ends, or for a second at most.
 
 Condr separates terminal presentation updates from reliable Session events. The Server remains the owner of PTYs, VT state, and terminal revisions; the GUI remains an event-driven presenter and does not poll terminal state on a display timer.
 
@@ -22,4 +22,3 @@ References: [herdr client transport](https://github.com/herdrdev/herdr/blob/9eb5
 
 > ADR 0041 adds `WatchTerminals`: a Client may name the Panes whose frames it wants. Its per-subscriber pending set and baselines follow that set, which belongs to the connection and survives a rejected subscription; the Bootstrap still carries every Pane's terminal record, with a view only for watched Panes. A Client that never sends it streams every Pane, as here.
 
-> ADR 0051 moves the VT to libghostty-vt. The producer reads its render state, which marks dirty rows rather than cell ranges, and compares each dirty row with the retained view cell by cell before it emits runs; the per-Client baselines are unchanged.
