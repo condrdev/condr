@@ -19,7 +19,8 @@ use crate::snapshot::MAX_SNAPSHOT_PANES;
 use crate::{
     AgentKind, AgentSnapshot, BrowsedDirectory, CommitDetails, DirectoryListing, FileContent,
     FileDiff, FileKind, FileMutation, FileMutationResult, GitLog, PaneId, ProxyMode, ProxySetting,
-    SessionSnapshot, TabId, TerminalCommand, TerminalView, TerminalViewFrame, WorkspaceId,
+    SessionSnapshot, TabId, TerminalColors, TerminalCommand, TerminalView, TerminalViewFrame,
+    WorkspaceId,
 };
 
 fn pane(id: u64) -> PaneId {
@@ -489,6 +490,14 @@ impl TryFrom<&ClientMessage> for super::ClientMessage {
                     panes: panes.iter().map(|pane| pane.as_u64()).collect(),
                 })
             }
+            ClientMessage::TerminalColors(colors) => {
+                Message::TerminalColors(super::TerminalColors {
+                    foreground: colors.foreground,
+                    background: colors.background,
+                    cursor: colors.cursor,
+                    ansi: colors.ansi.to_vec(),
+                })
+            }
             ClientMessage::Unknown => return Err("an unknown message cannot be sent".into()),
         };
         Ok(Self {
@@ -660,6 +669,17 @@ fn decode_client_message(message: super::ClientMessage) -> WireResult<ClientMess
                 ClientMessage::WatchTerminals {
                     panes: watch.panes.into_iter().map(pane).collect(),
                 }
+            }
+            Message::TerminalColors(colors) => {
+                let rgb = |value: u32| value & 0xff_ffff;
+                ClientMessage::TerminalColors(TerminalColors {
+                    foreground: rgb(colors.foreground),
+                    background: rgb(colors.background),
+                    cursor: rgb(colors.cursor),
+                    ansi: <[u32; 16]>::try_from(colors.ansi)
+                        .map_err(|_| malformed("terminal colours need 16 ANSI colours"))?
+                        .map(rgb),
+                })
             }
         })
     }

@@ -58,6 +58,39 @@ pub const DEFAULT_FOREGROUND_COLOR: u32 = 0xc9d1d9;
 pub const DEFAULT_BACKGROUND_COLOR: u32 = 0x0d1117;
 pub const DEFAULT_CURSOR_COLOR: u32 = 0xf0f6fc;
 
+/// The colours a desktop Client draws terminals with, as `0xRRGGBB`. The Server answers a
+/// program's colour queries (OSC 4, 10, 11, 12, `CSI ? 996 n`) with the last ones a
+/// Client sent (ADR 0054).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TerminalColors {
+    pub foreground: u32,
+    pub background: u32,
+    pub cursor: u32,
+    pub ansi: [u32; 16],
+}
+
+impl Default for TerminalColors {
+    fn default() -> Self {
+        Self {
+            foreground: DEFAULT_FOREGROUND_COLOR,
+            background: DEFAULT_BACKGROUND_COLOR,
+            cursor: DEFAULT_CURSOR_COLOR,
+            ansi: DEFAULT_ANSI_COLORS,
+        }
+    }
+}
+
+impl TerminalColors {
+    /// The xterm-256 colour at `index`: these ANSI colours for 0–15, the fixed cube and
+    /// grey ramp above.
+    pub fn indexed(&self, index: u8) -> u32 {
+        self.ansi
+            .get(usize::from(index))
+            .copied()
+            .unwrap_or_else(|| default_indexed_color(index))
+    }
+}
+
 /// The xterm-256 color at `index` as `0xRRGGBB`, with [`DEFAULT_ANSI_COLORS`] for 0–15.
 pub const fn default_indexed_color(index: u8) -> u32 {
     let (red, green, blue) = match index {

@@ -60,12 +60,12 @@ pub use terminal::{
     CELL_UNDERLINE_DASHED, CELL_UNDERLINE_DOTTED, CELL_UNDERLINE_DOUBLE, CELL_UNDERLINE_SINGLE,
     CELL_WIDE, CELL_WIDTH, CELL_WRAPPED, DEFAULT_ANSI_COLORS, DEFAULT_BACKGROUND_COLOR,
     DEFAULT_CURSOR_COLOR, DEFAULT_FOREGROUND_COLOR, DETECTED_LINK_FLAG, TerminalCell,
-    TerminalCellRun, TerminalColor, TerminalCommand, TerminalCursor, TerminalCursorShape,
-    TerminalFrameError, TerminalHyperlinkBudget, TerminalKey, TerminalKeyEventKind,
-    TerminalModifiers, TerminalMouseButton, TerminalMouseEvent, TerminalMousePosition,
-    TerminalMouseTracking, TerminalMouseWheel, TerminalPosition, TerminalScroll, TerminalSelection,
-    TerminalSelectionUnit, TerminalSide, TerminalSize, TerminalUpdate, TerminalView,
-    TerminalViewDelta, TerminalViewFrame, default_indexed_color,
+    TerminalCellRun, TerminalColor, TerminalColors, TerminalCommand, TerminalCursor,
+    TerminalCursorShape, TerminalFrameError, TerminalHyperlinkBudget, TerminalKey,
+    TerminalKeyEventKind, TerminalModifiers, TerminalMouseButton, TerminalMouseEvent,
+    TerminalMousePosition, TerminalMouseTracking, TerminalMouseWheel, TerminalPosition,
+    TerminalScroll, TerminalSelection, TerminalSelectionUnit, TerminalSide, TerminalSize,
+    TerminalUpdate, TerminalView, TerminalViewDelta, TerminalViewFrame, default_indexed_color,
 };
 #[cfg(feature = "runtime")]
 pub use terminal::{

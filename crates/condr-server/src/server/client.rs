@@ -1177,6 +1177,10 @@ pub(super) fn handle_client(
                 flush_terminal_render(&state, client_id);
                 false
             }
+            ClientMessage::TerminalColors(colors) => {
+                state.lock().or_abort().set_terminal_colors(colors);
+                false
+            }
             ClientMessage::Detach => true,
         };
         if should_close {

@@ -13,8 +13,8 @@ mod messages;
 pub(crate) mod pb;
 
 use crate::{
-    AgentSnapshot, PaneDirection, PaneId, SessionSnapshot, SplitDirection, TabId, TerminalCommand,
-    TerminalView, TerminalViewFrame, WorkspaceId,
+    AgentSnapshot, PaneDirection, PaneId, SessionSnapshot, SplitDirection, TabId, TerminalColors,
+    TerminalCommand, TerminalView, TerminalViewFrame, WorkspaceId,
 };
 use std::collections::HashSet;
 use std::fmt;

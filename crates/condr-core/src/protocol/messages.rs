@@ -164,6 +164,10 @@ pub enum ClientMessage {
     WatchTerminals {
         panes: HashSet<PaneId>,
     },
+    /// The colours this Client draws terminals with, which the Server answers every
+    /// Pane's colour queries with until another Client sends its own (ADR 0054). It
+    /// belongs to the connection and has no reply.
+    TerminalColors(TerminalColors),
     /// Rescans a Workspace's files and Git status now, as its watcher would (ADR 0046).
     /// There is no reply: [`SessionEvent::WorkspaceFilesChanged`] follows the scan, and
     /// [`SessionEvent::WorkspaceGitChanged`] when something moved.

@@ -37,7 +37,20 @@ message ClientMessage {
     RefreshWorkspace refresh_workspace = 24;
     GitLogRequest git_log = 25;
     GitCommitRequest git_commit = 26;
+    TerminalColors terminal_colors = 27;
   }
+}
+
+// The colours a desktop Client draws terminals with, as 0xRRGGBB (ADR 0054). The Server
+// answers every Pane's colour queries (OSC 4, 10, 11, 12 and CSI ? 996 n) with the last
+// ones a Client sent. It belongs to the connection and has no reply. The phone sends
+// none: its palette is not one the user chose.
+message TerminalColors {
+  uint32 foreground = 1;
+  uint32 background = 2;
+  uint32 cursor = 3;
+  // The 16 ANSI colours; the cube and grey ramp above them are xterm's.
+  repeated uint32 ansi = 4;
 }
 
 // A page of a Workspace's History (ADR 0046), walking from `from` or from HEAD.

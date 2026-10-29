@@ -38,10 +38,11 @@ use condr_core::protocol::{
 };
 use condr_core::{
     AgentSnapshot, FileMutation, FileMutationResult, GitRepository, PaneEnvironment, PaneId,
-    Session, TerminalAgentProbe, TerminalCommand, TerminalCwdProbe, TerminalHyperlinkBudget,
-    TerminalNoticeBatch, TerminalNoticeProbe, TerminalRuntime, TerminalSize, TerminalUpdate,
-    TerminalView, TerminalViewFrame, TerminalViewSource, WorkspaceId, create_worktree,
-    discover_repository, open_worktree, remove_worktree, validate_worktree_removal,
+    Session, TerminalAgentProbe, TerminalColors, TerminalCommand, TerminalCwdProbe,
+    TerminalHyperlinkBudget, TerminalNoticeBatch, TerminalNoticeProbe, TerminalRuntime,
+    TerminalSize, TerminalUpdate, TerminalView, TerminalViewFrame, TerminalViewSource, WorkspaceId,
+    create_worktree, discover_repository, open_worktree, remove_worktree,
+    validate_worktree_removal,
 };
 use config::{load_shell, load_worktree_root, save_proxy, save_shell};
 use layout::*;
@@ -550,6 +551,9 @@ struct RuntimeState {
     /// connection's, not its subscription's, so it outlives a `SubscriptionRejected`; a
     /// Client absent here gets every Pane.
     watched_terminals: std::collections::HashMap<u64, std::collections::HashSet<PaneId>>,
+    /// The colours the last desktop Client draws terminals with; every Pane answers colour
+    /// queries with them (ADR 0054). Until one sends any, Condr's defaults.
+    terminal_colors: Option<TerminalColors>,
     /// Live remote peers by client id, so a revocation can drop their connections. Named
     /// for TCP but holds every remote transport, Peer-to-peer included (ADR 0025).
     tcp_peers: std::collections::HashMap<u64, (crate::noise::PublicKey, EndpointStream)>,
@@ -714,6 +718,7 @@ impl RuntimeState {
             events: std::collections::VecDeque::new(),
             subscribers: std::collections::HashMap::new(),
             watched_terminals: std::collections::HashMap::new(),
+            terminal_colors: None,
             tcp_peers: std::collections::HashMap::new(),
             p2p: None,
             pushes: None,

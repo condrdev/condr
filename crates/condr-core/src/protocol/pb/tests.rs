@@ -350,6 +350,34 @@ fn the_proxy_setting_round_trips_and_an_older_or_newer_peer_reads_as_system() {
 }
 
 #[test]
+fn terminal_colors_round_trip_and_need_all_sixteen_ansi_colours() {
+    let colors = crate::TerminalColors {
+        background: 0xfafafa,
+        ..crate::TerminalColors::default()
+    };
+    let message = ClientMessage::TerminalColors(colors);
+    let mut encoded = super::ClientMessage::try_from(&message).unwrap();
+    assert_eq!(ClientMessage::try_from(encoded.clone()).unwrap(), message);
+
+    let Some(super::client_message::Message::TerminalColors(wire)) = encoded.message.as_mut()
+    else {
+        unreachable!()
+    };
+    wire.foreground = 0xff12_3456;
+    wire.ansi.pop();
+    assert!(ClientMessage::try_from(encoded.clone()).is_err());
+    let Some(super::client_message::Message::TerminalColors(wire)) = encoded.message.as_mut()
+    else {
+        unreachable!()
+    };
+    wire.ansi.push(0);
+    let ClientMessage::TerminalColors(decoded) = ClientMessage::try_from(encoded).unwrap() else {
+        unreachable!()
+    };
+    assert_eq!(decoded.foreground, 0x12_3456, "only RGB is kept");
+}
+
+#[test]
 fn a_watched_set_and_a_terminal_record_without_a_view_round_trip() {
     let message = ClientMessage::WatchTerminals {
         panes: [crate::PaneId::from_u64(3), crate::PaneId::from_u64(5)].into(),

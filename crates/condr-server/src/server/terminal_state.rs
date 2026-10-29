@@ -22,6 +22,18 @@ impl RuntimeState {
         }
     }
 
+    /// Every Pane answers colour queries with `colors` from now on, and so does each new
+    /// one (ADR 0054).
+    pub(super) fn set_terminal_colors(&mut self, colors: TerminalColors) {
+        if self.terminal_colors == Some(colors) {
+            return;
+        }
+        for runtime in self.terminals.values() {
+            let _ = runtime.set_colors(&colors);
+        }
+        self.terminal_colors = Some(colors);
+    }
+
     pub(super) fn clear_terminal_focus(&mut self) {
         if let Some((pane_id, _)) = self.focused_terminal.take()
             && let Some(runtime) = self.terminals.get(&pane_id)
@@ -39,6 +51,9 @@ impl RuntimeState {
         let instance_id = self.next_terminal_instance;
         self.next_terminal_instance = self.next_terminal_instance.wrapping_add(1).max(1);
         self.forget_agent_control(pane_id);
+        if let Some(colors) = &self.terminal_colors {
+            let _ = runtime.set_colors(colors);
+        }
         let probe = runtime
             .agent_probe()
             .expect("new Terminal has an agent probe");

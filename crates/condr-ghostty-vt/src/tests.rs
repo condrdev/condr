@@ -11,12 +11,18 @@ fn terminal(cols: u16, rows: u16) -> Terminal {
         version: "Condr test".into(),
         terminfo_name: "xterm-256color".into(),
         resize_pulls_scrollback: true,
-        foreground: Rgb::from_u32(0xc9d1d9),
-        background: Rgb::from_u32(0x0d1117),
-        cursor: Rgb::from_u32(0xf0f6fc),
-        palette: std::array::from_fn(|index| Rgb::from_u32(index as u32 * 0x010101)),
+        colors: colors(0x0d1117),
     })
     .unwrap()
+}
+
+fn colors(background: u32) -> Colors {
+    Colors {
+        foreground: Rgb::from_u32(0xc9d1d9),
+        background: Rgb::from_u32(background),
+        cursor: Rgb::from_u32(0xf0f6fc),
+        palette: std::array::from_fn(|index| Rgb::from_u32(index as u32 * 0x010101)),
+    }
 }
 
 fn screen(render: &mut RenderState) -> Vec<String> {
@@ -236,4 +242,48 @@ fn the_key_encoder_tells_when_modify_other_keys_is_on() {
     assert!(keys.modify_other_keys(&terminal));
     terminal.write(b"\x1b[>4;0m");
     assert!(!keys.modify_other_keys(&terminal));
+}
+
+#[test]
+fn colour_queries_answer_the_colours_set_and_a_scheme_flip_is_reported() {
+    let mut terminal = terminal(20, 5);
+    let replies = |terminal: &mut Terminal, query: &[u8]| -> Vec<u8> {
+        terminal
+            .write(query)
+            .into_iter()
+            .filter_map(|event| match event {
+                Event::WritePty(bytes) => Some(bytes),
+                _ => None,
+            })
+            .flatten()
+            .collect()
+    };
+    assert_eq!(replies(&mut terminal, b"\x1b[?996n"), b"\x1b[?997;1n");
+    assert_eq!(
+        replies(&mut terminal, b"\x1b]11;?\x1b\\"),
+        b"\x1b]11;rgb:0d0d/1111/1717\x1b\\"
+    );
+
+    terminal.write(b"\x1b[?2031h");
+    assert_eq!(
+        terminal.set_colors(&colors(0x0e1118)).unwrap(),
+        None,
+        "still dark"
+    );
+    assert_eq!(
+        terminal.set_colors(&colors(0xfafafa)).unwrap(),
+        Some(b"\x1b[?997;2n".to_vec())
+    );
+    assert_eq!(replies(&mut terminal, b"\x1b[?996n"), b"\x1b[?997;2n");
+    assert_eq!(
+        replies(&mut terminal, b"\x1b]11;?\x1b\\"),
+        b"\x1b]11;rgb:fafa/fafa/fafa\x1b\\"
+    );
+    // A program's own background outlives the next change of defaults.
+    terminal.write(b"\x1b]11;#102030\x1b\\");
+    terminal.set_colors(&colors(0xffffff)).unwrap();
+    assert_eq!(
+        replies(&mut terminal, b"\x1b]11;?\x1b\\"),
+        b"\x1b]11;rgb:1010/2020/3030\x1b\\"
+    );
 }

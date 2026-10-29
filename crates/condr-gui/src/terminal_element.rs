@@ -11,9 +11,10 @@ use condr_core::{
     CELL_FAINT, CELL_INVERSE, CELL_INVISIBLE, CELL_STRIKETHROUGH, CELL_UNDERLINE,
     CELL_UNDERLINE_CURLY, CELL_UNDERLINE_SINGLE, DEFAULT_ANSI_COLORS, DEFAULT_BACKGROUND_COLOR,
     DEFAULT_CURSOR_COLOR, DEFAULT_FOREGROUND_COLOR, DETECTED_LINK_FLAG, PaneId, TerminalColor,
-    TerminalCursorShape, TerminalModifiers, TerminalMouseButton, TerminalMouseEvent,
-    TerminalMousePosition, TerminalMouseTracking, TerminalMouseWheel, TerminalPosition,
-    TerminalSelection, TerminalSide, TerminalSize, TerminalView, default_indexed_color,
+    TerminalColors, TerminalCursorShape, TerminalModifiers, TerminalMouseButton,
+    TerminalMouseEvent, TerminalMousePosition, TerminalMouseTracking, TerminalMouseWheel,
+    TerminalPosition, TerminalSelection, TerminalSide, TerminalSize, TerminalView,
+    default_indexed_color,
 };
 use geometry::*;
 use gpui_kit::{
@@ -872,6 +873,14 @@ impl Element for TerminalElement {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_default_palette_reports_the_servers_default_colours() {
+        assert_eq!(
+            TerminalPalette::default().colors(),
+            TerminalColors::default()
+        );
+    }
 
     #[test]
     fn hyperlink_runs_resolve_to_cell_ranges() {

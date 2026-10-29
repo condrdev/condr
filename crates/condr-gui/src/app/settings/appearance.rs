@@ -501,6 +501,24 @@ impl Condr {
         self.terminal_color_scheme = name;
         self.save_terminal_color_scheme(cx);
         apply_terminal_color_scheme(&self.terminal_color_scheme, cx);
+        self.send_terminal_colors(None, cx);
+    }
+
+    /// Tells `key`'s Server, or every connected one, the colours terminals are drawn
+    /// with, so a program asking for them hears what the user sees (ADR 0054).
+    pub(in crate::app) fn send_terminal_colors(&self, key: Option<ConnectionKey>, cx: &App) {
+        let palette = cx
+            .try_global::<TerminalPalette>()
+            .cloned()
+            .unwrap_or_default();
+        let colors = palette.colors();
+        for connection in &self.connections {
+            if key.is_none_or(|key| key == connection.key)
+                && connection.status == ConnectionStatus::Connected
+            {
+                connection.send(ClientMessage::TerminalColors(colors));
+            }
+        }
     }
 
     /// Clamped like the terminal's; saving is debounced so a run of stepper clicks

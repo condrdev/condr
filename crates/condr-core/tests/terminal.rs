@@ -190,6 +190,38 @@ fn shell_without_a_locale_gets_the_system_one_and_a_set_one_is_kept() {
     }
 }
 
+/// The colours a Client sent answer OSC 11 and `CSI ? 996 n`, and turning them from dark to
+/// light tells a program that subscribed (mode 2031) (ADR 0054).
+#[cfg(unix)]
+#[test]
+fn colour_queries_answer_the_clients_colours_and_a_scheme_flip_is_reported() {
+    let mut command = CommandBuilder::new("/bin/sh");
+    command.arg("-c");
+    command.arg(
+        r#"stty raw -echo
+printf '\033[?2031hcolors-ready\r\n'
+flip=$(dd bs=1 count=10 2>/dev/null | od -An -tx1 | tr -d ' \n')
+printf '\033]11;?\033\\\033[?996n'
+reply=$(dd bs=1 count=34 2>/dev/null | od -An -tx1 | tr -d ' \n')
+stty sane
+[ "$flip$reply" = "1b5b3f3939373b326e671b5d31313b7267623a666166612f666166612f666166611b5c1b5b3f3939373b326e" ] && reply=ok
+printf '\r\ncolors=%s\r\n' "$reply""#,
+    );
+    command.cwd(std::env::temp_dir());
+    let mut runtime = TerminalRuntime::spawn(command, TerminalSize::new(24, 80)).unwrap();
+    wait_for_text(&runtime, "colors-ready");
+    runtime
+        .set_colors(&condr_core::TerminalColors {
+            background: 0xfafafa,
+            ..condr_core::TerminalColors::default()
+        })
+        .unwrap();
+    // The scheme report goes first; this byte lets the script ask.
+    runtime.write(b"g".to_vec()).unwrap();
+    wait_for_text(&runtime, "colors=ok");
+    assert!(runtime.wait().unwrap().success());
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn shell_round_trip_updates_vt_replies_and_resizes() {

@@ -72,6 +72,15 @@ pub(super) struct Vt {
     compression_seen: Option<u64>,
 }
 
+fn vt_colors(colors: &TerminalColors) -> ghostty::Colors {
+    ghostty::Colors {
+        foreground: rgb(colors.foreground),
+        background: rgb(colors.background),
+        cursor: rgb(colors.cursor),
+        palette: std::array::from_fn(|index| rgb(colors.indexed(index as u8))),
+    }
+}
+
 fn rgb(value: u32) -> ghostty::Rgb {
     ghostty::Rgb::from_u32(value)
 }
@@ -88,10 +97,7 @@ impl Vt {
             terminfo_name: "xterm-256color".into(),
             // ConPTY keeps its own screen and does not pull history back on a resize.
             resize_pulls_scrollback: !cfg!(windows),
-            foreground: rgb(DEFAULT_FOREGROUND_COLOR),
-            background: rgb(DEFAULT_BACKGROUND_COLOR),
-            cursor: rgb(DEFAULT_CURSOR_COLOR),
-            palette: std::array::from_fn(|index| rgb(default_indexed_color(index as u8))),
+            colors: vt_colors(&TerminalColors::default()),
         })
         .map_err(other_error)?;
         let render = ghostty::RenderState::new().map_err(other_error)?;
@@ -125,6 +131,12 @@ impl Vt {
     pub(super) fn hold_remaining(&self) -> Option<Duration> {
         let remaining = RENDER_HOLD_TIMEOUT.checked_sub(self.held_since?.elapsed())?;
         (!remaining.is_zero()).then_some(remaining)
+    }
+
+    /// Answers colour queries with `colors` from now on. Returns the report a program
+    /// that subscribed to scheme changes (mode 2031) reads when dark turned light or back.
+    pub(super) fn set_colors(&mut self, colors: &TerminalColors) -> Option<Vec<u8>> {
+        self.terminal.set_colors(&vt_colors(colors)).ok().flatten()
     }
 
     pub(super) fn resize(&mut self, size: TerminalSize) {

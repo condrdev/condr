@@ -170,10 +170,30 @@ pub struct Options {
     pub terminfo_name: String,
     /// Whether a resize pulls scrollback back onto the screen; ConPTY keeps its own.
     pub resize_pulls_scrollback: bool,
+    pub colors: Colors,
+}
+
+/// The colours a program's colour queries are answered with and its default and palette
+/// cells drawn in; what the program sets itself (OSC 4, 10, 11, 12) overrides them.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Colors {
     pub foreground: Rgb,
     pub background: Rgb,
     pub cursor: Rgb,
     pub palette: [Rgb; 256],
+}
+
+impl Colors {
+    /// Dark or light, as `CSI ? 996 n` and mode 2031 report it: by the background.
+    fn scheme(&self) -> sys::GhosttyColorScheme {
+        let Rgb { r, g, b } = self.background;
+        let luma = 299 * u32::from(r) + 587 * u32::from(g) + 114 * u32::from(b);
+        if luma < 1000 * 128 {
+            sys::GhosttyColorScheme::GHOSTTY_COLOR_SCHEME_DARK
+        } else {
+            sys::GhosttyColorScheme::GHOSTTY_COLOR_SCHEME_LIGHT
+        }
+    }
 }
 
 /// What the terminal reported while it parsed a write, in stream order.
@@ -258,6 +278,7 @@ struct Callbacks {
     events: Vec<Event>,
     size: sys::GhosttySizeReportSize,
     version: Vec<u8>,
+    scheme: sys::GhosttyColorScheme,
     panics: usize,
 }
 
@@ -290,11 +311,50 @@ impl Terminal {
                 cell_height: options.cell_height,
             },
             version: options.version.as_bytes().to_vec(),
+            scheme: options.colors.scheme(),
             panics: 0,
         }));
         let terminal = Self { raw, callbacks };
         terminal.install(&options)?;
+        terminal.apply_colors(&options.colors)?;
         Ok(terminal)
+    }
+
+    /// Replaces the default colours. When that turns the scheme from dark to light or
+    /// back, returns the report a program that asked for one (mode 2031) reads.
+    pub fn set_colors(&mut self, colors: &Colors) -> Result<Option<Vec<u8>>, Error> {
+        self.apply_colors(colors)?;
+        let scheme = colors.scheme();
+        let changed = std::mem::replace(&mut self.callbacks_mut().scheme, scheme) != scheme;
+        Ok((changed && self.mode(Mode::dec(2031))).then(|| {
+            // SAFETY: the buffer is as long as said.
+            encoded(|buf, len, written| unsafe {
+                sys::ghostty_color_scheme_report_encode(scheme, buf, len, written)
+            })
+        }))
+    }
+
+    fn apply_colors(&self, colors: &Colors) -> Result<(), Error> {
+        use sys::GhosttyTerminalOption as Opt;
+        for (option, color) in [
+            (
+                Opt::GHOSTTY_TERMINAL_OPT_COLOR_FOREGROUND,
+                colors.foreground,
+            ),
+            (
+                Opt::GHOSTTY_TERMINAL_OPT_COLOR_BACKGROUND,
+                colors.background,
+            ),
+            (Opt::GHOSTTY_TERMINAL_OPT_COLOR_CURSOR, colors.cursor),
+        ] {
+            let color = color.to_sys();
+            self.set(option, (&raw const color).cast())?;
+        }
+        let palette = colors.palette.map(Rgb::to_sys);
+        self.set(
+            Opt::GHOSTTY_TERMINAL_OPT_COLOR_PALETTE,
+            (&raw const palette).cast(),
+        )
     }
 
     fn set(&self, option: sys::GhosttyTerminalOption, value: *const c_void) -> Result<(), Error> {
@@ -305,7 +365,7 @@ impl Terminal {
     fn install(&self, options: &Options) -> Result<(), Error> {
         use sys::GhosttyTerminalOption as Opt;
         self.set(Opt::GHOSTTY_TERMINAL_OPT_USERDATA, self.callbacks.cast())?;
-        let callbacks: [(Opt, *const c_void); 13] = [
+        let callbacks: [(Opt, *const c_void); 14] = [
             (
                 Opt::GHOSTTY_TERMINAL_OPT_WRITE_PTY,
                 write_pty as *const c_void,
@@ -349,6 +409,10 @@ impl Terminal {
                 Opt::GHOSTTY_TERMINAL_OPT_XTVERSION,
                 xtversion as *const c_void,
             ),
+            (
+                Opt::GHOSTTY_TERMINAL_OPT_COLOR_SCHEME,
+                color_scheme as *const c_void,
+            ),
         ];
         for (option, callback) in callbacks {
             self.set(option, callback)?;
@@ -369,25 +433,6 @@ impl Terminal {
         self.set(
             Opt::GHOSTTY_TERMINAL_OPT_RESIZE_PULL_SCROLLBACK,
             (&raw const options.resize_pulls_scrollback).cast(),
-        )?;
-        for (option, color) in [
-            (
-                Opt::GHOSTTY_TERMINAL_OPT_COLOR_FOREGROUND,
-                options.foreground,
-            ),
-            (
-                Opt::GHOSTTY_TERMINAL_OPT_COLOR_BACKGROUND,
-                options.background,
-            ),
-            (Opt::GHOSTTY_TERMINAL_OPT_COLOR_CURSOR, options.cursor),
-        ] {
-            let color = color.to_sys();
-            self.set(option, (&raw const color).cast())?;
-        }
-        let palette = options.palette.map(Rgb::to_sys);
-        self.set(
-            Opt::GHOSTTY_TERMINAL_OPT_COLOR_PALETTE,
-            (&raw const palette).cast(),
         )?;
         // Graphemes measured as Unicode clusters by default, as Ghostty does (mode 2027).
         let grapheme = sys::GhosttyTerminalModeConfig {
@@ -1110,6 +1155,18 @@ extern "C" fn xtversion(_: sys::GhosttyTerminal, userdata: *mut c_void) -> sys::
             len: callbacks.version.len(),
         },
     )
+}
+
+extern "C" fn color_scheme(
+    _: sys::GhosttyTerminal,
+    userdata: *mut c_void,
+    out: *mut sys::GhosttyColorScheme,
+) -> bool {
+    guarded(userdata, false, |callbacks| {
+        // SAFETY: the library passes a scheme to fill for the call's duration.
+        unsafe { *out = callbacks.scheme };
+        true
+    })
 }
 
 #[cfg(test)]

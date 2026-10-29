@@ -20,6 +20,7 @@ trap 'rm -rf "$work"' EXIT
 # ones only a callback or an option's `void*` names.
 functions=(
   ghostty_cell_get
+  ghostty_color_scheme_report_encode
   ghostty_focus_encode
   ghostty_formatter_format_alloc
   ghostty_formatter_free

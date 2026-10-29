@@ -171,6 +171,14 @@ const _: () = {
     ["Offset of field: GhosttyColorRgb::b"][::std::mem::offset_of!(GhosttyColorRgb, b) - 2usize];
 };
 pub type GhosttyColorPaletteIndex = u8;
+impl GhosttyColorScheme {
+    pub const GHOSTTY_COLOR_SCHEME_LIGHT: GhosttyColorScheme = GhosttyColorScheme(0);
+    pub const GHOSTTY_COLOR_SCHEME_DARK: GhosttyColorScheme = GhosttyColorScheme(1);
+    pub const GHOSTTY_COLOR_SCHEME_MAX_VALUE: GhosttyColorScheme = GhosttyColorScheme(2147483647);
+}
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub struct GhosttyColorScheme(pub ::std::os::raw::c_int);
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct GhosttyDeviceAttributesPrimary {
@@ -245,6 +253,14 @@ const _: () = {
     ["Offset of field: GhosttyDeviceAttributes::tertiary"]
         [::std::mem::offset_of!(GhosttyDeviceAttributes, tertiary) - 152usize];
 };
+unsafe extern "C" {
+    pub fn ghostty_color_scheme_report_encode(
+        scheme: GhosttyColorScheme,
+        buf: *mut ::std::os::raw::c_char,
+        buf_len: usize,
+        out_written: *mut usize,
+    ) -> GhosttyResult;
+}
 impl GhosttyFocusEvent {
     pub const GHOSTTY_FOCUS_GAINED: GhosttyFocusEvent = GhosttyFocusEvent(0);
     pub const GHOSTTY_FOCUS_LOST: GhosttyFocusEvent = GhosttyFocusEvent(1);

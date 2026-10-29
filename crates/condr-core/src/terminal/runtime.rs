@@ -284,6 +284,16 @@ impl TerminalRuntime {
         self.input.try_write(bytes.into())
     }
 
+    /// Answers the program's colour queries with `colors` from now on (ADR 0054), and tells
+    /// a program that subscribed to scheme changes when dark turned light or back.
+    pub fn set_colors(&self, colors: &TerminalColors) -> io::Result<()> {
+        let report = lock_pane(&self.terminal)?.set_colors(colors);
+        match report {
+            Some(report) => self.input.try_write_control(report),
+            None => Ok(()),
+        }
+    }
+
     /// Paste and delayed Enter share one queue entry, so another client cannot split them.
     pub fn submit(&self, text: &str) -> io::Result<()> {
         let (bytes, enter) = {

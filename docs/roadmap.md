@@ -49,7 +49,6 @@ Condr 要守住的差异是原生 GUI 而非 TUI、Windows 一等公民、Server
 
 **已知限制**（出现摩擦再立 Issue）：
 
-- 终端颜色查询（OSC 4/10/11）回复的是 Server 内置的默认深色配色，不是 GUI 当前选的终端配色。因此选了浅色配色时，按背景色判断明暗的程序会判断成深色。
 - kitty keyboard 协议可协商（Claude Code 请求标志 5，Codex 请求 7），按下、重复与松开都会上报；但不上报单独的修饰键、小键盘键和标志 8 下普通文字键的松开。
 - OpenCode、Cursor 和 Antigravity 还没跑过真实会话；OMP、Grok 和 Copilot 只在 Linux 上验证过。OSC 支持范围没有对照表。
 
@@ -198,7 +197,6 @@ ADR 要回答三个问题：
 - GUI 里启动 Agent 的菜单：列出这台 Device 上装了哪些 Agent，点一下就在 Pane 里启动。现在在终端里输入命令已经够快。真要做时，用协议里现成的 `AgentCommand::Available` 和 `Start`。
 - 定时任务：按 cron 启动新的 Agent，或定时给已有的 Agent 发提示。现有的 `agent start`、`agent prompt` 和 `agent wait` 已经覆盖了大半。它会让 Condr 从看着 Agent 干活走向无人值守地派活，用户的期待也会跟着变，所以等有人提出需求再定。
 - TCP 与 Peer-to-peer Device 的端口转发：协议增加一种多路复用的字节流帧，把本机 listener 的连接经 Noise 或 iroh 连接接到远端 `localhost:<port>`。默认只有配对设备能开转发；若届时已有 observe/control capability，则只允许 `control`。
-- 颜色查询回复 GUI 当前的终端配色（见已知限制）。
 - `observe` 与 `control` 两级 capability（观察者拿 Bootstrap 和视觉流，不能输入、改布局、读文件；配对时决定，`condr server clients` 可看可改）：触发条件是第二个人开始共用同一个 Server。之后再谈设备密钥进 OS Keychain、密钥轮换、审计日志。不做账号体系、不做公网 listener。
 - Kimi hooks（等上游能区分主任务与子 agent 的 Stop）。
 

@@ -58,6 +58,7 @@ impl Condr {
                 // requests sent before it were dropped with the old connection.
                 self.clear_pending_requests(key);
                 self.sync_local_settings(key, cx);
+                self.send_terminal_colors(Some(key), cx);
                 self.sync_sidebar_workspace_open(cx);
                 if first_bootstrap {
                     // Now that the Session is known, the file's memory of it applies.

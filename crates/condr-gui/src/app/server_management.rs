@@ -457,6 +457,7 @@ impl Condr {
                 connection.subscribe();
             }
             self.sync_local_settings(key, cx);
+            self.send_terminal_colors(Some(key), cx);
             self.refresh_target_pane(key);
             if self.presents(key) {
                 self.rebuild_dock(window, cx);
