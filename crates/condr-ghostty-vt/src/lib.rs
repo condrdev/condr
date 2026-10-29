@@ -12,15 +12,17 @@
 )]
 mod bindings;
 mod key;
+mod mouse;
 mod render;
 
 pub use key::{KeyAction, KeyEncoder, KeyEvent, Mods, PhysicalKey};
+pub use mouse::{MouseAction, MouseButton, MouseEncoder, MouseEvent};
 pub use render::{
     Cell, CellWidth, Color, Cursor, CursorStyle, Dirty, RenderState, Row, Style, Underline,
 };
 
 use bindings as sys;
-use std::ffi::c_void;
+use std::ffi::{c_char, c_void};
 use std::mem::{MaybeUninit, size_of};
 use std::panic::{self, AssertUnwindSafe};
 use std::{fmt, ptr, slice};
@@ -53,6 +55,54 @@ fn check(result: sys::GhosttyResult) -> Result<(), Error> {
     } else {
         Err(Error(result.0))
     }
+}
+
+/// What one of the library's encoders writes, retried with the length it asks for while
+/// the buffer is too small; nothing when the encoding fails.
+fn encoded(
+    mut encode: impl FnMut(*mut c_char, usize, &mut usize) -> sys::GhosttyResult,
+) -> Vec<u8> {
+    let mut out = vec![0u8; 64];
+    loop {
+        let mut len = 0;
+        let result = encode(out.as_mut_ptr().cast(), out.len(), &mut len);
+        if result == sys::GhosttyResult::GHOSTTY_OUT_OF_SPACE && len > out.len() {
+            out.resize(len, 0);
+            continue;
+        }
+        out.truncate(if check(result).is_ok() { len } else { 0 });
+        return out;
+    }
+}
+
+/// What a program that turned on focus reports (mode 1004) reads when its terminal gains
+/// or loses focus.
+pub fn focus_report(focused: bool) -> Vec<u8> {
+    let event = if focused {
+        sys::GhosttyFocusEvent::GHOSTTY_FOCUS_GAINED
+    } else {
+        sys::GhosttyFocusEvent::GHOSTTY_FOCUS_LOST
+    };
+    // SAFETY: the buffer is as long as said.
+    encoded(|buf, len, written| unsafe { sys::ghostty_focus_encode(event, buf, len, written) })
+}
+
+/// `text` as a paste writes it: the control bytes xterm replaces become spaces, and the
+/// text is framed for bracketed paste (mode 2004) or has its newlines sent as Enter.
+pub fn paste(text: &str, bracketed: bool) -> Vec<u8> {
+    let mut data = text.as_bytes().to_vec();
+    // SAFETY: `data` is as long as said and the call may rewrite it in place (a retry
+    // rewrites it again to the same bytes); the buffer is as long as said.
+    encoded(|buf, len, written| unsafe {
+        sys::ghostty_paste_encode(
+            data.as_mut_ptr().cast(),
+            data.len(),
+            bracketed,
+            buf,
+            len,
+            written,
+        )
+    })
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
@@ -357,6 +407,11 @@ impl Terminal {
         // pointer and length describe `bytes`.
         unsafe { sys::ghostty_terminal_vt_write(self.raw, bytes.as_ptr(), bytes.len()) };
         std::mem::take(&mut self.callbacks_mut().events)
+    }
+
+    fn callbacks(&self) -> &Callbacks {
+        // SAFETY: as for `callbacks_mut`; `&self` excludes a library call that writes it.
+        unsafe { &*self.callbacks }
     }
 
     fn callbacks_mut(&mut self) -> &mut Callbacks {

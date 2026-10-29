@@ -20,10 +20,11 @@ trap 'rm -rf "$work"' EXIT
 # ones only a callback or an option's `void*` names.
 functions=(
   ghostty_cell_get
-  ghostty_free
+  ghostty_focus_encode
   ghostty_formatter_format_alloc
   ghostty_formatter_free
   ghostty_formatter_terminal_new
+  ghostty_free
   ghostty_grid_ref_hyperlink_uri
   ghostty_key_encoder_encode
   ghostty_key_encoder_free
@@ -38,6 +39,19 @@ functions=(
   ghostty_key_event_set_mods
   ghostty_key_event_set_unshifted_codepoint
   ghostty_key_event_set_utf8
+  ghostty_mouse_encoder_encode
+  ghostty_mouse_encoder_free
+  ghostty_mouse_encoder_new
+  ghostty_mouse_encoder_setopt
+  ghostty_mouse_encoder_setopt_from_terminal
+  ghostty_mouse_event_clear_button
+  ghostty_mouse_event_free
+  ghostty_mouse_event_new
+  ghostty_mouse_event_set_action
+  ghostty_mouse_event_set_button
+  ghostty_mouse_event_set_mods
+  ghostty_mouse_event_set_position
+  ghostty_paste_encode
   ghostty_render_state_free
   ghostty_render_state_get
   ghostty_render_state_new
@@ -77,6 +91,8 @@ types=(
   GhosttyColorPaletteIndex
   GhosttyColorRgb
   GhosttyDeviceAttributes
+  GhosttyMouseEncoderSize
+  GhosttyMousePosition
   GhosttyOptionAsAlt
   GhosttyRenderStateCursor
   GhosttyRenderStateCursorVisualStyle

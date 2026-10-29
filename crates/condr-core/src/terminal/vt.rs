@@ -14,31 +14,25 @@ use std::sync::LazyLock;
 pub(super) const RENDER_HOLD_TIMEOUT: Duration = Duration::from_secs(1);
 /// Ghostty's default: history kept in the library's logical bytes, compressed when idle.
 const SCROLLBACK_BYTES: usize = 50 * 1024 * 1024;
+/// The most wheel steps one event reports, so a flung wheel cannot flood the program.
+pub(super) const MAX_MOUSE_WHEEL_STEPS: u16 = 64;
 /// alacritty's set without `:`, so a double-click keeps URLs and Windows paths whole.
 const WORD_BOUNDARIES: &str = ",│`|\"' ()[]{}<>\t";
 
-/// The modes key and mouse encoding read, as flags.
+/// The modes that route input between the program and the Pane (scrolling, selection),
+/// as flags. The library's encoders read the rest themselves.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(super) struct TermMode(u32);
 
 impl TermMode {
     pub(super) const APP_CURSOR: Self = Self(1);
-    pub(super) const BRACKETED_PASTE: Self = Self(1 << 1);
-    pub(super) const ALT_SCREEN: Self = Self(1 << 2);
-    pub(super) const FOCUS_IN_OUT: Self = Self(1 << 3);
-    pub(super) const ALTERNATE_SCROLL: Self = Self(1 << 4);
-    pub(super) const MOUSE_REPORT_CLICK: Self = Self(1 << 5);
-    pub(super) const MOUSE_DRAG: Self = Self(1 << 6);
-    pub(super) const MOUSE_MOTION: Self = Self(1 << 7);
+    pub(super) const ALT_SCREEN: Self = Self(1 << 1);
+    pub(super) const ALTERNATE_SCROLL: Self = Self(1 << 2);
+    pub(super) const MOUSE_REPORT_CLICK: Self = Self(1 << 3);
+    pub(super) const MOUSE_DRAG: Self = Self(1 << 4);
+    pub(super) const MOUSE_MOTION: Self = Self(1 << 5);
     pub(super) const MOUSE_MODE: Self =
         Self(Self::MOUSE_REPORT_CLICK.0 | Self::MOUSE_DRAG.0 | Self::MOUSE_MOTION.0);
-    pub(super) const SGR_MOUSE: Self = Self(1 << 8);
-    pub(super) const UTF8_MOUSE: Self = Self(1 << 9);
-    pub(super) const DISAMBIGUATE_ESC_CODES: Self = Self(1 << 10);
-    pub(super) const REPORT_EVENT_TYPES: Self = Self(1 << 11);
-    pub(super) const REPORT_ALTERNATE_KEYS: Self = Self(1 << 12);
-    pub(super) const REPORT_ALL_KEYS_AS_ESC: Self = Self(1 << 13);
-    pub(super) const REPORT_ASSOCIATED_TEXT: Self = Self(1 << 14);
 
     pub(super) const fn empty() -> Self {
         Self(0)
@@ -71,6 +65,7 @@ pub(super) struct Vt {
     terminal: ghostty::Terminal,
     render: ghostty::RenderState,
     keys: ghostty::KeyEncoder,
+    mouse: ghostty::MouseEncoder,
     /// When the synchronized update now open began.
     held_since: Option<Instant>,
     /// The library's activity token at the last idle check.
@@ -101,10 +96,12 @@ impl Vt {
         .map_err(other_error)?;
         let render = ghostty::RenderState::new().map_err(other_error)?;
         let keys = ghostty::KeyEncoder::new().map_err(other_error)?;
+        let mouse = ghostty::MouseEncoder::new().map_err(other_error)?;
         Ok(Self {
             terminal,
             render,
             keys,
+            mouse,
             held_since: None,
             compression_seen: None,
         })
@@ -147,14 +144,11 @@ impl Vt {
         let mut modes = TermMode::empty();
         for (number, flag) in [
             (1, TermMode::APP_CURSOR),
+            (9, TermMode::MOUSE_REPORT_CLICK),
             (1000, TermMode::MOUSE_REPORT_CLICK),
             (1002, TermMode::MOUSE_DRAG),
             (1003, TermMode::MOUSE_MOTION),
-            (1004, TermMode::FOCUS_IN_OUT),
-            (1005, TermMode::UTF8_MOUSE),
-            (1006, TermMode::SGR_MOUSE),
             (1007, TermMode::ALTERNATE_SCROLL),
-            (2004, TermMode::BRACKETED_PASTE),
         ] {
             if self.mode(number) {
                 modes |= flag;
@@ -162,18 +156,6 @@ impl Vt {
         }
         if self.terminal.alternate_screen() {
             modes |= TermMode::ALT_SCREEN;
-        }
-        let kitty = self.terminal.kitty_keyboard_flags();
-        for (bit, flag) in [
-            (1, TermMode::DISAMBIGUATE_ESC_CODES),
-            (2, TermMode::REPORT_EVENT_TYPES),
-            (4, TermMode::REPORT_ALTERNATE_KEYS),
-            (8, TermMode::REPORT_ALL_KEYS_AS_ESC),
-            (16, TermMode::REPORT_ASSOCIATED_TEXT),
-        ] {
-            if kitty & bit != 0 {
-                modes |= flag;
-            }
         }
         modes
     }
@@ -333,9 +315,12 @@ impl Vt {
             ..TerminalModifiers::default()
         };
         let cmd_c = modifiers == cmd && matches!(key, TerminalKey::Character(text) if text == "c");
-        let legacy = self.terminal.kitty_keyboard_flags() == 0;
-        let kitty_flags = (legacy && cmd_c && reads_kitty_keys).then_some(KITTY_DISAMBIGUATE);
-        if legacy && kitty_flags.is_none() {
+        let kitty = self.terminal.kitty_keyboard_flags() != 0;
+        let kitty_flags = (!kitty && cmd_c && reads_kitty_keys).then_some(KITTY_DISAMBIGUATE);
+        // A program that negotiated a keyboard (kitty flags or xterm's modifyOtherKeys)
+        // reads keys as Ghostty encodes them; any other reads the classic xterm bytes
+        // Condr sends, since Ghostty's own legacy encoding follows fixterms (ADR 0051).
+        if !kitty && kitty_flags.is_none() && !self.keys.modify_other_keys(&self.terminal) {
             return encode_legacy_key(key, modifiers, kind, self.mode(1));
         }
         let mut mods = ghostty::Mods {
@@ -371,6 +356,83 @@ impl Vt {
             unshifted,
         };
         Ok(self.keys.encode(&self.terminal, &event, kitty_flags))
+    }
+
+    /// A mouse event as the program's tracking mode and format report it, if they do.
+    pub(super) fn encode_mouse(&mut self, event: TerminalMouseEvent) -> Option<Vec<u8>> {
+        let (action, button, position, modifiers, repeat) = match event {
+            TerminalMouseEvent::Button {
+                button,
+                pressed,
+                position,
+                modifiers,
+            } => (
+                if pressed {
+                    ghostty::MouseAction::Press
+                } else {
+                    ghostty::MouseAction::Release
+                },
+                Some(mouse_button(button)),
+                position,
+                modifiers,
+                1,
+            ),
+            TerminalMouseEvent::Motion {
+                button,
+                position,
+                modifiers,
+            } => (
+                ghostty::MouseAction::Motion,
+                button.map(mouse_button),
+                position,
+                modifiers,
+                1,
+            ),
+            TerminalMouseEvent::Wheel {
+                direction,
+                amount,
+                position,
+                modifiers,
+            } => (
+                ghostty::MouseAction::Press,
+                Some(match direction {
+                    TerminalMouseWheel::Up => ghostty::MouseButton::WheelUp,
+                    TerminalMouseWheel::Down => ghostty::MouseButton::WheelDown,
+                    TerminalMouseWheel::Left => ghostty::MouseButton::WheelLeft,
+                    TerminalMouseWheel::Right => ghostty::MouseButton::WheelRight,
+                }),
+                position,
+                modifiers,
+                amount.min(MAX_MOUSE_WHEEL_STEPS),
+            ),
+        };
+        let report = self.mouse.encode(
+            &self.terminal,
+            &ghostty::MouseEvent {
+                action,
+                button,
+                mods: ghostty::Mods {
+                    shift: modifiers.shift,
+                    ctrl: modifiers.control,
+                    alt: modifiers.alt,
+                    logo: modifiers.platform,
+                },
+                column: position.column,
+                row: position.row,
+            },
+        );
+        (!report.is_empty() && repeat > 0).then(|| report.repeat(usize::from(repeat)))
+    }
+
+    /// Pasted text as the program reads it. A CRLF counts as one line break, so a Windows
+    /// clipboard does not press Enter twice outside bracketed paste.
+    pub(super) fn encode_paste(&self, text: &str) -> Vec<u8> {
+        ghostty::paste(&text.replace("\r\n", "\n"), self.mode(2004))
+    }
+
+    /// What the program reads when its Pane gains or loses focus, if it asked (mode 1004).
+    pub(super) fn focus_report(&self, focused: bool) -> Option<Vec<u8>> {
+        self.mode(1004).then(|| ghostty::focus_report(focused))
     }
 
     /// Typed text. While every key must be reported as an escape code, a single character
@@ -671,6 +733,14 @@ fn typed_key(
         ..ghostty::Mods::default()
     };
     (physical, text, Some(base), consumed)
+}
+
+fn mouse_button(button: TerminalMouseButton) -> ghostty::MouseButton {
+    match button {
+        TerminalMouseButton::Left => ghostty::MouseButton::Left,
+        TerminalMouseButton::Middle => ghostty::MouseButton::Middle,
+        TerminalMouseButton::Right => ghostty::MouseButton::Right,
+    }
 }
 
 fn named_key(key: &TerminalKey) -> ghostty::PhysicalKey {

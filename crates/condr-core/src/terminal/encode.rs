@@ -1,20 +1,9 @@
 use super::*;
 
-pub(super) fn encode_paste(text: &str, bracketed: bool) -> Vec<u8> {
-    if bracketed {
-        // Like Alacritty: ESC cannot forge the closing marker and ETX never interrupts.
-        let text = text.replace(['\x1b', '\x03'], "");
-        format!("\x1b[200~{text}\x1b[201~").into_bytes()
-    } else {
-        text.replace("\r\n", "\r").replace('\n', "\r").into_bytes()
-    }
-}
-
-/// A key in legacy xterm form, which programs that negotiated no kitty keyboard flags
-/// read. A release is nothing. libghostty-vt encodes kitty keys (ADR 0051); legacy keys
-/// stay here, since its legacy encoding follows fixterms (Ctrl+[ as `CSI 91;5u` rather
-/// than ESC, Ctrl+Shift+letter as CSI u) and the Client sends text, not the control
-/// characters a keyboard layout would give it.
+/// A key in legacy xterm form, which programs that negotiated no keyboard (kitty flags or
+/// modifyOtherKeys) read. A release is nothing. libghostty-vt encodes negotiated keys
+/// (ADR 0051); these stay here, since its legacy encoding follows fixterms (Ctrl+[ as
+/// `CSI 91;5u` rather than ESC, Shift+Enter as `CSI 27;2;13~` rather than LF).
 pub(super) fn encode_legacy_key(
     key: &TerminalKey,
     modifiers: TerminalModifiers,

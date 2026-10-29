@@ -12,8 +12,6 @@ mod job;
 #[cfg(feature = "runtime")]
 mod launch;
 #[cfg(feature = "runtime")]
-mod mouse;
-#[cfg(feature = "runtime")]
 mod notices;
 #[cfg(feature = "runtime")]
 mod osc;

@@ -15,7 +15,7 @@ impl TerminalRuntime {
             TerminalMouseEvent::Wheel { modifiers, .. } if modifiers.shift
         );
         if !shifted_wheel && modes.intersects(TermMode::MOUSE_MODE) {
-            return self.handle_application_mouse(event, modes, display_offset, screen_lines);
+            return self.handle_application_mouse(event, display_offset, screen_lines);
         }
         if let TerminalMouseEvent::Button {
             button,
@@ -63,7 +63,6 @@ impl TerminalRuntime {
     pub(super) fn handle_application_mouse(
         &self,
         event: TerminalMouseEvent,
-        modes: TermMode,
         display_offset: usize,
         screen_lines: usize,
     ) -> io::Result<()> {
@@ -84,7 +83,7 @@ impl TerminalRuntime {
                     position,
                     modifiers,
                 };
-                if self.write_mouse_report(event, modes)? {
+                if self.write_mouse_report(event)? {
                     *lock_pane(&self.reported_mouse_press)? = Some(ReportedMousePress {
                         button,
                         position,
@@ -113,7 +112,7 @@ impl TerminalRuntime {
                     position,
                     modifiers,
                 };
-                if let Some(bytes) = encode_mouse(event, modes) {
+                if let Some(bytes) = lock_pane(&self.terminal)?.encode_mouse(event) {
                     self.input.try_write_control(bytes)?;
                 }
                 *reported = None;
@@ -139,7 +138,7 @@ impl TerminalRuntime {
                     position,
                     modifiers,
                 };
-                if let Some(bytes) = encode_mouse(event, modes) {
+                if let Some(bytes) = lock_pane(&self.terminal)?.encode_mouse(event) {
                     self.input.try_write(bytes)?;
                     press.position = position;
                     press.modifiers = modifiers;
@@ -154,14 +153,11 @@ impl TerminalRuntime {
                 else {
                     return Ok(());
                 };
-                self.write_mouse_report(
-                    TerminalMouseEvent::Motion {
-                        button: None,
-                        position,
-                        modifiers,
-                    },
-                    modes,
-                )?;
+                self.write_mouse_report(TerminalMouseEvent::Motion {
+                    button: None,
+                    position,
+                    modifiers,
+                })?;
             }
             TerminalMouseEvent::Wheel {
                 direction,
@@ -173,26 +169,19 @@ impl TerminalRuntime {
                 else {
                     return Ok(());
                 };
-                self.write_mouse_report(
-                    TerminalMouseEvent::Wheel {
-                        direction,
-                        amount,
-                        position,
-                        modifiers,
-                    },
-                    modes,
-                )?;
+                self.write_mouse_report(TerminalMouseEvent::Wheel {
+                    direction,
+                    amount,
+                    position,
+                    modifiers,
+                })?;
             }
         }
         Ok(())
     }
 
-    pub(super) fn write_mouse_report(
-        &self,
-        event: TerminalMouseEvent,
-        modes: TermMode,
-    ) -> io::Result<bool> {
-        let Some(bytes) = encode_mouse(event, modes) else {
+    pub(super) fn write_mouse_report(&self, event: TerminalMouseEvent) -> io::Result<bool> {
+        let Some(bytes) = lock_pane(&self.terminal)?.encode_mouse(event) else {
             return Ok(false);
         };
         self.input.try_write(bytes)?;
@@ -209,20 +198,16 @@ impl TerminalRuntime {
     }
 
     pub fn release_mouse(&self) -> io::Result<()> {
-        let modes = lock_pane(&self.terminal)?.modes();
         let mut reported = lock_pane(&self.reported_mouse_press)?;
         let Some(press) = *reported else {
             return Ok(());
         };
-        if let Some(bytes) = encode_mouse(
-            TerminalMouseEvent::Button {
-                button: press.button,
-                pressed: false,
-                position: press.position,
-                modifiers: press.modifiers,
-            },
-            modes,
-        ) {
+        if let Some(bytes) = lock_pane(&self.terminal)?.encode_mouse(TerminalMouseEvent::Button {
+            button: press.button,
+            pressed: false,
+            position: press.position,
+            modifiers: press.modifiers,
+        }) {
             self.input.try_write_control(bytes)?;
         }
         *reported = None;

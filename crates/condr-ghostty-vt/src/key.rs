@@ -1,7 +1,7 @@
 //! Key encoding: libghostty-vt turns a key event into what the program reads, for the
 //! terminal's live modes (legacy xterm, modifyOtherKeys, kitty keyboard protocol).
 
-use super::{Error, Terminal, check, sys};
+use super::{Error, Terminal, check, encoded, sys};
 use std::ptr;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -14,7 +14,7 @@ pub struct Mods {
 }
 
 impl Mods {
-    fn bits(self) -> sys::GhosttyMods {
+    pub(crate) fn bits(self) -> sys::GhosttyMods {
         u16::from(self.shift)
             | u16::from(self.ctrl) << 1
             | u16::from(self.alt) << 2
@@ -178,26 +178,27 @@ impl KeyEncoder {
                 event.unshifted.map_or(0, u32::from),
             );
         }
-        let mut out = vec![0u8; 64];
-        loop {
-            let mut len = 0;
-            // SAFETY: the buffer is as long as said; `len` is read after the call.
-            let result = unsafe {
-                sys::ghostty_key_encoder_encode(
-                    self.raw,
-                    self.event,
-                    out.as_mut_ptr().cast(),
-                    out.len(),
-                    &mut len,
-                )
-            };
-            if result == sys::GhosttyResult::GHOSTTY_OUT_OF_SPACE && len > out.len() {
-                out.resize(len, 0);
-                continue;
-            }
-            out.truncate(if check(result).is_ok() { len } else { 0 });
-            return out;
-        }
+        // SAFETY: live handles; the buffer is as long as said.
+        encoded(|buf, len, written| unsafe {
+            sys::ghostty_key_encoder_encode(self.raw, self.event, buf, len, written)
+        })
+    }
+
+    /// Whether the program turned on xterm's modifyOtherKeys mode 2, which the library
+    /// tracks but does not report: only in that mode does Ctrl+; encode as `CSI 27;5;59~`.
+    pub fn modify_other_keys(&mut self, terminal: &Terminal) -> bool {
+        let probe = KeyEvent {
+            key: PhysicalKey::Char(';'),
+            action: KeyAction::Press,
+            mods: Mods {
+                ctrl: true,
+                ..Mods::default()
+            },
+            consumed: Mods::default(),
+            text: ";",
+            unshifted: Some(';'),
+        };
+        self.encode(terminal, &probe, None).starts_with(b"\x1b[27;")
     }
 }
 

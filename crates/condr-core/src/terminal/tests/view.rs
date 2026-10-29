@@ -490,8 +490,17 @@ fn a_status_line_burst_coalesces_into_sparse_frames_and_keeps_the_last_revision(
 #[test]
 fn programs_negotiate_the_kitty_keyboard_protocol() {
     let mut vt = Vt::new(TerminalSize::new(2, 8)).unwrap();
+    let escape = |vt: &mut Vt| {
+        vt.encode_key(
+            &TerminalKey::Escape,
+            TerminalModifiers::default(),
+            TerminalKeyEventKind::Press,
+            false,
+        )
+        .unwrap()
+    };
     vt.write(b"\x1b[>1u");
-    assert!(vt.modes().contains(TermMode::DISAMBIGUATE_ESC_CODES));
+    assert_eq!(escape(&mut vt), b"\x1b[27u");
     vt.write(b"\x1b[<u");
-    assert!(!vt.modes().contains(TermMode::DISAMBIGUATE_ESC_CODES));
+    assert_eq!(escape(&mut vt), b"\x1b");
 }

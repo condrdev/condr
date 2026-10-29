@@ -288,14 +288,14 @@ impl TerminalRuntime {
     pub fn submit(&self, text: &str) -> io::Result<()> {
         let (bytes, enter) = {
             let mut terminal = lock_pane(&self.terminal)?;
-            let bracketed = terminal.modes().contains(TermMode::BRACKETED_PASTE);
+            let paste = terminal.encode_paste(text);
             let enter = terminal.encode_key(
                 &TerminalKey::Enter,
                 TerminalModifiers::default(),
                 TerminalKeyEventKind::Press,
                 false,
             )?;
-            (encode_paste(text, bracketed), enter)
+            (paste, enter)
         };
         self.scroll_to_bottom();
         self.clear_selection();
@@ -389,10 +389,8 @@ impl TerminalRuntime {
                 Ok(None)
             }
             TerminalCommand::Paste(text) => {
-                let bracketed = lock_pane(&self.terminal)?
-                    .modes()
-                    .contains(TermMode::BRACKETED_PASTE);
-                self.write(encode_paste(&text, bracketed))?;
+                let bytes = lock_pane(&self.terminal)?.encode_paste(&text);
+                self.write(bytes)?;
                 Ok(None)
             }
             TerminalCommand::Submit(text) => {
@@ -410,15 +408,12 @@ impl TerminalRuntime {
                 Ok(None)
             }
             TerminalCommand::Focus(focused) => {
-                let focus_reporting = lock_pane(&self.terminal)?
-                    .modes()
-                    .contains(TermMode::FOCUS_IN_OUT);
+                let report = lock_pane(&self.terminal)?.focus_report(focused);
                 if !focused {
                     self.release_mouse()?;
                 }
-                if focus_reporting {
-                    self.input
-                        .try_write_control(if focused { b"\x1b[I" } else { b"\x1b[O" }.to_vec())?;
+                if let Some(report) = report {
+                    self.input.try_write_control(report)?;
                 }
                 Ok(None)
             }

@@ -50,7 +50,7 @@ Condr 要守住的差异是原生 GUI 而非 TUI、Windows 一等公民、Server
 **已知限制**（出现摩擦再立 Issue）：
 
 - 终端颜色查询（OSC 4/10/11）回复的是 Server 内置的默认深色配色，不是 GUI 当前选的终端配色。因此选了浅色配色时，按背景色判断明暗的程序会判断成深色。
-- kitty keyboard 协议可协商（Claude Code 请求标志 5，Codex 请求 7），按下、重复与松开都会上报；但不上报单独的修饰键、小键盘键和标志 8 下普通文字键的松开，也不支持 xterm modifyOtherKeys。
+- kitty keyboard 协议可协商（Claude Code 请求标志 5，Codex 请求 7），按下、重复与松开都会上报；但不上报单独的修饰键、小键盘键和标志 8 下普通文字键的松开。
 - OpenCode、Cursor 和 Antigravity 还没跑过真实会话；OMP、Grok 和 Copilot 只在 Linux 上验证过。OSC 支持范围没有对照表。
 
 ## 近期方向

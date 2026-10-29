@@ -245,6 +245,22 @@ const _: () = {
     ["Offset of field: GhosttyDeviceAttributes::tertiary"]
         [::std::mem::offset_of!(GhosttyDeviceAttributes, tertiary) - 152usize];
 };
+impl GhosttyFocusEvent {
+    pub const GHOSTTY_FOCUS_GAINED: GhosttyFocusEvent = GhosttyFocusEvent(0);
+    pub const GHOSTTY_FOCUS_LOST: GhosttyFocusEvent = GhosttyFocusEvent(1);
+    pub const GHOSTTY_FOCUS_MAX_VALUE: GhosttyFocusEvent = GhosttyFocusEvent(2147483647);
+}
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub struct GhosttyFocusEvent(pub ::std::os::raw::c_int);
+unsafe extern "C" {
+    pub fn ghostty_focus_encode(
+        event: GhosttyFocusEvent,
+        buf: *mut ::std::os::raw::c_char,
+        buf_len: usize,
+        out_written: *mut usize,
+    ) -> GhosttyResult;
+}
 pub type GhosttyCell = u64;
 pub type GhosttyRow = u64;
 impl GhosttyCellContentTag {
@@ -1935,5 +1951,181 @@ unsafe extern "C" {
         out_buf: *mut ::std::os::raw::c_char,
         out_buf_size: usize,
         out_len: *mut usize,
+    ) -> GhosttyResult;
+}
+#[repr(C)]
+#[derive(Debug)]
+pub struct GhosttyMouseEventImpl {
+    _unused: [u8; 0],
+}
+pub type GhosttyMouseEvent = *mut GhosttyMouseEventImpl;
+impl GhosttyMouseAction {
+    pub const GHOSTTY_MOUSE_ACTION_PRESS: GhosttyMouseAction = GhosttyMouseAction(0);
+    pub const GHOSTTY_MOUSE_ACTION_RELEASE: GhosttyMouseAction = GhosttyMouseAction(1);
+    pub const GHOSTTY_MOUSE_ACTION_MOTION: GhosttyMouseAction = GhosttyMouseAction(2);
+    pub const GHOSTTY_MOUSE_ACTION_MAX_VALUE: GhosttyMouseAction = GhosttyMouseAction(2147483647);
+}
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub struct GhosttyMouseAction(pub ::std::os::raw::c_int);
+impl GhosttyMouseButton {
+    pub const GHOSTTY_MOUSE_BUTTON_UNKNOWN: GhosttyMouseButton = GhosttyMouseButton(0);
+    pub const GHOSTTY_MOUSE_BUTTON_LEFT: GhosttyMouseButton = GhosttyMouseButton(1);
+    pub const GHOSTTY_MOUSE_BUTTON_RIGHT: GhosttyMouseButton = GhosttyMouseButton(2);
+    pub const GHOSTTY_MOUSE_BUTTON_MIDDLE: GhosttyMouseButton = GhosttyMouseButton(3);
+    pub const GHOSTTY_MOUSE_BUTTON_FOUR: GhosttyMouseButton = GhosttyMouseButton(4);
+    pub const GHOSTTY_MOUSE_BUTTON_FIVE: GhosttyMouseButton = GhosttyMouseButton(5);
+    pub const GHOSTTY_MOUSE_BUTTON_SIX: GhosttyMouseButton = GhosttyMouseButton(6);
+    pub const GHOSTTY_MOUSE_BUTTON_SEVEN: GhosttyMouseButton = GhosttyMouseButton(7);
+    pub const GHOSTTY_MOUSE_BUTTON_EIGHT: GhosttyMouseButton = GhosttyMouseButton(8);
+    pub const GHOSTTY_MOUSE_BUTTON_NINE: GhosttyMouseButton = GhosttyMouseButton(9);
+    pub const GHOSTTY_MOUSE_BUTTON_TEN: GhosttyMouseButton = GhosttyMouseButton(10);
+    pub const GHOSTTY_MOUSE_BUTTON_ELEVEN: GhosttyMouseButton = GhosttyMouseButton(11);
+    pub const GHOSTTY_MOUSE_BUTTON_MAX_VALUE: GhosttyMouseButton = GhosttyMouseButton(2147483647);
+}
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub struct GhosttyMouseButton(pub ::std::os::raw::c_int);
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct GhosttyMousePosition {
+    pub x: f32,
+    pub y: f32,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of GhosttyMousePosition"][::std::mem::size_of::<GhosttyMousePosition>() - 8usize];
+    ["Alignment of GhosttyMousePosition"][::std::mem::align_of::<GhosttyMousePosition>() - 4usize];
+    ["Offset of field: GhosttyMousePosition::x"]
+        [::std::mem::offset_of!(GhosttyMousePosition, x) - 0usize];
+    ["Offset of field: GhosttyMousePosition::y"]
+        [::std::mem::offset_of!(GhosttyMousePosition, y) - 4usize];
+};
+unsafe extern "C" {
+    pub fn ghostty_mouse_event_new(
+        allocator: *const GhosttyAllocator,
+        event: *mut GhosttyMouseEvent,
+    ) -> GhosttyResult;
+}
+unsafe extern "C" {
+    pub fn ghostty_mouse_event_free(event: GhosttyMouseEvent);
+}
+unsafe extern "C" {
+    pub fn ghostty_mouse_event_set_action(event: GhosttyMouseEvent, action: GhosttyMouseAction);
+}
+unsafe extern "C" {
+    pub fn ghostty_mouse_event_set_button(event: GhosttyMouseEvent, button: GhosttyMouseButton);
+}
+unsafe extern "C" {
+    pub fn ghostty_mouse_event_clear_button(event: GhosttyMouseEvent);
+}
+unsafe extern "C" {
+    pub fn ghostty_mouse_event_set_mods(event: GhosttyMouseEvent, mods: GhosttyMods);
+}
+unsafe extern "C" {
+    pub fn ghostty_mouse_event_set_position(
+        event: GhosttyMouseEvent,
+        position: GhosttyMousePosition,
+    );
+}
+#[repr(C)]
+#[derive(Debug)]
+pub struct GhosttyMouseEncoderImpl {
+    _unused: [u8; 0],
+}
+pub type GhosttyMouseEncoder = *mut GhosttyMouseEncoderImpl;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct GhosttyMouseEncoderSize {
+    pub size: usize,
+    pub screen_width: u32,
+    pub screen_height: u32,
+    pub cell_width: u32,
+    pub cell_height: u32,
+    pub padding_top: u32,
+    pub padding_bottom: u32,
+    pub padding_right: u32,
+    pub padding_left: u32,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of GhosttyMouseEncoderSize"][::std::mem::size_of::<GhosttyMouseEncoderSize>() - 40usize];
+    ["Alignment of GhosttyMouseEncoderSize"]
+        [::std::mem::align_of::<GhosttyMouseEncoderSize>() - 8usize];
+    ["Offset of field: GhosttyMouseEncoderSize::size"]
+        [::std::mem::offset_of!(GhosttyMouseEncoderSize, size) - 0usize];
+    ["Offset of field: GhosttyMouseEncoderSize::screen_width"]
+        [::std::mem::offset_of!(GhosttyMouseEncoderSize, screen_width) - 8usize];
+    ["Offset of field: GhosttyMouseEncoderSize::screen_height"]
+        [::std::mem::offset_of!(GhosttyMouseEncoderSize, screen_height) - 12usize];
+    ["Offset of field: GhosttyMouseEncoderSize::cell_width"]
+        [::std::mem::offset_of!(GhosttyMouseEncoderSize, cell_width) - 16usize];
+    ["Offset of field: GhosttyMouseEncoderSize::cell_height"]
+        [::std::mem::offset_of!(GhosttyMouseEncoderSize, cell_height) - 20usize];
+    ["Offset of field: GhosttyMouseEncoderSize::padding_top"]
+        [::std::mem::offset_of!(GhosttyMouseEncoderSize, padding_top) - 24usize];
+    ["Offset of field: GhosttyMouseEncoderSize::padding_bottom"]
+        [::std::mem::offset_of!(GhosttyMouseEncoderSize, padding_bottom) - 28usize];
+    ["Offset of field: GhosttyMouseEncoderSize::padding_right"]
+        [::std::mem::offset_of!(GhosttyMouseEncoderSize, padding_right) - 32usize];
+    ["Offset of field: GhosttyMouseEncoderSize::padding_left"]
+        [::std::mem::offset_of!(GhosttyMouseEncoderSize, padding_left) - 36usize];
+};
+impl GhosttyMouseEncoderOption {
+    pub const GHOSTTY_MOUSE_ENCODER_OPT_EVENT: GhosttyMouseEncoderOption =
+        GhosttyMouseEncoderOption(0);
+    pub const GHOSTTY_MOUSE_ENCODER_OPT_FORMAT: GhosttyMouseEncoderOption =
+        GhosttyMouseEncoderOption(1);
+    pub const GHOSTTY_MOUSE_ENCODER_OPT_SIZE: GhosttyMouseEncoderOption =
+        GhosttyMouseEncoderOption(2);
+    pub const GHOSTTY_MOUSE_ENCODER_OPT_ANY_BUTTON_PRESSED: GhosttyMouseEncoderOption =
+        GhosttyMouseEncoderOption(3);
+    pub const GHOSTTY_MOUSE_ENCODER_OPT_TRACK_LAST_CELL: GhosttyMouseEncoderOption =
+        GhosttyMouseEncoderOption(4);
+    pub const GHOSTTY_MOUSE_ENCODER_OPT_MAX_VALUE: GhosttyMouseEncoderOption =
+        GhosttyMouseEncoderOption(2147483647);
+}
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub struct GhosttyMouseEncoderOption(pub ::std::os::raw::c_int);
+unsafe extern "C" {
+    pub fn ghostty_mouse_encoder_new(
+        allocator: *const GhosttyAllocator,
+        encoder: *mut GhosttyMouseEncoder,
+    ) -> GhosttyResult;
+}
+unsafe extern "C" {
+    pub fn ghostty_mouse_encoder_free(encoder: GhosttyMouseEncoder);
+}
+unsafe extern "C" {
+    pub fn ghostty_mouse_encoder_setopt(
+        encoder: GhosttyMouseEncoder,
+        option: GhosttyMouseEncoderOption,
+        value: *const ::std::os::raw::c_void,
+    );
+}
+unsafe extern "C" {
+    pub fn ghostty_mouse_encoder_setopt_from_terminal(
+        encoder: GhosttyMouseEncoder,
+        terminal: GhosttyTerminal,
+    );
+}
+unsafe extern "C" {
+    pub fn ghostty_mouse_encoder_encode(
+        encoder: GhosttyMouseEncoder,
+        event: GhosttyMouseEvent,
+        out_buf: *mut ::std::os::raw::c_char,
+        out_buf_size: usize,
+        out_len: *mut usize,
+    ) -> GhosttyResult;
+}
+unsafe extern "C" {
+    pub fn ghostty_paste_encode(
+        data: *mut ::std::os::raw::c_char,
+        data_len: usize,
+        bracketed: bool,
+        buf: *mut ::std::os::raw::c_char,
+        buf_len: usize,
+        out_written: *mut usize,
     ) -> GhosttyResult;
 }

@@ -183,3 +183,57 @@ fn a_panicking_callback_answers_nothing_and_is_counted() {
     terminal.write(b"still parses");
     assert_eq!(terminal.plain_text().unwrap(), "still parses");
 }
+
+#[test]
+fn mouse_reports_follow_the_programs_tracking_mode_and_format() {
+    let mut terminal = terminal(20, 5);
+    let mut mouse = MouseEncoder::new().unwrap();
+    let event = |action, button, column| MouseEvent {
+        action,
+        button,
+        mods: Mods::default(),
+        column,
+        row: 2,
+    };
+    let press = event(MouseAction::Press, Some(MouseButton::Left), 4);
+    assert!(mouse.encode(&terminal, &press).is_empty(), "no tracking");
+
+    terminal.write(b"\x1b[?1000h");
+    assert_eq!(mouse.encode(&terminal, &press), b"\x1b[M %#");
+    let release = event(MouseAction::Release, Some(MouseButton::Left), 4);
+    assert_eq!(mouse.encode(&terminal, &release), b"\x1b[M#%#");
+
+    terminal.write(b"\x1b[?1006h");
+    assert_eq!(mouse.encode(&terminal, &release), b"\x1b[<0;5;3m");
+    let wheel = event(MouseAction::Press, Some(MouseButton::WheelDown), 4);
+    assert_eq!(mouse.encode(&terminal, &wheel), b"\x1b[<65;5;3M");
+
+    terminal.write(b"\x1b[?1003h");
+    let hover = event(MouseAction::Motion, None, 7);
+    assert_eq!(mouse.encode(&terminal, &hover), b"\x1b[<35;8;3M");
+
+    terminal.write(b"\x1b[?1006l\x1b[?1015h");
+    assert_eq!(mouse.encode(&terminal, &press), b"\x1b[32;5;3M");
+    // SGR pixels: the middle of column 4, row 2 in 8x16 cells.
+    terminal.write(b"\x1b[?1016h");
+    assert_eq!(mouse.encode(&terminal, &press), b"\x1b[<0;36;40M");
+}
+
+#[test]
+fn pastes_drop_control_bytes_and_follow_bracketed_paste() {
+    assert_eq!(paste("one\ntwo\x03", false), b"one\rtwo ");
+    assert_eq!(paste("a\x1b[201~b", true), b"\x1b[200~a [201~b\x1b[201~");
+    assert_eq!(focus_report(true), b"\x1b[I");
+    assert_eq!(focus_report(false), b"\x1b[O");
+}
+
+#[test]
+fn the_key_encoder_tells_when_modify_other_keys_is_on() {
+    let mut terminal = terminal(20, 5);
+    let mut keys = KeyEncoder::new().unwrap();
+    assert!(!keys.modify_other_keys(&terminal));
+    terminal.write(b"\x1b[>4;2m");
+    assert!(keys.modify_other_keys(&terminal));
+    terminal.write(b"\x1b[>4;0m");
+    assert!(!keys.modify_other_keys(&terminal));
+}

@@ -2,11 +2,10 @@
 //! limits and helpers. Only the `runtime` feature builds it (ADR 0039).
 
 pub(super) use super::cursor_settle::{CURSOR_POSITION_SETTLE_ENABLED, CursorSettle};
-pub(super) use super::encode::{encode_key, encode_legacy_key, encode_paste};
+pub(super) use super::encode::{encode_key, encode_legacy_key};
 pub(super) use super::input_queue::*;
 #[cfg(windows)]
 pub(super) use super::job::Job;
-pub(super) use super::mouse::{MAX_MOUSE_WHEEL_STEPS, encode_mouse};
 pub(super) use super::notices::*;
 pub(super) use super::osc::*;
 pub(super) use super::process::*;
@@ -19,7 +18,7 @@ pub(super) use super::shell::shell_command;
 pub(super) use super::view::blank_cell;
 pub(super) use super::view::publish_view;
 pub(super) use super::view_source::TerminalDamageBaseline;
-pub(super) use super::vt::{TermMode, Vt};
+pub(super) use super::vt::{MAX_MOUSE_WHEEL_STEPS, TermMode, Vt};
 pub(super) use crate::agent::{
     AGENT_EVENT_OSC_PREFIX, AGENT_POLL_INTERVAL, AgentDetector, AgentEvent, AgentPublish,
     ProcessInfo, ProcessProbeResult, ProgramStatus, identify_agent_process,

@@ -512,9 +512,118 @@ fn cmd_c_reaches_a_program_that_reads_kitty_keys_unasked() {
 
 #[test]
 fn paste_respects_bracketed_mode_and_filters_control_markers() {
-    assert_eq!(encode_paste("one\r\ntwo\n", false), b"one\rtwo\r");
+    let mut vt = Vt::new(TerminalSize::new(4, 20)).unwrap();
+    assert_eq!(vt.encode_paste("one\r\ntwo\n"), b"one\rtwo\r");
+    vt.write(b"\x1b[?2004h");
     assert_eq!(
-        encode_paste("one\x1b[201~\x03two\n", true),
-        b"\x1b[200~one[201~two\n\x1b[201~"
+        vt.encode_paste("one\x1b[201~\x03two\n"),
+        b"\x1b[200~one [201~ two\n\x1b[201~"
+    );
+}
+
+#[test]
+fn focus_reports_reach_only_a_program_that_asked() {
+    let mut vt = Vt::new(TerminalSize::new(4, 20)).unwrap();
+    assert_eq!(vt.focus_report(true), None);
+    vt.write(b"\x1b[?1004h");
+    assert_eq!(vt.focus_report(true).as_deref(), Some(&b"\x1b[I"[..]));
+    assert_eq!(vt.focus_report(false).as_deref(), Some(&b"\x1b[O"[..]));
+}
+
+#[test]
+fn modify_other_keys_hands_keys_to_ghostty_and_turning_it_off_hands_them_back() {
+    let mut vt = Vt::new(TerminalSize::new(4, 20)).unwrap();
+    let key = |vt: &mut Vt, key: TerminalKey, modifiers| {
+        vt.encode_key(&key, modifiers, TerminalKeyEventKind::Press, false)
+            .unwrap()
+    };
+    let shift = TerminalModifiers {
+        shift: true,
+        ..TerminalModifiers::default()
+    };
+    let control = TerminalModifiers {
+        control: true,
+        ..TerminalModifiers::default()
+    };
+    let bracket = || TerminalKey::Character("[".into());
+    assert_eq!(key(&mut vt, TerminalKey::Enter, shift), b"\n");
+    assert_eq!(key(&mut vt, bracket(), control), b"\x1b");
+    vt.write(b"\x1b[>4;2m");
+    assert_eq!(key(&mut vt, TerminalKey::Enter, shift), b"\x1b[27;2;13~");
+    assert_eq!(key(&mut vt, bracket(), control), b"\x1b[27;5;91~");
+    assert_eq!(
+        key(&mut vt, TerminalKey::Up, TerminalModifiers::default()),
+        b"\x1b[A"
+    );
+    vt.write(b"\x1b[>4m");
+    assert_eq!(key(&mut vt, TerminalKey::Enter, shift), b"\n");
+}
+
+#[test]
+fn mouse_reports_follow_the_programs_tracking_mode_and_format() {
+    let mut vt = Vt::new(TerminalSize::new(10, 20)).unwrap();
+    let at = TerminalMousePosition { row: 3, column: 7 };
+    let control_shift = TerminalModifiers {
+        shift: true,
+        control: true,
+        ..TerminalModifiers::default()
+    };
+    let button = |pressed, modifiers| TerminalMouseEvent::Button {
+        button: TerminalMouseButton::Left,
+        pressed,
+        position: at,
+        modifiers,
+    };
+    let hover = TerminalMouseEvent::Motion {
+        button: None,
+        position: at,
+        modifiers: TerminalModifiers::default(),
+    };
+    assert_eq!(vt.encode_mouse(button(true, control_shift)), None);
+
+    vt.write(b"\x1b[?1000h");
+    assert_eq!(
+        vt.encode_mouse(button(false, TerminalModifiers::default()))
+            .as_deref(),
+        Some(&b"\x1b[M#($"[..]),
+        "a release in X11 form is button 3"
+    );
+    assert_eq!(vt.encode_mouse(hover), None, "clicks only");
+
+    vt.write(b"\x1b[?1002h\x1b[?1006h");
+    assert_eq!(
+        vt.encode_mouse(button(true, control_shift)).as_deref(),
+        Some(&b"\x1b[<20;8;4M"[..])
+    );
+    assert_eq!(
+        vt.encode_mouse(button(false, TerminalModifiers::default()))
+            .as_deref(),
+        Some(&b"\x1b[<0;8;4m"[..])
+    );
+    assert_eq!(vt.encode_mouse(hover), None, "drags only");
+    assert_eq!(
+        vt.encode_mouse(TerminalMouseEvent::Wheel {
+            direction: TerminalMouseWheel::Down,
+            amount: 2,
+            position: at,
+            modifiers: TerminalModifiers::default(),
+        })
+        .as_deref(),
+        Some(&b"\x1b[<65;8;4M\x1b[<65;8;4M"[..])
+    );
+
+    let far = TerminalMouseEvent::Motion {
+        button: None,
+        position: TerminalMousePosition {
+            row: 130,
+            column: 130,
+        },
+        modifiers: TerminalModifiers::default(),
+    };
+    let mut wide = Vt::new(TerminalSize::new(200, 200)).unwrap();
+    wide.write(b"\x1b[?1003h\x1b[?1005h");
+    assert_eq!(
+        wide.encode_mouse(far),
+        Some(vec![b'\x1b', b'[', b'M', b'C', 0xc2, 0xa3, 0xc2, 0xa3])
     );
 }
