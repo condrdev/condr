@@ -52,7 +52,7 @@ Manages Devices, project Workspaces and Agent state. Drag Devices or Workspaces 
   * Each Workspace has at most one of each, reused for the next file so Tabs do not pile up.
 * **Pane controls**:
   * **Title bar**: shows the Agent mark, the terminal title and the zoom / restore button.
-  * **Progress bar**: a thin line along the top of the terminal shows a program's progress when it reports one (OSC 9;4, or a percentage in its OSC 7501 status), red when it failed and sweeping while it cannot tell how far it is.
+  * **Progress bar**: a thin line along the top of the terminal shows a program's progress when it reports one (OSC 9;4, or a percentage in its OSC 7501 status), in the terminal colour scheme's blue: red when it failed, yellow while it is paused or waiting for you, and sweeping while it cannot tell how far it is.
   * **Program notifications**: a program that asks for a desktop notification (OSC 9 or OSC 777) gets a system notification while you look elsewhere, except an Agent Condr already notifies about.
   * **⋮ menu**: split, swap, zoom and close.
   * **Rearranging**: drag a Pane's title bar onto the center of another Pane to swap them, or onto an edge to split and dock there; drag the divider between Panes to resize them.

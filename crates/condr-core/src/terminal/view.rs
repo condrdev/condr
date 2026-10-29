@@ -58,7 +58,7 @@ pub const DEFAULT_FOREGROUND_COLOR: u32 = 0xc9d1d9;
 pub const DEFAULT_BACKGROUND_COLOR: u32 = 0x0d1117;
 pub const DEFAULT_CURSOR_COLOR: u32 = 0xf0f6fc;
 
-/// What a program last reported of its progress with OSC 9;4 (ADR 0054).
+/// A program's progress, from OSC 9;4 or a percentage in its OSC 7501 status (ADR 0054).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TerminalProgress {
     pub state: TerminalProgressState,

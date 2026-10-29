@@ -5,9 +5,11 @@ use condr_ghostty_vt::{
     ProgressState as VtProgressState,
 };
 
-/// Out-of-band signals the VT emits alongside grid changes: the OSC 0/2 title, BEL and
-/// OSC 52 copies. The monitor drains them with [`TerminalNoticeProbe::take`]; bells are
-/// counted, not queued, and only the latest clipboard payload is retained.
+/// Out-of-band signals the VT emits alongside grid changes: the OSC 0/2 title, BEL, OSC
+/// 52 copies, the program's progress and desktop notifications (ADR 0054), and the shell
+/// commands it marked (ADR 0055); the Agent probe takes the Agent's own reports. The
+/// monitor drains the rest with [`TerminalNoticeProbe::take`]; bells are counted, not
+/// queued, and only the latest clipboard payload is retained.
 #[derive(Debug, Default)]
 pub(super) struct TerminalNotices {
     pub(super) title: Option<String>,
@@ -137,18 +139,21 @@ impl TerminalNotices {
         }));
     }
 
-    fn end_status_progress(&mut self) {
+    pub(super) fn end_status_progress(&mut self) {
         if std::mem::take(&mut self.progress_from_status) {
             self.record_progress(None);
         }
     }
 
-    /// The progress the program reported, or `None` once it went [`PROGRESS_TIMEOUT`]
-    /// without a report: a program that died mid-task does not keep its bar.
+    /// The progress the program reported, or `None` once an OSC 9;4 progress went
+    /// [`PROGRESS_TIMEOUT`] without a report: a program that died mid-task does not keep
+    /// its bar. An OSC 7501 record is a state the program holds without repeating it, so
+    /// its progress lasts until a report, a prompt or the program's exit ends it.
     pub(super) fn take_progress(&mut self) -> Option<Option<TerminalProgress>> {
-        if self
-            .progress_at
-            .is_some_and(|reported| reported.elapsed() >= PROGRESS_TIMEOUT)
+        if !self.progress_from_status
+            && self
+                .progress_at
+                .is_some_and(|reported| reported.elapsed() >= PROGRESS_TIMEOUT)
         {
             self.record_progress(None);
         }

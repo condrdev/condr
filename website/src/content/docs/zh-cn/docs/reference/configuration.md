@@ -66,7 +66,7 @@ fps_monitor = false
 | 键 | 类型 / 可选值 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `appearance` | `system` / `light` / `dark` | `system` | 界面色彩模式。非法值自动降级为 `system` |
-| `notifications` | bool | `true` | Agent 任务完成或需介入确认时的系统通知 |
+| `notifications` | bool | `true` | Agent 任务完成或需介入确认、程序请求通知（OSC 9 或 777），以及你没在看的 Pane 里长命令结束时的系统通知 |
 | `keep_awake` | bool | `false` | 保持屏幕常亮，并阻止系统因空闲而休眠 |
 | `fps_monitor` | bool | `false` | 在界面叠加显示实时帧率与资源占用 |
 | `editor` | string | 空 | 上次通过 **Open in** 调用的编辑器名称，亦作为全局默认值（由 Condr 内部维护写入） |
@@ -84,7 +84,7 @@ color_scheme = "Dracula"
 | --- | --- | --- | --- |
 | `font_family` | string | 界面主题等宽字体 | 终端渲染字体。留空时使用界面内置默认字体 |
 | `font_size` | 6 ~ 72 | 界面等宽基准字号 | 像素单位。浮点数自动四舍五入，溢出范围截断至边界值 |
-| `color_scheme` | string | 空 | 内置 iTerm2 主题标识，需与 **Appearance** 下拉项严格一致。缺省或无法识别时使用默认调色板 |
+| `color_scheme` | string | 空 | 内置 iTerm2 主题标识，需与 **Appearance** 下拉项严格一致。缺省或无法识别时使用默认调色板。程序向终端查询颜色（OSC 10/11，或问终端是深色还是浅色）时，得到的就是这个配色；多台桌面端连同一个 Device 时，以最后连上或最后改配色的那台为准 |
 
 ### `[client.code]` 代码视图（Preview / Diff）
 

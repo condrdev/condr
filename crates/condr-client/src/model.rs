@@ -30,7 +30,7 @@ pub struct SessionModel {
     /// The Panes this Client asked frames for with `WatchTerminals`; `None` is every Pane.
     watched: Option<HashSet<PaneId>>,
     pub terminal_titles: HashMap<PaneId, String>,
-    /// Each Pane's OSC 9;4 progress (ADR 0054).
+    /// Each Pane's progress, from OSC 9;4 or an OSC 7501 percentage (ADR 0054).
     pub terminal_progress: HashMap<PaneId, TerminalProgress>,
     pub terminal_hyperlinks: HashMap<PaneId, TerminalHyperlinkBudget>,
     pub agents: HashMap<PaneId, AgentSnapshot>,
@@ -224,7 +224,6 @@ impl SessionModel {
         apply_terminal_frame_batch(&mut self.terminals, &mut self.terminal_hyperlinks, panes)
     }
 
-    /// Applies an `AgentChanged`.
     /// Records a `TerminalProgressChanged` (ADR 0054).
     pub fn apply_progress(&mut self, pane_id: PaneId, progress: Option<TerminalProgress>) {
         match progress {
@@ -233,6 +232,7 @@ impl SessionModel {
         };
     }
 
+    /// Applies an `AgentChanged`.
     pub fn apply_agent(&mut self, pane_id: PaneId, agent: Option<AgentSnapshot>) -> AgentChange {
         let Some(agent) = agent else {
             return AgentChange {

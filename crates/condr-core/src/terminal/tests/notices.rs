@@ -292,4 +292,14 @@ fn a_programs_own_status_percentage_shows_as_its_progress_until_a_report_moves_o
         progress(TerminalProgressState::Normal, 10)
     );
     assert_eq!(feed(b"\x1b]133;A\x07"), Some(None), "a prompt ends it");
+
+    // A waiting program does not repeat itself: its bar outlives the OSC 9;4 timeout.
+    assert_eq!(
+        feed(b"\x1b]7501;state=blocked:kind=question:progress=60\x07"),
+        progress(TerminalProgressState::Paused, 60)
+    );
+    notices.lock().unwrap().progress_at = Instant::now().checked_sub(PROGRESS_TIMEOUT);
+    assert_eq!(probe.take().progress, None, "still waiting, still shown");
+    notices.lock().unwrap().end_status_progress();
+    assert_eq!(probe.take().progress, Some(None), "the program left");
 }

@@ -528,7 +528,7 @@ struct RuntimeState {
     agents: std::collections::HashMap<PaneId, AgentSnapshot>,
     agent_control: AgentControl,
     terminal_titles: std::collections::HashMap<PaneId, String>,
-    /// Each Pane's OSC 9;4 progress (ADR 0054).
+    /// Each Pane's progress, from OSC 9;4 or an OSC 7501 percentage (ADR 0054).
     terminal_progress: std::collections::HashMap<PaneId, TerminalProgress>,
     /// Panes that rang while no Client had them focused, until one focuses them.
     pending_terminal_bells: std::collections::HashSet<PaneId>,

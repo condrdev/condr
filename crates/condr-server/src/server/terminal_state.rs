@@ -91,7 +91,6 @@ impl RuntimeState {
         )
     }
 
-    /// Forgets a Terminal's reported title and tells subscribers, if there was one.
     /// Forgets what the Pane's last Terminal reported of itself: its title and progress.
     pub(super) fn clear_terminal_reports(&mut self, pane_id: PaneId) {
         if self.terminal_titles.remove(&pane_id).is_some() {

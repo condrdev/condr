@@ -202,6 +202,8 @@ impl TerminalAgentProbe {
         }
         // An exit-tail hook belongs to the job that just left, not to the bare shell.
         if process == Some(ProcessProbeResult::ShellOnly) {
+            // The program that reported its progress over OSC 7501 is gone (ADR 0054).
+            notices.end_status_progress();
             match notices
                 .agent
                 .observe_process(ProcessProbeResult::ShellOnly, now)

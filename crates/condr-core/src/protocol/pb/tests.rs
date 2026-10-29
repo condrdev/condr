@@ -374,7 +374,7 @@ fn the_proxy_setting_round_trips_and_an_older_or_newer_peer_reads_as_system() {
 }
 
 #[test]
-fn terminal_colors_round_trip_and_need_all_sixteen_ansi_colours() {
+fn terminal_colors_round_trip_and_need_at_least_sixteen_ansi_colours() {
     let colors = crate::TerminalColors {
         background: 0xfafafa,
         ..crate::TerminalColors::default()
@@ -394,11 +394,15 @@ fn terminal_colors_round_trip_and_need_all_sixteen_ansi_colours() {
     else {
         unreachable!()
     };
-    wire.ansi.push(0);
+    wire.ansi.extend([0, 0x00ff_00ff]);
     let ClientMessage::TerminalColors(decoded) = ClientMessage::try_from(encoded).unwrap() else {
         unreachable!()
     };
     assert_eq!(decoded.foreground, 0x12_3456, "only RGB is kept");
+    assert_eq!(
+        decoded.ansi[15], 0,
+        "a newer peer's extra colours are ignored"
+    );
 }
 
 #[test]

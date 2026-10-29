@@ -553,7 +553,8 @@ message PaneTerminalSnapshot {
   bool exited = 3;
   optional string title = 4;
   bool attention = 5;
-  // What the program last reported with OSC 9;4 (ADR 0054); absent for none.
+  // The program's progress, from OSC 9;4 or an OSC 7501 percentage (ADR 0054);
+  // absent for none.
   TerminalProgress progress = 6;
 }
 

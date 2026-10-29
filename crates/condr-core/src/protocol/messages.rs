@@ -590,7 +590,7 @@ pub struct PaneTerminalSnapshot {
     pub title: Option<String>,
     /// Whether a BEL from this Pane still waits for a Client to focus the Pane.
     pub attention: bool,
-    /// What the program last reported with OSC 9;4 (ADR 0054).
+    /// The program's progress, from OSC 9;4 or an OSC 7501 percentage (ADR 0054).
     pub progress: Option<TerminalProgress>,
 }
 
@@ -696,7 +696,7 @@ pub enum SessionEvent {
         pane_id: PaneId,
         title: Option<String>,
     },
-    /// The Pane's OSC 9;4 progress changed, timed out or was removed (ADR 0054).
+    /// The Pane's progress changed or ended (ADR 0054).
     TerminalProgressChanged {
         pane_id: PaneId,
         progress: Option<TerminalProgress>,

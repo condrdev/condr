@@ -506,21 +506,26 @@ impl Render for TerminalPanel {
             .child(body)
     }
 }
-/// A program's OSC 9;4 progress as a thin bar along the top of its terminal (ADR 0054):
-/// accent for progress, red for an error, amber for a pause, sweeping when indeterminate.
+/// A program's progress (OSC 9;4, or a percentage in its OSC 7501 status) as a thin bar
+/// along the top of its terminal (ADR 0054), in the terminal colour scheme's own blue,
+/// red for an error and yellow for a pause, so it reads on any scheme's background; it
+/// sweeps when indeterminate.
 fn progress_bar(
     key: ConnectionKey,
     pane_id: PaneId,
     progress: TerminalProgress,
     cx: &App,
 ) -> impl IntoElement {
-    let theme = cx.theme();
+    let palette = cx
+        .try_global::<TerminalPalette>()
+        .cloned()
+        .unwrap_or_default();
     let (color, whole) = match progress.state {
         TerminalProgressState::Normal | TerminalProgressState::Indeterminate => {
-            (theme.progress_bar, false)
+            (palette.normal[4], false)
         }
-        TerminalProgressState::Error => (theme.danger, true),
-        TerminalProgressState::Paused => (theme.warning, true),
+        TerminalProgressState::Error => (palette.normal[1], true),
+        TerminalProgressState::Paused => (palette.normal[3], true),
     };
     let fallback = if whole { 100.0 } else { 0.0 };
     Progress::new(SharedString::from(format!(

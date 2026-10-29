@@ -256,6 +256,23 @@ fn a_done_nobody_looked_at_waits_for_a_focus_from_any_client() {
     );
 }
 
+/// ADR 0054: the last colours any Client sent are the ones every Pane answers with.
+#[test]
+fn the_last_client_to_send_terminal_colours_wins() {
+    let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
+    let colours = |background| condr_core::TerminalColors {
+        background,
+        ..condr_core::TerminalColors::default()
+    };
+    assert_eq!(
+        state.terminal_colors, None,
+        "Condr's own until a Client speaks"
+    );
+    state.set_terminal_colors(colours(0x101010));
+    state.set_terminal_colors(colours(0xfafafa));
+    assert_eq!(state.terminal_colors, Some(colours(0xfafafa)));
+}
+
 #[test]
 fn new_shells_get_the_shell_integration_only_while_the_setting_has_it_on() {
     let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());

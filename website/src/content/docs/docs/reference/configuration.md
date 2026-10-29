@@ -66,7 +66,7 @@ fps_monitor = false
 | Key | Type / values | Default | Description |
 | --- | --- | --- | --- |
 | `appearance` | `system` / `light` / `dark` | `system` | Interface color mode. An invalid value falls back to `system` |
-| `notifications` | bool | `true` | System notifications when an Agent finishes a task or needs your confirmation |
+| `notifications` | bool | `true` | System notifications when an Agent finishes a task or needs your confirmation, when a program asks for one (OSC 9 or 777), and when a long shell command ends in a Pane you are not looking at |
 | `keep_awake` | bool | `false` | Keep the screen on, and stop the system from sleeping when idle |
 | `fps_monitor` | bool | `false` | Overlay the live frame rate and resource usage on the interface |
 | `editor` | string | Empty | The editor last used through **Open in**, also the global default (written and maintained by Condr) |
@@ -84,7 +84,7 @@ color_scheme = "Dracula"
 | --- | --- | --- | --- |
 | `font_family` | string | The interface theme's monospace font | The font terminals render with. Empty uses the interface's built-in default font |
 | `font_size` | 6 ~ 72 | The interface's base monospace size | In pixels. Fractions are rounded, and out-of-range values are clamped to the nearest bound |
-| `color_scheme` | string | Empty | A built-in iTerm2 scheme name, matching the **Appearance** dropdown exactly. Empty or unrecognized names use the default palette |
+| `color_scheme` | string | Empty | A built-in iTerm2 scheme name, matching the **Appearance** dropdown exactly. Empty or unrecognized names use the default palette. Programs that ask the terminal for its colours (OSC 10/11, or whether it is dark or light) get this scheme; with several desktops on one Device, the last to connect or change its scheme decides |
 
 ### `[client.code]` code views (Preview / Diff)
 

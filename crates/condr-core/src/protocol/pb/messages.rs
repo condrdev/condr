@@ -710,8 +710,12 @@ fn decode_client_message(message: super::ClientMessage) -> WireResult<ClientMess
                     foreground: rgb(colors.foreground),
                     background: rgb(colors.background),
                     cursor: rgb(colors.cursor),
-                    ansi: <[u32; 16]>::try_from(colors.ansi)
-                        .map_err(|_| malformed("terminal colours need 16 ANSI colours"))?
+                    // A newer peer may send more than the 16 (ADR 0028).
+                    ansi: colors
+                        .ansi
+                        .get(..16)
+                        .and_then(|ansi| <[u32; 16]>::try_from(ansi).ok())
+                        .ok_or_else(|| malformed("terminal colours need 16 ANSI colours"))?
                         .map(rgb),
                 })
             }
