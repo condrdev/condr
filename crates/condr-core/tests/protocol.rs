@@ -599,6 +599,7 @@ fn terminal_snapshot(pane_id: PaneId, text: String) -> PaneTerminalSnapshot {
         exited: false,
         title: None,
         attention: false,
+        progress: None,
     }
 }
 

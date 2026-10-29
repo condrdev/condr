@@ -64,8 +64,9 @@ pub use terminal::{
     TerminalCursorShape, TerminalFrameError, TerminalHyperlinkBudget, TerminalKey,
     TerminalKeyEventKind, TerminalModifiers, TerminalMouseButton, TerminalMouseEvent,
     TerminalMousePosition, TerminalMouseTracking, TerminalMouseWheel, TerminalPosition,
-    TerminalScroll, TerminalSelection, TerminalSelectionUnit, TerminalSide, TerminalSize,
-    TerminalUpdate, TerminalView, TerminalViewDelta, TerminalViewFrame, default_indexed_color,
+    TerminalProgress, TerminalProgressState, TerminalScroll, TerminalSelection,
+    TerminalSelectionUnit, TerminalSide, TerminalSize, TerminalUpdate, TerminalView,
+    TerminalViewDelta, TerminalViewFrame, default_indexed_color,
 };
 #[cfg(feature = "runtime")]
 pub use terminal::{

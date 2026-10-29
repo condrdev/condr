@@ -211,6 +211,8 @@ pub enum Event {
         title: String,
         body: String,
     },
+    /// OSC 9;4: `None` removes the progress.
+    Progress(Option<Progress>),
     ProgramStatus(ProgramStatus),
     /// OSC 133 started a primary prompt.
     PromptStart,
@@ -218,6 +220,22 @@ pub enum Event {
     Reset,
     /// A synchronized update (mode 2026) began or ended.
     RenderHold(bool),
+}
+
+/// What OSC 9;4 reported.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Progress {
+    pub state: ProgressState,
+    /// 0 through 100, when the program gave one.
+    pub percent: Option<u8>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProgressState {
+    Normal,
+    Error,
+    Indeterminate,
+    Paused,
 }
 
 /// One OSC 7501 report, as the library parsed it.
@@ -365,7 +383,7 @@ impl Terminal {
     fn install(&self, options: &Options) -> Result<(), Error> {
         use sys::GhosttyTerminalOption as Opt;
         self.set(Opt::GHOSTTY_TERMINAL_OPT_USERDATA, self.callbacks.cast())?;
-        let callbacks: [(Opt, *const c_void); 14] = [
+        let callbacks: [(Opt, *const c_void); 15] = [
             (
                 Opt::GHOSTTY_TERMINAL_OPT_WRITE_PTY,
                 write_pty as *const c_void,
@@ -412,6 +430,10 @@ impl Terminal {
             (
                 Opt::GHOSTTY_TERMINAL_OPT_COLOR_SCHEME,
                 color_scheme as *const c_void,
+            ),
+            (
+                Opt::GHOSTTY_TERMINAL_OPT_PROGRESS_REPORT,
+                progress_report as *const c_void,
             ),
         ];
         for (option, callback) in callbacks {
@@ -1028,6 +1050,35 @@ extern "C" fn desktop_notification(
             )
         };
         callbacks.events.push(Event::Notification { title, body });
+    });
+}
+
+extern "C" fn progress_report(
+    _: sys::GhosttyTerminal,
+    userdata: *mut c_void,
+    report: *const sys::GhosttyTerminalProgressReport,
+) {
+    use sys::GhosttyTerminalProgressState as State;
+    guarded(userdata, (), |callbacks| {
+        // SAFETY: a report valid for the call's duration.
+        let report = unsafe { &*report };
+        let state = match report.state {
+            State::GHOSTTY_TERMINAL_PROGRESS_STATE_SET => Some(ProgressState::Normal),
+            State::GHOSTTY_TERMINAL_PROGRESS_STATE_ERROR => Some(ProgressState::Error),
+            State::GHOSTTY_TERMINAL_PROGRESS_STATE_INDETERMINATE => {
+                Some(ProgressState::Indeterminate)
+            }
+            State::GHOSTTY_TERMINAL_PROGRESS_STATE_PAUSE => Some(ProgressState::Paused),
+            _ => None,
+        };
+        callbacks.events.push(Event::Progress(state.map(|state| {
+            Progress {
+                state,
+                percent: u8::try_from(report.progress)
+                    .ok()
+                    .map(|percent| percent.min(100)),
+            }
+        })));
     });
 }
 

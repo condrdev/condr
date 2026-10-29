@@ -257,6 +257,57 @@ fn a_done_nobody_looked_at_waits_for_a_focus_from_any_client() {
 }
 
 #[test]
+fn terminal_progress_is_published_per_change_and_cleared_with_the_terminals_reports() {
+    let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
+    state
+        .session
+        .create_workspace(std::env::temp_dir())
+        .expect("Workspace capacity");
+    let pane_id = state.session.workspaces()[0].tabs()[0]
+        .focused_pane()
+        .unwrap()
+        .id();
+    let progress = condr_core::TerminalProgress {
+        state: condr_core::TerminalProgressState::Normal,
+        percent: Some(30),
+    };
+    let report = |state: &mut RuntimeState, progress| {
+        apply_terminal_notices(
+            state,
+            pane_id,
+            TerminalNoticeBatch {
+                progress: Some(progress),
+                ..TerminalNoticeBatch::default()
+            },
+        );
+    };
+    let changes = |state: &RuntimeState| {
+        state
+            .events
+            .iter()
+            .filter_map(|event| match &event.event {
+                SessionEvent::TerminalProgressChanged { progress, .. } => Some(*progress),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+
+    report(&mut state, Some(progress));
+    report(&mut state, Some(progress));
+    assert_eq!(changes(&state), [Some(progress)], "a repeat is no change");
+    assert_eq!(state.terminal_progress.get(&pane_id), Some(&progress));
+    report(&mut state, None);
+    report(&mut state, Some(progress));
+    state.clear_terminal_reports(pane_id);
+    assert_eq!(
+        changes(&state),
+        [Some(progress), None, Some(progress), None],
+        "a Terminal ending takes its progress with it"
+    );
+    assert!(state.terminal_progress.is_empty());
+}
+
+#[test]
 fn terminal_notices_publish_title_changes_once_and_collapse_bells() {
     let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
     state
@@ -377,7 +428,7 @@ fn terminal_notices_publish_title_changes_once_and_collapse_bells() {
     assert_eq!(state.focused_terminal, None);
     assert_eq!(events(&state).len(), 5);
 
-    state.clear_terminal_title(pane_id);
+    state.clear_terminal_reports(pane_id);
     assert_eq!(
         events(&state).last(),
         Some(&SessionEvent::TerminalTitleChanged {
@@ -385,7 +436,7 @@ fn terminal_notices_publish_title_changes_once_and_collapse_bells() {
             title: None,
         })
     );
-    state.clear_terminal_title(pane_id);
+    state.clear_terminal_reports(pane_id);
     assert_eq!(events(&state).len(), 6);
 
     // OSC 52 copies fan out to subscribed clients without entering the event history.
@@ -597,6 +648,7 @@ fn wire_projected_hyperlinks_are_committed_as_the_client_baseline() {
             exited: false,
             title: None,
             attention: false,
+            progress: None,
         })],
     )
     .unwrap();
@@ -1066,6 +1118,7 @@ fn bootstrap_dynamic_records_are_split_and_reassembled() {
                 exited: false,
                 title: None,
                 attention: false,
+                progress: None,
             },
             PaneTerminalSnapshot {
                 pane_id: second_pane,
@@ -1073,6 +1126,7 @@ fn bootstrap_dynamic_records_are_split_and_reassembled() {
                 exited: true,
                 title: None,
                 attention: false,
+                progress: None,
             },
         ],
         agents: Vec::new(),

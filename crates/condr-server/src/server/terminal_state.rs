@@ -60,7 +60,7 @@ impl RuntimeState {
         let cwd_probe = runtime.cwd_probe();
         let notice_probe = runtime.notice_probe();
         let view_source = runtime.view_source();
-        self.clear_terminal_title(pane_id);
+        self.clear_terminal_reports(pane_id);
         self.clear_unseen(pane_id);
         let mut view = runtime.view();
         let hyperlinks = TerminalHyperlinkBudget::new(&mut view);
@@ -92,11 +92,18 @@ impl RuntimeState {
     }
 
     /// Forgets a Terminal's reported title and tells subscribers, if there was one.
-    pub(super) fn clear_terminal_title(&mut self, pane_id: PaneId) {
+    /// Forgets what the Pane's last Terminal reported of itself: its title and progress.
+    pub(super) fn clear_terminal_reports(&mut self, pane_id: PaneId) {
         if self.terminal_titles.remove(&pane_id).is_some() {
             self.publish_background(SessionEvent::TerminalTitleChanged {
                 pane_id,
                 title: None,
+            });
+        }
+        if self.terminal_progress.remove(&pane_id).is_some() {
+            self.publish_background(SessionEvent::TerminalProgressChanged {
+                pane_id,
+                progress: None,
             });
         }
     }
@@ -194,7 +201,7 @@ impl RuntimeState {
         if self.exited_terminals.insert(pane_id) {
             self.publish_background(SessionEvent::TerminalExited { pane_id });
         }
-        self.clear_terminal_title(pane_id);
+        self.clear_terminal_reports(pane_id);
         self.forget_agent(pane_id);
         true
     }

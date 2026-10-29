@@ -313,6 +313,7 @@ impl RuntimeState {
                             exited: self.exited_terminals.contains(&pane.id()),
                             title: self.terminal_titles.get(&pane.id()).cloned(),
                             attention: self.pending_terminal_bells.contains(&pane.id()),
+                            progress: self.terminal_progress.get(&pane.id()).copied(),
                         });
                     }
                 }

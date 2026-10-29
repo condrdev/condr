@@ -1,6 +1,9 @@
 use super::*;
 use crate::agent::program_status::{BlockedKind, ProgramState};
-use condr_ghostty_vt::{BlockedKind as VtBlockedKind, Event, ProgramState as VtProgramState};
+use condr_ghostty_vt::{
+    BlockedKind as VtBlockedKind, Event, ProgramState as VtProgramState,
+    ProgressState as VtProgressState,
+};
 
 /// Out-of-band signals the VT emits alongside grid changes: the OSC 0/2 title, BEL and
 /// OSC 52 copies. The monitor drains them with [`TerminalNoticeProbe::take`]; bells are
@@ -11,6 +14,10 @@ pub(super) struct TerminalNotices {
     pub(super) title_changed: bool,
     pub(super) bells: u64,
     pub(super) clipboard: Option<String>,
+    pub(super) progress: Option<TerminalProgress>,
+    pub(super) progress_changed: bool,
+    /// When the program last reported its progress, for [`PROGRESS_TIMEOUT`].
+    pub(super) progress_at: Option<Instant>,
     /// What the agent said since the agent probe last drained them, oldest first.
     pub(super) agent_events: Vec<AgentNotice>,
     pub(super) agent: AgentDetector,
@@ -54,6 +61,9 @@ impl AgentNotice {
     }
 }
 
+/// How long a progress lasts without a new report, as in Ghostty (ADR 0054).
+pub(super) const PROGRESS_TIMEOUT: Duration = Duration::from_secs(15);
+
 /// More queued notices than this means nobody is draining them; the oldest go.
 const MAX_QUEUED_AGENT_EVENTS: usize = 64;
 
@@ -70,6 +80,26 @@ impl TerminalNotices {
             self.title = title;
             self.title_changed = true;
         }
+    }
+
+    fn record_progress(&mut self, progress: Option<TerminalProgress>) {
+        self.progress_at = progress.is_some().then(Instant::now);
+        if self.progress != progress {
+            self.progress = progress;
+            self.progress_changed = true;
+        }
+    }
+
+    /// The progress the program reported, or `None` once it went [`PROGRESS_TIMEOUT`]
+    /// without a report: a program that died mid-task does not keep its bar.
+    pub(super) fn take_progress(&mut self) -> Option<Option<TerminalProgress>> {
+        if self
+            .progress_at
+            .is_some_and(|reported| reported.elapsed() >= PROGRESS_TIMEOUT)
+        {
+            self.record_progress(None);
+        }
+        std::mem::take(&mut self.progress_changed).then_some(self.progress)
     }
 
     fn record_clipboard(&mut self, text: String) {
@@ -144,9 +174,21 @@ pub(super) fn apply_terminal_events(
                     notices.record_agent_event(AgentNotice::PromptStart);
                 }
             }
+            Event::Progress(progress) => {
+                notices.record_progress(progress.map(|progress| TerminalProgress {
+                    state: match progress.state {
+                        VtProgressState::Normal => TerminalProgressState::Normal,
+                        VtProgressState::Error => TerminalProgressState::Error,
+                        VtProgressState::Indeterminate => TerminalProgressState::Indeterminate,
+                        VtProgressState::Paused => TerminalProgressState::Paused,
+                    },
+                    percent: progress.percent,
+                }))
+            }
             Event::Reset => {
-                // RIS clears the title without a title change of its own.
+                // RIS clears the title and progress without reports of their own.
                 notices.record_title(None);
+                notices.record_progress(None);
                 if notices.agent.reports_program_status() {
                     notices.record_agent_event(AgentNotice::Reset);
                 }

@@ -9,7 +9,7 @@ use condr_core::protocol::{
 };
 use condr_core::{
     AgentDisplayState, AgentSnapshot, AgentState, PaneId, Session, SessionSnapshot,
-    TerminalHyperlinkBudget, TerminalViewFrame, Workspace, WorkspaceId,
+    TerminalHyperlinkBudget, TerminalProgress, TerminalViewFrame, Workspace, WorkspaceId,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -30,6 +30,8 @@ pub struct SessionModel {
     /// The Panes this Client asked frames for with `WatchTerminals`; `None` is every Pane.
     watched: Option<HashSet<PaneId>>,
     pub terminal_titles: HashMap<PaneId, String>,
+    /// Each Pane's OSC 9;4 progress (ADR 0054).
+    pub terminal_progress: HashMap<PaneId, TerminalProgress>,
     pub terminal_hyperlinks: HashMap<PaneId, TerminalHyperlinkBudget>,
     pub agents: HashMap<PaneId, AgentSnapshot>,
     /// Panes whose `Done` no Client has looked at yet, as the Server keeps them (ADR 0052).
@@ -89,11 +91,15 @@ impl SessionModel {
         self.terminals.clear();
         self.exited.clear();
         self.terminal_titles.clear();
+        self.terminal_progress.clear();
         self.terminal_hyperlinks.clear();
         for terminal in bootstrap.terminals {
             let pane_id = terminal.pane_id;
             if let Some(title) = terminal.title {
                 self.terminal_titles.insert(pane_id, title);
+            }
+            if let Some(progress) = terminal.progress {
+                self.terminal_progress.insert(pane_id, progress);
             }
             if terminal.exited {
                 self.exited.insert(pane_id);
@@ -167,6 +173,8 @@ impl SessionModel {
             .retain(|pane_id, _| live.contains(pane_id));
         self.terminal_titles
             .retain(|pane_id, _| live.contains(pane_id));
+        self.terminal_progress
+            .retain(|pane_id, _| live.contains(pane_id));
         self.agents.retain(|pane_id, _| live.contains(pane_id));
         self.agent_unseen.retain(|pane_id| live.contains(pane_id));
         self.attention.retain(|pane_id| live.contains(pane_id));
@@ -217,6 +225,14 @@ impl SessionModel {
     }
 
     /// Applies an `AgentChanged`.
+    /// Records a `TerminalProgressChanged` (ADR 0054).
+    pub fn apply_progress(&mut self, pane_id: PaneId, progress: Option<TerminalProgress>) {
+        match progress {
+            Some(progress) => self.terminal_progress.insert(pane_id, progress),
+            None => self.terminal_progress.remove(&pane_id),
+        };
+    }
+
     pub fn apply_agent(&mut self, pane_id: PaneId, agent: Option<AgentSnapshot>) -> AgentChange {
         let Some(agent) = agent else {
             return AgentChange {
@@ -412,6 +428,7 @@ mod tests {
             exited: true,
             title: Some("build".into()),
             attention: true,
+            progress: None,
         };
         let mut model = SessionModel::default();
         model.watch_terminals(HashSet::new());

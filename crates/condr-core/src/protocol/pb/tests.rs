@@ -116,6 +116,7 @@ fn unknown_enum_values_decode_to_their_fallback() {
                 exited: false,
                 title: None,
                 attention: false,
+                progress: None,
             },
         )),
     };
@@ -392,6 +393,10 @@ fn a_watched_set_and_a_terminal_record_without_a_view_round_trip() {
         exited: true,
         title: Some("build".into()),
         attention: true,
+        progress: Some(crate::TerminalProgress {
+            state: crate::TerminalProgressState::Paused,
+            percent: Some(40),
+        }),
     });
     assert_eq!(
         decode_bootstrap_record((&record).into()).unwrap(),

@@ -39,10 +39,10 @@ use condr_core::protocol::{
 use condr_core::{
     AgentSnapshot, FileMutation, FileMutationResult, GitRepository, PaneEnvironment, PaneId,
     Session, TerminalAgentProbe, TerminalColors, TerminalCommand, TerminalCwdProbe,
-    TerminalHyperlinkBudget, TerminalNoticeBatch, TerminalNoticeProbe, TerminalRuntime,
-    TerminalSize, TerminalUpdate, TerminalView, TerminalViewFrame, TerminalViewSource, WorkspaceId,
-    create_worktree, discover_repository, open_worktree, remove_worktree,
-    validate_worktree_removal,
+    TerminalHyperlinkBudget, TerminalNoticeBatch, TerminalNoticeProbe, TerminalProgress,
+    TerminalRuntime, TerminalSize, TerminalUpdate, TerminalView, TerminalViewFrame,
+    TerminalViewSource, WorkspaceId, create_worktree, discover_repository, open_worktree,
+    remove_worktree, validate_worktree_removal,
 };
 use config::{load_shell, load_worktree_root, save_proxy, save_shell};
 use layout::*;
@@ -525,6 +525,8 @@ struct RuntimeState {
     agents: std::collections::HashMap<PaneId, AgentSnapshot>,
     agent_control: AgentControl,
     terminal_titles: std::collections::HashMap<PaneId, String>,
+    /// Each Pane's OSC 9;4 progress (ADR 0054).
+    terminal_progress: std::collections::HashMap<PaneId, TerminalProgress>,
     /// Panes that rang while no Client had them focused, until one focuses them.
     pending_terminal_bells: std::collections::HashSet<PaneId>,
     /// Panes whose Agent reported `Done` while no Client had them focused, until one
@@ -628,6 +630,7 @@ struct BootstrapTerminalCapture {
     exited: bool,
     title: Option<String>,
     attention: bool,
+    progress: Option<TerminalProgress>,
 }
 
 impl BootstrapCapture {
@@ -648,6 +651,7 @@ impl BootstrapCapture {
                     exited: terminal.exited,
                     title: terminal.title,
                     attention: terminal.attention,
+                    progress: terminal.progress,
                 })
                 .collect(),
             agents: self.agents,
@@ -707,6 +711,7 @@ impl RuntimeState {
             agents: std::collections::HashMap::new(),
             agent_control: AgentControl::default(),
             terminal_titles: std::collections::HashMap::new(),
+            terminal_progress: std::collections::HashMap::new(),
             pending_terminal_bells: std::collections::HashSet::new(),
             agent_unseen: std::collections::HashSet::new(),
             workspace_git: std::collections::HashMap::new(),

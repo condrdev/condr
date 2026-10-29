@@ -107,6 +107,8 @@ types=(
   GhosttyTerminalDesktopNotification
   GhosttyTerminalModeConfig
   GhosttyTerminalProgramStatus
+  GhosttyTerminalProgressReport
+  GhosttyTerminalProgressState
   GhosttyTerminalScreen
   GhosttyTerminalScrollbar
   GhosttyTerminalSemanticPrompt

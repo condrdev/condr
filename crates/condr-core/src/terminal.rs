@@ -51,8 +51,9 @@ pub use view::{
     DEFAULT_CURSOR_COLOR, DEFAULT_FOREGROUND_COLOR, DETECTED_LINK_FLAG, TerminalCell,
     TerminalCellRun, TerminalColor, TerminalColors, TerminalCursor, TerminalCursorShape,
     TerminalFrameError, TerminalHyperlinkBudget, TerminalMouseTracking, TerminalPosition,
-    TerminalSelection, TerminalSelectionUnit, TerminalSide, TerminalSize, TerminalUpdate,
-    TerminalView, TerminalViewDelta, TerminalViewFrame, default_indexed_color,
+    TerminalProgress, TerminalProgressState, TerminalSelection, TerminalSelectionUnit,
+    TerminalSide, TerminalSize, TerminalUpdate, TerminalView, TerminalViewDelta, TerminalViewFrame,
+    default_indexed_color,
 };
 pub(crate) use view::{
     decode_position, decode_selection, decode_size, encode_position, encode_selection,

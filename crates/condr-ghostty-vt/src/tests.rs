@@ -287,3 +287,18 @@ fn colour_queries_answer_the_colours_set_and_a_scheme_flip_is_reported() {
         b"\x1b]11;rgb:1010/2020/3030\x1b\\"
     );
 }
+
+#[test]
+fn progress_reports_arrive_as_events() {
+    let mut terminal = terminal(20, 5);
+    let progress = |state, percent| Event::Progress(Some(Progress { state, percent }));
+    assert_eq!(
+        terminal.write(b"\x1b]9;4;1;42\x07\x1b]9;4;3\x07\x1b]9;4;2\x07\x1b]9;4;0\x07"),
+        [
+            progress(ProgressState::Normal, Some(42)),
+            progress(ProgressState::Indeterminate, None),
+            progress(ProgressState::Error, None),
+            Event::Progress(None),
+        ]
+    );
+}

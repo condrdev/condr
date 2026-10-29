@@ -822,6 +822,42 @@ fn a_program_copying_says_so_and_clearing_the_clipboard_does_not() {
     assert_eq!(notes(window), 1, "repeated copies replace one note");
 }
 
+#[cfg(unix)]
+#[test]
+fn a_programs_progress_shows_along_the_top_of_its_pane_until_it_removes_it() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    let pane_id = focused_pane(&view, window);
+    let selector = leaked_selector(format!("terminal-progress-{}", pane_id.as_u64()));
+    let run = |command: &str, window: &mut VisualTestContext| {
+        window.update(|_, cx| {
+            view.update(cx, |this, _| {
+                this.terminal_command(1, pane_id, TerminalCommand::Text(command.into()));
+            });
+        });
+    };
+    assert!(window.debug_bounds(selector).is_none());
+
+    run("printf '\\033]9;4;1;50\\007'\r", window);
+    assert!(wait_until_event_driven(window, |window| {
+        window.debug_bounds(selector).is_some()
+    }));
+    let bar = window.debug_bounds(selector).unwrap();
+    let terminal = window.debug_bounds(terminal_selector(pane_id)).unwrap();
+    assert!(bar.size.height <= px(2.), "a hairline: {bar:?}");
+    assert!(
+        bar.origin.y <= terminal.origin.y,
+        "above the grid: {bar:?} {terminal:?}"
+    );
+
+    run("printf '\\033]9;4;0\\007'\r", window);
+    assert!(wait_until_event_driven(window, |window| {
+        window.debug_bounds(selector).is_none()
+    }));
+}
+
 #[test]
 fn terminal_clipboard_shortcuts_paste_through_tcp_server() {
     let _serial_guard = acquire_visual_test_lock();

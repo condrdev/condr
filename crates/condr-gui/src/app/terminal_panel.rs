@@ -1,6 +1,8 @@
 //! A terminal Pane as a GPUI Dock panel.
 
 use super::*;
+use condr_core::{TerminalProgress, TerminalProgressState};
+use gpui_kit::component::progress::Progress;
 
 pub(super) struct TerminalPanel {
     connection_key: ConnectionKey,
@@ -127,6 +129,7 @@ impl Render for TerminalPanel {
             attention,
             zoomed,
             pasting,
+            progress,
         ) = owner
             .as_ref()
             .map(|owner| {
@@ -169,6 +172,13 @@ impl Render for TerminalPanel {
                     connection.is_some_and(|connection| {
                         connection.pasting_images.contains(&self.pane_id)
                     }),
+                    connection.and_then(|connection| {
+                        connection
+                            .model
+                            .terminal_progress
+                            .get(&self.pane_id)
+                            .copied()
+                    }),
                 )
             })
             .unwrap_or((
@@ -185,6 +195,7 @@ impl Render for TerminalPanel {
                 false,
                 false,
                 false,
+                None,
             ));
         let ime_terminal_revision = marked_text
             .as_ref()
@@ -296,6 +307,17 @@ impl Render for TerminalPanel {
             })
             .when_some(link_tooltip, |this, uri| {
                 this.tooltip(move |window, cx| Tooltip::new(uri.clone()).build(window, cx))
+            })
+            .when_some(progress, |this, progress| {
+                this.relative().child(
+                    div()
+                        .debug_selector(move || format!("terminal-progress-{}", pane_id.as_u64()))
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .right_0()
+                        .child(progress_bar(key, pane_id, progress, cx)),
+                )
             });
 
         let menu_owner = self.owner.clone();
@@ -484,6 +506,33 @@ impl Render for TerminalPanel {
             .child(body)
     }
 }
+/// A program's OSC 9;4 progress as a thin bar along the top of its terminal (ADR 0054):
+/// accent for progress, red for an error, amber for a pause, sweeping when indeterminate.
+fn progress_bar(
+    key: ConnectionKey,
+    pane_id: PaneId,
+    progress: TerminalProgress,
+    cx: &App,
+) -> impl IntoElement {
+    let theme = cx.theme();
+    let (color, whole) = match progress.state {
+        TerminalProgressState::Normal | TerminalProgressState::Indeterminate => {
+            (theme.progress_bar, false)
+        }
+        TerminalProgressState::Error => (theme.danger, true),
+        TerminalProgressState::Paused => (theme.warning, true),
+    };
+    let fallback = if whole { 100.0 } else { 0.0 };
+    Progress::new(SharedString::from(format!(
+        "terminal-progress-{key}-{}",
+        pane_id.as_u64()
+    )))
+    .with_size(px(2.))
+    .color(color)
+    .loading(progress.state == TerminalProgressState::Indeterminate)
+    .value(progress.percent.map_or(fallback, f32::from))
+}
+
 impl Condr {
     /// Input makes a blinking cursor visible again and restarts its phase.
     pub(super) fn restart_cursor_blink(&self, key: ConnectionKey, pane_id: PaneId, cx: &mut App) {

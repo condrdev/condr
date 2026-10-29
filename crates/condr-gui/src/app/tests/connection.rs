@@ -303,6 +303,7 @@ fn ordinary_runtime_bootstrap_keeps_subscription_baseline_and_attention() {
                 exited: false,
                 title: None,
                 attention: true,
+                progress: None,
             }],
             agents: Vec::new(),
             workspace_git: Vec::new(),
@@ -350,6 +351,7 @@ fn incomplete_bootstrap_batches_never_produce_a_partial_snapshot() {
         exited: false,
         title: None,
         attention: false,
+        progress: None,
     };
     let payload = encode_bootstrap_record(&BootstrapRecord::Terminal(terminal.clone())).unwrap();
     let midpoint = payload.len() / 2;

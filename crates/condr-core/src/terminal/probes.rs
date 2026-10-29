@@ -58,11 +58,16 @@ pub struct TerminalNoticeBatch {
     pub bells: u64,
     /// Latest OSC 52 copy payload, including an empty clipboard clear.
     pub clipboard: Option<String>,
+    /// The progress, when it changed (ADR 0054).
+    pub progress: Option<Option<TerminalProgress>>,
 }
 
 impl TerminalNoticeBatch {
     pub fn is_empty(&self) -> bool {
-        self.title.is_none() && self.bells == 0 && self.clipboard.is_none()
+        self.title.is_none()
+            && self.bells == 0
+            && self.clipboard.is_none()
+            && self.progress.is_none()
     }
 }
 
@@ -75,6 +80,7 @@ impl TerminalNoticeProbe {
             title: std::mem::take(&mut notices.title_changed).then(|| notices.title.clone()),
             bells: std::mem::take(&mut notices.bells),
             clipboard: std::mem::take(&mut notices.clipboard),
+            progress: notices.take_progress(),
         }
     }
 }

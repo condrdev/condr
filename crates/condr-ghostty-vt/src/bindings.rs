@@ -905,6 +905,43 @@ const _: () = {
     ["Offset of field: GhosttyTerminalDesktopNotification::body"]
         [::std::mem::offset_of!(GhosttyTerminalDesktopNotification, body) - 24usize];
 };
+impl GhosttyTerminalProgressState {
+    pub const GHOSTTY_TERMINAL_PROGRESS_STATE_REMOVE: GhosttyTerminalProgressState =
+        GhosttyTerminalProgressState(0);
+    pub const GHOSTTY_TERMINAL_PROGRESS_STATE_SET: GhosttyTerminalProgressState =
+        GhosttyTerminalProgressState(1);
+    pub const GHOSTTY_TERMINAL_PROGRESS_STATE_ERROR: GhosttyTerminalProgressState =
+        GhosttyTerminalProgressState(2);
+    pub const GHOSTTY_TERMINAL_PROGRESS_STATE_INDETERMINATE: GhosttyTerminalProgressState =
+        GhosttyTerminalProgressState(3);
+    pub const GHOSTTY_TERMINAL_PROGRESS_STATE_PAUSE: GhosttyTerminalProgressState =
+        GhosttyTerminalProgressState(4);
+    pub const GHOSTTY_TERMINAL_PROGRESS_STATE_MAX_VALUE: GhosttyTerminalProgressState =
+        GhosttyTerminalProgressState(2147483647);
+}
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub struct GhosttyTerminalProgressState(pub ::std::os::raw::c_int);
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct GhosttyTerminalProgressReport {
+    pub size: usize,
+    pub state: GhosttyTerminalProgressState,
+    pub progress: i8,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of GhosttyTerminalProgressReport"]
+        [::std::mem::size_of::<GhosttyTerminalProgressReport>() - 16usize];
+    ["Alignment of GhosttyTerminalProgressReport"]
+        [::std::mem::align_of::<GhosttyTerminalProgressReport>() - 8usize];
+    ["Offset of field: GhosttyTerminalProgressReport::size"]
+        [::std::mem::offset_of!(GhosttyTerminalProgressReport, size) - 0usize];
+    ["Offset of field: GhosttyTerminalProgressReport::state"]
+        [::std::mem::offset_of!(GhosttyTerminalProgressReport, state) - 8usize];
+    ["Offset of field: GhosttyTerminalProgressReport::progress"]
+        [::std::mem::offset_of!(GhosttyTerminalProgressReport, progress) - 12usize];
+};
 impl GhosttyProgramStatusState {
     pub const GHOSTTY_PROGRAM_STATUS_STATE_IDLE: GhosttyProgramStatusState =
         GhosttyProgramStatusState(0);

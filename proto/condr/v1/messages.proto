@@ -549,6 +549,24 @@ message PaneTerminalSnapshot {
   bool exited = 3;
   optional string title = 4;
   bool attention = 5;
+  // What the program last reported with OSC 9;4 (ADR 0054); absent for none.
+  TerminalProgress progress = 6;
+}
+
+// A program's progress (ADR 0054).
+message TerminalProgress {
+  TerminalProgressState state = 1;
+  // 0 through 100; absent when the program gave none.
+  optional uint32 percent = 2;
+}
+
+// A state a newer peer adds reads as INDETERMINATE.
+enum TerminalProgressState {
+  TERMINAL_PROGRESS_STATE_UNSPECIFIED = 0;
+  TERMINAL_PROGRESS_STATE_NORMAL = 1;
+  TERMINAL_PROGRESS_STATE_ERROR = 2;
+  TERMINAL_PROGRESS_STATE_INDETERMINATE = 3;
+  TERMINAL_PROGRESS_STATE_PAUSED = 4;
 }
 
 message WorkspaceGitSnapshot {
@@ -614,6 +632,7 @@ message SessionEvent {
     // sequence stays contiguous (ADR 0028).
     Empty omitted = 10;
     AgentUnseenChanged agent_unseen_changed = 11;
+    TerminalProgressChanged terminal_progress_changed = 12;
   }
 }
 
@@ -635,6 +654,12 @@ message WorkspaceGitChanged {
 message TerminalTitleChanged {
   uint64 pane_id = 1;
   optional string title = 2;
+}
+
+message TerminalProgressChanged {
+  uint64 pane_id = 1;
+  // Absent: the progress was removed, timed out or reset.
+  TerminalProgress progress = 2;
 }
 
 message TerminalAttentionChanged {

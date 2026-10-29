@@ -19,8 +19,8 @@ use crate::snapshot::MAX_SNAPSHOT_PANES;
 use crate::{
     AgentKind, AgentSnapshot, BrowsedDirectory, CommitDetails, DirectoryListing, FileContent,
     FileDiff, FileKind, FileMutation, FileMutationResult, GitLog, PaneId, ProxyMode, ProxySetting,
-    SessionSnapshot, TabId, TerminalColors, TerminalCommand, TerminalView, TerminalViewFrame,
-    WorkspaceId,
+    SessionSnapshot, TabId, TerminalColors, TerminalCommand, TerminalProgress,
+    TerminalProgressState, TerminalView, TerminalViewFrame, WorkspaceId,
 };
 
 fn pane(id: u64) -> PaneId {
@@ -168,6 +168,36 @@ fn decode_proxy(proxy: Option<super::ProxySetting>) -> WireResult<ProxySetting> 
     Ok(ProxySetting {
         mode: proxy_mode(enum_or(proxy.mode, "proxy mode", super::ProxyMode::System)?),
         url: proxy.url,
+    })
+}
+
+fn encode_progress(progress: TerminalProgress) -> super::TerminalProgress {
+    use super::TerminalProgressState as State;
+    super::TerminalProgress {
+        state: match progress.state {
+            TerminalProgressState::Normal => State::Normal,
+            TerminalProgressState::Error => State::Error,
+            TerminalProgressState::Indeterminate => State::Indeterminate,
+            TerminalProgressState::Paused => State::Paused,
+        } as i32,
+        percent: progress.percent.map(u32::from),
+    }
+}
+
+fn decode_progress(progress: super::TerminalProgress) -> WireResult<TerminalProgress> {
+    use super::TerminalProgressState as State;
+    Ok(TerminalProgress {
+        state: match enum_or(progress.state, "progress state", State::Indeterminate)? {
+            State::Unspecified => unreachable!("enum_or rejects 0"),
+            State::Normal => TerminalProgressState::Normal,
+            State::Error => TerminalProgressState::Error,
+            State::Indeterminate => TerminalProgressState::Indeterminate,
+            State::Paused => TerminalProgressState::Paused,
+        },
+        percent: progress
+            .percent
+            .map(|percent| narrow::<u8>(percent, "progress percent").map(|p| p.min(100)))
+            .transpose()?,
     })
 }
 
@@ -1235,6 +1265,7 @@ impl From<&BootstrapRecord> for super::BootstrapRecord {
                         exited: terminal.exited,
                         title: terminal.title.clone(),
                         attention: terminal.attention,
+                        progress: terminal.progress.map(encode_progress),
                     })
                 }
                 BootstrapRecord::Agent(agent) => Record::Agent(encode_pane_agent(agent)),
@@ -1260,6 +1291,7 @@ pub(crate) fn decode_bootstrap_record(
             exited: terminal.exited,
             title: terminal.title,
             attention: terminal.attention,
+            progress: terminal.progress.map(decode_progress).transpose()?,
         }),
         Record::Agent(agent) => BootstrapRecord::Agent(decode_pane_agent(agent)?),
         Record::WorkspaceGit(git) => BootstrapRecord::WorkspaceGit(decode_git(git)?),
@@ -1326,6 +1358,12 @@ impl TryFrom<&SessionEvent> for super::SessionEvent {
                     title: title.clone(),
                 })
             }
+            SessionEvent::TerminalProgressChanged { pane_id, progress } => {
+                Event::TerminalProgressChanged(super::TerminalProgressChanged {
+                    pane_id: pane_id.as_u64(),
+                    progress: progress.map(encode_progress),
+                })
+            }
             SessionEvent::TerminalAttentionChanged { pane_id, attention } => {
                 Event::TerminalAttentionChanged(super::TerminalAttentionChanged {
                     pane_id: pane_id.as_u64(),
@@ -1381,6 +1419,10 @@ impl TryFrom<super::SessionEvent> for SessionEvent {
             Event::TerminalTitleChanged(changed) => Self::TerminalTitleChanged {
                 pane_id: pane(changed.pane_id),
                 title: changed.title,
+            },
+            Event::TerminalProgressChanged(changed) => Self::TerminalProgressChanged {
+                pane_id: pane(changed.pane_id),
+                progress: changed.progress.map(decode_progress).transpose()?,
             },
             Event::TerminalAttentionChanged(changed) => Self::TerminalAttentionChanged {
                 pane_id: pane(changed.pane_id),

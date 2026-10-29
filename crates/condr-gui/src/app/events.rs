@@ -322,6 +322,12 @@ impl Condr {
                         }
                         notify = true;
                     }
+                    SessionEvent::TerminalProgressChanged { pane_id, progress } => {
+                        self.connections[index]
+                            .model
+                            .apply_progress(pane_id, progress);
+                        notify = true;
+                    }
                     SessionEvent::TerminalAttentionChanged { pane_id, attention } => {
                         let focused = self.terminal_input.focused == Some((key, pane_id));
                         notify = if attention {

@@ -14,7 +14,7 @@ pub(crate) mod pb;
 
 use crate::{
     AgentSnapshot, PaneDirection, PaneId, SessionSnapshot, SplitDirection, TabId, TerminalColors,
-    TerminalCommand, TerminalView, TerminalViewFrame, WorkspaceId,
+    TerminalCommand, TerminalProgress, TerminalView, TerminalViewFrame, WorkspaceId,
 };
 use std::collections::HashSet;
 use std::fmt;

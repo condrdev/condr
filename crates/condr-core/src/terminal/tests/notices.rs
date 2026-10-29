@@ -42,6 +42,7 @@ fn title_and_bell_notices_are_recorded_once_per_change_and_counted() {
             title: Some(Some("\u{2733} fix tests".into())),
             bells: 2,
             clipboard: Some("world".into()),
+            progress: None,
         }
     );
     assert!(probe.take().is_empty());
@@ -93,6 +94,7 @@ fn terminal_reply_to_a_stopped_writer_ends_the_reader_cleanly_and_keeps_tail_not
             title: Some(Some("tail title".into())),
             bells: 1,
             clipboard: Some("tail copy".into()),
+            progress: None,
         }
     );
 }
@@ -118,4 +120,46 @@ fn terminal_titles_are_sanitized() {
         sanitize_terminal_title(&"x".repeat(1000)).map(|title| title.len()),
         Some(MAX_TERMINAL_TITLE_CHARS)
     );
+}
+
+#[test]
+fn progress_is_recorded_once_per_change_and_cleared_by_remove_reset_and_silence() {
+    let mut vt = Vt::new(TerminalSize::new(4, 12)).unwrap();
+    let notices = SharedTerminalNotices::default();
+    let probe = TerminalNoticeProbe {
+        notices: Arc::clone(&notices),
+    };
+    let progress = |state, percent| Some(Some(TerminalProgress { state, percent }));
+
+    feed(&mut vt, &notices, b"\x1b]9;4;1;40\x07");
+    assert_eq!(
+        probe.take().progress,
+        progress(TerminalProgressState::Normal, Some(40))
+    );
+    feed(&mut vt, &notices, b"\x1b]9;4;1;40\x07");
+    assert_eq!(probe.take().progress, None, "the same report again");
+    feed(&mut vt, &notices, b"\x1b]9;4;3\x07\x1b]9;4;0\x07");
+    assert_eq!(
+        probe.take().progress,
+        Some(None),
+        "set and removed in one read"
+    );
+
+    feed(&mut vt, &notices, b"\x1b]9;4;2;70\x07");
+    assert_eq!(
+        probe.take().progress,
+        progress(TerminalProgressState::Error, Some(70))
+    );
+    feed(&mut vt, &notices, b"\x1bc");
+    assert_eq!(probe.take().progress, Some(None), "RIS clears it");
+
+    feed(&mut vt, &notices, b"\x1b]9;4;4;10\x07");
+    assert!(probe.take().progress.is_some());
+    notices.lock().unwrap().progress_at = Instant::now().checked_sub(PROGRESS_TIMEOUT);
+    assert_eq!(
+        probe.take().progress,
+        Some(None),
+        "a silent program loses its bar"
+    );
+    assert!(probe.take().is_empty());
 }

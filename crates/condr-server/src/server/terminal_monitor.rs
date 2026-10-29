@@ -82,19 +82,18 @@ fn publish_frames(
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 view_source.compress_if_idle();
+                // A progress the program stopped updating times out here (ADR 0054).
+                if !take_notices(notice_probe, state, pane_id, instance_id) {
+                    return false;
+                }
                 continue;
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => return false,
         };
         let update =
             coalesce_terminal_update(update, updates, last_view_publish + TERMINAL_FRAME_INTERVAL);
-        let notices = notice_probe.take();
-        if !notices.is_empty() {
-            let mut state = state.lock().or_abort();
-            if !state.terminal_is_current(pane_id, instance_id) {
-                return false;
-            }
-            apply_terminal_notices(&mut state, pane_id, notices);
+        if !take_notices(notice_probe, state, pane_id, instance_id) {
+            return false;
         }
         match update {
             TerminalUpdate::View(_) => {
@@ -113,6 +112,26 @@ fn publish_frames(
             TerminalUpdate::Exited => return true,
         }
     }
+}
+
+/// Applies what the Pane's terminal reported besides its grid; `false` once the Pane is
+/// no longer this monitor's.
+fn take_notices(
+    notice_probe: &TerminalNoticeProbe,
+    state: &Arc<Mutex<RuntimeState>>,
+    pane_id: PaneId,
+    instance_id: u64,
+) -> bool {
+    let notices = notice_probe.take();
+    if notices.is_empty() {
+        return true;
+    }
+    let mut state = state.lock().or_abort();
+    if !state.terminal_is_current(pane_id, instance_id) {
+        return false;
+    }
+    apply_terminal_notices(&mut state, pane_id, notices);
+    true
 }
 
 /// Reaps the Pane's ended terminal and keeps it, exited, with its final view.
@@ -164,7 +183,7 @@ fn end_terminal(
         state.record_agent_resume(pane_id, None);
         state.forget_agent_control(pane_id);
         state.publish_background(SessionEvent::TerminalExited { pane_id });
-        state.clear_terminal_title(pane_id);
+        state.clear_terminal_reports(pane_id);
         state.forget_agent(pane_id);
         clients
     };
@@ -419,5 +438,14 @@ pub(super) fn apply_terminal_notices(
     }
     if let Some(text) = notices.clipboard {
         state.broadcast_clipboard(pane_id, text);
+    }
+    if let Some(progress) = notices.progress {
+        let previous = match progress {
+            Some(progress) => state.terminal_progress.insert(pane_id, progress),
+            None => state.terminal_progress.remove(&pane_id),
+        };
+        if previous != progress {
+            state.publish_background(SessionEvent::TerminalProgressChanged { pane_id, progress });
+        }
     }
 }

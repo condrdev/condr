@@ -730,6 +730,7 @@ pub(super) fn commit_layout_candidate(
             state.agents.remove(pane_id);
             state.forget_agent_control(*pane_id);
             state.terminal_titles.remove(pane_id);
+            state.terminal_progress.remove(pane_id);
             state.pending_terminal_bells.remove(pane_id);
             state.agent_unseen.remove(pane_id);
             state.terminal_views.remove(pane_id);
