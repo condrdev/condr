@@ -11,8 +11,10 @@
     clippy::all
 )]
 mod bindings;
+mod key;
 mod render;
 
+pub use key::{KeyAction, KeyEncoder, KeyEvent, Mods, PhysicalKey};
 pub use render::{
     Cell, CellWidth, Color, Cursor, CursorStyle, Dirty, RenderState, Row, Style, Underline,
 };

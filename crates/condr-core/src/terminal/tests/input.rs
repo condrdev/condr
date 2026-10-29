@@ -315,16 +315,15 @@ fn kitty_keyboard_protocol_follows_the_negotiated_flags() {
         shift: true,
         ..none
     };
-    let disambiguate = TermMode::DISAMBIGUATE_ESC_CODES;
-    let events = disambiguate | TermMode::REPORT_EVENT_TYPES;
-    let all = disambiguate
-        | TermMode::REPORT_ALTERNATE_KEYS
-        | TermMode::REPORT_ALL_KEYS_AS_ESC
-        | TermMode::REPORT_ASSOCIATED_TEXT;
+    // Kitty keyboard flags as the program pushes them (`CSI > flags u`).
+    let disambiguate = 1u8;
+    let events = disambiguate | 2;
+    let all = disambiguate | 4 | 8 | 16;
+    let legacy = 0u8;
     let ch = |text: &str| TerminalKey::Character(text.into());
-    let cases: &[(TerminalKey, TerminalModifiers, TermMode, &[u8])] = &[
+    let cases: &[(TerminalKey, TerminalModifiers, u8, &[u8])] = &[
         // Legacy stays legacy without any kitty flag.
-        (TerminalKey::Enter, shift, TermMode::empty(), b"\n"),
+        (TerminalKey::Enter, shift, legacy, b"\n"),
         // herdr parity under disambiguation.
         (TerminalKey::Enter, shift, disambiguate, b"\x1b[13;2u"),
         (TerminalKey::Enter, alt, disambiguate, b"\x1b[13;3u"),
@@ -334,7 +333,7 @@ fn kitty_keyboard_protocol_follows_the_negotiated_flags() {
         (ch("c"), control, disambiguate, b"\x1b[99;5u"),
         // Cmd+C reaches a kitty program as super+c; legacy encoding drops it entirely.
         (ch("c"), platform, disambiguate, b"\x1b[99;9u"),
-        (ch("c"), platform, TermMode::empty(), b""),
+        (ch("c"), platform, legacy, b""),
         (ch("L"), shift, disambiguate, b"L"),
         (ch("a"), none, disambiguate, b"a"),
         (TerminalKey::Enter, none, disambiguate, b"\r"),
@@ -344,10 +343,11 @@ fn kitty_keyboard_protocol_follows_the_negotiated_flags() {
         (TerminalKey::Function(5), shift, disambiguate, b"\x1b[15;2~"),
         // Escape follows the spec rather than herdr.
         (TerminalKey::Escape, none, disambiguate, b"\x1b[27u"),
-        // Event types add the press suffix and put legacy-form keys in kitty form.
-        (ch("c"), control, events, b"\x1b[99;5:1u"),
+        // Event types put legacy-form keys in kitty form; a press, the default, is left
+        // unnumbered.
+        (ch("c"), control, events, b"\x1b[99;5u"),
         (TerminalKey::Left, none, events, b"\x1b[1;1:1D"),
-        (TerminalKey::Function(3), control, events, b"\x1b[13;5:1~"),
+        (TerminalKey::Function(3), control, events, b"\x1b[13;5~"),
         // Without a modifier field only the plain legacy sequences are valid.
         (TerminalKey::Up, none, all, b"\x1b[A"),
         (TerminalKey::Function(1), none, all, b"\x1b[P"),
@@ -365,45 +365,39 @@ fn kitty_keyboard_protocol_follows_the_negotiated_flags() {
             b"\x1b[57376u",
         ),
         (TerminalKey::Function(20), control, all, b"\x1b[57383;5u"),
-        (TerminalKey::Function(3), none, TermMode::empty(), b"\x1bOR"),
+        (TerminalKey::Function(3), none, legacy, b"\x1bOR"),
         (TerminalKey::Function(5), none, all, b"\x1b[15~"),
-        // Alternate keys alone do not disambiguate Escape.
-        (
-            TerminalKey::Escape,
-            none,
-            TermMode::REPORT_ALTERNATE_KEYS,
-            b"\x1b",
-        ),
+        // libghostty-vt reads any kitty flag as kitty mode, alternate keys alone included.
+        (TerminalKey::Escape, none, 4, b"\x1b[27u"),
         (TerminalKey::Enter, none, events, b"\r"),
-        // Report-all reports text keys with alternate and associated text.
-        (ch("a"), none, all, b"\x1b[97;1;97u"),
+        // Report-all reports text keys with alternate and associated text, a default
+        // modifier field left empty.
+        (ch("a"), none, all, b"\x1b[97;;97u"),
         (ch("L"), shift, all, b"\x1b[108:76;2;76u"),
         (ch("c"), control, all, b"\x1b[99;5u"),
         (TerminalKey::Enter, none, all, b"\x1b[13u"),
-        (
-            ch("c"),
-            control,
-            all | TermMode::REPORT_EVENT_TYPES,
-            b"\x1b[99;5:1u",
-        ),
+        (ch("c"), control, all | 2, b"\x1b[99;5u"),
         (TerminalKey::BackTab, none, all, b"\x1b[9;2u"),
     ];
-    for (key, modifiers, modes, expected) in cases {
-        assert_eq!(
-            encode_key_in_mode(key, *modifiers, TerminalKeyEventKind::Press, *modes, false)
-                .unwrap(),
-            *expected,
-            "{key:?} {modifiers:?} {modes:?}"
-        );
+    let mut mismatches = Vec::new();
+    for (key, modifiers, flags, expected) in cases {
+        let found = encode(*flags, key, *modifiers, TerminalKeyEventKind::Press, false);
+        if found != *expected {
+            mismatches.push(format!(
+                "{key:?} {modifiers:?} {flags}: expected {} found {}",
+                expected.escape_ascii(),
+                found.escape_ascii()
+            ));
+        }
     }
 
     use TerminalKeyEventKind::{Release, Repeat};
-    let report_text = events | TermMode::REPORT_ALL_KEYS_AS_ESC | TermMode::REPORT_ASSOCIATED_TEXT;
+    let report_text = events | 8 | 16;
     let event_cases: &[(
         TerminalKey,
         TerminalModifiers,
         TerminalKeyEventKind,
-        TermMode,
+        u8,
         &[u8],
     )] = &[
         // Event types number a repeat 2 and a release 3.
@@ -433,28 +427,57 @@ fn kitty_keyboard_protocol_follows_the_negotiated_flags() {
         (ch("c"), control, Repeat, disambiguate, b"\x1b[99;5u"),
         (ch("c"), control, Release, disambiguate, b""),
         (TerminalKey::Escape, none, Release, disambiguate, b""),
-        (ch("c"), control, Repeat, TermMode::empty(), b"\x03"),
-        (ch("c"), control, Release, TermMode::empty(), b""),
-        (
-            TerminalKey::Left,
-            none,
-            Repeat,
-            TermMode::empty(),
-            b"\x1b[D",
-        ),
-        (TerminalKey::Left, none, Release, TermMode::empty(), b""),
+        (ch("c"), control, Repeat, legacy, b"\x03"),
+        (ch("c"), control, Release, legacy, b""),
+        (TerminalKey::Left, none, Repeat, legacy, b"\x1b[D"),
+        (TerminalKey::Left, none, Release, legacy, b""),
     ];
-    for (key, modifiers, kind, modes, expected) in event_cases {
-        assert_eq!(
-            encode_key_in_mode(key, *modifiers, *kind, *modes, false).unwrap(),
-            *expected,
-            "{key:?} {modifiers:?} {kind:?} {modes:?}"
-        );
+    for (key, modifiers, kind, flags, expected) in event_cases {
+        let found = encode(*flags, key, *modifiers, *kind, false);
+        if found != *expected {
+            mismatches.push(format!(
+                "{key:?} {modifiers:?} {kind:?} {flags}: expected {} found {}",
+                expected.escape_ascii(),
+                found.escape_ascii()
+            ));
+        }
     }
+    for (text, flags, expected) in [
+        ("a", disambiguate, &b"a"[..]),
+        ("A", all, b"\x1b[97:65;2;65u"),
+        ("ab", all, b"ab"),
+    ] {
+        let found = vt_with_flags(flags).encode_text(text);
+        if found != expected {
+            mismatches.push(format!(
+                "text {text} {flags}: expected {} found {}",
+                expected.escape_ascii(),
+                found.escape_ascii()
+            ));
+        }
+    }
+    assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
+}
 
-    assert_eq!(encode_text_in_mode("a", disambiguate), b"a");
-    assert_eq!(encode_text_in_mode("A", all), b"\x1b[97:65;2;65u");
-    assert_eq!(encode_text_in_mode("ab", all), b"ab");
+/// A VT whose program pushed `flags` (`CSI > flags u`); 0 leaves it on legacy keys.
+fn vt_with_flags(flags: u8) -> Vt {
+    let mut vt = Vt::new(TerminalSize::new(2, 20)).unwrap();
+    if flags != 0 {
+        vt.write(format!("\x1b[>{flags}u").as_bytes());
+    }
+    vt
+}
+
+fn encode(
+    flags: u8,
+    key: &TerminalKey,
+    modifiers: TerminalModifiers,
+    kind: TerminalKeyEventKind,
+    reads_kitty_keys: bool,
+) -> Vec<u8> {
+    vt_with_flags(flags)
+        .encode_key(key, modifiers, kind, reads_kitty_keys)
+        .unwrap()
 }
 
 #[test]
@@ -473,10 +496,9 @@ fn cmd_c_reaches_a_program_that_reads_kitty_keys_unasked() {
         shift: true,
         ..platform
     };
-    let legacy = TermMode::empty();
-    let encode = |key: &str, modifiers, kind, modes, reads| {
-        encode_key_in_mode(&ch(key), modifiers, kind, modes, reads).unwrap()
-    };
+    let legacy = 0u8;
+    let encode =
+        |key: &str, modifiers, kind, flags, reads| encode(flags, &ch(key), modifiers, kind, reads);
     assert_eq!(encode("c", platform, Press, legacy, true), b"\x1b[99;9u");
     assert_eq!(encode("c", platform, Press, legacy, false), b"");
     // Only Cmd+C changes: other Cmd chords still send nothing, Ctrl+C stays ETX, a
@@ -485,16 +507,7 @@ fn cmd_c_reaches_a_program_that_reads_kitty_keys_unasked() {
     assert_eq!(encode("c", cmd_shift, Press, legacy, true), b"");
     assert_eq!(encode("c", control, Press, legacy, true), b"\x03");
     assert_eq!(encode("c", platform, Release, legacy, true), b"");
-    assert_eq!(
-        encode(
-            "c",
-            platform,
-            Press,
-            TermMode::DISAMBIGUATE_ESC_CODES | TermMode::REPORT_EVENT_TYPES,
-            true
-        ),
-        b"\x1b[99;9:1u"
-    );
+    assert_eq!(encode("c", platform, Press, 1 | 2, true), b"\x1b[99;9u");
 }
 
 #[test]

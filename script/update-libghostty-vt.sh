@@ -24,6 +24,19 @@ functions=(
   ghostty_formatter_free
   ghostty_formatter_terminal_new
   ghostty_grid_ref_hyperlink_uri
+  ghostty_key_encoder_encode
+  ghostty_key_encoder_free
+  ghostty_key_encoder_new
+  ghostty_key_encoder_setopt
+  ghostty_key_encoder_setopt_from_terminal
+  ghostty_key_event_free
+  ghostty_key_event_new
+  ghostty_key_event_set_action
+  ghostty_key_event_set_consumed_mods
+  ghostty_key_event_set_key
+  ghostty_key_event_set_mods
+  ghostty_key_event_set_unshifted_codepoint
+  ghostty_key_event_set_utf8
   ghostty_render_state_free
   ghostty_render_state_get
   ghostty_render_state_new
@@ -63,6 +76,7 @@ types=(
   GhosttyColorPaletteIndex
   GhosttyColorRgb
   GhosttyDeviceAttributes
+  GhosttyOptionAsAlt
   GhosttyRenderStateCursor
   GhosttyRenderStateCursorVisualStyle
   GhosttyRenderStateDirty

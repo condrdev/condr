@@ -1638,3 +1638,302 @@ impl GhosttySgrUnderline {
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct GhosttySgrUnderline(pub ::std::os::raw::c_int);
+#[repr(C)]
+#[derive(Debug)]
+pub struct GhosttyKeyEventImpl {
+    _unused: [u8; 0],
+}
+pub type GhosttyKeyEvent = *mut GhosttyKeyEventImpl;
+impl GhosttyKeyAction {
+    pub const GHOSTTY_KEY_ACTION_RELEASE: GhosttyKeyAction = GhosttyKeyAction(0);
+    pub const GHOSTTY_KEY_ACTION_PRESS: GhosttyKeyAction = GhosttyKeyAction(1);
+    pub const GHOSTTY_KEY_ACTION_REPEAT: GhosttyKeyAction = GhosttyKeyAction(2);
+    pub const GHOSTTY_KEY_ACTION_MAX_VALUE: GhosttyKeyAction = GhosttyKeyAction(2147483647);
+}
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub struct GhosttyKeyAction(pub ::std::os::raw::c_int);
+pub type GhosttyMods = u16;
+impl GhosttyKey {
+    pub const GHOSTTY_KEY_UNIDENTIFIED: GhosttyKey = GhosttyKey(0);
+    pub const GHOSTTY_KEY_BACKQUOTE: GhosttyKey = GhosttyKey(1);
+    pub const GHOSTTY_KEY_BACKSLASH: GhosttyKey = GhosttyKey(2);
+    pub const GHOSTTY_KEY_BRACKET_LEFT: GhosttyKey = GhosttyKey(3);
+    pub const GHOSTTY_KEY_BRACKET_RIGHT: GhosttyKey = GhosttyKey(4);
+    pub const GHOSTTY_KEY_COMMA: GhosttyKey = GhosttyKey(5);
+    pub const GHOSTTY_KEY_DIGIT_0: GhosttyKey = GhosttyKey(6);
+    pub const GHOSTTY_KEY_DIGIT_1: GhosttyKey = GhosttyKey(7);
+    pub const GHOSTTY_KEY_DIGIT_2: GhosttyKey = GhosttyKey(8);
+    pub const GHOSTTY_KEY_DIGIT_3: GhosttyKey = GhosttyKey(9);
+    pub const GHOSTTY_KEY_DIGIT_4: GhosttyKey = GhosttyKey(10);
+    pub const GHOSTTY_KEY_DIGIT_5: GhosttyKey = GhosttyKey(11);
+    pub const GHOSTTY_KEY_DIGIT_6: GhosttyKey = GhosttyKey(12);
+    pub const GHOSTTY_KEY_DIGIT_7: GhosttyKey = GhosttyKey(13);
+    pub const GHOSTTY_KEY_DIGIT_8: GhosttyKey = GhosttyKey(14);
+    pub const GHOSTTY_KEY_DIGIT_9: GhosttyKey = GhosttyKey(15);
+    pub const GHOSTTY_KEY_EQUAL: GhosttyKey = GhosttyKey(16);
+    pub const GHOSTTY_KEY_INTL_BACKSLASH: GhosttyKey = GhosttyKey(17);
+    pub const GHOSTTY_KEY_INTL_RO: GhosttyKey = GhosttyKey(18);
+    pub const GHOSTTY_KEY_INTL_YEN: GhosttyKey = GhosttyKey(19);
+    pub const GHOSTTY_KEY_A: GhosttyKey = GhosttyKey(20);
+    pub const GHOSTTY_KEY_B: GhosttyKey = GhosttyKey(21);
+    pub const GHOSTTY_KEY_C: GhosttyKey = GhosttyKey(22);
+    pub const GHOSTTY_KEY_D: GhosttyKey = GhosttyKey(23);
+    pub const GHOSTTY_KEY_E: GhosttyKey = GhosttyKey(24);
+    pub const GHOSTTY_KEY_F: GhosttyKey = GhosttyKey(25);
+    pub const GHOSTTY_KEY_G: GhosttyKey = GhosttyKey(26);
+    pub const GHOSTTY_KEY_H: GhosttyKey = GhosttyKey(27);
+    pub const GHOSTTY_KEY_I: GhosttyKey = GhosttyKey(28);
+    pub const GHOSTTY_KEY_J: GhosttyKey = GhosttyKey(29);
+    pub const GHOSTTY_KEY_K: GhosttyKey = GhosttyKey(30);
+    pub const GHOSTTY_KEY_L: GhosttyKey = GhosttyKey(31);
+    pub const GHOSTTY_KEY_M: GhosttyKey = GhosttyKey(32);
+    pub const GHOSTTY_KEY_N: GhosttyKey = GhosttyKey(33);
+    pub const GHOSTTY_KEY_O: GhosttyKey = GhosttyKey(34);
+    pub const GHOSTTY_KEY_P: GhosttyKey = GhosttyKey(35);
+    pub const GHOSTTY_KEY_Q: GhosttyKey = GhosttyKey(36);
+    pub const GHOSTTY_KEY_R: GhosttyKey = GhosttyKey(37);
+    pub const GHOSTTY_KEY_S: GhosttyKey = GhosttyKey(38);
+    pub const GHOSTTY_KEY_T: GhosttyKey = GhosttyKey(39);
+    pub const GHOSTTY_KEY_U: GhosttyKey = GhosttyKey(40);
+    pub const GHOSTTY_KEY_V: GhosttyKey = GhosttyKey(41);
+    pub const GHOSTTY_KEY_W: GhosttyKey = GhosttyKey(42);
+    pub const GHOSTTY_KEY_X: GhosttyKey = GhosttyKey(43);
+    pub const GHOSTTY_KEY_Y: GhosttyKey = GhosttyKey(44);
+    pub const GHOSTTY_KEY_Z: GhosttyKey = GhosttyKey(45);
+    pub const GHOSTTY_KEY_MINUS: GhosttyKey = GhosttyKey(46);
+    pub const GHOSTTY_KEY_PERIOD: GhosttyKey = GhosttyKey(47);
+    pub const GHOSTTY_KEY_QUOTE: GhosttyKey = GhosttyKey(48);
+    pub const GHOSTTY_KEY_SEMICOLON: GhosttyKey = GhosttyKey(49);
+    pub const GHOSTTY_KEY_SLASH: GhosttyKey = GhosttyKey(50);
+    pub const GHOSTTY_KEY_ALT_LEFT: GhosttyKey = GhosttyKey(51);
+    pub const GHOSTTY_KEY_ALT_RIGHT: GhosttyKey = GhosttyKey(52);
+    pub const GHOSTTY_KEY_BACKSPACE: GhosttyKey = GhosttyKey(53);
+    pub const GHOSTTY_KEY_CAPS_LOCK: GhosttyKey = GhosttyKey(54);
+    pub const GHOSTTY_KEY_CONTEXT_MENU: GhosttyKey = GhosttyKey(55);
+    pub const GHOSTTY_KEY_CONTROL_LEFT: GhosttyKey = GhosttyKey(56);
+    pub const GHOSTTY_KEY_CONTROL_RIGHT: GhosttyKey = GhosttyKey(57);
+    pub const GHOSTTY_KEY_ENTER: GhosttyKey = GhosttyKey(58);
+    pub const GHOSTTY_KEY_META_LEFT: GhosttyKey = GhosttyKey(59);
+    pub const GHOSTTY_KEY_META_RIGHT: GhosttyKey = GhosttyKey(60);
+    pub const GHOSTTY_KEY_SHIFT_LEFT: GhosttyKey = GhosttyKey(61);
+    pub const GHOSTTY_KEY_SHIFT_RIGHT: GhosttyKey = GhosttyKey(62);
+    pub const GHOSTTY_KEY_SPACE: GhosttyKey = GhosttyKey(63);
+    pub const GHOSTTY_KEY_TAB: GhosttyKey = GhosttyKey(64);
+    pub const GHOSTTY_KEY_CONVERT: GhosttyKey = GhosttyKey(65);
+    pub const GHOSTTY_KEY_KANA_MODE: GhosttyKey = GhosttyKey(66);
+    pub const GHOSTTY_KEY_NON_CONVERT: GhosttyKey = GhosttyKey(67);
+    pub const GHOSTTY_KEY_DELETE: GhosttyKey = GhosttyKey(68);
+    pub const GHOSTTY_KEY_END: GhosttyKey = GhosttyKey(69);
+    pub const GHOSTTY_KEY_HELP: GhosttyKey = GhosttyKey(70);
+    pub const GHOSTTY_KEY_HOME: GhosttyKey = GhosttyKey(71);
+    pub const GHOSTTY_KEY_INSERT: GhosttyKey = GhosttyKey(72);
+    pub const GHOSTTY_KEY_PAGE_DOWN: GhosttyKey = GhosttyKey(73);
+    pub const GHOSTTY_KEY_PAGE_UP: GhosttyKey = GhosttyKey(74);
+    pub const GHOSTTY_KEY_ARROW_DOWN: GhosttyKey = GhosttyKey(75);
+    pub const GHOSTTY_KEY_ARROW_LEFT: GhosttyKey = GhosttyKey(76);
+    pub const GHOSTTY_KEY_ARROW_RIGHT: GhosttyKey = GhosttyKey(77);
+    pub const GHOSTTY_KEY_ARROW_UP: GhosttyKey = GhosttyKey(78);
+    pub const GHOSTTY_KEY_NUM_LOCK: GhosttyKey = GhosttyKey(79);
+    pub const GHOSTTY_KEY_NUMPAD_0: GhosttyKey = GhosttyKey(80);
+    pub const GHOSTTY_KEY_NUMPAD_1: GhosttyKey = GhosttyKey(81);
+    pub const GHOSTTY_KEY_NUMPAD_2: GhosttyKey = GhosttyKey(82);
+    pub const GHOSTTY_KEY_NUMPAD_3: GhosttyKey = GhosttyKey(83);
+    pub const GHOSTTY_KEY_NUMPAD_4: GhosttyKey = GhosttyKey(84);
+    pub const GHOSTTY_KEY_NUMPAD_5: GhosttyKey = GhosttyKey(85);
+    pub const GHOSTTY_KEY_NUMPAD_6: GhosttyKey = GhosttyKey(86);
+    pub const GHOSTTY_KEY_NUMPAD_7: GhosttyKey = GhosttyKey(87);
+    pub const GHOSTTY_KEY_NUMPAD_8: GhosttyKey = GhosttyKey(88);
+    pub const GHOSTTY_KEY_NUMPAD_9: GhosttyKey = GhosttyKey(89);
+    pub const GHOSTTY_KEY_NUMPAD_ADD: GhosttyKey = GhosttyKey(90);
+    pub const GHOSTTY_KEY_NUMPAD_BACKSPACE: GhosttyKey = GhosttyKey(91);
+    pub const GHOSTTY_KEY_NUMPAD_CLEAR: GhosttyKey = GhosttyKey(92);
+    pub const GHOSTTY_KEY_NUMPAD_CLEAR_ENTRY: GhosttyKey = GhosttyKey(93);
+    pub const GHOSTTY_KEY_NUMPAD_COMMA: GhosttyKey = GhosttyKey(94);
+    pub const GHOSTTY_KEY_NUMPAD_DECIMAL: GhosttyKey = GhosttyKey(95);
+    pub const GHOSTTY_KEY_NUMPAD_DIVIDE: GhosttyKey = GhosttyKey(96);
+    pub const GHOSTTY_KEY_NUMPAD_ENTER: GhosttyKey = GhosttyKey(97);
+    pub const GHOSTTY_KEY_NUMPAD_EQUAL: GhosttyKey = GhosttyKey(98);
+    pub const GHOSTTY_KEY_NUMPAD_MEMORY_ADD: GhosttyKey = GhosttyKey(99);
+    pub const GHOSTTY_KEY_NUMPAD_MEMORY_CLEAR: GhosttyKey = GhosttyKey(100);
+    pub const GHOSTTY_KEY_NUMPAD_MEMORY_RECALL: GhosttyKey = GhosttyKey(101);
+    pub const GHOSTTY_KEY_NUMPAD_MEMORY_STORE: GhosttyKey = GhosttyKey(102);
+    pub const GHOSTTY_KEY_NUMPAD_MEMORY_SUBTRACT: GhosttyKey = GhosttyKey(103);
+    pub const GHOSTTY_KEY_NUMPAD_MULTIPLY: GhosttyKey = GhosttyKey(104);
+    pub const GHOSTTY_KEY_NUMPAD_PAREN_LEFT: GhosttyKey = GhosttyKey(105);
+    pub const GHOSTTY_KEY_NUMPAD_PAREN_RIGHT: GhosttyKey = GhosttyKey(106);
+    pub const GHOSTTY_KEY_NUMPAD_SUBTRACT: GhosttyKey = GhosttyKey(107);
+    pub const GHOSTTY_KEY_NUMPAD_SEPARATOR: GhosttyKey = GhosttyKey(108);
+    pub const GHOSTTY_KEY_NUMPAD_UP: GhosttyKey = GhosttyKey(109);
+    pub const GHOSTTY_KEY_NUMPAD_DOWN: GhosttyKey = GhosttyKey(110);
+    pub const GHOSTTY_KEY_NUMPAD_RIGHT: GhosttyKey = GhosttyKey(111);
+    pub const GHOSTTY_KEY_NUMPAD_LEFT: GhosttyKey = GhosttyKey(112);
+    pub const GHOSTTY_KEY_NUMPAD_BEGIN: GhosttyKey = GhosttyKey(113);
+    pub const GHOSTTY_KEY_NUMPAD_HOME: GhosttyKey = GhosttyKey(114);
+    pub const GHOSTTY_KEY_NUMPAD_END: GhosttyKey = GhosttyKey(115);
+    pub const GHOSTTY_KEY_NUMPAD_INSERT: GhosttyKey = GhosttyKey(116);
+    pub const GHOSTTY_KEY_NUMPAD_DELETE: GhosttyKey = GhosttyKey(117);
+    pub const GHOSTTY_KEY_NUMPAD_PAGE_UP: GhosttyKey = GhosttyKey(118);
+    pub const GHOSTTY_KEY_NUMPAD_PAGE_DOWN: GhosttyKey = GhosttyKey(119);
+    pub const GHOSTTY_KEY_ESCAPE: GhosttyKey = GhosttyKey(120);
+    pub const GHOSTTY_KEY_F1: GhosttyKey = GhosttyKey(121);
+    pub const GHOSTTY_KEY_F2: GhosttyKey = GhosttyKey(122);
+    pub const GHOSTTY_KEY_F3: GhosttyKey = GhosttyKey(123);
+    pub const GHOSTTY_KEY_F4: GhosttyKey = GhosttyKey(124);
+    pub const GHOSTTY_KEY_F5: GhosttyKey = GhosttyKey(125);
+    pub const GHOSTTY_KEY_F6: GhosttyKey = GhosttyKey(126);
+    pub const GHOSTTY_KEY_F7: GhosttyKey = GhosttyKey(127);
+    pub const GHOSTTY_KEY_F8: GhosttyKey = GhosttyKey(128);
+    pub const GHOSTTY_KEY_F9: GhosttyKey = GhosttyKey(129);
+    pub const GHOSTTY_KEY_F10: GhosttyKey = GhosttyKey(130);
+    pub const GHOSTTY_KEY_F11: GhosttyKey = GhosttyKey(131);
+    pub const GHOSTTY_KEY_F12: GhosttyKey = GhosttyKey(132);
+    pub const GHOSTTY_KEY_F13: GhosttyKey = GhosttyKey(133);
+    pub const GHOSTTY_KEY_F14: GhosttyKey = GhosttyKey(134);
+    pub const GHOSTTY_KEY_F15: GhosttyKey = GhosttyKey(135);
+    pub const GHOSTTY_KEY_F16: GhosttyKey = GhosttyKey(136);
+    pub const GHOSTTY_KEY_F17: GhosttyKey = GhosttyKey(137);
+    pub const GHOSTTY_KEY_F18: GhosttyKey = GhosttyKey(138);
+    pub const GHOSTTY_KEY_F19: GhosttyKey = GhosttyKey(139);
+    pub const GHOSTTY_KEY_F20: GhosttyKey = GhosttyKey(140);
+    pub const GHOSTTY_KEY_F21: GhosttyKey = GhosttyKey(141);
+    pub const GHOSTTY_KEY_F22: GhosttyKey = GhosttyKey(142);
+    pub const GHOSTTY_KEY_F23: GhosttyKey = GhosttyKey(143);
+    pub const GHOSTTY_KEY_F24: GhosttyKey = GhosttyKey(144);
+    pub const GHOSTTY_KEY_F25: GhosttyKey = GhosttyKey(145);
+    pub const GHOSTTY_KEY_FN: GhosttyKey = GhosttyKey(146);
+    pub const GHOSTTY_KEY_FN_LOCK: GhosttyKey = GhosttyKey(147);
+    pub const GHOSTTY_KEY_PRINT_SCREEN: GhosttyKey = GhosttyKey(148);
+    pub const GHOSTTY_KEY_SCROLL_LOCK: GhosttyKey = GhosttyKey(149);
+    pub const GHOSTTY_KEY_PAUSE: GhosttyKey = GhosttyKey(150);
+    pub const GHOSTTY_KEY_BROWSER_BACK: GhosttyKey = GhosttyKey(151);
+    pub const GHOSTTY_KEY_BROWSER_FAVORITES: GhosttyKey = GhosttyKey(152);
+    pub const GHOSTTY_KEY_BROWSER_FORWARD: GhosttyKey = GhosttyKey(153);
+    pub const GHOSTTY_KEY_BROWSER_HOME: GhosttyKey = GhosttyKey(154);
+    pub const GHOSTTY_KEY_BROWSER_REFRESH: GhosttyKey = GhosttyKey(155);
+    pub const GHOSTTY_KEY_BROWSER_SEARCH: GhosttyKey = GhosttyKey(156);
+    pub const GHOSTTY_KEY_BROWSER_STOP: GhosttyKey = GhosttyKey(157);
+    pub const GHOSTTY_KEY_EJECT: GhosttyKey = GhosttyKey(158);
+    pub const GHOSTTY_KEY_LAUNCH_APP_1: GhosttyKey = GhosttyKey(159);
+    pub const GHOSTTY_KEY_LAUNCH_APP_2: GhosttyKey = GhosttyKey(160);
+    pub const GHOSTTY_KEY_LAUNCH_MAIL: GhosttyKey = GhosttyKey(161);
+    pub const GHOSTTY_KEY_MEDIA_PLAY_PAUSE: GhosttyKey = GhosttyKey(162);
+    pub const GHOSTTY_KEY_MEDIA_SELECT: GhosttyKey = GhosttyKey(163);
+    pub const GHOSTTY_KEY_MEDIA_STOP: GhosttyKey = GhosttyKey(164);
+    pub const GHOSTTY_KEY_MEDIA_TRACK_NEXT: GhosttyKey = GhosttyKey(165);
+    pub const GHOSTTY_KEY_MEDIA_TRACK_PREVIOUS: GhosttyKey = GhosttyKey(166);
+    pub const GHOSTTY_KEY_POWER: GhosttyKey = GhosttyKey(167);
+    pub const GHOSTTY_KEY_SLEEP: GhosttyKey = GhosttyKey(168);
+    pub const GHOSTTY_KEY_AUDIO_VOLUME_DOWN: GhosttyKey = GhosttyKey(169);
+    pub const GHOSTTY_KEY_AUDIO_VOLUME_MUTE: GhosttyKey = GhosttyKey(170);
+    pub const GHOSTTY_KEY_AUDIO_VOLUME_UP: GhosttyKey = GhosttyKey(171);
+    pub const GHOSTTY_KEY_WAKE_UP: GhosttyKey = GhosttyKey(172);
+    pub const GHOSTTY_KEY_COPY: GhosttyKey = GhosttyKey(173);
+    pub const GHOSTTY_KEY_CUT: GhosttyKey = GhosttyKey(174);
+    pub const GHOSTTY_KEY_PASTE: GhosttyKey = GhosttyKey(175);
+    pub const GHOSTTY_KEY_MAX_VALUE: GhosttyKey = GhosttyKey(2147483647);
+}
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub struct GhosttyKey(pub ::std::os::raw::c_int);
+unsafe extern "C" {
+    pub fn ghostty_key_event_new(
+        allocator: *const GhosttyAllocator,
+        event: *mut GhosttyKeyEvent,
+    ) -> GhosttyResult;
+}
+unsafe extern "C" {
+    pub fn ghostty_key_event_free(event: GhosttyKeyEvent);
+}
+unsafe extern "C" {
+    pub fn ghostty_key_event_set_action(event: GhosttyKeyEvent, action: GhosttyKeyAction);
+}
+unsafe extern "C" {
+    pub fn ghostty_key_event_set_key(event: GhosttyKeyEvent, key: GhosttyKey);
+}
+unsafe extern "C" {
+    pub fn ghostty_key_event_set_mods(event: GhosttyKeyEvent, mods: GhosttyMods);
+}
+unsafe extern "C" {
+    pub fn ghostty_key_event_set_consumed_mods(event: GhosttyKeyEvent, consumed_mods: GhosttyMods);
+}
+unsafe extern "C" {
+    pub fn ghostty_key_event_set_utf8(
+        event: GhosttyKeyEvent,
+        utf8: *const ::std::os::raw::c_char,
+        len: usize,
+    );
+}
+unsafe extern "C" {
+    pub fn ghostty_key_event_set_unshifted_codepoint(event: GhosttyKeyEvent, codepoint: u32);
+}
+#[repr(C)]
+#[derive(Debug)]
+pub struct GhosttyKeyEncoderImpl {
+    _unused: [u8; 0],
+}
+pub type GhosttyKeyEncoder = *mut GhosttyKeyEncoderImpl;
+impl GhosttyOptionAsAlt {
+    pub const GHOSTTY_OPTION_AS_ALT_FALSE: GhosttyOptionAsAlt = GhosttyOptionAsAlt(0);
+    pub const GHOSTTY_OPTION_AS_ALT_TRUE: GhosttyOptionAsAlt = GhosttyOptionAsAlt(1);
+    pub const GHOSTTY_OPTION_AS_ALT_LEFT: GhosttyOptionAsAlt = GhosttyOptionAsAlt(2);
+    pub const GHOSTTY_OPTION_AS_ALT_RIGHT: GhosttyOptionAsAlt = GhosttyOptionAsAlt(3);
+    pub const GHOSTTY_OPTION_AS_ALT_MAX_VALUE: GhosttyOptionAsAlt = GhosttyOptionAsAlt(2147483647);
+}
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub struct GhosttyOptionAsAlt(pub ::std::os::raw::c_int);
+impl GhosttyKeyEncoderOption {
+    pub const GHOSTTY_KEY_ENCODER_OPT_CURSOR_KEY_APPLICATION: GhosttyKeyEncoderOption =
+        GhosttyKeyEncoderOption(0);
+    pub const GHOSTTY_KEY_ENCODER_OPT_KEYPAD_KEY_APPLICATION: GhosttyKeyEncoderOption =
+        GhosttyKeyEncoderOption(1);
+    pub const GHOSTTY_KEY_ENCODER_OPT_IGNORE_KEYPAD_WITH_NUMLOCK: GhosttyKeyEncoderOption =
+        GhosttyKeyEncoderOption(2);
+    pub const GHOSTTY_KEY_ENCODER_OPT_ALT_ESC_PREFIX: GhosttyKeyEncoderOption =
+        GhosttyKeyEncoderOption(3);
+    pub const GHOSTTY_KEY_ENCODER_OPT_MODIFY_OTHER_KEYS_STATE_2: GhosttyKeyEncoderOption =
+        GhosttyKeyEncoderOption(4);
+    pub const GHOSTTY_KEY_ENCODER_OPT_KITTY_FLAGS: GhosttyKeyEncoderOption =
+        GhosttyKeyEncoderOption(5);
+    pub const GHOSTTY_KEY_ENCODER_OPT_MACOS_OPTION_AS_ALT: GhosttyKeyEncoderOption =
+        GhosttyKeyEncoderOption(6);
+    pub const GHOSTTY_KEY_ENCODER_OPT_BACKARROW_KEY_MODE: GhosttyKeyEncoderOption =
+        GhosttyKeyEncoderOption(7);
+    pub const GHOSTTY_KEY_ENCODER_OPT_MAX_VALUE: GhosttyKeyEncoderOption =
+        GhosttyKeyEncoderOption(2147483647);
+}
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub struct GhosttyKeyEncoderOption(pub ::std::os::raw::c_int);
+unsafe extern "C" {
+    pub fn ghostty_key_encoder_new(
+        allocator: *const GhosttyAllocator,
+        encoder: *mut GhosttyKeyEncoder,
+    ) -> GhosttyResult;
+}
+unsafe extern "C" {
+    pub fn ghostty_key_encoder_free(encoder: GhosttyKeyEncoder);
+}
+unsafe extern "C" {
+    pub fn ghostty_key_encoder_setopt(
+        encoder: GhosttyKeyEncoder,
+        option: GhosttyKeyEncoderOption,
+        value: *const ::std::os::raw::c_void,
+    );
+}
+unsafe extern "C" {
+    pub fn ghostty_key_encoder_setopt_from_terminal(
+        encoder: GhosttyKeyEncoder,
+        terminal: GhosttyTerminal,
+    );
+}
+unsafe extern "C" {
+    pub fn ghostty_key_encoder_encode(
+        encoder: GhosttyKeyEncoder,
+        event: GhosttyKeyEvent,
+        out_buf: *mut ::std::os::raw::c_char,
+        out_buf_size: usize,
+        out_len: *mut usize,
+    ) -> GhosttyResult;
+}

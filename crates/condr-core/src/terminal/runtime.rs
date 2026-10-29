@@ -286,15 +286,17 @@ impl TerminalRuntime {
 
     /// Paste and delayed Enter share one queue entry, so another client cannot split them.
     pub fn submit(&self, text: &str) -> io::Result<()> {
-        let modes = lock_pane(&self.terminal)?.modes();
-        let bytes = encode_paste(text, modes.contains(TermMode::BRACKETED_PASTE));
-        let enter = encode_key_in_mode(
-            &TerminalKey::Enter,
-            TerminalModifiers::default(),
-            TerminalKeyEventKind::Press,
-            modes,
-            false,
-        )?;
+        let (bytes, enter) = {
+            let mut terminal = lock_pane(&self.terminal)?;
+            let bracketed = terminal.modes().contains(TermMode::BRACKETED_PASTE);
+            let enter = terminal.encode_key(
+                &TerminalKey::Enter,
+                TerminalModifiers::default(),
+                TerminalKeyEventKind::Press,
+                false,
+            )?;
+            (encode_paste(text, bracketed), enter)
+        };
         self.scroll_to_bottom();
         self.clear_selection();
         self.input.try_submit(bytes, enter)
@@ -364,11 +366,10 @@ impl TerminalRuntime {
                         });
                     }
                 } else {
-                    let bytes = encode_key_in_mode(
+                    let bytes = lock_pane(&self.terminal)?.encode_key(
                         &key,
                         modifiers,
                         kind,
-                        modes,
                         self.reads_kitty_keys.load(Ordering::Relaxed),
                     )?;
                     // Letting go of a key is not input: it neither scrolls to the bottom
@@ -383,8 +384,8 @@ impl TerminalRuntime {
                 Ok(None)
             }
             TerminalCommand::Text(text) => {
-                let modes = lock_pane(&self.terminal)?.modes();
-                self.write(encode_text_in_mode(&text, modes))?;
+                let bytes = lock_pane(&self.terminal)?.encode_text(&text);
+                self.write(bytes)?;
                 Ok(None)
             }
             TerminalCommand::Paste(text) => {

@@ -2,7 +2,7 @@
 //! limits and helpers. Only the `runtime` feature builds it (ADR 0039).
 
 pub(super) use super::cursor_settle::{CURSOR_POSITION_SETTLE_ENABLED, CursorSettle};
-pub(super) use super::encode::{encode_key, encode_key_in_mode, encode_paste, encode_text_in_mode};
+pub(super) use super::encode::{encode_key, encode_legacy_key, encode_paste};
 pub(super) use super::input_queue::*;
 #[cfg(windows)]
 pub(super) use super::job::Job;

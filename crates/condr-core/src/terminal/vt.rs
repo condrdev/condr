@@ -63,13 +63,6 @@ impl TermMode {
     pub(super) const REPORT_ALTERNATE_KEYS: Self = Self(1 << 12);
     pub(super) const REPORT_ALL_KEYS_AS_ESC: Self = Self(1 << 13);
     pub(super) const REPORT_ASSOCIATED_TEXT: Self = Self(1 << 14);
-    pub(super) const KITTY_KEYBOARD_PROTOCOL: Self = Self(
-        Self::DISAMBIGUATE_ESC_CODES.0
-            | Self::REPORT_EVENT_TYPES.0
-            | Self::REPORT_ALTERNATE_KEYS.0
-            | Self::REPORT_ALL_KEYS_AS_ESC.0
-            | Self::REPORT_ASSOCIATED_TEXT.0,
-    );
 
     pub(super) const fn empty() -> Self {
         Self(0)
@@ -101,6 +94,7 @@ impl std::ops::BitOrAssign for TermMode {
 pub(super) struct Vt {
     terminal: ghostty::Terminal,
     render: ghostty::RenderState,
+    keys: ghostty::KeyEncoder,
     /// When the synchronized update now open began.
     held_since: Option<Instant>,
     /// The library's activity token at the last idle check.
@@ -130,9 +124,11 @@ impl Vt {
         })
         .map_err(other_error)?;
         let render = ghostty::RenderState::new().map_err(other_error)?;
+        let keys = ghostty::KeyEncoder::new().map_err(other_error)?;
         Ok(Self {
             terminal,
             render,
+            keys,
             held_since: None,
             compression_seen: None,
         })
@@ -343,6 +339,82 @@ impl Vt {
             .unwrap_or_default();
         let rows: Vec<&str> = text.trim_end_matches('\n').lines().collect();
         rows[rows.len().saturating_sub(lines)..].join("\n")
+    }
+
+    /// What a key sends to the program for the live modes: libghostty-vt encodes it once
+    /// the program negotiated kitty keyboard flags, Condr's legacy encoder otherwise (ADR
+    /// 0051). Cmd+C reaches a program that reads kitty keys without having asked in kitty
+    /// form, which legacy encoding would drop.
+    pub(super) fn encode_key(
+        &mut self,
+        key: &TerminalKey,
+        modifiers: TerminalModifiers,
+        kind: TerminalKeyEventKind,
+        reads_kitty_keys: bool,
+    ) -> io::Result<Vec<u8>> {
+        let cmd = TerminalModifiers {
+            platform: true,
+            ..TerminalModifiers::default()
+        };
+        let cmd_c = modifiers == cmd && matches!(key, TerminalKey::Character(text) if text == "c");
+        let legacy = self.terminal.kitty_keyboard_flags() == 0;
+        let kitty_flags = (legacy && cmd_c && reads_kitty_keys).then_some(KITTY_DISAMBIGUATE);
+        if legacy && kitty_flags.is_none() {
+            return encode_legacy_key(key, modifiers, kind, self.mode(1));
+        }
+        let mut mods = ghostty::Mods {
+            shift: modifiers.shift,
+            ctrl: modifiers.control,
+            alt: modifiers.alt,
+            logo: modifiers.platform,
+        };
+        let (physical, text, unshifted, consumed) = match key {
+            TerminalKey::Character(text) => typed_key(text, modifiers.shift),
+            TerminalKey::BackTab => {
+                mods.shift = true;
+                (
+                    ghostty::PhysicalKey::Tab,
+                    "",
+                    None,
+                    ghostty::Mods::default(),
+                )
+            }
+            named => (named_key(named), "", None, ghostty::Mods::default()),
+        };
+        let action = match kind {
+            TerminalKeyEventKind::Press => ghostty::KeyAction::Press,
+            TerminalKeyEventKind::Repeat => ghostty::KeyAction::Repeat,
+            TerminalKeyEventKind::Release => ghostty::KeyAction::Release,
+        };
+        let event = ghostty::KeyEvent {
+            key: physical,
+            action,
+            mods,
+            consumed,
+            text,
+            unshifted,
+        };
+        Ok(self.keys.encode(&self.terminal, &event, kitty_flags))
+    }
+
+    /// Typed text. While every key must be reported as an escape code, a single character
+    /// goes out as its key; longer commits, such as IME input, stay plain text.
+    pub(super) fn encode_text(&mut self, text: &str) -> Vec<u8> {
+        let mut chars = text.chars();
+        let single = matches!((chars.next(), chars.next()), (Some(_), None));
+        if !single || self.terminal.kitty_keyboard_flags() & KITTY_REPORT_ALL == 0 {
+            return text.as_bytes().to_vec();
+        }
+        let (physical, text, unshifted, consumed) = typed_key(text, true);
+        let event = ghostty::KeyEvent {
+            key: physical,
+            action: ghostty::KeyAction::Press,
+            mods: consumed,
+            consumed,
+            text,
+            unshifted,
+        };
+        self.keys.encode(&self.terminal, &event, None)
     }
 
     /// Where the cursor sits in the viewport and whether it shows, read without an update
@@ -563,6 +635,88 @@ impl Hyperlinks {
         self.bytes = bytes;
         self.values.insert(uri.clone());
         Some(uri)
+    }
+}
+
+/// Kitty keyboard flags: disambiguate escape codes, and report every key as one.
+const KITTY_DISAMBIGUATE: u8 = 1;
+const KITTY_REPORT_ALL: u8 = 8;
+
+/// The US-layout key that types `text`, and whether Shift made it: the protocol carries
+/// text and named keys, not physical keys, so the Server derives one (ADR 0051).
+fn typed_key(
+    text: &str,
+    shift_held: bool,
+) -> (ghostty::PhysicalKey, &str, Option<char>, ghostty::Mods) {
+    let mut chars = text.chars();
+    let (Some(typed), None) = (chars.next(), chars.next()) else {
+        return (
+            ghostty::PhysicalKey::Unidentified,
+            text,
+            None,
+            ghostty::Mods::default(),
+        );
+    };
+    const SHIFTED: [(char, char); 21] = [
+        ('~', '`'),
+        ('!', '1'),
+        ('@', '2'),
+        ('#', '3'),
+        ('$', '4'),
+        ('%', '5'),
+        ('^', '6'),
+        ('&', '7'),
+        ('*', '8'),
+        ('(', '9'),
+        (')', '0'),
+        ('_', '-'),
+        ('+', '='),
+        ('{', '['),
+        ('}', ']'),
+        ('|', '\\'),
+        (':', ';'),
+        ('"', '\''),
+        ('<', ','),
+        ('>', '.'),
+        ('?', '/'),
+    ];
+    let (base, shifted) = if typed.is_ascii_uppercase() {
+        (typed.to_ascii_lowercase(), true)
+    } else if let Some(&(_, base)) = SHIFTED.iter().find(|(shifted, _)| *shifted == typed) {
+        (base, true)
+    } else {
+        (typed, false)
+    };
+    let physical = if base.is_ascii_graphic() || base == ' ' {
+        ghostty::PhysicalKey::Char(base)
+    } else {
+        ghostty::PhysicalKey::Unidentified
+    };
+    let consumed = ghostty::Mods {
+        shift: shifted && shift_held,
+        ..ghostty::Mods::default()
+    };
+    (physical, text, Some(base), consumed)
+}
+
+fn named_key(key: &TerminalKey) -> ghostty::PhysicalKey {
+    match key {
+        TerminalKey::Enter => ghostty::PhysicalKey::Enter,
+        TerminalKey::Tab | TerminalKey::BackTab => ghostty::PhysicalKey::Tab,
+        TerminalKey::Backspace => ghostty::PhysicalKey::Backspace,
+        TerminalKey::Delete => ghostty::PhysicalKey::Delete,
+        TerminalKey::Escape => ghostty::PhysicalKey::Escape,
+        TerminalKey::Up => ghostty::PhysicalKey::Up,
+        TerminalKey::Down => ghostty::PhysicalKey::Down,
+        TerminalKey::Right => ghostty::PhysicalKey::Right,
+        TerminalKey::Left => ghostty::PhysicalKey::Left,
+        TerminalKey::Home => ghostty::PhysicalKey::Home,
+        TerminalKey::End => ghostty::PhysicalKey::End,
+        TerminalKey::PageUp => ghostty::PhysicalKey::PageUp,
+        TerminalKey::PageDown => ghostty::PhysicalKey::PageDown,
+        TerminalKey::Insert => ghostty::PhysicalKey::Insert,
+        TerminalKey::Function(number) => ghostty::PhysicalKey::Function(*number),
+        TerminalKey::Character(_) => ghostty::PhysicalKey::Unidentified,
     }
 }
 
