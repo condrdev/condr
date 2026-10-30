@@ -109,6 +109,12 @@ impl TerminalNoticeProbe {
             finished_commands: std::mem::take(&mut notices.finished_commands),
         }
     }
+
+    /// How long until a progress the program stopped updating times out, while one shows,
+    /// so the monitor takes the notices then (ADR 0054).
+    pub fn progress_timeout(&self) -> Option<Duration> {
+        lock_pane(&self.notices).ok()?.progress_timeout()
+    }
 }
 
 /// Tracks which agent occupies one Terminal: the process probe names it, and its state is

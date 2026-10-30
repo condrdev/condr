@@ -150,14 +150,16 @@ impl TerminalNotices {
     /// its bar. An OSC 7501 record is a state the program holds without repeating it, so
     /// its progress lasts until a report, a prompt or the program's exit ends it.
     pub(super) fn take_progress(&mut self) -> Option<Option<TerminalProgress>> {
-        if !self.progress_from_status
-            && self
-                .progress_at
-                .is_some_and(|reported| reported.elapsed() >= PROGRESS_TIMEOUT)
-        {
+        if self.progress_timeout().is_some_and(|left| left.is_zero()) {
             self.record_progress(None);
         }
         std::mem::take(&mut self.progress_changed).then_some(self.progress)
+    }
+
+    /// How long an OSC 9;4 progress has left before it times out, while one shows.
+    pub(super) fn progress_timeout(&self) -> Option<Duration> {
+        let reported = self.progress_at.filter(|_| !self.progress_from_status)?;
+        Some(PROGRESS_TIMEOUT.saturating_sub(reported.elapsed()))
     }
 
     fn record_notification(&mut self, title: &str, body: &str) {

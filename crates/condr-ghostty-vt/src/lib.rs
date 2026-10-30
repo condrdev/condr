@@ -940,10 +940,6 @@ unsafe fn take_allocated(text: *mut u8, len: usize) -> String {
     copied
 }
 
-/// A borrowed array the library passed, which it may give as a null pointer when empty.
-///
-/// # Safety
-/// `data` must be null or point at `len` readable values that outlive `'a`.
 /// Sends libghostty-vt's own log to `tracing` (ADR 0019), once per process. The parser
 /// logs what it skips sequence by sequence, so only an error stays above debug: a
 /// program's output cannot flood the log.
@@ -989,6 +985,10 @@ extern "C" fn library_log(
     });
 }
 
+/// A borrowed array the library passed, which it may give as a null pointer when empty.
+///
+/// # Safety
+/// `data` must be null or point at `len` readable values that outlive `'a`.
 unsafe fn borrowed<'a, T>(data: *const T, len: usize) -> &'a [T] {
     if data.is_null() || len == 0 {
         return &[];

@@ -9,14 +9,14 @@ use cache::{ShapedCell, TerminalRenderCacheKey, cell_font};
 use colors::{ContrastMemo, is_app_chosen_exact_color, is_decorative_character, terminal_color};
 use condr_core::protocol::RuntimeEpoch;
 use condr_core::{
-    CELL_FAINT, CELL_INVERSE, CELL_INVISIBLE, CELL_OVERLINE, CELL_STRIKETHROUGH, CELL_UNDERLINE,
-    CELL_UNDERLINE_CURLY, CELL_UNDERLINE_DASHED, CELL_UNDERLINE_DOTTED, CELL_UNDERLINE_DOUBLE,
-    CELL_UNDERLINE_SINGLE, CELL_WIDE, CELL_WIDTH, DEFAULT_ANSI_COLORS, DEFAULT_BACKGROUND_COLOR,
-    DEFAULT_CURSOR_COLOR, DEFAULT_FOREGROUND_COLOR, DETECTED_LINK_FLAG, PaneId, TerminalColor,
-    TerminalColors, TerminalCursorShape, TerminalModifiers, TerminalMouseButton,
-    TerminalMouseEvent, TerminalMousePosition, TerminalMouseTracking, TerminalMouseWheel,
-    TerminalPosition, TerminalSelection, TerminalSide, TerminalSize, TerminalView,
-    default_indexed_color,
+    CELL_BOLD, CELL_FAINT, CELL_INVERSE, CELL_INVISIBLE, CELL_ITALIC, CELL_OVERLINE,
+    CELL_STRIKETHROUGH, CELL_UNDERLINE, CELL_UNDERLINE_CURLY, CELL_UNDERLINE_DASHED,
+    CELL_UNDERLINE_DOTTED, CELL_UNDERLINE_DOUBLE, CELL_UNDERLINE_SINGLE, CELL_WIDE, CELL_WIDTH,
+    DEFAULT_ANSI_COLORS, DEFAULT_BACKGROUND_COLOR, DEFAULT_CURSOR_COLOR, DEFAULT_FOREGROUND_COLOR,
+    DETECTED_LINK_FLAG, PaneId, TerminalColor, TerminalColors, TerminalCursorShape,
+    TerminalModifiers, TerminalMouseButton, TerminalMouseEvent, TerminalMousePosition,
+    TerminalMouseTracking, TerminalMouseWheel, TerminalPosition, TerminalSelection, TerminalSide,
+    TerminalSize, TerminalView, default_indexed_color,
 };
 pub(crate) use decoration::Decorations;
 #[cfg(test)]
@@ -330,9 +330,9 @@ impl Element for TerminalElement {
                     continue;
                 }
 
-                // The lines are `decorations`', so the same text shapes once whatever its
-                // underline.
-                let shape_flags = flags & !(CELL_UNDERLINE | CELL_OVERLINE);
+                // Only what changes the glyphs keys the shape: the lines are `decorations`',
+                // and width, link and wrap marks draw nothing.
+                let shape_flags = flags & (CELL_BOLD | CELL_ITALIC | CELL_STRIKETHROUGH);
                 let line = render_cache.shaped_line(&cell.text, foreground, shape_flags, || {
                     let font = cell_font(style.font(), &cell.text, flags);
                     let strikethrough =

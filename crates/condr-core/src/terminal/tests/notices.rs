@@ -159,13 +159,21 @@ fn progress_is_recorded_once_per_change_and_cleared_by_remove_reset_and_silence(
 
     feed(&mut vt, &notices, b"\x1b]9;4;4;10\x07");
     assert!(probe.take().progress.is_some());
+    assert!(
+        probe
+            .progress_timeout()
+            .is_some_and(|left| !left.is_zero() && left <= PROGRESS_TIMEOUT),
+        "the monitor wakes when the bar would time out"
+    );
     notices.lock().unwrap().progress_at = Instant::now().checked_sub(PROGRESS_TIMEOUT);
+    assert_eq!(probe.progress_timeout(), Some(Duration::ZERO));
     assert_eq!(
         probe.take().progress,
         Some(None),
         "a silent program loses its bar"
     );
     assert!(probe.take().is_empty());
+    assert_eq!(probe.progress_timeout(), None, "no bar, no wakeup");
 }
 
 #[test]
@@ -299,6 +307,11 @@ fn a_programs_own_status_percentage_shows_as_its_progress_until_a_report_moves_o
         progress(TerminalProgressState::Paused, 60)
     );
     notices.lock().unwrap().progress_at = Instant::now().checked_sub(PROGRESS_TIMEOUT);
+    assert_eq!(
+        probe.progress_timeout(),
+        None,
+        "a report's bar never times out"
+    );
     assert_eq!(probe.take().progress, None, "still waiting, still shown");
     notices.lock().unwrap().end_status_progress();
     assert_eq!(probe.take().progress, Some(None), "the program left");

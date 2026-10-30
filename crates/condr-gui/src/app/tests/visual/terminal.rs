@@ -1909,6 +1909,7 @@ fn underlines_and_overlines_are_drawn_apart_from_the_text_in_their_own_colour() 
     use crate::terminal_element::{Decoration, LineStyle};
     use condr_core::{
         CELL_OVERLINE, CELL_UNDERLINE_CURLY, CELL_UNDERLINE_DOTTED, CELL_UNDERLINE_DOUBLE,
+        CELL_WRAPPED,
     };
     let _serial_guard = acquire_visual_test_lock();
     let workspace_root = TestDirectory::new("terminal-decorations");
@@ -1972,7 +1973,7 @@ fn underlines_and_overlines_are_drawn_apart_from_the_text_in_their_own_colour() 
             cell("a", 0, TerminalColor::Default),
             cell("b", CELL_UNDERLINE_DOUBLE, TerminalColor::Default),
             cell(" ", 0, TerminalColor::Default),
-            cell(" ", 0, TerminalColor::Default),
+            cell("c", CELL_WRAPPED, TerminalColor::Default),
         ],
         cursor: None,
     };
@@ -2022,7 +2023,7 @@ fn underlines_and_overlines_are_drawn_apart_from_the_text_in_their_own_colour() 
     assert_eq!(
         cache.borrow().shaped_cells(),
         3,
-        "a, b and c shape once each, underlined or not"
+        "a, b and c shape once each, underlined, overlined or soft-wrapped"
     );
 }
 

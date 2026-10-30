@@ -672,12 +672,11 @@ impl Vt {
     }
 
     /// One bounded step of compressing the scrollback, once no output has arrived since
-    /// the last look; `true` while more steps remain and the terminal is still idle.
-    pub(super) fn compress_step_if_idle(&mut self) -> bool {
+    /// the last look: whether more steps remain, or `None` when output arrived.
+    pub(super) fn compress_step_if_idle(&mut self) -> Option<bool> {
         let activity = self.terminal.compression_activity();
-        let idle = self.compression_seen == Some(activity);
-        self.compression_seen = Some(activity);
-        idle && !self.terminal.compress()
+        let idle = self.compression_seen.replace(activity) == Some(activity);
+        idle.then(|| !self.terminal.compress())
     }
 
     #[cfg(test)]

@@ -224,13 +224,13 @@ fn idle_scrollback_is_compressed_to_the_end_and_reads_back_unchanged() {
     let before = terminal.lock().unwrap().resident_bytes();
     let tail = terminal.lock().unwrap().recent_text(3);
 
-    source.compress_if_idle();
+    assert!(source.compress_if_idle(), "look again once output stops");
     assert_eq!(
         terminal.lock().unwrap().resident_bytes(),
         before,
         "the first look only notes activity"
     );
-    source.compress_if_idle();
+    assert!(!source.compress_if_idle(), "nothing left until more output");
     let after = terminal.lock().unwrap().resident_bytes();
     if cfg!(any(target_os = "macos", target_os = "linux")) {
         assert!(
@@ -239,6 +239,8 @@ fn idle_scrollback_is_compressed_to_the_end_and_reads_back_unchanged() {
         );
     }
     assert_eq!(terminal.lock().unwrap().recent_text(3), tail);
+    terminal.lock().unwrap().write(line.as_bytes());
+    assert!(source.compress_if_idle(), "new output wants another look");
 }
 
 #[test]

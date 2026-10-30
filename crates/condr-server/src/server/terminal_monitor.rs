@@ -71,18 +71,36 @@ fn publish_frames(
     let mut last_view_publish = Instant::now()
         .checked_sub(TERMINAL_FRAME_INTERVAL)
         .unwrap_or_else(Instant::now);
+    // Output since the scrollback was last compressed to the end.
+    let mut compression_pending = true;
     loop {
-        // A held cursor move or an open synchronized update times out without new output;
-        // an idle Pane's scrollback is compressed once output has stopped (ADR 0051).
+        // A held cursor move or an open synchronized update times out without new output.
+        // An idle Pane looks again only while its scrollback may still be compressed (ADR
+        // 0051) or a progress may time out (ADR 0054); otherwise it sleeps until output.
         let wait = view_source.frame_wakeup();
-        let update = match updates.recv_timeout(wait.unwrap_or(condr_core::TERMINAL_IDLE_CHECK)) {
-            Ok(update) => update,
+        let idle = compression_pending
+            .then_some(condr_core::TERMINAL_IDLE_CHECK)
+            .into_iter()
+            .chain(notice_probe.progress_timeout())
+            .min();
+        let received = match wait.or(idle) {
+            Some(timeout) => updates.recv_timeout(timeout),
+            None => updates
+                .recv()
+                .map_err(|_| mpsc::RecvTimeoutError::Disconnected),
+        };
+        let update = match received {
+            Ok(update) => {
+                compression_pending = true;
+                update
+            }
             Err(mpsc::RecvTimeoutError::Timeout) if wait.is_some() => {
                 TerminalUpdate::View(view_source.revision())
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                view_source.compress_if_idle();
-                // A progress the program stopped updating times out here (ADR 0054).
+                if compression_pending {
+                    compression_pending = view_source.compress_if_idle();
+                }
                 if !take_notices(notice_probe, state, pane_id, instance_id) {
                     return false;
                 }
