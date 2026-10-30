@@ -1,3 +1,5 @@
 website/** linguist-documentation
 # Raw PTY output the VT replay test feeds (ADR 0051): bytes, never line-ending fixed.
 crates/condr-core/tests/vt/*.pty binary
+# The screens it compares them with, read byte for byte: LF on Windows too.
+crates/condr-core/tests/vt/*.screens text eol=lf

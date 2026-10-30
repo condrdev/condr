@@ -205,7 +205,8 @@ fn a_synchronized_update_holds_frames_until_it_ends_or_times_out() {
     terminal.lock().unwrap().held_since =
         Instant::now().checked_sub(super::vt::RENDER_HOLD_TIMEOUT);
     assert!(source.take_frame().is_some(), "the hold timed out");
-    assert_eq!(source.frame_wakeup(), None);
+    // Not `frame_wakeup`: on Windows the cursor that moved still settles.
+    assert_eq!(terminal.lock().unwrap().hold_remaining(), None);
 }
 
 /// ADR 0051: once output stops, the monitor's idle checks compress the whole scrollback,
