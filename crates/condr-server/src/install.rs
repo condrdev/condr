@@ -13,6 +13,13 @@ use serde_json::json;
 use crate::{ServerConfig, probe_server};
 
 const BINARY: &str = if cfg!(windows) { "condr.exe" } else { "condr" };
+/// Microsoft's ConPTY, which portable-pty loads from beside `condr.exe` (ADR 0056); it is
+/// installed and removed with the binary.
+const CONPTY: &[&str] = if cfg!(windows) {
+    &["conpty.dll", "OpenConsole.exe"]
+} else {
+    &[]
+};
 #[cfg_attr(not(unix), allow(dead_code))]
 const PROFILE_MARKER: &str = "# condr user bin";
 #[cfg_attr(not(unix), allow(dead_code))]
@@ -453,7 +460,16 @@ pub fn install(options: InstallOptions) -> io::Result<i32> {
         );
         replaced
     };
-    for leftover in sweep_old_files(target.parent().expect("install path has a directory")) {
+    let source_dir = source.parent().expect("an executable has a directory");
+    let dir = target.parent().expect("install path has a directory");
+    for name in CONPTY {
+        let (from, to) = (source_dir.join(name), dir.join(name));
+        // A binary without it beside still runs, on Windows' own ConPTY.
+        if from.is_file() && !same_file(&from, &to) {
+            place_binary(&from, &to)?;
+        }
+    }
+    for leftover in sweep_old_files(dir) {
         steps.say("Left", format!("{} is still in use", leftover.display()));
     }
     register_path(&target, &steps)?;
@@ -563,31 +579,30 @@ pub fn uninstall(options: UninstallOptions) -> io::Result<i32> {
     };
 
     let mut leftovers = Vec::new();
-    match fs::remove_file(&target) {
-        Ok(()) => steps.say("Binary", format!("removed {}", target.display())),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            steps.say("Binary", format!("{} was not installed", target.display()));
-        }
-        Err(error) if cfg!(windows) => {
-            // The running condr.exe cannot delete itself; a later install sweeps it.
-            let old = dir.join(format!("condr-{:x}.old", unique_suffix()));
-            fs::rename(&target, &old)
-                .map_err(|_| detail(format!("could not remove {}", target.display()), error))?;
-            steps.say(
-                "Binary",
-                format!(
-                    "{} is in use; renamed to {}",
-                    target.display(),
-                    old.display()
-                ),
-            );
-            leftovers.push(old);
-        }
-        Err(error) => {
-            return Err(detail(
-                format!("could not remove {}", target.display()),
-                error,
-            ));
+    for path in std::iter::once(target.clone()).chain(CONPTY.iter().map(|name| dir.join(name))) {
+        match fs::remove_file(&path) {
+            Ok(()) => steps.say("Binary", format!("removed {}", path.display())),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                steps.say("Binary", format!("{} was not installed", path.display()));
+            }
+            Err(error) if cfg!(windows) => {
+                // A file in use, the running condr.exe first, cannot be deleted; a later
+                // install sweeps it.
+                let old = dir.join(format!("condr-{:x}.old", unique_suffix()));
+                fs::rename(&path, &old)
+                    .map_err(|_| detail(format!("could not remove {}", path.display()), error))?;
+                steps.say(
+                    "Binary",
+                    format!("{} is in use; renamed to {}", path.display(), old.display()),
+                );
+                leftovers.push(old);
+            }
+            Err(error) => {
+                return Err(detail(
+                    format!("could not remove {}", path.display()),
+                    error,
+                ));
+            }
         }
     }
     leftovers.extend(sweep_old_files(&dir));

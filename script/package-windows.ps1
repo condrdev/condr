@@ -15,14 +15,17 @@ $packageVersion = $Version
 if (-not $Release) { $packageVersion += '-' + $Commit.Substring(0, 12) }
 New-Item -ItemType Directory -Force -Path $Dist | Out-Null
 
+# condr.exe loads the ConPTY its build put beside it instead of Windows' own (ADR 0056).
+$conpty = 'target\release\conpty.dll', 'target\release\OpenConsole.exe'
+
 $fullStage = Join-Path $Dist 'condr'
 New-Item -ItemType Directory -Force -Path $fullStage | Out-Null
-Copy-Item target\release\condr-gui.exe, target\release\condr.exe, LICENSE $fullStage
+Copy-Item (@('target\release\condr-gui.exe', 'target\release\condr.exe', 'LICENSE') + $conpty) $fullStage
 Set-Content -Encoding ascii -Path (Join-Path $fullStage BUILD-COMMIT) -Value $Commit
 
 $headlessStage = Join-Path $Dist 'condr-headless'
 New-Item -ItemType Directory -Force -Path $headlessStage | Out-Null
-Copy-Item target\release\condr.exe, LICENSE $headlessStage
+Copy-Item (@('target\release\condr.exe', 'LICENSE') + $conpty) $headlessStage
 Set-Content -Encoding ascii -Path (Join-Path $headlessStage BUILD-COMMIT) -Value $Commit
 Compress-Archive -Path $headlessStage -DestinationPath (Join-Path $Dist "condr-headless-$packageVersion-windows-x86_64.zip") -Force
 

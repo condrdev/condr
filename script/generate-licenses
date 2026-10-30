@@ -58,6 +58,10 @@ trap 'rm -f "$TMP" "$ABOUT"' EXIT
     echo
     cat crates/condr-ghostty-vt/NOTICE
     echo
+    echo "## Windows console host"
+    echo
+    cat crates/condr-server/NOTICE
+    echo
     echo "## Rust crates"
     echo
 } > "$TMP"

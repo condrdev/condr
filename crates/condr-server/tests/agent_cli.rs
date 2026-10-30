@@ -953,3 +953,98 @@ fn a_finished_turn_pushes_once_to_condr_cloud() {
         "Idle -> Working -> Done pushes exactly once"
     );
 }
+
+/// A program in a Windows Pane hears the terminal's OSC answers, the OSC 7501 one ahead of
+/// DA1's, as Claude Code needs before it reports its state: the ConPTY beside condr.exe
+/// passes them on, where Windows' own drops every OSC in its input and answers DA1 itself
+/// (ADR 0056).
+#[cfg(windows)]
+#[test]
+fn a_windows_pane_program_hears_osc_answers_before_da1() {
+    let server = Server::start();
+    let pane = server.pane();
+    let replies = server.root.join("replies");
+    let probe = format!(
+        "$env:CONDR_TEST_REPLIES = '{}'; & '{}' --exact windows_query_probe --nocapture",
+        replies.display(),
+        std::env::current_exe().unwrap().display()
+    );
+    server.ok(&["pane", "run", &pane, &probe]);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let replies = loop {
+        if let Ok(replies) = std::fs::read(&replies) {
+            break replies;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no replies; {}",
+            server.diagnostics()
+        );
+        thread::sleep(Duration::from_millis(20));
+    };
+    let at = |reply: &[u8]| {
+        replies
+            .windows(reply.len())
+            .position(|bytes| bytes == reply)
+    };
+    let text = String::from_utf8_lossy(&replies);
+    let da1 = at(b"\x1b[?").unwrap_or_else(|| panic!("no DA1 reply in {text:?}"));
+    let status = at(b"\x1b]7501;?").unwrap_or_else(|| panic!("no OSC 7501 answer in {text:?}"));
+    let background = at(b"\x1b]11;rgb:").unwrap_or_else(|| panic!("no OSC 11 answer in {text:?}"));
+    assert!(status < da1 && background < da1, "{text:?}");
+}
+
+/// Run in a Pane by the test above: asks what Claude Code asks, the Program Status
+/// Protocol and then DA1, with the background colour between, and writes what came back
+/// up to the end of DA1's reply.
+#[cfg(windows)]
+#[test]
+#[allow(unsafe_code)] // The console mode has no safe wrapper.
+fn windows_query_probe() {
+    use std::io::{Read as _, Write as _};
+    use windows_sys::Win32::System::Console::{
+        ENABLE_ECHO_INPUT, ENABLE_LINE_INPUT, ENABLE_PROCESSED_INPUT,
+        ENABLE_VIRTUAL_TERMINAL_INPUT, ENABLE_VIRTUAL_TERMINAL_PROCESSING, GetConsoleMode,
+        GetStdHandle, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, SetConsoleMode,
+    };
+
+    let Some(path) = std::env::var_os("CONDR_TEST_REPLIES") else {
+        return;
+    };
+    // VT both ways, as a TUI sets it: the queries go out as sequences, and each answer
+    // arrives as the bytes it was sent as.
+    let (input, output) = unsafe {
+        (
+            GetStdHandle(STD_INPUT_HANDLE),
+            GetStdHandle(STD_OUTPUT_HANDLE),
+        )
+    };
+    let (mut shell_input, mut shell_output) = (0, 0);
+    unsafe { GetConsoleMode(input, &mut shell_input) };
+    unsafe { GetConsoleMode(output, &mut shell_output) };
+    let raw = shell_input & !(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT)
+        | ENABLE_VIRTUAL_TERMINAL_INPUT;
+    unsafe { SetConsoleMode(input, raw) };
+    unsafe { SetConsoleMode(output, shell_output | ENABLE_VIRTUAL_TERMINAL_PROCESSING) };
+
+    let mut stdout = std::io::stdout();
+    stdout
+        .write_all(b"\x1b]7501;?\x1b\\\x1b]11;?\x07\x1b[c")
+        .unwrap();
+    stdout.flush().unwrap();
+    let mut replies = Vec::new();
+    let mut byte = [0];
+    // DA1's reply ends in `c`; nothing asked for comes after it.
+    while !(replies.windows(3).any(|bytes| bytes == b"\x1b[?") && replies.ends_with(b"c")) {
+        if std::io::stdin().read(&mut byte).unwrap() == 0 {
+            break;
+        }
+        replies.push(byte[0]);
+    }
+    unsafe { SetConsoleMode(input, shell_input) };
+    unsafe { SetConsoleMode(output, shell_output) };
+    // Renamed into place, so the test never reads half of it.
+    let partial = PathBuf::from(&path).with_extension("partial");
+    std::fs::write(&partial, replies).unwrap();
+    std::fs::rename(partial, path).unwrap();
+}

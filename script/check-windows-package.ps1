@@ -16,10 +16,11 @@ try {
   $installer = @(Get-ChildItem $Dist -Filter 'condr-*-windows-x86_64.exe')
   if ($headlessZip.Count -ne 1 -or $installer.Count -ne 1) { throw 'expected one headless ZIP and installer' }
 
-  # The headless ZIP carries only the CLI, at this commit.
+  # The headless ZIP carries only the CLI and the ConPTY it loads (ADR 0056), at this commit.
+  $conpty = 'conpty.dll', 'OpenConsole.exe'
   Expand-Archive $headlessZip[0].FullName (Join-Path $stage 'headless')
   $headless = Join-Path $stage 'headless\condr-headless'
-  foreach ($name in 'condr.exe', 'LICENSE', 'BUILD-COMMIT') {
+  foreach ($name in @('condr.exe', 'LICENSE', 'BUILD-COMMIT') + $conpty) {
     if (-not (Test-Path (Join-Path $headless $name) -PathType Leaf)) { throw "headless ZIP is missing $name" }
   }
   if (Test-Path (Join-Path $headless 'condr-gui.exe')) { throw 'headless ZIP contains the GUI' }
@@ -36,7 +37,9 @@ try {
     throw "GUI installer failed: $($process.ExitCode)"
   }
   if ((Get-Content (Join-Path $gui 'BUILD-COMMIT') -Raw).Trim() -ne $commit) { throw 'GUI installer has the wrong commit' }
-  if (-not (Test-Path (Join-Path $gui 'LICENSE') -PathType Leaf)) { throw 'GUI installer is missing LICENSE' }
+  foreach ($name in @('LICENSE') + $conpty) {
+    if (-not (Test-Path (Join-Path $gui $name) -PathType Leaf)) { throw "GUI installer is missing $name" }
+  }
   $guiHash = (Get-FileHash (Join-Path $gui 'condr-gui.exe')).Hash
   & (Join-Path $gui 'condr.exe') server --help
   if ($LASTEXITCODE -ne 0) { throw 'installed GUI bundle CLI failed' }
@@ -95,6 +98,9 @@ try {
       & (Join-Path $PSScriptRoot 'install-condr.ps1') -From $headlessZip[0].FullName
       & (Join-Path $destination 'condr.exe') server --help
       if ($LASTEXITCODE -ne 0) { throw 'installed CLI failed' }
+      foreach ($name in $conpty) {
+        if (-not (Test-Path (Join-Path $destination $name) -PathType Leaf)) { throw "CLI install is missing $name" }
+      }
       $pathEntries = @([Environment]::GetEnvironmentVariable('Path', 'User') -split ';' | Where-Object { $_ -eq $destination })
       if ($pathEntries.Count -ne 1) { throw 'CLI installer must register PATH exactly once' }
     }

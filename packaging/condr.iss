@@ -38,6 +38,9 @@ UninstallDisplayIcon={app}\condr-gui.exe
 
 [Files]
 Source: "{#BundleDir}\condr.exe"; DestDir: "{app}"
+; The ConPTY condr.exe loads from beside itself instead of Windows' own (ADR 0056).
+Source: "{#BundleDir}\conpty.dll"; DestDir: "{app}"
+Source: "{#BundleDir}\OpenConsole.exe"; DestDir: "{app}"
 Source: "{#BundleDir}\condr-gui.exe"; DestDir: "{app}"
 Source: "{#BundleDir}\LICENSE"; DestDir: "{app}"
 Source: "{#BundleDir}\BUILD-COMMIT"; DestDir: "{app}"

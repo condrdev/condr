@@ -28,7 +28,7 @@ Condr splits the runtime and the interface into two processes. The Server hosts 
 
 ## Terminal frames
 
-1. The Server creates the PTY through `portable-pty`. On Windows it uses ConPTY, and each terminal's processes go into their own Job Object, so closing a Pane ends them together.
+1. The Server creates the PTY through `portable-pty`. On Windows it uses ConPTY, Microsoft's own from Windows Terminal, which Condr ships beside `condr.exe` because the one Windows has keeps a terminal's colour and status answers from programs, and each terminal's processes go into their own Job Object, so closing a Pane ends them together.
 2. PTY output goes to `libghostty-vt`, Ghostty's terminal core, which parses it.
 3. While parsing, it hands the Server what is not screen content: OSC 7 updates the current working directory, OSC 7501 carries Program Status Protocol reports, and OSC 777 carries Agent events.
 4. The Server coalesces wakeups at 60 Hz and reads again only the rows `libghostty-vt` marks changed: a full-screen change produces a complete frame, a partial change produces only the changed cells.
