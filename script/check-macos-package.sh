@@ -39,7 +39,13 @@ if [ "${CONDR_SIGNING_IDENTITY:--}" != - ]; then
     done
 fi
 if [ -n "${CONDR_NOTARY_PROFILE:-}${CONDR_NOTARY_KEY:-}" ]; then
-    xcrun stapler validate "$1"
+    # The same CloudKit lookup that stapling retries in package-macos.sh.
+    for attempt in 1 2 3 4 5; do
+        xcrun stapler validate "$1" && break
+        [ "$attempt" -lt 5 ] || exit 1
+        echo "validating the staple failed (attempt $attempt), retrying in 15 s" >&2
+        sleep 15
+    done
     spctl --assess --type execute "$app"
 fi
 
