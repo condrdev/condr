@@ -12,7 +12,8 @@ After editing the SVG, regenerate and commit its derived assets:
 cargo run --locked -p condr-gui --example generate_icons
 ```
 
-- `condr.png`: embedded in the GUI title bars and Start Page, and supplied to X11.
+- `condr.png`: embedded in the GUI title bars and Start Page, supplied to X11, and
+  the AppImage's `.DirIcon`.
 - `condr.ico`: 16, 32, 48, 64, 128 and 256 pixel images, embedded as resource 1
   in both Windows executables and used by Inno Setup. Shortcuts and the uninstall
   entry use the GUI executable's icon.

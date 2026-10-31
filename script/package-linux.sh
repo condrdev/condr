@@ -65,5 +65,7 @@ fi
 exec "$appdir/usr/bin/condr-gui" "$@"
 EOF
 chmod 755 "$appdir/AppRun"
+# appimagetool rejects an SVG .DirIcon, so give it the PNG.
+install -m 644 assets/brand/condr.png "$appdir/.DirIcon"
 mkdir -p "$(dirname "$APPIMAGE_OUTPUT")"
 "$APPIMAGE_TOOL" "$appdir" "$APPIMAGE_OUTPUT"
