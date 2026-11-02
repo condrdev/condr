@@ -7,6 +7,14 @@ Condr organizes terminal-first work across projects while recognizing agent CLI 
 **Server**:
 A long-lived Condr runtime that owns one or more Sessions and their Terminals. Each computer runs one Server: it always answers on a private local socket for the GUI and CLI on that machine, and on a configured TCP address as well for other Devices, as ADR 0013 describes. Closing a Client does not stop it or its work. Over TCP a Server accepts paired Devices (ADR 0011); SSH Clients access it with the remote login user’s permissions (ADR 0015). Server is an engineering term: the interface never shows it, and presents a Server together with the machine it runs on as one Device.
 
+**Autostart**:
+This machine's Server starting by itself when its user logs in, or when the machine boots on Linux, so other Devices and the Companion reach it after a restart (ADR 0057). Off until turned on, and turned on only on the machine itself; the interface calls it "Start Condr at login".
+_Avoid_: service install, daemon, launch at login (that would be the GUI's window)
+
+**Supervisor**:
+The small process every local Server is started through: it runs the Server, starts it again when it crashes, and ends when the Server stops on purpose (ADR 0058). An engineering term; the interface never shows it.
+_Avoid_: monitor (a Pane's monitor is the thread that publishes its frames), watchdog, keeper
+
 **Build identity**:
 What one Condr binary is, as `<version>[+<12-character commit>]` (ADR 0027): the workspace version, plus the commit CI built from. `condr --version` and `condr-gui --version` (with `(nightly)` after a nightly's) and the Server's `Status` report it, `Hello` and `Welcome` exchange it, and the GUI marks a Device whose Server is another build than the window. A different protocol number is a refusal; a different build under the same protocol is only that mark.
 
