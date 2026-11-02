@@ -17,10 +17,10 @@ Condr exists to end that split: **it is an extremely light, millisecond-startup,
 
 ### Lightweight and fast
 
-Condr drops Electron and heavy full-featured remote development environments in favor of a pure Rust stack:
+Condr drops Electron and heavy full-featured remote development environments in favor of a native stack written in Rust:
 
 - **Very low system resource usage**: both the `condr-server` server and the `condr-gui` client compile to compact native machine code with a tiny resident memory footprint, so the server carries almost no extra load.
-- **Millisecond cold start and 60 Hz rendering**: built on a pure Rust virtual terminal core, it keeps a steady frame rate while an Agent streams output, redraws the whole screen or scrolls through a very long scrollback buffer, with no sluggish interaction.
+- **Millisecond cold start and 60 Hz rendering**: built on Ghostty's terminal core (`libghostty-vt`), it keeps a steady frame rate while an Agent streams output, redraws the whole screen or scrolls through a very long scrollback buffer, with no sluggish interaction.
 - **Connect instantly**: no bulky language servers or daemon clusters to bring up on the remote side; pairing finishes and the terminal is ready within seconds.
 
 ### Modern remote connectivity

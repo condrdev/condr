@@ -39,7 +39,7 @@ Condr 由两部分组成：
 - **Agent 状态** — 侧栏显示每个 Agent 正在做什么。Agent 完成任务时，Condr 会向你发送通知。
 - **Agent 驱动** — Agent 也能反向控制 Condr，自动创建窗格、跨窗格任务分发、与其他 Agent 沟通。
 - **真实终端** — 基于 Ghostty 终端内核的真实终端，完整保留原生 Shell 生态，还支持跨设备的截图一键粘贴。
-- **极致流畅** — 纯 Rust 全栈打造，不使用 Electron。体积小，响应快，Agent 忙碌时界面不卡顿。
+- **极致流畅** — 原生全栈，以 Rust 编写，不使用 Electron。体积小，响应快，Agent 忙碌时界面不卡顿。
 - **移动端 App** — 通过手机随时随地管理 Agent，你可以打开任意 Pane 查看或者回复，离开电脑也不耽误。
 
 ## 安装
@@ -108,6 +108,8 @@ Condr 支持在单个窗口中跨机器集中管理本地与远程的所有 Agen
 具体设置步骤见官方文档站 [远程连接](https://condr.dev/zh-cn/docs/using/remote/)。
 
 ## 开发
+
+构建需要 `crates/condr-ghostty-vt/ghostty.toml` 中 `zig = "…"` 指定的精确版本的 Zig，用于编译 `libghostty-vt`；可用 [mise](https://mise.jdx.dev) 安装，例如 `mise use zig@<version>`。
 
 ```bash
 git clone https://github.com/condrdev/condr

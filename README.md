@@ -39,7 +39,7 @@ Condr has two parts:
 - **Agent status** — The sidebar shows what each agent is doing. Condr notifies you when an agent finishes a task.
 - **Agent driven** — Agents can drive Condr in turn: create panes on their own, hand out tasks across panes, and talk to other agents.
 - **Real terminals** — Real terminals built on Ghostty's terminal core keep the whole native shell ecosystem, and paste a screenshot across devices in one step.
-- **Smooth** — Pure Rust from end to end, with no Electron. Small and responsive, even while agents are busy.
+- **Smooth** — Native from end to end, written in Rust with no Electron. Small and responsive, even while agents are busy.
 - **Mobile app** — Manage your agents from your phone wherever you are: open any pane to read or reply, even away from your computer.
 
 ## Install
@@ -109,6 +109,8 @@ Condr manages every agent task, local and remote, across machines from a single 
 See [Remote connections](https://condr.dev/docs/using/remote/) in the docs for the setup steps.
 
 ## Development
+
+Building needs Zig at the exact version `crates/condr-ghostty-vt/ghostty.toml` names (`zig = "…"`), which compiles `libghostty-vt`; install it with [mise](https://mise.jdx.dev), e.g. `mise use zig@<version>`.
 
 ```bash
 git clone https://github.com/condrdev/condr

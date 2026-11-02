@@ -12,6 +12,8 @@ Thanks for your interest. Condr is early and moving fast, so please open an issu
 
 Rust `1.99.1`, pinned in `rust-toolchain.toml` so `rustup` picks it up automatically. CI (`.github/workflows/ci.yml`) runs `cargo fmt --check`, `clippy` and `cargo test` on Linux and Windows for every pull request; see `docs/releases.md` for how builds are published.
 
+Every build of the Server or the GUI also needs Zig at the exact version `crates/condr-ghostty-vt/ghostty.toml` names (`zig = "…"`): its `build.rs` compiles `libghostty-vt` from the pinned Ghostty source, always ReleaseFast. Install it with [mise](https://mise.jdx.dev), e.g. `mise use zig@<version>`. `CONDR_GHOSTTY_VT_SKIP_NATIVE=1` skips the native build, for cross-target Clippy only.
+
 ```bash
 cargo build                 # everything
 cargo run -p condr-gui      # the GUI (needs a display)

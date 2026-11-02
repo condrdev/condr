@@ -128,6 +128,7 @@ cargo clippy --workspace --all-targets --features condr-gui/test-support -- -D w
 cargo fmt --all
 ```
 
+* **Zig is required**: `libghostty-vt` is compiled from source with the exact Zig version `crates/condr-ghostty-vt/ghostty.toml` names (`zig = "…"`); install it with [mise](https://mise.jdx.dev).
 * **Build the GUI on its target OS**: GPUI does not cross-compile, so the window must be built natively on the target system. `condr-core` and `condr-server` build and test without a display.
 * **Optimized dev builds**: the root `Cargo.toml` turns on optimization for GPUI, text shaping, terminal emulation and Condr's hot paths, so `cargo run -p condr-gui` keeps a usable frame rate in a dev build.
 

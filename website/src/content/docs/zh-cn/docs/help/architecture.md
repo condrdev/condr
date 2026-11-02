@@ -128,6 +128,7 @@ cargo clippy --workspace --all-targets --features condr-gui/test-support -- -D w
 cargo fmt --all
 ```
 
+* **需要 Zig**：`libghostty-vt` 用 `crates/condr-ghostty-vt/ghostty.toml` 中 `zig = "…"` 指定的精确 Zig 版本从源码编译，可用 [mise](https://mise.jdx.dev) 安装。
 * **GUI 构建环境限制**：GPUI 不支持交叉编译，窗口必须在目标系统本地构建。`condr-core` 与 `condr-server` 支持在无显示器环境下编译与测试。
 * **开发构建性能优化**：项目根目录 `Cargo.toml` 针对 GPUI、文本排版、终端模拟及 Condr 核心热点路径启用了编译优化，确保 `cargo run -p condr-gui` 在开发构建下保持可用的帧率。
 
