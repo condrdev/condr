@@ -154,6 +154,11 @@ pub(super) fn server_general_page(
                     .keywords(["prompt", "osc 133", "zsh", "bash", "fish"]),
                 ),
         )
+        .group(
+            SettingGroup::new()
+                .title("Startup")
+                .item(autostart_item(this, settings, cx)),
+        )
         // Restart is the Device's own lifecycle, so it lives here for good, apart from
         // the read-only Status; Connections repeats it only while a change waits for it.
         .group(
@@ -161,6 +166,106 @@ pub(super) fn server_general_page(
                 .title("Restart")
                 .item(server_restart_row(this, settings, cx)),
         )
+}
+
+/// What Autostart is called here (ADR 0057): Linux starts the Server at boot.
+const AUTOSTART_TITLE: &str = if cfg!(target_os = "linux") {
+    "Start Condr at boot"
+} else {
+    "Start Condr at login"
+};
+
+/// Whether this machine's login item starts its Server (ADR 0057).
+pub(super) fn autostart_registered() -> bool {
+    condr_server::autostart::registered().is_ok_and(|path| path.is_some())
+}
+
+/// The switch for this machine's Autostart. Another Device's is its own login item,
+/// which no message reaches, so its page says how to change it there.
+fn autostart_item(
+    this: &SettingsWindow,
+    settings: &Entity<SettingsWindow>,
+    cx: &App,
+) -> SettingItem {
+    let local = this
+        .selected_connection(cx, |c| matches!(c.endpoint, Endpoint::Local(_)))
+        .unwrap_or(false);
+    if !local {
+        return SettingItem::new(
+            AUTOSTART_TITLE,
+            SettingField::render(|_, _, cx| {
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Run `condr server autostart on` on that device.")
+            }),
+        )
+        .disabled(true);
+    }
+    SettingItem::new(
+        AUTOSTART_TITLE,
+        SettingField::switch(
+            {
+                let settings = settings.clone();
+                move |cx| settings.read(cx).autostart
+            },
+            {
+                let settings = settings.clone();
+                move |on, cx| set_autostart(&settings, on, cx)
+            },
+        ),
+    )
+    .description(if cfg!(target_os = "linux") {
+        "Condr runs from the moment this computer boots, so your other devices and your \
+         phone reach it after a restart. No window opens."
+    } else {
+        "Condr runs from the moment you log in, so your other devices and your phone reach \
+         it after a restart. No window opens."
+    })
+    .keywords([
+        "autostart",
+        "login",
+        "boot",
+        "startup",
+        "launch agent",
+        "systemd",
+    ])
+}
+
+/// What flipping the Autostart switch does. Registering runs `loginctl` and `systemctl`
+/// on Linux, so it happens off the UI thread; a failure is a toast (ADR 0020), and the
+/// switch then shows what the login item says.
+pub(in crate::app) fn set_autostart(settings: &Entity<SettingsWindow>, on: bool, cx: &mut App) {
+    settings.update(cx, |this, cx| {
+        this.autostart = on;
+        cx.notify();
+    });
+    let owner = settings.read(cx).owner.clone();
+    let what = format!("turn {} {AUTOSTART_TITLE}", if on { "on" } else { "off" });
+    let Ok(done) = owner.update(cx, |owner, cx| {
+        owner.spawn_launch(
+            what,
+            move || {
+                if on {
+                    condr_server::autostart::enable(&condr_server::resolve_server_executable()?)
+                } else {
+                    condr_server::autostart::disable().map(drop)
+                }
+            },
+            cx,
+        )
+    }) else {
+        return;
+    };
+    let settings = settings.downgrade();
+    cx.spawn(async move |cx| {
+        done.await;
+        let _ = settings.update(cx, |this, cx| {
+            this.autostart = autostart_registered();
+            cx.notify();
+        });
+    })
+    .detach();
 }
 
 /// How this machine reaches out (ADR 0038): the proxy its Server's relay connection and

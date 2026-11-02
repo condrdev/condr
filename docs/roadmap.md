@@ -26,7 +26,7 @@ Condr 要守住的差异是原生 GUI 而非 TUI、Windows 一等公民、Server
 
 | 领域 | 现状 |
 | --- | --- |
-| 运行时 | 一机一 Server（ADR 0013）；GUI 断开不影响 PTY 和 Agent；重连先取权威 Bootstrap 再订阅事件；Server 重启按 Session Snapshot 恢复结构并 resume 原生会话；当前 Workspace 和 Tab 是每个客户端自己的视图（ADR 0021），GUI 重启后恢复窗口、侧栏与视图（ADR 0023）；Windows 上每个 Terminal 的进程归属由 Job Object 决定（ADR 0030），Server 与 GUI 以桌面 shell 给的进程状态运行（ADR 0031） |
+| 运行时 | 一机一 Server（ADR 0013）；GUI 断开不影响 PTY 和 Agent；重连先取权威 Bootstrap 再订阅事件；Server 重启按 Session Snapshot 恢复结构并 resume 原生会话；可在登录时（Linux 为开机时）自启（ADR 0057），崩溃后由 Supervisor 重新拉起（ADR 0058）；当前 Workspace 和 Tab 是每个客户端自己的视图（ADR 0021），GUI 重启后恢复窗口、侧栏与视图（ADR 0023）；Windows 上每个 Terminal 的进程归属由 Job Object 决定（ADR 0030），Server 与 GUI 以桌面 shell 给的进程状态运行（ADR 0031） |
 | 终端 | libghostty-vt（Ghostty 的终端内核，ADR 0051）+ 自绘 GPUI 元素；颜色查询回答所选配色，程序的进度条与桌面通知（ADR 0054）；zsh/bash/fish 的 Shell 集成：提示符跳转与长命令通知（ADR 0055）；合并视觉流（ADR 0004）；kitty keyboard、OSC 7/52/777、图片粘贴（含远程，ADR 0012）；Server 侧选区（ADR 0008） |
 | Agent | 每种 CLI 一个规格模块，9 种完整支持，Kimi 仅识别（ADR 0035）；状态只来自 CLI 自己：会说 Program Status Protocol 的经 OSC 7501 上报（ADR 0044），否则靠 hooks 经 OSC 777 回写（ADR 0014）；`Blocked` 和 `Error` 带 `detail`，sidebar、OS 通知、CLI JSON 和左侧栏顶部跨 Device 的「Needs you」列表都显示它（ADR 0024）；完成、失败或需输入时发 OS 通知 |
 | Agent 驱动 | `condr workspace|tab|pane|agent` 全部 JSON 输出；内嵌 Skill（`condr --skill`）；`agent start|prompt|wait` 可跨 Pane 编排；`--device <name>` 直连保存的远程 Device，`device list` 与 `workspace list --all-devices` 汇总多机（ADR 0022） |
@@ -143,14 +143,6 @@ ADR 要回答三个问题：
 3. 初始化：仓库里一份可以提交的声明，写明要从父仓库复制的被忽略文件（考虑沿用 `.worktreeinclude` 的写法）、setup 命令和 teardown 命令，从父仓库已提交的版本读取。Server 在 `CreateWorktree` 之后复制文件，在新 Workspace 的第一个 Pane 里执行 setup，输出留在终端里；要启动 Agent 的，等 setup 结束再启动。Remove Worktree 之前执行 teardown。这是在执行仓库里写下的命令，所以第一次执行和声明内容变化时都要用户确认，确认记在 Server 这台机器上；Windows 要有 PowerShell 的写法。
 
 **停在哪**：setup 失败不自动删除 worktree，输出留在 Pane 里给人看。不做后台服务的监管、端口分配或反向代理（端口见上一节）。不做一个任务在多个仓库各开一个 worktree（见“多仓库 Workspace 的 Changes”）。
-
-### Server 开机自启
-
-**为什么**：Server 重启后能按 Session Snapshot 恢复结构并 resume 原生会话，但机器重启后没有人去启动它：TCP、Peer-to-peer 和手机都连不上，只有 SSH 能拉起远端的 Server。无头 Device 和配了手机的机器受影响最大。安装文档也写明了这一项还没有。
-
-**做到哪**：`condr server install` 增加开机自启的选项，安装脚本可以透传。Linux 写 systemd user unit，无头机器还要 `loginctl enable-linger`；macOS 写 launchd LaunchAgent；Windows 写登录时运行的启动项。`condr server status` 显示是否已注册，并能取消注册。由服务管理器启动时，Pane 的环境是否仍与在终端里启动一致（ADR 0031），要在三个平台上实测。
-
-**停在哪**：默认不注册，安装时显式选择。只以当前用户运行，不做系统级服务，不以 root 运行。
 
 ### 公开预览收尾，拿到第一批外部用户
 

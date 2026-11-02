@@ -12,6 +12,11 @@ publish = false
 name = "condr"
 path = "src/main.rs"
 
+# Windows only: what Autostart's login item runs, so no console window opens (ADR 0057).
+[[bin]]
+name = "condrw"
+path = "src/bin/condrw.rs"
+
 [dependencies]
 atomicwrites.workspace = true
 clap.workspace = true
@@ -46,6 +51,7 @@ nix = { workspace = true, features = ["signal"] }
 
 [target.'cfg(windows)'.dependencies]
 widestring.workspace = true
+windows-registry.workspace = true
 windows-spawn.workspace = true
 windows-sys = { workspace = true, features = [
     "Win32_Security",

@@ -154,3 +154,32 @@ fn human_output_is_one_line_per_step() {
         "{stdout}"
     );
 }
+
+/// Autostart registers the installed copy, and uninstalling that copy turns it off
+/// (ADR 0057). macOS only: its LaunchAgent is a file under the throwaway home, where
+/// Linux would enable lingering and Windows would write the real registry.
+#[cfg(target_os = "macos")]
+#[test]
+fn uninstall_turns_off_the_autostart_that_starts_it() {
+    let home = Home::new();
+    let condr = PathBuf::from(env!("CARGO_BIN_EXE_condr"));
+    let installed = home.install_dir().join("condr");
+    home.json(&condr, &["server", "install", "--json"]);
+    let plist = home
+        .home()
+        .join("Library/LaunchAgents/dev.condr.server.plist");
+
+    let report = home.json(&installed, &["server", "autostart", "on", "--json"]);
+    assert_eq!(report["enabled"], Value::from(true));
+    assert_eq!(report["path"], Value::from(installed.to_str().unwrap()));
+    assert!(plist.is_file());
+
+    let report = home.json(&condr, &["server", "uninstall", "--yes", "--json"]);
+    assert_eq!(report["autostart_removed"], Value::from(true));
+    assert!(
+        !plist.exists(),
+        "the LaunchAgent outlived the binary it starts"
+    );
+    let report = home.json(&condr, &["server", "autostart", "--json"]);
+    assert_eq!(report["enabled"], Value::from(false));
+}

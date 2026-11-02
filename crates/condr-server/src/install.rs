@@ -13,10 +13,11 @@ use serde_json::json;
 use crate::{ServerConfig, probe_server};
 
 const BINARY: &str = if cfg!(windows) { "condr.exe" } else { "condr" };
-/// Microsoft's ConPTY, which portable-pty loads from beside `condr.exe` (ADR 0056); it is
-/// installed and removed with the binary.
-const CONPTY: &[&str] = if cfg!(windows) {
-    &["conpty.dll", "OpenConsole.exe"]
+/// Installed and removed with the binary, from beside it: Microsoft's ConPTY, which
+/// portable-pty loads from beside `condr.exe` (ADR 0056), and `condrw.exe`, which
+/// Autostart's login item runs (ADR 0057).
+const SIBLINGS: &[&str] = if cfg!(windows) {
+    &["conpty.dll", "OpenConsole.exe", "condrw.exe"]
 } else {
     &[]
 };
@@ -462,9 +463,9 @@ pub fn install(options: InstallOptions) -> io::Result<i32> {
     };
     let source_dir = source.parent().expect("an executable has a directory");
     let dir = target.parent().expect("install path has a directory");
-    for name in CONPTY {
+    for name in SIBLINGS {
         let (from, to) = (source_dir.join(name), dir.join(name));
-        // A binary without it beside still runs, on Windows' own ConPTY.
+        // A binary without them beside still runs, on Windows' own ConPTY.
         if from.is_file() && !same_file(&from, &to) {
             place_binary(&from, &to)?;
         }
@@ -577,9 +578,24 @@ pub fn uninstall(options: UninstallOptions) -> io::Result<i32> {
     } else {
         "none"
     };
+    // Before the binary goes, or every login would try to start a file that is gone. One
+    // that starts another `condr`, a development build, say, is left alone.
+    let autostart = match crate::autostart::registered() {
+        Ok(Some(path)) if path == target || same_file(&path, &target) => {
+            crate::autostart::disable()
+                .map_err(|error| detail("failed to turn Autostart off", error))?;
+            steps.say("Autostart", "off");
+            true
+        }
+        Ok(_) => false,
+        Err(error) => {
+            steps.say("Autostart", format!("left as it is: {error}"));
+            false
+        }
+    };
 
     let mut leftovers = Vec::new();
-    for path in std::iter::once(target.clone()).chain(CONPTY.iter().map(|name| dir.join(name))) {
+    for path in std::iter::once(target.clone()).chain(SIBLINGS.iter().map(|name| dir.join(name))) {
         match fs::remove_file(&path) {
             Ok(()) => steps.say("Binary", format!("removed {}", path.display())),
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
@@ -623,6 +639,7 @@ pub fn uninstall(options: UninstallOptions) -> io::Result<i32> {
                 "removed_path": target,
                 "path_unregistered": true,
                 "server": server,
+                "autostart_removed": autostart,
                 "leftovers": leftovers,
             })
         );

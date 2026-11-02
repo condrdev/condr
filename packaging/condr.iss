@@ -41,6 +41,8 @@ Source: "{#BundleDir}\condr.exe"; DestDir: "{app}"
 ; The ConPTY condr.exe loads from beside itself instead of Windows' own (ADR 0056).
 Source: "{#BundleDir}\conpty.dll"; DestDir: "{app}"
 Source: "{#BundleDir}\OpenConsole.exe"; DestDir: "{app}"
+; What Autostart's login item runs, so condr.exe opens no console window (ADR 0057).
+Source: "{#BundleDir}\condrw.exe"; DestDir: "{app}"
 Source: "{#BundleDir}\condr-gui.exe"; DestDir: "{app}"
 Source: "{#BundleDir}\LICENSE"; DestDir: "{app}"
 Source: "{#BundleDir}\BUILD-COMMIT"; DestDir: "{app}"
@@ -62,6 +64,8 @@ Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; Value
 Filename: "{win}\explorer.exe"; Parameters: """{app}\condr-gui.exe"""; Description: "Launch Condr"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
+; Before the files go, or every login would try to start a condrw.exe that is gone.
+Filename: "{app}\condr.exe"; Parameters: "server autostart off"; Flags: runhidden; RunOnceId: "AutostartOff"
 Filename: "{app}\condr.exe"; Parameters: "server stop"; Flags: runhidden; RunOnceId: "StopServer"
 
 [Code]

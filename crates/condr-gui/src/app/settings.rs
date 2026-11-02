@@ -167,6 +167,9 @@ pub(super) struct SettingsWindow {
     /// The Licenses page text, in a read-only editor because it is far too long
     /// for a plain text element.
     licenses: Entity<EditorState>,
+    /// Whether this machine's Server starts at login (ADR 0057), as last read from its
+    /// login item; read again once the switch has changed it.
+    pub(super) autostart: bool,
     /// Re-asks the selected Server for its `Status` while this window is open, so uptime
     /// and recent errors on the General page stay current. Dropped with the window.
     _status_refresh: Task<()>,
@@ -374,6 +377,7 @@ impl SettingsWindow {
             server_keys,
             server_labels,
             licenses,
+            autostart: server::autostart_registered(),
             _status_refresh: cx.spawn(async move |this, cx| {
                 loop {
                     // Every second while a code shows: its countdown ticks, and a device

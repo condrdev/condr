@@ -1460,6 +1460,7 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "widestring",
+ "windows-registry 0.6.1",
  "windows-spawn",
  "windows-sys 0.59.0",
 ]

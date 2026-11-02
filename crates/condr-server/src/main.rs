@@ -131,6 +131,15 @@ enum ServerCommand {
     },
     /// Ask the Server to shut down
     Stop,
+    /// Start the Server when you log in (when this machine boots on Linux), or stop
+    /// doing so; without `on` or `off`, show whether it does
+    Autostart {
+        #[arg(value_enum)]
+        state: Option<Switch>,
+        /// Print one JSON object instead of a line
+        #[arg(long)]
+        json: bool,
+    },
     /// Run the Server in the foreground
     Run {
         #[command(flatten)]
@@ -156,6 +165,12 @@ enum ServerCommand {
         #[arg(value_name = "FINGERPRINT")]
         key: String,
     },
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, clap::ValueEnum)]
+enum Switch {
+    On,
+    Off,
 }
 
 /// What `run` takes, and `supervise` passes on to each Server it runs.
@@ -276,6 +291,23 @@ fn dispatch(command: ServerCommand) -> i32 {
 /// One `label  value` line of `condr server status`, labels padded to a common width.
 fn field(label: &str, value: impl std::fmt::Display) {
     println!("{label:<13} {value}");
+}
+
+/// Autostart (ADR 0057) for `condr server status` and `autostart`, `--json`.
+fn autostart_json(registered: &io::Result<Option<PathBuf>>) -> serde_json::Value {
+    match registered {
+        Ok(path) => json!({ "enabled": path.is_some(), "path": path }),
+        Err(error) => json!({ "enabled": null, "path": null, "error": error.to_string() }),
+    }
+}
+
+/// Autostart (ADR 0057) as a `condr server status` line.
+fn autostart_text(registered: &io::Result<Option<PathBuf>>) -> String {
+    match registered {
+        Ok(Some(path)) => format!("on ({})", path.display()),
+        Ok(None) => "off".into(),
+        Err(error) => format!("unknown ({error})"),
+    }
 }
 
 /// `[network.proxy]` for `condr server status --json`.
@@ -412,6 +444,7 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
             Ok(0)
         }
         ServerCommand::Status { json } => {
+            let autostart = condr_server::autostart::registered();
             let endpoint = ServerConfig::default().local_endpoint();
             let status = match condr_server::server_status(&endpoint) {
                 Ok(status) => status,
@@ -420,11 +453,17 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                     if json {
                         println!(
                             "{}",
-                            json!({ "running": false, "endpoint": endpoint.to_string(), "error": detail })
+                            json!({
+                                "running": false,
+                                "endpoint": endpoint.to_string(),
+                                "error": detail,
+                                "autostart": autostart_json(&autostart),
+                            })
                         );
                     } else {
                         field("Status", "not running");
                         field("Reason", &detail);
+                        field("Autostart", autostart_text(&autostart));
                     }
                     return Ok(1);
                 }
@@ -473,6 +512,7 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                         "agents": agents,
                         "clients": clients,
                         "recent_errors": recent_errors,
+                        "autostart": autostart_json(&autostart),
                     })
                 );
                 return Ok(0);
@@ -502,6 +542,7 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                     "restart to apply the Listen, Peer-to-peer and Proxy changes",
                 );
             }
+            field("Autostart", autostart_text(&autostart));
             field("Workspaces", workspaces);
             field("Tabs", tabs);
             field("Panes", panes);
@@ -567,6 +608,39 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                 .map_err(|error| failure("asked the Server to stop", [error.to_string()]))?;
             field("Status", status);
             field("Endpoint", &endpoint);
+            Ok(0)
+        }
+        ServerCommand::Autostart { state, json } => {
+            match state {
+                Some(Switch::On) => {
+                    condr_server::autostart::enable(&condr_server::resolve_server_executable()?)
+                        .map_err(|error| {
+                            io::Error::other(format!("failed to turn Autostart on\n{error}"))
+                        })?
+                }
+                Some(Switch::Off) => {
+                    condr_server::autostart::disable().map_err(|error| {
+                        io::Error::other(format!("failed to turn Autostart off\n{error}"))
+                    })?;
+                }
+                None => {}
+            }
+            let registered = condr_server::autostart::registered();
+            if json {
+                println!("{}", autostart_json(&registered));
+                return Ok(0);
+            }
+            field("Autostart", autostart_text(&registered));
+            if state == Some(Switch::On) {
+                println!(
+                    "The Server starts {} from now on; `condr server start` starts it now.",
+                    if cfg!(target_os = "linux") {
+                        "when this machine boots"
+                    } else {
+                        "when you log in"
+                    }
+                );
+            }
             Ok(0)
         }
         ServerCommand::Supervise { options } => {
@@ -931,6 +1005,27 @@ mod tests {
             })
         ));
         assert!(matches!(parse(&["stop"]), Ok(ServerCommand::Stop)));
+        assert!(matches!(
+            parse(&["autostart"]),
+            Ok(ServerCommand::Autostart {
+                state: None,
+                json: false
+            })
+        ));
+        assert!(matches!(
+            parse(&["autostart", "on", "--json"]),
+            Ok(ServerCommand::Autostart {
+                state: Some(Switch::On),
+                json: true
+            })
+        ));
+        assert!(matches!(
+            parse(&["autostart", "off"]),
+            Ok(ServerCommand::Autostart {
+                state: Some(Switch::Off),
+                json: false
+            })
+        ));
         assert!(matches!(parse(&["invite"]), Ok(ServerCommand::Invite)));
         assert!(matches!(parse(&["clients"]), Ok(ServerCommand::Clients)));
         assert!(matches!(
@@ -956,6 +1051,7 @@ mod tests {
         assert!(parse(&["start", "--detached"]).is_err());
         assert!(parse(&["start", "--listen", "not-an-address"]).is_err());
         assert!(parse(&["revoke"]).is_err());
+        assert!(parse(&["autostart", "yes"]).is_err());
         assert!(parse(&["install", "--start", "--restart"]).is_err());
         assert!(parse(&["uninstall", "--start"]).is_err());
         assert!(Cli::parse_checked_from(["condr", "--skill", "server", "stop"]).is_err());

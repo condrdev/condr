@@ -84,7 +84,13 @@ condr server start
 
 Server 运行于守护进程模式，关闭当前终端不影响其运行。
 
-*注：目前尚未注册系统开机自启服务，主机重启后需手动执行该命令启动。*
+如果希望登录时（Linux 上为开机时）自动启动 Server，让其他设备和手机在机器重启后也能连上：
+
+```sh
+condr server autostart on
+```
+
+`condr server autostart off` 取消。桌面应用的 Settings › General 里也有同样的开关。Linux 上会注册一个 systemd 用户 unit 并开启 linger，可能需要输入密码；macOS 上会添加一个 LaunchAgent，系统会弹出一条后台项目的通知。Server 崩溃后会自动重新启动。
 
 ### 3. 高级安装与环境配置
 
@@ -158,7 +164,7 @@ Condr 默认每 5 小时在后台自动检测一次通道更新。可在客户�
 
 | 安装形式 | 卸载方式 |
 | :--- | :--- |
-| **Windows 桌面端** | 进入系统 **“设置” › “应用” › “已安装的应用”** 卸载。安装程序会自动终止后台服务并清理系统变量。 |
+| **Windows 桌面端** | 进入系统 **“设置” › “应用” › “已安装的应用”** 卸载。安装程序会自动关闭开机自启、终止后台服务并清理系统变量。 |
 | **macOS 桌面端** | 将 `Condr.app` 移至废纸篓，并继续执行清理命令。 |
 | **Linux 桌面端** | 删除对应的 `.AppImage` 文件，并继续执行清理命令。 |
 | **Headless Server** | 直接执行清理命令。 |
@@ -171,5 +177,5 @@ Condr 默认每 5 小时在后台自动检测一次通道更新。可在客户�
 condr server uninstall
 ```
 
-此命令将确认后主动停止运行中的 Server 进程，并删除 `condr` 二进制文件与关联的 PATH 环境变量。
+此命令将确认后主动停止运行中的 Server 进程；如果开机自启启动的正是这个 `condr`，也会一并关闭，并删除 `condr` 二进制文件与关联的 PATH 环境变量。
 *自动化脚本环境中可追加 `--yes` 参数跳过交互确认：`condr server uninstall --yes`*

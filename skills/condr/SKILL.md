@@ -32,7 +32,8 @@ All commands below start with `condr`.
 | `agent prompt` | Prompt an idle agent; `--wait` awaits its next settled state. |
 | `agent wait` | Await a state without sending input. |
 | `agent hooks` | `install`, `uninstall` or `status` the hooks that report an agent's state; states stay `unknown` until installed. |
-| `server start`, `server status`, `server run` | Start a background Server, check it (`status --json`: uptime, Workspace/Tab/Pane/Agent counts, clients, recent errors), or run it in the foreground. |
+| `server start`, `server status`, `server run` | Start a background Server, check it (`status --json`: uptime, Workspace/Tab/Pane/Agent counts, clients, recent errors, autostart), or run it in the foreground. |
+| `server autostart [on\|off]` | Start this machine's Server at login (at boot on Linux), or stop doing so; without `on`/`off`, show which. Only when the user asks. |
 | `server stop`, `server restart` | Stop all terminals; restart restores layout/cwd and resumes saved native conversations in fresh shells. Run restart from outside Condr. |
 | `server invite`, `server clients`, `server revoke` | Pair remote devices, list paired devices, or revoke access. |
 | `device list` | List the remote Devices saved on this machine, whether each answers, and its Workspace count. |

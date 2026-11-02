@@ -114,8 +114,11 @@ condr server stop
 # Temporary foreground run for debugging; settings apply to this run only
 condr server run [--listen <IP:PORT>] [--p2p] [--snapshot <path>] [--endpoint <path>]
 
-# Show the running state, uptime, session counts and recent errors; exit code 1 when not running
+# Show the running state, uptime, session counts, recent errors and Autostart; exit code 1 when not running
 condr server status [--json]
+
+# Start the Server when you log in (at boot on Linux), or stop doing so; without on/off, show which
+condr server autostart [on|off] [--json]
 
 # Install the current binary into the user's executable path and register PATH
 condr server install [--start] [--restart] [--yes] [--json]
@@ -298,7 +301,7 @@ condr device list
 
 ### Output conventions
 
-1. **Structured data (JSON)**: apart from `pane read`, which prints raw terminal characters, and the `server` group, which prints interactive text by default, every other subcommand **prints machine-readable standard JSON by default**. `server status`, `install` and `uninstall` also print JSON with `--json`.
+1. **Structured data (JSON)**: apart from `pane read`, which prints raw terminal characters, and the `server` group, which prints interactive text by default, every other subcommand **prints machine-readable standard JSON by default**. `server status`, `autostart`, `install` and `uninstall` also print JSON with `--json`.
 2. **Error output (stderr)**: on a business-logic or network error, the command prints standard JSON to standard error (stderr):
 
 ```json

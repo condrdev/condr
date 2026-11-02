@@ -114,8 +114,11 @@ condr server stop
 # 前台临时调试运行；配置项仅本次有效，不写入配置文件
 condr server run [--listen <IP:PORT>] [--p2p] [--snapshot <路径>] [--endpoint <路径>]
 
-# 查看运行状态、运行时长、会话计数及最近错误；未运行退出码为 1
+# 查看运行状态、运行时长、会话计数、最近错误及自启状态；未运行退出码为 1
 condr server status [--json]
+
+# 登录时（Linux 上为开机时）自动启动 Server，或取消；不带 on/off 时显示当前状态
+condr server autostart [on|off] [--json]
 
 # 将当前二进制安装到用户执行路径并注册 PATH
 condr server install [--start] [--restart] [--yes] [--json]
@@ -298,7 +301,7 @@ condr device list
 
 ### 输出规范
 
-1. **结构化数据（JSON）**：除 `pane read` 输出原始终端字符、`server` 组默认输出交互文本外，其余所有子命令**默认输出机器可读的标准 JSON**。`server status`、`install`、`uninstall` 附加 `--json` 时同样输出 JSON。
+1. **结构化数据（JSON）**：除 `pane read` 输出原始终端字符、`server` 组默认输出交互文本外，其余所有子命令**默认输出机器可读的标准 JSON**。`server status`、`autostart`、`install`、`uninstall` 附加 `--json` 时同样输出 JSON。
 2. **错误输出（Stderr）**：发生业务逻辑或网络错误时，命令行以标准 JSON 输出至标准错误（Stderr）：
 
 ```json

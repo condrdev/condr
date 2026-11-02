@@ -1,10 +1,13 @@
 //! The standalone Condr runtime and its local client endpoint.
 
+pub mod autostart;
 mod client;
 mod client_writer;
 mod endpoint;
 pub mod install;
 pub mod logging;
+#[cfg(unix)]
+pub mod login_environment;
 pub mod noise;
 pub mod p2p;
 pub(crate) mod persistence;
@@ -23,9 +26,9 @@ pub use endpoint::{
 pub use noise::{DeviceKey, PublicKey, Secret, ServerIdentity};
 pub use server::{
     BoundServer, ServerConfig, ServerHandle, connected_devices, ensure_local_server, ensure_server,
-    ensure_server_from, load_listen, load_p2p, probe_server, restart_server, restart_server_from,
-    revoke_devices, save_listen, save_p2p, server_status, set_server_executable, stop_server,
-    wait_for_shutdown,
+    ensure_server_from, load_listen, load_p2p, probe_server, resolve_server_executable,
+    restart_server, restart_server_from, revoke_devices, save_listen, save_p2p, server_status,
+    set_server_executable, stop_server, wait_for_shutdown,
 };
 pub use ssh::SshEndpoint;
 

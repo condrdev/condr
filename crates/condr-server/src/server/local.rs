@@ -69,6 +69,9 @@ pub fn restart_server(config: ServerConfig) -> io::Result<Endpoint> {
 /// [`restart_server`], but the replacement is `executable` rather than whatever the
 /// lookup rules would pick; `condr server install` runs from a temporary copy.
 pub fn restart_server_from(config: ServerConfig, executable: &Path) -> io::Result<Endpoint> {
+    // Read now: the shell's profile would otherwise lengthen the time without a Server.
+    #[cfg(unix)]
+    let _ = crate::login_environment::captured();
     let endpoint = config.local_endpoint();
     match stop_server(&endpoint) {
         Ok(()) => {}
@@ -197,6 +200,25 @@ fn spawn_server(config: ServerConfig, server_executable: &Path) -> io::Result<En
         .stdin(Stdio::null())
         .stdout(Stdio::from(log))
         .stderr(Stdio::from(stderr));
+    // Whoever starts it, launchd and systemd included, the Server and its Panes get what
+    // the user's login shell sets up, PATH above all (ADR 0057).
+    #[cfg(unix)]
+    match crate::login_environment::captured() {
+        Ok(environment) => {
+            // `CONDR_*` stay the caller's: test endpoints and directories, the log filter.
+            command.envs(
+                environment
+                    .iter()
+                    .filter(|(key, _)| !key.starts_with("CONDR_"))
+                    .map(|(key, value)| (key, value)),
+            );
+        }
+        Err(error) => {
+            tracing::warn!(
+                "the Server keeps its launcher's environment, not the login shell's: {error}"
+            );
+        }
+    }
     #[cfg(windows)]
     let spawn_result = spawn_detached(&mut command);
     #[cfg(not(windows))]
@@ -300,7 +322,9 @@ pub fn set_server_executable(path: PathBuf) {
     let _ = SERVER_EXECUTABLE.set(path);
 }
 
-pub(super) fn resolve_server_executable() -> io::Result<PathBuf> {
+/// The `condr` this process starts a Server from: `CONDR_SERVER_EXECUTABLE`, then what
+/// [`set_server_executable`] named, then the `condr` beside this executable.
+pub fn resolve_server_executable() -> io::Result<PathBuf> {
     if let Some(path) = std::env::var_os("CONDR_SERVER_EXECUTABLE") {
         let path = PathBuf::from(path);
         return path.is_file().then_some(path).ok_or_else(|| {

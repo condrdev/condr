@@ -44,7 +44,7 @@ condr server start
 :::note
 - Server 会常驻后台运行，关闭终端不会中断进程。
 - 如需连接此机器，请参阅[远程连接](/zh-cn/docs/using/remote/)。
-- 当前预览版本尚未配置系统自启服务，机器重启后需手动执行上述启动命令。
+- 想在机器重启后自动启动 Server，执行一次 `condr server autostart on`（见[安装](/zh-cn/docs/start/install/)）。
 :::
 
 ## 深入探索

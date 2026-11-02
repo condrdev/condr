@@ -84,7 +84,13 @@ condr server start
 
 The Server runs as a daemon; closing the current terminal does not affect it.
 
-*Note: no system startup service is registered yet, so after a host reboot you need to run this command again by hand.*
+To have the Server start by itself when you log in (when the machine boots, on Linux), so other devices and your phone reach it after a restart:
+
+```sh
+condr server autostart on
+```
+
+`condr server autostart off` undoes it, and the desktop app has the same switch under Settings › General. On Linux this registers a systemd user unit and enables lingering, which may ask for your password; on macOS it adds a LaunchAgent, and macOS shows a "Background Items Added" notice. A Server that crashes is started again on its own.
 
 ### 3. Advanced install and environment options
 
@@ -158,7 +164,7 @@ Uninstalling removes only the application itself and its executables. **It does 
 
 | Install type | How to uninstall |
 | :--- | :--- |
-| **Windows desktop app** | Uninstall it under **Settings › Apps › Installed apps**. The installer stops the background service and cleans up the environment variables automatically. |
+| **Windows desktop app** | Uninstall it under **Settings › Apps › Installed apps**. The installer turns Autostart off, stops the background service and cleans up the environment variables automatically. |
 | **macOS desktop app** | Move `Condr.app` to the Trash, then run the cleanup command below. |
 | **Linux desktop app** | Delete the `.AppImage` file, then run the cleanup command below. |
 | **Headless Server** | Run the cleanup command directly. |
@@ -171,5 +177,5 @@ In a regular system terminal, **not a terminal inside Condr**, run:
 condr server uninstall
 ```
 
-After confirmation, this command stops the running Server process and deletes the `condr` binary together with its `PATH` entry.
+After confirmation, this command stops the running Server process, turns off Autostart if it starts this `condr`, and deletes the `condr` binary together with its `PATH` entry.
 *In scripted environments, add `--yes` to skip the interactive confirmation: `condr server uninstall --yes`*

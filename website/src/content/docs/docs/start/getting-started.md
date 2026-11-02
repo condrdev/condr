@@ -44,7 +44,7 @@ condr server start
 :::note
 - The Server keeps running in the background; closing the terminal does not stop it.
 - To connect to this machine, see [Remote connections](/docs/using/remote/).
-- The current preview does not register a system startup service yet, so after a reboot you need to run the start command above again by hand.
+- To start the Server by itself after a reboot, run `condr server autostart on` once (see [Install](/docs/start/install/)).
 :::
 
 ## Dig deeper
