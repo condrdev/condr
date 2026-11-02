@@ -11,6 +11,7 @@ pub(crate) mod persistence;
 mod poison;
 mod server;
 pub mod ssh;
+pub mod supervisor;
 #[cfg(test)]
 pub(crate) mod test_support;
 

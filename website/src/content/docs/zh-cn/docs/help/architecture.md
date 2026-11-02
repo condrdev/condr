@@ -11,7 +11,7 @@ Condr 把运行时和界面分成两个进程。Server 托管终端、Agent 和 
 
 * **每台机器一个 Server**：Server 始终监听本机的私有 socket（Windows 上为命名管道）。配置 `[server] listen` 后，Server 增开一个 TCP 监听端口；开启 Peer-to-peer 时，Server 同时接受 P2P 连接。所有连接入口均访问同一个 Session。
 * **Server 与命令行属于同一个二进制程序**：`condr server …` 负责管理 Server，其余子命令均作为客户端连接 Server。
-* **窗口作为独立客户端运行**：`condr-gui` 启动时首先检测本机 Server。若未收到响应，则以后台进程启动 `condr server run --detached`。关闭窗口仅断开连接，Server、终端和 Agent 保持运行。
+* **窗口作为独立客户端运行**：`condr-gui` 启动时首先检测本机 Server。若未收到响应，则以后台进程启动 Server；它由一个小的 Supervisor 进程运行，崩溃后会被重新启动。关闭窗口仅断开连接，Server、终端和 Agent 保持运行。
 * **窗口单实例限制**：窗口启动时会锁定运行时目录下的 `condr.lock`。若锁已被占用，新启动的实例直接退出。
 
 ---

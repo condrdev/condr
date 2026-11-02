@@ -86,21 +86,36 @@ pub fn restart_server_from(config: ServerConfig, executable: &Path) -> io::Resul
     ensure_server_from(config, executable)
 }
 
-/// Waits until a stopped Server has released its listener, for up to 30 seconds.
+/// Waits until a stopped Server has released its listener and its Supervisor has
+/// exited, for up to 30 seconds.
 pub fn wait_for_shutdown(socket_path: &Path) -> io::Result<()> {
     let deadline = Instant::now() + Duration::from_secs(30);
+    // Whether the listener was free while a Supervisor lived: it was between restarts.
+    let mut between_restarts = false;
     loop {
         // The bind lock outlives PTY shutdown and the final Snapshot flush. Polling
         // it also avoids filling a socket backlog after the accept loop has stopped.
-        match crate::endpoint::acquire_local_bind_lock(socket_path) {
+        let released = match crate::endpoint::acquire_local_bind_lock(socket_path) {
             Ok(lock) => {
                 drop(lock);
-                return Ok(());
+                true
             }
-            Err(error) if error.kind() == io::ErrorKind::AddrInUse => {}
+            Err(error) if error.kind() == io::ErrorKind::AddrInUse => false,
             // No Server ever bound here: the socket directory does not exist yet.
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
             Err(error) => return Err(error),
+        };
+        // The Supervisor exits just after its Server; until then `condr.exe` is in use,
+        // and an upgrade or uninstall that waited on this could not replace it.
+        if released && !crate::supervisor::is_running(socket_path)? {
+            return Ok(());
+        }
+        if released {
+            between_restarts = true;
+        } else if between_restarts {
+            // The Server had crashed when this was asked to stop it, and its Supervisor
+            // has started it again; that one is stopped too, which ends the Supervisor.
+            between_restarts = stop_server(&Endpoint::local(socket_path)).is_err();
         }
         if Instant::now() >= deadline {
             return Err(io::Error::new(
@@ -112,8 +127,8 @@ pub fn wait_for_shutdown(socket_path: &Path) -> io::Result<()> {
     }
 }
 
-/// Connects to the host's Server, starting it detached first if nothing answers on its
-/// socket. Returns the local endpoint to talk to it on.
+/// Connects to the host's Server, starting it detached through its Supervisor (ADR 0058)
+/// first if nothing answers on its socket. Returns the local endpoint to talk to it on.
 pub fn ensure_server(config: ServerConfig) -> io::Result<Endpoint> {
     if let Some(endpoint) = running_endpoint(&config)? {
         return Ok(endpoint);
@@ -167,7 +182,7 @@ fn spawn_server(config: ServerConfig, server_executable: &Path) -> io::Result<En
     })?;
     let stderr = log.try_clone()?;
     let mut command = Command::new(server_executable);
-    command.args(["server", "run"]);
+    command.args(["server", "supervise"]);
     command.arg("--endpoint").arg(&config.socket_path);
     if let Some(address) = config.listen {
         command.arg("--listen").arg(address.to_string());
@@ -179,7 +194,6 @@ fn spawn_server(config: ServerConfig, server_executable: &Path) -> io::Result<En
         command.arg("--snapshot").arg(path);
     }
     command
-        .arg("--detached")
         .stdin(Stdio::null())
         .stdout(Stdio::from(log))
         .stderr(Stdio::from(stderr));
@@ -226,9 +240,9 @@ fn spawn_server(config: ServerConfig, server_executable: &Path) -> io::Result<En
     Err(io::Error::new(io::ErrorKind::TimedOut, message))
 }
 
-/// Starts the detached Server with this session's desktop shell as its parent (ADR 0031):
-/// it then runs, and so does every Pane, as a program started from the Start menu would,
-/// whoever launched it. Windows hands a child its parent's process mitigations, and an
+/// Starts the detached Supervisor with this session's desktop shell as its parent (ADR
+/// 0031): its Server then runs, and so does every Pane, as a program started from the
+/// Start menu would, whoever launched it. Windows hands a child its parent's process mitigations, and an
 /// installer or an agent's shell tool that enforces redirection trust would otherwise stop
 /// every Pane from following the junctions users make (pnpm's store, linked skills).
 #[cfg(windows)]

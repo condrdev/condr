@@ -252,9 +252,13 @@ impl BoundServer {
                 io::Error::other(format!("failed to create server runtime: {error}"))
             })?;
         runtime.block_on(async move {
-            tokio::task::spawn_blocking(move || self.run_blocking())
-                .await
-                .map_err(|error| io::Error::other(format!("server task failed: {error}")))?
+            match tokio::task::spawn_blocking(move || self.run_blocking()).await {
+                Ok(result) => result,
+                // Unwound on, so the process exits 101 and its Supervisor restarts it
+                // (ADR 0058); an error would read as a Server that stopped on purpose.
+                Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
+                Err(error) => Err(io::Error::other(format!("server task failed: {error}"))),
+            }
         })
     }
 

@@ -11,7 +11,7 @@ Condr splits the runtime and the interface into two processes. The Server hosts 
 
 * **One Server per machine**: the Server always listens on a private local socket (a named pipe on Windows). With `[server] listen` configured, the Server opens one extra TCP listening port; with Peer-to-peer turned on, it also accepts P2P connections. Every entry point reaches the same Session.
 * **The Server and the command line are one binary**: `condr server …` manages the Server, and every other subcommand connects to the Server as a client.
-* **The window runs as a separate client**: on startup `condr-gui` first probes the local Server. If nothing answers, it starts `condr server run --detached` as a background process. Closing the window only disconnects; the Server, terminals and Agents keep running.
+* **The window runs as a separate client**: on startup `condr-gui` first probes the local Server. If nothing answers, it starts the Server as a background process, through a small Supervisor process that starts it again if it crashes. Closing the window only disconnects; the Server, terminals and Agents keep running.
 * **Single window instance**: on startup the window locks `condr.lock` in the runtime directory. If the lock is already held, the new instance exits at once.
 
 ---

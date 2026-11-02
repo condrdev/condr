@@ -133,21 +133,18 @@ enum ServerCommand {
     Stop,
     /// Run the Server in the foreground
     Run {
-        /// Local socket or named pipe path; defaults to the platform path
-        #[arg(long, value_name = "PATH")]
-        endpoint: Option<PathBuf>,
-        /// Also listen on this TCP address, overriding config.toml for this run
-        #[arg(long, value_name = "ADDR")]
-        listen: Option<SocketAddr>,
-        /// Also accept Peer-to-peer connections, overriding config.toml for this run
-        #[arg(long)]
-        p2p: bool,
-        /// Where the session snapshot is persisted
-        #[arg(long, value_name = "PATH")]
-        snapshot: Option<PathBuf>,
-        /// Leave the parent session first; `start` uses this for the server it spawns
-        #[arg(long)]
-        detached: bool,
+        #[command(flatten)]
+        options: RunOptions,
+        /// How the previous Server crashed; its Supervisor passes this when restarting
+        #[arg(long, value_name = "HOW", hide = true)]
+        restarted_after: Option<String>,
+    },
+    /// Leave the parent session and run the Server, restarting it when it crashes
+    /// (ADR 0058); `start` and every other local launch go through this
+    #[command(hide = true)]
+    Supervise {
+        #[command(flatten)]
+        options: RunOptions,
     },
     /// Print a one-time invite that pairs a new device over TCP
     Invite,
@@ -159,6 +156,42 @@ enum ServerCommand {
         #[arg(value_name = "FINGERPRINT")]
         key: String,
     },
+}
+
+/// What `run` takes, and `supervise` passes on to each Server it runs.
+#[derive(clap::Args)]
+struct RunOptions {
+    /// Local socket or named pipe path; defaults to the platform path
+    #[arg(long, value_name = "PATH")]
+    endpoint: Option<PathBuf>,
+    /// Also listen on this TCP address, overriding config.toml for this run
+    #[arg(long, value_name = "ADDR")]
+    listen: Option<SocketAddr>,
+    /// Also accept Peer-to-peer connections, overriding config.toml for this run
+    #[arg(long)]
+    p2p: bool,
+    /// Where the session snapshot is persisted
+    #[arg(long, value_name = "PATH")]
+    snapshot: Option<PathBuf>,
+}
+
+impl RunOptions {
+    fn to_args(&self) -> Vec<std::ffi::OsString> {
+        let mut args = Vec::new();
+        if let Some(path) = &self.endpoint {
+            args.extend(["--endpoint".into(), path.into()]);
+        }
+        if let Some(address) = self.listen {
+            args.extend(["--listen".into(), address.to_string().into()]);
+        }
+        if self.p2p {
+            args.push("--p2p".into());
+        }
+        if let Some(path) = &self.snapshot {
+            args.extend(["--snapshot".into(), path.into()]);
+        }
+        args
+    }
 }
 
 impl Cli {
@@ -536,12 +569,29 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
             field("Endpoint", &endpoint);
             Ok(0)
         }
+        ServerCommand::Supervise { options } => {
+            #[cfg(unix)]
+            nix::unistd::setsid().map_err(|error| {
+                io::Error::other(format!("failed to detach from the parent session: {error}"))
+            })?;
+            // `spawn_server` quotes the log from this line on when the Server never answers.
+            eprintln!("detached process {} starting", std::process::id());
+            let socket_path = options
+                .endpoint
+                .clone()
+                .unwrap_or_else(condr_server::default_socket_path);
+            condr_server::supervisor::supervise(&socket_path, &options.to_args())?;
+            Ok(0)
+        }
         ServerCommand::Run {
-            endpoint,
-            listen,
-            p2p,
-            snapshot,
-            detached,
+            options:
+                RunOptions {
+                    endpoint,
+                    listen,
+                    p2p,
+                    snapshot,
+                },
+            restarted_after,
         } => {
             let mut config = match endpoint {
                 Some(path) => ServerConfig::at_socket(path),
@@ -559,12 +609,9 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
             config = config.with_cloud_url(condr_client::cloud::base_url());
             // Dropped when this arm returns, before `exit`, so the writer drains.
             let _log_guard = condr_server::logging::init(&config.log_file_stem());
-            if detached {
-                #[cfg(unix)]
-                nix::unistd::setsid().map_err(|error| {
-                    io::Error::other(format!("failed to detach from the parent session: {error}"))
-                })?;
-                eprintln!("detached process {} starting", std::process::id());
+            if let Some(crash) = restarted_after {
+                // An error, so the crash shows among `condr server status`'s recent errors.
+                tracing::error!("restarted by its Supervisor after the previous Server {crash}");
             }
             #[cfg(windows)]
             opt_out_of_power_throttling();
@@ -806,17 +853,50 @@ mod tests {
         ));
 
         let ServerCommand::Run {
-            endpoint,
-            listen,
-            detached,
-            ..
-        } = parse(&["run", "--endpoint", "test.sock", "--detached"]).unwrap()
+            options,
+            restarted_after,
+        } = parse(&[
+            "run",
+            "--endpoint",
+            "test.sock",
+            "--restarted-after",
+            "panicked",
+        ])
+        .unwrap()
         else {
             panic!("expected run");
         };
-        assert_eq!(endpoint, Some("test.sock".into()));
-        assert_eq!(listen, None);
-        assert!(detached);
+        assert_eq!(options.endpoint, Some("test.sock".into()));
+        assert_eq!(options.listen, None);
+        assert_eq!(restarted_after.as_deref(), Some("panicked"));
+
+        // The Supervisor hands each Server exactly the options it was given.
+        let ServerCommand::Supervise { options } = parse(&[
+            "supervise",
+            "--endpoint",
+            "test.sock",
+            "--listen",
+            "127.0.0.1:4244",
+            "--p2p",
+            "--snapshot",
+            "state.snapshot",
+        ])
+        .unwrap() else {
+            panic!("expected supervise");
+        };
+        assert_eq!(
+            options.to_args(),
+            [
+                "--endpoint",
+                "test.sock",
+                "--listen",
+                "127.0.0.1:4244",
+                "--p2p",
+                "--snapshot",
+                "state.snapshot"
+            ]
+            .map(std::ffi::OsString::from)
+        );
 
         assert!(matches!(
             parse(&["status"]),
@@ -869,6 +949,8 @@ mod tests {
         assert!(parse(&["start", "--endpoint", "test.sock"]).is_err());
         assert!(parse(&["restart", "--endpoint", "test.sock"]).is_err());
         assert!(parse(&["restart", "--detached"]).is_err());
+        assert!(parse(&["run", "--detached"]).is_err());
+        assert!(parse(&["supervise", "--restarted-after", "panicked"]).is_err());
         assert!(parse(&["status", "--listen", "127.0.0.1:4242"]).is_err());
         assert!(parse(&["stop", "--snapshot", "state.snapshot"]).is_err());
         assert!(parse(&["start", "--detached"]).is_err());

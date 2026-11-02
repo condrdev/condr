@@ -274,7 +274,7 @@ fn auto_started_server_survives_launcher_exit() {
         client.bootstrap().unwrap().server_id,
     );
     #[cfg(unix)]
-    assert_is_session_leader(client.bootstrap().unwrap().runtime_epoch);
+    assert_left_launcher_session(client.bootstrap().unwrap().runtime_epoch);
     drop(client);
     stop_server(&endpoint).unwrap();
     wait_for_stop(&endpoint);
@@ -487,11 +487,132 @@ fn detached_server_launcher_helper() {
     }
 }
 
+/// The Server runs in its Supervisor's session, which left the launcher's (ADR 0058).
 #[cfg(unix)]
-fn assert_is_session_leader(runtime_epoch: condr_core::protocol::RuntimeEpoch) {
-    let pid = i32::try_from(runtime_epoch.0 >> 96).unwrap();
-    let pid = nix::unistd::Pid::from_raw(pid);
-    assert_eq!(nix::unistd::getsid(Some(pid)).unwrap(), pid);
+fn assert_left_launcher_session(runtime_epoch: condr_core::protocol::RuntimeEpoch) {
+    let server = server_pid(runtime_epoch);
+    assert_ne!(
+        nix::unistd::getsid(Some(server)).unwrap(),
+        nix::unistd::getsid(None).unwrap()
+    );
+}
+
+/// The Server's process ID, which its Runtime Epoch carries in its top bits.
+#[cfg(unix)]
+fn server_pid(runtime_epoch: condr_core::protocol::RuntimeEpoch) -> nix::unistd::Pid {
+    nix::unistd::Pid::from_raw(i32::try_from(runtime_epoch.0 >> 96).unwrap())
+}
+
+/// A Server that aborts (ADR 0053) is started again by its Supervisor, which reports the
+/// crash; one ended by SIGTERM stays down, and its Supervisor exits with it; and `stop`
+/// asked while a Supervisor waits to restart a crashed Server stops for good (ADR 0058).
+#[cfg(unix)]
+#[test]
+fn the_supervisor_restarts_a_crashed_server_and_not_a_stopped_one() {
+    use nix::sys::signal::{Signal, kill};
+
+    let endpoint_path = std::env::temp_dir().join(format!(
+        "condr-supervisor-test-{}-{}.sock",
+        std::process::id(),
+        unique_suffix()
+    ));
+    let config_directory = endpoint_path.with_extension("config");
+    let snapshot_path = endpoint_path.with_extension("snapshot");
+    let with_test_host = |command: &mut Command| {
+        command
+            .env("CONDR_SOCKET_PATH", &endpoint_path)
+            .env("CONDR_CONFIG_DIR", &config_directory)
+            .env("CONDR_DATA_DIR", &config_directory)
+            .env("CONDR_LOG_DIR", &config_directory)
+            .env("CONDR_SNAPSHOT_PATH", &snapshot_path)
+            .env("CONDR_SERVER_EXECUTABLE", env!("CARGO_BIN_EXE_condr"))
+            .env_remove("CONDR_PANE_ID");
+    };
+    let launch = || {
+        let mut launcher = Command::new(std::env::current_exe().unwrap());
+        launcher
+            .arg("--exact")
+            .arg("detached_server_launcher_helper")
+            .arg("--nocapture")
+            .env(DETACHED_HELPER_ENV, "1");
+        with_test_host(&mut launcher);
+        assert!(launcher.status().unwrap().success());
+    };
+    launch();
+    let endpoint = Endpoint::local(&endpoint_path);
+    let guard = ServerGuard(endpoint.clone());
+
+    let crashed = runtime_epoch(&endpoint);
+    kill(server_pid(crashed), Signal::SIGABRT).unwrap();
+    // macOS writes a crash report before the process is gone.
+    let restarted = (0..300)
+        .find_map(|_| {
+            thread::sleep(Duration::from_millis(50));
+            ClientConnection::connect_overview(&endpoint, "after-crash")
+                .ok()
+                .map(|client| client.overview().runtime_epoch)
+                .filter(|epoch| *epoch != crashed)
+        })
+        .expect("the Supervisor started the Server again");
+
+    let mut status = Command::new(env!("CARGO_BIN_EXE_condr"));
+    status.args(["server", "status", "--json"]);
+    with_test_host(&mut status);
+    let status = status.output().unwrap();
+    let status = String::from_utf8_lossy(&status.stdout);
+    assert!(
+        status
+            .contains("restarted by its Supervisor after the previous Server was ended by SIGABRT"),
+        "status reports the crash:\n{status}"
+    );
+
+    kill(server_pid(restarted), Signal::SIGTERM).unwrap();
+    wait_for_stop(&endpoint);
+    // Both the bind lock and the Supervisor's are released, and nothing came back.
+    condr_server::wait_for_shutdown(&endpoint_path).unwrap();
+    thread::sleep(Duration::from_millis(1500));
+    assert!(
+        endpoint.connect().is_err(),
+        "a stopped Server is not restarted"
+    );
+
+    launch();
+    kill(server_pid(runtime_epoch(&endpoint)), Signal::SIGABRT).unwrap();
+    let mut stop = Command::new(env!("CARGO_BIN_EXE_condr"));
+    stop.args(["server", "stop"]);
+    with_test_host(&mut stop);
+    let asked = std::time::Instant::now();
+    let stop = stop.output().unwrap();
+    assert!(
+        stop.status.success(),
+        "stop failed: {}",
+        String::from_utf8_lossy(&stop.stderr)
+    );
+    assert!(
+        asked.elapsed() < Duration::from_secs(20),
+        "stop waited it out"
+    );
+    thread::sleep(Duration::from_millis(1500));
+    assert!(
+        endpoint.connect().is_err(),
+        "the Server its Supervisor restarted was stopped too"
+    );
+    condr_server::wait_for_shutdown(&endpoint_path).unwrap();
+    guard.disarm();
+
+    let _ = std::fs::remove_dir_all(&config_directory);
+    let _ = std::fs::remove_file(&snapshot_path);
+    let mut snapshot_lock = snapshot_path.into_os_string();
+    snapshot_lock.push(".lock");
+    let _ = std::fs::remove_file(snapshot_lock);
+}
+
+#[cfg(unix)]
+fn runtime_epoch(endpoint: &Endpoint) -> condr_core::protocol::RuntimeEpoch {
+    ClientConnection::connect_overview(endpoint, "epoch")
+        .unwrap()
+        .overview()
+        .runtime_epoch
 }
 
 /// The detached Server's stderr file under `directory`, the `CONDR_LOG_DIR` its launcher was given.
