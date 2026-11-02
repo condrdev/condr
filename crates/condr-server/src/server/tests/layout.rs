@@ -857,6 +857,11 @@ fn pane_terminal_survives_disconnect_and_reconnects_with_live_state() {
         pane_id,
         TerminalCommand::Resize(TerminalSize::new(10, 40)),
     );
+    // A resize reaches the PTY on its own thread, so typed text can overtake it. The
+    // frame at the new size is published only after the PTY has it.
+    wait_for_terminal(&mut second, &mut second_terminal_views, pane_id, |view| {
+        (view.size.rows, view.size.columns) == (10, 40)
+    });
     send_terminal(
         &mut second,
         server_id,
