@@ -587,14 +587,7 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
             // `restart_server` already treats it.
             let status = match condr_server::stop_server(&endpoint) {
                 Ok(()) => "stopped",
-                Err(error)
-                    if matches!(
-                        error.kind(),
-                        io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
-                    ) =>
-                {
-                    "not running"
-                }
+                Err(error) if condr_server::not_running(&error) => "not running",
                 Err(error) => {
                     return Err(failure(
                         "failed to stop",

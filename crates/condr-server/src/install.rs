@@ -570,8 +570,11 @@ pub fn uninstall(options: UninstallOptions) -> io::Result<i32> {
                 "not uninstalled; the Server keeps running",
             ));
         }
-        crate::stop_server(&endpoint)
-            .map_err(|error| detail("failed to stop the Server", error))?;
+        match crate::stop_server(&endpoint) {
+            Ok(()) => {}
+            Err(error) if crate::not_running(&error) => {}
+            Err(error) => return Err(detail("failed to stop the Server", error)),
+        }
         crate::wait_for_shutdown(&config.socket_path)?;
         steps.say("Server", "stopped");
         "stopped"

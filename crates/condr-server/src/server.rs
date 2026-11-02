@@ -71,9 +71,9 @@ use workspace_git::*;
 
 pub use config::{ServerConfig, load_listen, load_p2p, save_listen, save_p2p};
 pub use local::{
-    connected_devices, ensure_local_server, ensure_server, ensure_server_from, probe_server,
-    resolve_server_executable, restart_server, restart_server_from, revoke_devices, server_status,
-    set_server_executable, stop_server, wait_for_shutdown,
+    connected_devices, ensure_local_server, ensure_server, ensure_server_from, not_running,
+    probe_server, resolve_server_executable, restart_server, restart_server_from, revoke_devices,
+    server_status, set_server_executable, stop_server, wait_for_shutdown,
 };
 
 const ACCEPT_POLL: Duration = Duration::from_millis(10);

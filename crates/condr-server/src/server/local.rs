@@ -75,14 +75,8 @@ pub fn restart_server_from(config: ServerConfig, executable: &Path) -> io::Resul
     let endpoint = config.local_endpoint();
     match stop_server(&endpoint) {
         Ok(()) => {}
-        Err(error)
-            if matches!(
-                error.kind(),
-                io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
-            ) =>
-        {
-            // Nothing answers, but a Server that just stopped may still hold its bind lock.
-        }
+        // Nothing answers, but a Server that just stopped may still hold its bind lock.
+        Err(error) if not_running(&error) => {}
         Err(error) => return Err(error),
     }
     wait_for_shutdown(&config.socket_path)?;
@@ -428,6 +422,20 @@ pub fn server_status(endpoint: &Endpoint) -> io::Result<ServerAdminResponse> {
             format!("unexpected status response: {other:?}"),
         )),
     }
+}
+
+/// Whether a [`stop_server`] error means there was no Server left to stop: nothing
+/// listens, or the one there went away mid-handshake, as a crashing Server does.
+pub fn not_running(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::NotFound
+            | io::ErrorKind::ConnectionRefused
+            | io::ErrorKind::ConnectionReset
+            | io::ErrorKind::ConnectionAborted
+            | io::ErrorKind::BrokenPipe
+            | io::ErrorKind::UnexpectedEof
+    )
 }
 
 pub fn stop_server(endpoint: &Endpoint) -> io::Result<()> {
