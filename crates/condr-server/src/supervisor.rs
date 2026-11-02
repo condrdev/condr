@@ -230,7 +230,15 @@ mod tests {
         drop(first);
         assert!(is_running(&socket_path).unwrap());
         drop(second);
-        assert!(!is_running(&socket_path).unwrap());
+        // Polled, as `wait_for_shutdown` does: a Pane another test forks holds every open
+        // lock until it execs.
+        assert!(
+            (0..100).any(|_| {
+                thread::sleep(Duration::from_millis(10));
+                !is_running(&socket_path).unwrap()
+            }),
+            "the lock is free once the last Supervisor ends"
+        );
         fs::remove_dir_all(directory).unwrap();
     }
 
