@@ -28,6 +28,7 @@ pub fn disable() -> io::Result<bool> {
     platform::disable()
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn remove_if_present(path: &Path) -> io::Result<bool> {
     match std::fs::remove_file(path) {
         Ok(()) => Ok(true),
