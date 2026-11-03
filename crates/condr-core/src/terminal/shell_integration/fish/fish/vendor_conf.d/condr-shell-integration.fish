@@ -14,6 +14,8 @@ if set -q CONDR_FISH_DATA_DIR
     end
     set -e CONDR_FISH_DATA_DIR CONDR_FISH_DATA_DIRS_UNSET
     if status is-interactive; and not functions -q __condr_prompt_mark
+        # vendor_conf.d runs before config.fish: tell the Server marks will come (ADR 0059).
+        printf '\e]777;notify;condr://shell;integration\a'
         function __condr_prompt_mark --on-event fish_prompt
             printf '\e]133;A\a'
         end

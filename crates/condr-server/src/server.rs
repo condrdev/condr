@@ -38,7 +38,7 @@ use condr_core::protocol::{
 };
 use condr_core::{
     AgentSnapshot, FileMutation, FileMutationResult, GitRepository, PaneEnvironment, PaneId,
-    Session, TerminalAgentProbe, TerminalColors, TerminalCommand, TerminalCwdProbe,
+    Session, ShellReadiness, TerminalAgentProbe, TerminalColors, TerminalCommand, TerminalCwdProbe,
     TerminalHyperlinkBudget, TerminalNoticeBatch, TerminalNoticeProbe, TerminalProgress,
     TerminalRuntime, TerminalSize, TerminalUpdate, TerminalView, TerminalViewFrame,
     TerminalViewSource, WorkspaceId, create_worktree, discover_repository, open_worktree,
@@ -91,6 +91,8 @@ const CWD_SCAN_INTERVAL: Duration = Duration::from_millis(500);
 /// A pending native resume checks whether the shell is idle at most this often: the
 /// check scans the whole process table, and a starting shell wakes the probe per chunk.
 const RESUME_RETRY_INTERVAL: Duration = Duration::from_millis(500);
+/// How often `condr agent start` looks again for a fresh shell's first prompt (ADR 0059).
+const PROMPT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const TERMINAL_FRAME_INTERVAL: Duration = Duration::from_micros(16_667);
 const BOOTSTRAP_METADATA_HEADROOM: usize = 64 * 1024;
 const MAX_PERSISTED_SNAPSHOT_BYTES: usize = MAX_FRAME_SIZE - BOOTSTRAP_METADATA_HEADROOM;

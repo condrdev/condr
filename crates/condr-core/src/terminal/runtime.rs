@@ -13,7 +13,7 @@ pub struct TerminalRuntime {
     pub(super) process: ProcessProbe,
     pub(super) last_known_cwd: Arc<Mutex<Option<PathBuf>>>,
     reported_cwd: Arc<Mutex<ReportedCwd>>,
-    notices: SharedTerminalNotices,
+    pub(super) notices: SharedTerminalNotices,
     size: Arc<Mutex<TerminalSize>>,
     revision: Arc<AtomicU64>,
     damage_baseline: Arc<Mutex<Option<TerminalDamageBaseline>>>,
@@ -36,6 +36,12 @@ pub struct TerminalRuntime {
     reader_cancel: Option<UnixStream>,
     #[cfg(unix)]
     writer_cancel: Option<UnixStream>,
+    /// When the shell started, and whether Condr gave it integration that announces
+    /// itself, for [`TerminalLaunchProbe::readiness`] (ADR 0059).
+    pub(super) started: Instant,
+    pub(super) announces: bool,
+    /// Whether anyone typed into the Pane: a key, text or a paste (ADR 0059).
+    typed: AtomicBool,
 }
 
 #[derive(Clone, Copy)]
@@ -79,14 +85,17 @@ impl TerminalRuntime {
             .filter(|program| !program.is_empty())
             .map_or_else(default_shell_program, str::to_owned);
         let mut command = shell_command(&program);
+        let mut announces = false;
         if let Some(pane) = pane {
             pane.apply(&mut command);
             if let Some(directory) = &pane.shell_integration {
-                shell_integration::apply(&mut command, &program, directory);
+                announces = shell_integration::apply(&mut command, &program, directory);
             }
         }
         command.cwd(cwd);
-        Self::spawn(command, size)
+        let mut runtime = Self::spawn(command, size)?;
+        runtime.announces = announces;
+        Ok(runtime)
     }
 
     pub fn spawn(mut command: CommandBuilder, size: TerminalSize) -> io::Result<Self> {
@@ -213,6 +222,9 @@ impl TerminalRuntime {
             reader_cancel: Some(reader_cancel),
             #[cfg(unix)]
             writer_cancel: Some(writer_cancel),
+            started: Instant::now(),
+            announces: false,
+            typed: AtomicBool::new(false),
         };
 
         let writer_stop = Arc::clone(&runtime.writer_stopping);
@@ -373,7 +385,22 @@ impl TerminalRuntime {
         }
     }
 
+    /// Whether anyone typed into the Pane since it started.
+    pub fn typed(&self) -> bool {
+        self.typed.load(Ordering::Relaxed)
+    }
+
     pub fn execute(&self, command: TerminalCommand) -> io::Result<Option<String>> {
+        let typed = match &command {
+            TerminalCommand::Key { kind, .. } => *kind != TerminalKeyEventKind::Release,
+            TerminalCommand::Text(_) | TerminalCommand::Paste(_) | TerminalCommand::Submit(_) => {
+                true
+            }
+            _ => false,
+        };
+        if typed {
+            self.typed.store(true, Ordering::Relaxed);
+        }
         match command {
             TerminalCommand::Key {
                 key,

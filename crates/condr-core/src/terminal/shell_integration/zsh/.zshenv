@@ -1,6 +1,8 @@
 # Condr shell integration (ADR 0055). Condr starts zsh with ZDOTDIR pointing here, so this
 # file runs first: it puts the user's ZDOTDIR back, reads the user's .zshenv in its place,
 # and in an interactive shell marks each prompt and command for the terminal (OSC 133).
+# Before any of the person's files, it tells the Server marks will come (ADR 0059).
+[[ -o interactive ]] && builtin printf '\e]777;notify;condr://shell;integration\a'
 if [[ -n ${CONDR_USER_ZDOTDIR+set} ]]; then
   ZDOTDIR=$CONDR_USER_ZDOTDIR
   unset CONDR_USER_ZDOTDIR

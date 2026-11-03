@@ -25,11 +25,15 @@ pub(crate) const KNOWN_SHELLS: &[&str] = &[
 const WINDOWS_POWERSHELL_CWD_HOOK: &str = r"if ($null -eq $global:__CondrOriginalPrompt) { $global:__CondrOriginalPrompt = $function:prompt; function global:prompt { $out = @(& $global:__CondrOriginalPrompt) -join ' '; $loc = $ExecutionContext.SessionState.Path.CurrentLocation; if ($loc.Provider.Name -eq 'FileSystem') { try { [Environment]::CurrentDirectory = $loc.ProviderPath } catch {}; $esc = [string][char]27; $out += $esc + ']9;9;' + $loc.ProviderPath + $esc + '\' }; $out } }";
 
 /// bash's rc file: the user's `~/.bashrc`, an exit trap that reports the last cwd, and
-/// the shell integration when the Server turned it on (ADR 0055).
+/// the shell integration when the Server turned it on (ADR 0055), announced before
+/// `~/.bashrc` when this bash gets marks (ADR 0059).
 #[cfg(unix)]
 const BASH_RC_WRAPPER: &str = r#"exec 3<<'__CONDR_BASHRC__'
 __condr_integration=${CONDR_BASH_INTEGRATION-}
 unset CONDR_BASH_INTEGRATION
+if [[ -n $__condr_integration ]] && ((BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4))); then
+  builtin printf '\e]777;notify;condr://shell;integration\a'
+fi
 if [[ -r "$HOME/.bashrc" ]]; then source "$HOME/.bashrc"; fi
 if [[ -n $__condr_integration ]]; then source "$__condr_integration"; fi
 unset __condr_integration

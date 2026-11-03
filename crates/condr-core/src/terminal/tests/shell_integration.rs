@@ -16,8 +16,10 @@ fn integrated_shell(program: &str, home: &Path, zdotdir: Option<&Path>) -> Optio
     }
     command.env_remove("XDG_DATA_DIRS");
     command.cwd(home);
-    apply(&mut command, &program, &integration);
-    Some(TerminalRuntime::spawn(command, TerminalSize::new(24, 120)).unwrap())
+    let announces = apply(&mut command, &program, &integration);
+    let mut runtime = TerminalRuntime::spawn(command, TerminalSize::new(24, 120)).unwrap();
+    runtime.announces = announces;
+    Some(runtime)
 }
 
 fn which(program: &str) -> Option<String> {
@@ -252,4 +254,87 @@ fn zsh_prompts_can_be_jumped_between() {
 #[test]
 fn bash_prompts_can_be_jumped_between_from_4_4() {
     jumps_between_prompts("bash", "user$", bash_has_marks());
+}
+
+/// Polls until the shell is ready to be typed into, or panics after ten seconds.
+fn ready_shell(runtime: &TerminalRuntime) -> String {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        match runtime.launch_probe().readiness() {
+            ShellReadiness::Ready(shell) => return shell,
+            _ if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
+            other => panic!("never ready ({other:?}): {}", runtime.visible_text()),
+        }
+    }
+}
+
+#[test]
+fn an_announced_zsh_is_ready_only_at_its_prompt() {
+    let home = home("zsh-ready");
+    // Builtins only: the process probe took this for a shell at its prompt.
+    std::fs::write(
+        home.join(".zshrc"),
+        "zmodload zsh/zselect; zselect -t 150; PROMPT='user> '\n",
+    )
+    .unwrap();
+    let Some(runtime) = integrated_shell("zsh", &home, None) else {
+        return;
+    };
+    assert!(runtime.announces);
+    assert_eq!(ready_shell(&runtime), "zsh");
+    assert!(
+        runtime.visible_text().contains("user>"),
+        "ready before the prompt: {}",
+        runtime.visible_text()
+    );
+    let _ = std::fs::remove_dir_all(home);
+}
+
+#[test]
+fn an_announced_zsh_stuck_in_a_startup_read_is_never_ready() {
+    let home = home("zsh-read");
+    std::fs::write(home.join(".zshrc"), "read -k 1 answer; PROMPT='user> '\n").unwrap();
+    let Some(runtime) = integrated_shell("zsh", &home, None) else {
+        return;
+    };
+    let until = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < until {
+        assert_eq!(
+            runtime.launch_probe().readiness(),
+            ShellReadiness::Starting,
+            "the probe would have typed into the read"
+        );
+        thread::sleep(Duration::from_millis(50));
+    }
+    // Whatever the person types reaches the read, and the prompt follows.
+    assert!(!runtime.typed());
+    runtime.execute(TerminalCommand::Text("y".into())).unwrap();
+    assert!(runtime.typed());
+    assert_eq!(ready_shell(&runtime), "zsh");
+    let _ = std::fs::remove_dir_all(home);
+}
+
+#[test]
+fn bash_is_ready_by_its_marks_from_4_4_and_by_the_probe_before() {
+    let home = home("bash-ready");
+    std::fs::write(home.join(".bashrc"), "PS1='user> '\n").unwrap();
+    let Some(runtime) = integrated_shell("bash", &home, None) else {
+        return;
+    };
+    assert_eq!(ready_shell(&runtime), "bash");
+    wait_for(&runtime, "user>");
+    let announced = runtime.notices.lock().unwrap().shell_announced;
+    assert_eq!(announced, bash_has_marks());
+    let _ = std::fs::remove_dir_all(home);
+}
+
+#[test]
+fn a_shell_without_integration_is_left_to_the_probe() {
+    let mut command = CommandBuilder::new("/bin/sh");
+    command.env("PS1", "plain> ");
+    let runtime = TerminalRuntime::spawn(command, TerminalSize::new(24, 120)).unwrap();
+    assert!(!runtime.announces);
+    // macOS's /bin/sh is bash.
+    let shell = ready_shell(&runtime);
+    assert!(["sh", "bash", "dash"].contains(&shell.as_str()), "{shell}");
 }

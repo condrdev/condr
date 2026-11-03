@@ -1,10 +1,32 @@
 use super::*;
 
+/// How long a shell Condr gave integration has to announce itself before the process
+/// probe decides alone (ADR 0059): a `/etc/zshenv` that sets `ZDOTDIR` skips Condr's.
+const ANNOUNCE_GRACE: Duration = Duration::from_secs(2);
+/// How long after its first prompt mark a line editor has to turn on bracketed paste,
+/// which it does once it reads; the person's own prompt hooks still run after the mark.
+const PASTE_GRACE: Duration = Duration::from_secs(1);
+
 #[derive(Clone)]
 pub struct TerminalLaunchProbe {
     #[cfg(unix)]
     master: Option<Weak<Mutex<Box<dyn MasterPty + Send>>>>,
     process: ProcessProbe,
+    terminal: Weak<Mutex<Terminal>>,
+    notices: SharedTerminalNotices,
+    started: Instant,
+    announces: bool,
+}
+
+/// Whether a line typed into the Pane now would reach its shell's prompt (ADR 0059).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ShellReadiness {
+    /// The shell has not shown its first prompt yet; ask again.
+    Starting,
+    /// A program runs in the Pane, or nothing says its shell waits at a prompt.
+    Busy,
+    /// At its prompt: the shell's lower-cased name, to quote a line for.
+    Ready(String),
 }
 
 impl TerminalRuntime {
@@ -13,6 +35,10 @@ impl TerminalRuntime {
             #[cfg(unix)]
             master: self.master.as_ref().map(Arc::downgrade),
             process: self.process.clone(),
+            terminal: Arc::downgrade(&self.terminal),
+            notices: Arc::clone(&self.notices),
+            started: self.started,
+            announces: self.announces,
         }
     }
 
@@ -31,10 +57,57 @@ impl TerminalRuntime {
 }
 
 impl TerminalLaunchProbe {
-    /// Whether the Pane has an idle supported shell ready for a command.
-    pub fn is_idle(&self) -> bool {
+    /// Whether the Pane's shell waits at its prompt and is one Condr can type into.
+    pub fn is_ready(&self) -> bool {
+        matches!(self.readiness(), ShellReadiness::Ready(shell) if KNOWN_SHELLS.contains(&shell.as_str()))
+    }
+
+    /// A shell whose integration announced itself is ready at its first prompt mark, and
+    /// a Windows PowerShell once its prompt first reports the directory. Anything else is
+    /// left to the process probe, which takes a shell running only builtins, still in its
+    /// startup files, for one at its prompt (ADR 0059).
+    pub fn readiness(&self) -> ShellReadiness {
+        let Ok(notices) = self.notices.lock() else {
+            return ShellReadiness::Busy;
+        };
+        let (announced, first_prompt, first_cwd_report, running) = (
+            notices.shell_announced,
+            notices.first_prompt,
+            notices.first_cwd_report,
+            notices.command.is_some(),
+        );
+        drop(notices);
+        if announced {
+            let Some(prompt) = first_prompt else {
+                return ShellReadiness::Starting;
+            };
+            if running {
+                return ShellReadiness::Busy;
+            }
+            let bracketed = self
+                .terminal
+                .upgrade()
+                .is_some_and(|terminal| lock_pane(&terminal).is_ok_and(|vt| vt.mode(2004)));
+            if !bracketed && prompt.elapsed() < PASTE_GRACE {
+                return ShellReadiness::Starting;
+            }
+            return self
+                .current_shell()
+                .map_or(ShellReadiness::Busy, ShellReadiness::Ready);
+        }
+        if cfg!(windows)
+            && first_cwd_report.is_none()
+            && self
+                .current_shell()
+                .is_some_and(|shell| matches!(shell.as_str(), "pwsh" | "powershell"))
+        {
+            return ShellReadiness::Starting;
+        }
+        if self.announces && self.started.elapsed() < ANNOUNCE_GRACE {
+            return ShellReadiness::Starting;
+        }
         self.idle_shell()
-            .is_some_and(|shell| KNOWN_SHELLS.contains(&shell.as_str()))
+            .map_or(ShellReadiness::Busy, ShellReadiness::Ready)
     }
 
     /// OS inspection runs outside the Server lock. The caller validates the Terminal
@@ -44,12 +117,12 @@ impl TerminalLaunchProbe {
         installation: &crate::agent_discovery::AgentInstallation,
         args: &[String],
     ) -> io::Result<String> {
-        let shell = self.idle_shell().ok_or_else(|| {
-            io::Error::new(
+        let ShellReadiness::Ready(shell) = self.readiness() else {
+            return Err(io::Error::new(
                 io::ErrorKind::WouldBlock,
                 "Pane is busy or its shell is initializing",
-            )
-        })?;
+            ));
+        };
         if !KNOWN_SHELLS.contains(&shell.as_str()) {
             return Err(io::Error::new(
                 io::ErrorKind::Unsupported,
@@ -75,6 +148,21 @@ impl TerminalLaunchProbe {
             ));
         }
         Ok(command)
+    }
+
+    /// The shell's name from its process row alone, with no look at what else runs.
+    fn current_shell(&self) -> Option<String> {
+        let shell_pid = Pid::from_u32(self.process.shell_pid?);
+        let mut system = System::new();
+        system.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&[shell_pid]),
+            ProcessRefreshKind::new(),
+        );
+        let shell = system.process(shell_pid)?;
+        if Some(shell.start_time()) != self.process.shell_started_at {
+            return None;
+        }
+        process_shell_name(shell)
     }
 
     fn idle_shell(&self) -> Option<String> {
@@ -127,15 +215,19 @@ impl TerminalLaunchProbe {
         {
             return None;
         }
-        // The idle root process by lower-cased name, whatever it is; callers decide
-        // whether Condr knows how to type a command into it.
-        let name = shell.name().to_str()?.to_ascii_lowercase();
-        Some(
-            name.trim_start_matches('-')
-                .trim_end_matches(".exe")
-                .to_owned(),
-        )
+        process_shell_name(shell)
     }
+}
+
+/// The root process by lower-cased name, whatever it is; callers decide whether Condr
+/// knows how to type a command into it.
+fn process_shell_name(shell: &sysinfo::Process) -> Option<String> {
+    let name = shell.name().to_str()?.to_ascii_lowercase();
+    Some(
+        name.trim_start_matches('-')
+            .trim_end_matches(".exe")
+            .to_owned(),
+    )
 }
 
 /// The launch as one line typed at the idle shell's prompt. Words are quoted only when

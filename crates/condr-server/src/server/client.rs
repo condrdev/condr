@@ -978,56 +978,20 @@ pub(super) fn handle_client(
                 session_id,
                 command,
             } => {
-                let installations = if matches!(
-                    command,
-                    condr_core::protocol::AgentCommand::Available
-                        | condr_core::protocol::AgentCommand::Start { .. }
-                ) {
-                    condr_core::agent_discovery::discover()
-                } else {
-                    Vec::new()
+                let (state, lifecycle, outbound) =
+                    (Arc::clone(&state), Arc::clone(&lifecycle), outbound.clone());
+                let start = matches!(command, condr_core::protocol::AgentCommand::Start { .. });
+                let request = move || {
+                    agent_request(
+                        &state, &lifecycle, &outbound, client_id, server_id, session_id, command,
+                    )
                 };
-                let launch = if let condr_core::protocol::AgentCommand::Start {
-                    pane_id,
-                    kind,
-                    ref args,
-                    ..
-                } = command
-                {
-                    let probe = {
-                        let state = state.lock().or_abort();
-                        state.terminal_instances.get(&pane_id).copied().zip(
-                            state
-                                .terminals
-                                .get(&pane_id)
-                                .map(TerminalRuntime::launch_probe),
-                        )
-                    };
-                    probe.and_then(|(instance, probe)| {
-                        installations
-                            .iter()
-                            .find(|installation| installation.kind == kind)
-                            .map(|installation| (instance, probe.command(installation, args)))
-                    })
+                // A start may wait for a fresh shell's first prompt, which this loop must not
+                // (ADR 0059).
+                if start {
+                    thread::spawn(request);
                 } else {
-                    None
-                };
-                let mut state = state.lock().or_abort();
-                if server_id != state.server_id
-                    || session_id != state.session_id
-                    || lifecycle.is_stopping()
-                {
-                    queue_message(
-                        &outbound,
-                        ServerMessage::AgentResult {
-                            result: Err(condr_core::protocol::AgentError {
-                                code: "invalid_agent_request".into(),
-                                message: "unknown Server/Session or Server is stopping".into(),
-                            }),
-                        },
-                    );
-                } else {
-                    state.handle_agent(client_id, &outbound, command, installations, launch);
+                    request();
                 }
                 false
             }
@@ -1212,6 +1176,80 @@ pub(super) fn handle_client(
 const MAX_LOG_PAGE: u32 = 1000;
 
 /// The repository a Workspace is in, for History's requests.
+/// Answers one `AgentCommand`. A start first waits, up to its own timeout, for a fresh
+/// Pane's shell to reach its first prompt (ADR 0059).
+fn agent_request(
+    state: &Arc<Mutex<RuntimeState>>,
+    lifecycle: &ServerLifecycle,
+    outbound: &ClientWriter,
+    client_id: u64,
+    server_id: ServerId,
+    session_id: SessionId,
+    command: condr_core::protocol::AgentCommand,
+) {
+    let installations = if matches!(
+        command,
+        condr_core::protocol::AgentCommand::Available
+            | condr_core::protocol::AgentCommand::Start { .. }
+    ) {
+        condr_core::agent_discovery::discover()
+    } else {
+        Vec::new()
+    };
+    let launch = if let condr_core::protocol::AgentCommand::Start {
+        pane_id,
+        kind,
+        ref args,
+        timeout_ms,
+        ..
+    } = command
+    {
+        let waited_until = Instant::now() + Duration::from_millis(timeout_ms.min(300_000));
+        let probe = loop {
+            let probe = {
+                let state = state.lock().or_abort();
+                state.terminal_instances.get(&pane_id).copied().zip(
+                    state
+                        .terminals
+                        .get(&pane_id)
+                        .map(TerminalRuntime::launch_probe),
+                )
+            };
+            match &probe {
+                Some((_, launch))
+                    if launch.readiness() == ShellReadiness::Starting
+                        && Instant::now() < waited_until =>
+                {
+                    thread::sleep(PROMPT_POLL_INTERVAL);
+                }
+                _ => break probe,
+            }
+        };
+        probe.and_then(|(instance, probe)| {
+            installations
+                .iter()
+                .find(|installation| installation.kind == kind)
+                .map(|installation| (instance, probe.command(installation, args)))
+        })
+    } else {
+        None
+    };
+    let mut state = state.lock().or_abort();
+    if server_id != state.server_id || session_id != state.session_id || lifecycle.is_stopping() {
+        queue_message(
+            outbound,
+            ServerMessage::AgentResult {
+                result: Err(condr_core::protocol::AgentError {
+                    code: "invalid_agent_request".into(),
+                    message: "unknown Server/Session or Server is stopping".into(),
+                }),
+            },
+        );
+    } else {
+        state.handle_agent(client_id, outbound, command, installations, launch);
+    }
+}
+
 fn workspace_repository(
     state: &Arc<Mutex<RuntimeState>>,
     server_id: ServerId,

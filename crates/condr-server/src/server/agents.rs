@@ -138,7 +138,7 @@ pub(super) fn resume_agent(
             io::ErrorKind::TimedOut,
             "agent resume timed out",
         ))
-    } else if resume.submitted || !probe.is_idle() {
+    } else if resume.submitted || !probe.is_ready() {
         return true;
     } else {
         // Session validation bounds the ID to a plain token; the shell resolves the CLI.

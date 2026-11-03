@@ -71,7 +71,7 @@ pub use terminal::{
 #[cfg(feature = "runtime")]
 pub use terminal::{
     CURSOR_POSITION_SETTLE, CommandBuilder, FinishedCommand, LONG_COMMAND, PaneEnvironment,
-    TERMINAL_IDLE_CHECK, TerminalAgentProbe, TerminalCwdProbe, TerminalLaunchProbe,
+    ShellReadiness, TERMINAL_IDLE_CHECK, TerminalAgentProbe, TerminalCwdProbe, TerminalLaunchProbe,
     TerminalNoticeBatch, TerminalNoticeProbe, TerminalNotification, TerminalRuntime,
     TerminalViewSource, default_shell_program, install_shell_integration,
 };

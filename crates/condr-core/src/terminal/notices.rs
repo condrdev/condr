@@ -32,6 +32,13 @@ pub(super) struct TerminalNotices {
     pub(super) agent_events: Vec<AgentNotice>,
     pub(super) agent: AgentDetector,
     pub(super) agent_stopping: bool,
+    /// The shell's integration said, before the person's startup files, that it marks its
+    /// prompts (ADR 0059). Never cleared.
+    pub(super) shell_announced: bool,
+    /// When the shell first marked a prompt (OSC 133;A), and when it first reported its
+    /// directory, which a Windows PowerShell does at each prompt (ADR 0059). Never cleared.
+    pub(super) first_prompt: Option<Instant>,
+    pub(super) first_cwd_report: Option<Instant>,
 }
 
 pub(super) type SharedTerminalNotices = Arc<Mutex<TerminalNotices>>;
@@ -70,6 +77,10 @@ impl AgentNotice {
         }
     }
 }
+
+/// The title of the OSC 777 notification Condr's shell integration announces itself
+/// with, `condr://shell;integration` (ADR 0059).
+const SHELL_INTEGRATION_TITLE: &str = "condr://shell";
 
 /// How long a progress lasts without a new report, as in Ghostty (ADR 0054).
 pub(super) const PROGRESS_TIMEOUT: Duration = Duration::from_secs(15);
@@ -256,15 +267,19 @@ pub(super) fn apply_terminal_events(
             Event::Bell => notices.bells = notices.bells.saturating_add(1),
             Event::TitleChanged(title) => notices.record_title(sanitize_terminal_title(&title)),
             Event::PwdChanged(pwd) => {
+                notices.first_cwd_report.get_or_insert_with(Instant::now);
                 if let Some(cwd) = reported_cwd_of(&pwd) {
                     record_reported_cwd(reported_cwd, cwd);
                 }
             }
             Event::ClipboardWrite(text) => notices.record_clipboard(text),
-            // Condr's own Agent events travel as OSC 777 notifications too.
+            // Condr's own Agent events and its shell integration's announcement travel as
+            // OSC 777 notifications too.
             Event::Notification { title, body } => {
                 let payload = format!("{AGENT_EVENT_OSC_PREFIX}{body}");
-                if format!("777;notify;{title};") == AGENT_EVENT_OSC_PREFIX {
+                if title == SHELL_INTEGRATION_TITLE {
+                    notices.shell_announced |= body == "integration";
+                } else if format!("777;notify;{title};") == AGENT_EVENT_OSC_PREFIX {
                     if let Some(event) = AgentEvent::decode(payload.as_bytes()) {
                         notices.record_agent_event(AgentNotice::Hook(event));
                     }
@@ -281,6 +296,7 @@ pub(super) fn apply_terminal_events(
             // A prompt or a reset only matters to records the protocol keeps; a plain
             // shell's prompt marks must not wake the process probe.
             Event::PromptStart => {
+                notices.first_prompt.get_or_insert_with(Instant::now);
                 if notices.agent.reports_program_status() {
                     notices.record_agent_event(AgentNotice::PromptStart);
                 }
