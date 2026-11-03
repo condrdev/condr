@@ -90,8 +90,8 @@ If you delete only `device-key`, the window may generate a new key before the Se
 
 The Server pushes to every paired phone whose entry has `push` set, through Condr Cloud (`push.condr.dev`, a Cloudflare Worker), which forwards the notification to Apple or Google.
 
-* **What it sees**: Condr Cloud and Cloudflare, which runs it, Apple and Google see the Agent's name and state, the Workspace, the Agent's `detail`, the terminal title, the Server's name and both Device keys, never terminal contents. Pushes are plain text, not end-to-end encrypted.
-* **What it stores**: each phone's Device key and push token, which Devices may push to it, and when it last registered. A registration not refreshed in 90 days is purged, and a token is deleted when Apple or Google reports it invalid.
+* **What it sees**: Condr Cloud and Cloudflare, which runs it, Apple and Google see the Agent's name and state, the Workspace, the Agent's `detail`, the terminal title, the Server's name and the name the phone gives it, and both Device keys, never terminal contents. Pushes are plain text, not end-to-end encrypted.
+* **What it stores**: each phone's Device key and push token, which Devices may push to it and the name the phone gives each, and when it last registered. A registration not refreshed in 90 days is purged, and a token is deleted when Apple or Google reports it invalid.
 * **Authentication**: every request is signed with the caller's Device key. There are no accounts.
 * **Turning it off**: a phone whose owner declined notifications never contacts Condr Cloud. Turning notifications off on the phone stops pushes, and revoking the phone stops this Server's pushes to it.
 

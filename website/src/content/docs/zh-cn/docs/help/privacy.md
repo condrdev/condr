@@ -11,7 +11,7 @@ Condr 没有账号，也没有统计分析。桌面端、Server 与手机端都�
 
 * **你的工作**：终端、Agent 输出、Workspace、Git 数据和文件，都留在运行它们的 Server 所在的 Device 上。其他 Device 只能通过你建立的连接看到它们，这些连接都是端到端加密的。一条通知只带有关于某个 Agent 的少量信息（见下文 Condr Cloud），从不包含终端内容。
 * **Device 密钥**：电脑把密钥存在数据目录的 `device-key` 文件里。iPhone App 把密钥存放在 iOS 钥匙串中，仅本台手机可读取，且不会随备份恢复到其他手机。Android App 用 Android Keystore 中的密钥加密保存它，存放位置不参与备份。密钥从不离开设备。
-* **手机端数据**：你配对的电脑、为它们设置的名称以及你的偏好设置，均保存在手机本地。
+* **手机端数据**：你配对的电脑、为它们设置的名称以及你的偏好设置，均保存在手机本地。如果你允许通知，这些名称也会发送给下文的 Condr Cloud。
 
 ---
 
@@ -19,8 +19,8 @@ Condr 没有账号，也没有统计分析。桌面端、Server 与手机端都�
 
 * **Peer-to-peer 中继与 DNS**（`relay.condr.dev`、`dns.condr.dev`）：仅用于 Peer-to-peer 连接。中继无法读取你的传输流量；但当中继处在连接路径上时，它能获知通信双方的 Device 标识、连接时间以及来源 IP 地址。中继不会在磁盘上存储任何内容。详见[安全模型](/zh-cn/docs/help/security/)。
 * **Condr Cloud**（`push.condr.dev`，运行在 Cloudflare Workers 上）：负责投递手机端的通知。当 Agent 完成、出错或需要你处理时，你的 Server 会请求 Condr Cloud 推送，Condr Cloud 再交给 Apple（Android 上则是 Google）。
-  * **存储的内容**：对每台允许通知的手机，保存它的 Device 标识、推送令牌、哪些 Device 可以向它推送，以及它最近一次注册的时间。不保存任何通知。超过 90 天未更新的注册会被删除；Apple 或 Google 报告令牌失效时，该令牌会立即删除。
-  * **推送中可见的内容**：Condr Cloud 及运行它的 Cloudflare、Apple 与 Google 能看到 Agent 的名称和状态、Workspace、Agent 给出的简短说明（如有）、终端标题、Server 的名称以及双方的 Device 标识，但看不到终端内容。推送是明文，没有端到端加密。
+  * **存储的内容**：对每台允许通知的手机，保存它的 Device 标识、推送令牌、哪些 Device 可以向它推送及你在 App 中为它们设置的名称，以及它最近一次注册的时间。不保存任何通知。超过 90 天未更新的注册会被删除；Apple 或 Google 报告令牌失效时，该令牌会立即删除。
+  * **推送中可见的内容**：Condr Cloud 及运行它的 Cloudflare、Apple 与 Google 能看到 Agent 的名称和状态、Workspace、Agent 给出的简短说明（如有）、终端标题、Server 的名称及你在 App 中为它设置的名称，以及双方的 Device 标识，但看不到终端内容。推送是明文，没有端到端加密。
   * **没有账号**：每个请求都用 Device 密钥签名。
 * **更新检查**：桌面端每 5 小时读取一次 `https://condr.dev/version.txt`（若跟随 nightly 渠道则查询 GitHub API），以确认是否有新版本。该请求不会携带任何能够识别你个人或当前安装实例的信息。你可以在 **Settings › About** 中关闭自动更新检查。
 * **网站**（`condr.dev`）：托管于 Cloudflare Pages，不包含任何统计分析代码，亦不设置 Cookie。页面字体从 Google Fonts 加载。与其他网页请求一样，Cloudflare 与 Google 会在请求过程中收到你的 IP 地址。

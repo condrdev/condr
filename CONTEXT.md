@@ -38,7 +38,7 @@ A Condr-hosted service that helps Peer-to-peer connections hole-punch and forwar
 _Avoid_: proxy, gateway
 
 **Condr Cloud**:
-A Condr-hosted service that forwards a Server's push for an Agent that finished or needs its person to the Companion through APNs or FCM (ADR 0047). It stores which phones accept pushes from which Devices and their push tokens, and sees the notification's text but never terminal contents. It has nothing to do with the Relay; its outage stops only pushes.
+A Condr-hosted service that forwards a Server's push for an Agent that finished or needs its person to the Companion through APNs or FCM (ADR 0047). It stores which phones accept pushes from which Devices, the name each phone gives those Devices, and the phones' push tokens, and sees the notification's text but never terminal contents. It has nothing to do with the Relay; its outage stops only pushes.
 _Avoid_: push relay, 推送中转, push server, hub
 
 **Client**:

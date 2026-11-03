@@ -79,7 +79,7 @@ Condr 要守住的差异是原生 GUI 而非 TUI、Windows 一等公民、Server
 4. 查看：各 Device 的 Workspace 与 Agent 状态、「Needs you」列表、Pane 的终端视图（打开时接管尺寸）。
 5. 终端交互：按 ADR 0041 实现输入、按键排、滚动、选择与鼠标模式。
 6. iOS 公开测试：TestFlight 公开链接，要求桌面端 0.1.13 或更新；只在手机端或协议变化时上传新 build；Beta App Review 用 App 内的静态 Demo。官网文档加手机端与隐私政策两页，联系邮箱 `hello@condr.dev`。
-7. 推送：已按 ADR 0047 实现。Condr Cloud 以 Cloudflare Worker 运行在 push.condr.dev，按来源 IP 和调用方限速；SECURITY.md 与隐私政策页写明它保存 Device id、推送 token、允许推送的 Server 和最后登记时间，它、苹果和谷歌看得到通知正文，看不到终端内容。Agent 完成、失败或进入 Blocked 时推送，点开后重新拉取 Server 的权威状态。只接 APNs 与 FCM，不接国内厂商通道或聚合推送：没有 GMS 的 Android 手机只在前台更新。FCM 这条路已写好，随 Android 在真机验证。
+7. 推送：已按 ADR 0047 实现。Condr Cloud 以 Cloudflare Worker 运行在 push.condr.dev，按来源 IP 和调用方限速；SECURITY.md 与隐私政策页写明它保存 Device id、推送 token、允许推送的 Server 及手机给它们起的名字和最后登记时间，它、苹果和谷歌看得到通知正文，看不到终端内容。Agent 完成、失败或进入 Blocked 时推送，点开后重新拉取 Server 的权威状态。只接 APNs 与 FCM，不接国内厂商通道或聚合推送：没有 GMS 的 Android 手机只在前台更新。FCM 这条路已写好，随 Android 在真机验证。
 8. Android：已按 ADR 0048 实现，终端由手机自绘 Server 的格子。正式版之前以签名 APK 在 GitHub Releases 发布，Google Play 随首个正式版。
 
 **要实测的风险**：蜂窝网络下打洞可能更常失败，流量更多经 relay.condr.dev 转发，会推高带宽成本，也会碰到 relay 对每个客户端的限速；Wi-Fi 与蜂窝切换时连接能否保住（iroh 1.0 支持 QUIC multipath，未验证），保不住就走第 3 步的重连；手机不显示的 Git 与文件事件在蜂窝流量里占多少（ADR 0041）。

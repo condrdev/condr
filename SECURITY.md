@@ -34,8 +34,8 @@ Peer-to-peer is Condr's first hosted online service, and it is optional. A Serve
 Condr Cloud (`push.condr.dev`, a Cloudflare Worker) delivers the mobile app's notifications when an Agent finishes, fails or needs you: a Server asks it to push, and it forwards the push to Apple (APNs) or Google (FCM). It is unrelated to the relay. A phone whose owner declined notifications never contacts it, and turning notifications off on the phone stops pushes.
 
 - **No accounts.** Every request is signed with the caller's Device key, and Condr Cloud checks it against the Device id, which is that key's public half. It issues no credential of its own.
-- **What it stores.** For each phone that allows notifications: its Device id, its push token, which Devices may push to it, and when it last registered. It keeps no notification. A registration not refreshed for 90 days is purged, and a token is deleted as soon as Apple or Google reports it invalid.
-- **What a push reveals.** Condr Cloud and Cloudflare, which runs it, Apple and Google see the Agent's name and state, the Workspace, the Agent's `detail`, the terminal title, the Server's name and both Device ids. They never see terminal contents.
+- **What it stores.** For each phone that allows notifications: its Device id, its push token, which Devices may push to it and the name the phone gives each, and when it last registered. It keeps no notification. A registration not refreshed for 90 days is purged, and a token is deleted as soon as Apple or Google reports it invalid.
+- **What a push reveals.** Condr Cloud and Cloudflare, which runs it, Apple and Google see the Agent's name and state, the Workspace, the Agent's `detail`, the terminal title, the Server's name and the name the phone gives it, and both Device ids. They never see terminal contents.
 - **Pushes are not end-to-end encrypted.** They travel over TLS but as plain text, the same text the phone shows on its lock screen.
 - **An outage affects only pushes.** Connections to your Devices do not depend on Condr Cloud.
 

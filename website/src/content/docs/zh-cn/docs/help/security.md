@@ -90,8 +90,8 @@ Condr 不设用户账号体系，亦不收集遥测数据。运行期间仅访�
 
 Server 通过 Condr Cloud（`push.condr.dev`，一个 Cloudflare Worker）向每台记录中 `push` 为真的已配对手机推送通知，再由 Condr Cloud 转交 Apple 或 Google。
 
-* **可见内容**：Condr Cloud 及运行它的 Cloudflare、Apple 与 Google 能看到 Agent 的名称和状态、Workspace、Agent 的 `detail`、终端标题、Server 的名称以及双方的设备公钥，但看不到终端内容。推送为明文，未做端到端加密。
-* **存储内容**：每台手机的设备公钥与推送令牌、允许向它推送的设备，以及最近一次注册时间。超过 90 天未更新的注册会被清除；Apple 或 Google 报告令牌失效时，该令牌随即删除。
+* **可见内容**：Condr Cloud 及运行它的 Cloudflare、Apple 与 Google 能看到 Agent 的名称和状态、Workspace、Agent 的 `detail`、终端标题、Server 的名称及手机为它设置的名称，以及双方的设备公钥，但看不到终端内容。推送为明文，未做端到端加密。
+* **存储内容**：每台手机的设备公钥与推送令牌、允许向它推送的设备及手机为它们设置的名称，以及最近一次注册时间。超过 90 天未更新的注册会被清除；Apple 或 Google 报告令牌失效时，该令牌随即删除。
 * **身份认证**：每个请求均以调用方的设备密钥签名，不设用户账号。
 * **关闭方式**：拒绝通知权限的手机从不连接 Condr Cloud。在手机上关闭通知即可停止推送；撤销该手机后，当前 Server 也不再向它推送。
 
