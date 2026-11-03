@@ -941,13 +941,7 @@ fn a_finished_turn_pushes_once_to_condr_cloud() {
         serde_json::json!([condr_core::AgentKind::Claude.label()])
     );
     assert_eq!(body["pane"], pane);
-    assert!(
-        body["body"]
-            .as_str()
-            .unwrap()
-            .ends_with(&condr_server::noise::device_name()),
-        "{body}"
-    );
+    assert_eq!(body["serverName"], condr_server::noise::device_name());
     assert!(
         requests.recv_timeout(Duration::from_secs(2)).is_err(),
         "Idle -> Working -> Done pushes exactly once"

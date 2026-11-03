@@ -94,8 +94,9 @@ fn push(pane: &str, title_loc_key: &'static str) -> Push {
         to: vec![DeviceKey::from_seed([9; 32]).public().to_string()],
         title_loc_key,
         title_loc_args: ["Claude Code"],
-        body: "site · mac".into(),
+        body: "site".into(),
         pane: pane.into(),
+        server_name: "mac".into(),
     }
 }
 
@@ -160,8 +161,9 @@ fn a_push_posts_signed_json_and_retries_a_5xx_once() {
             "to": [DeviceKey::from_seed([9; 32]).public().to_string()],
             "titleLocKey": "push_blocked",
             "titleLocArgs": ["Claude Code"],
-            "body": "site · mac",
+            "body": "site",
             "pane": "7",
+            "serverName": "mac",
         })
     );
     assert_eq!(next(&requests).1, body, "a 5xx is retried");
@@ -291,8 +293,9 @@ fn a_device_watching_the_pane_is_skipped_and_nobody_left_posts_nothing() {
             "to": [away.public().to_string()],
             "titleLocKey": "push_finished",
             "titleLocArgs": [AgentKind::Claude.label()],
-            "body": format!("{workspace} · build · {}", crate::noise::device_name()),
+            "body": format!("{workspace} · build"),
             "pane": watched.as_u64().to_string(),
+            "serverName": crate::noise::device_name(),
         })
     );
 

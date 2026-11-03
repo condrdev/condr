@@ -24,6 +24,9 @@ pub(super) struct Push {
     pub(super) title_loc_args: [&'static str; 1],
     pub(super) body: String,
     pub(super) pane: String,
+    /// This machine's name, which Condr Cloud ends the body with for a phone that gave
+    /// the Device none of its own (ADR 0060).
+    pub(super) server_name: String,
 }
 
 /// The monitor's end: whom to push to, and the sender task's queue.
@@ -92,7 +95,6 @@ impl RuntimeState {
             .session
             .workspace_for_pane(pane_id)
             .map(|workspace| workspace.name());
-        let device_name = crate::noise::device_name();
         let _ = pushes.queue.send(Push {
             to,
             title_loc_key: match alert {
@@ -105,15 +107,15 @@ impl RuntimeState {
                 agent.detail.as_deref(),
                 workspace,
                 self.terminal_titles.get(&pane_id).map(String::as_str),
-                Some(device_name.as_str()),
             ]),
             pane: pane_id.as_u64().to_string(),
+            server_name: crate::noise::device_name(),
         });
     }
 }
 
-/// `detail · Workspace · terminal title · Server`, empty parts left out, cut to 1 KB of
-/// UTF-8 at a character boundary.
+/// `detail · Workspace · terminal title`, empty parts left out, cut to 1 KB of UTF-8 at a
+/// character boundary. Condr Cloud adds the Device's name after the cut (ADR 0060).
 pub(super) fn push_body<'a>(parts: impl IntoIterator<Item = Option<&'a str>>) -> String {
     let mut body = parts
         .into_iter()
