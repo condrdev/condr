@@ -54,7 +54,7 @@ class Push(
     private set
 
   private var granted: Boolean? = null
-  private var servers: List<String> = emptyList()
+  private var servers: List<Server> = emptyList()
   private var token: String? = null
   /** Bumped by every registration, so only the latest one's answer sets the flag. */
   private var attempt = 0
@@ -66,10 +66,11 @@ class Push(
   }
 
   /**
-   * The notification permission and the Devices paired now, as the app last found them. A
-   * registration that failed is tried again on the next call even when nothing changed.
+   * The notification permission and the Devices paired now with the names the app lists them by, as
+   * the app last found them; a rename registers again (ADR 0060). A registration that failed is
+   * tried again on the next call even when nothing changed.
    */
-  suspend fun update(granted: Boolean, servers: List<String>) {
+  suspend fun update(granted: Boolean, servers: List<Server>) {
     if (granted == this.granted && servers == this.servers && on) return
     this.granted = granted
     this.servers = servers
@@ -153,9 +154,15 @@ class Push(
   /** Condr Cloud answers HTTP 200 with the outcome in `code`. */
   @Serializable data class Reply(val code: String)
 
+  /**
+   * A Device that may push to this phone: its Device id, and the name the app lists it by, which
+   * Condr Cloud ends its pushes with (ADR 0060).
+   */
+  @Serializable data class Server(val id: String, val name: String)
+
   /** What `PUT /api/push/device` registers: the FCM token and the Devices that may push to it. */
   @Serializable
-  data class Registration(val platform: String, val token: String, val servers: List<String>)
+  data class Registration(val platform: String, val token: String, val servers: List<Server>)
 
   companion object {
     /**

@@ -71,6 +71,7 @@ import dev.condr.companion.R
 import dev.condr.companion.Stores
 import dev.condr.companion.model.AppTab
 import dev.condr.companion.model.DeviceRoute
+import dev.condr.companion.model.Push
 import dev.condr.companion.model.SettingsRoute
 import dev.condr.companion.push.Notifications
 import dev.condr.companion.ui.agents.AgentsScreen
@@ -238,7 +239,10 @@ private fun PushRegistration(asks: Boolean) {
   var returns by remember { mutableStateOf(0) }
   val ask =
     rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted = it }
-  val servers = stores.session.devices.mapNotNull { it.deviceId }
+  val servers =
+    stores.session.devices.mapNotNull { device ->
+      device.deviceId?.let { Push.Server(it, device.label) }
+    }
   LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
     granted = Notifications.granted(context)
     returns += 1

@@ -25,6 +25,8 @@ class PushTest {
   private val client: CompanionInterface = FakeClient { flags.add(it) }
   private val preferences = Preferences.inMemory()
 
+  private val mac = Push.Server("mac-id", "mac")
+
   @Before fun main() = Dispatchers.setMain(dispatcher)
 
   @After fun reset() = Dispatchers.resetMain()
@@ -38,14 +40,17 @@ class PushTest {
   @Test
   fun registersOncePermissionServersAndTokenAreAllThere() = runTest {
     val push = push()
-    push.update(granted = true, servers = listOf("mac"))
+    push.update(granted = true, servers = listOf(mac))
     assertTrue(requests.isEmpty())
     push.received("tok")
     assertEquals(1, requests.size)
     val (method, url, body) = requests[0]
     assertEquals("PUT", method)
     assertEquals("https://cloud.test/api/push/device", url)
-    assertEquals("""{"platform":"FCM","token":"tok","servers":["mac"]}""", body)
+    assertEquals(
+      """{"platform":"FCM","token":"tok","servers":[{"id":"mac-id","name":"mac"}]}""",
+      body,
+    )
     assertTrue(push.on)
     assertEquals(true, flags.last())
   }
@@ -54,8 +59,8 @@ class PushTest {
   fun losingThePermissionRemovesARegistrationOnceMade() = runTest {
     val push = push()
     push.received("tok")
-    push.update(granted = true, servers = listOf("mac"))
-    push.update(granted = false, servers = listOf("mac"))
+    push.update(granted = true, servers = listOf(mac))
+    push.update(granted = false, servers = listOf(mac))
     assertEquals(listOf("PUT", "DELETE"), requests.map { it.first })
     assertFalse(push.on)
     assertFalse(preferences.pushRegistered)
@@ -66,18 +71,31 @@ class PushTest {
     answer = 200 to """{"code":"401"}"""
     val push = push()
     push.received("tok")
-    push.update(granted = true, servers = listOf("mac"))
+    push.update(granted = true, servers = listOf(mac))
     assertFalse(push.on)
     answer = 200 to """{"code":"200"}"""
-    push.update(granted = true, servers = listOf("mac"))
+    push.update(granted = true, servers = listOf(mac))
     assertEquals(2, requests.size)
     assertTrue(push.on)
   }
 
   @Test
+  fun renamingADeviceRegistersAgainWithItsNewName() = runTest {
+    val push = push()
+    push.received("tok")
+    push.update(granted = true, servers = listOf(mac))
+    push.update(granted = true, servers = listOf(Push.Server("mac-id", "Work Mac")))
+    assertEquals(listOf("PUT", "PUT"), requests.map { it.first })
+    assertEquals(
+      """{"platform":"FCM","token":"tok","servers":[{"id":"mac-id","name":"Work Mac"}]}""",
+      requests.last().third,
+    )
+  }
+
+  @Test
   fun noTokenMeansNothingReachesThePhone() = runTest {
     val push = push()
-    push.update(granted = true, servers = listOf("mac"))
+    push.update(granted = true, servers = listOf(mac))
     push.failed()
     assertFalse(push.on)
     assertTrue(requests.isEmpty())

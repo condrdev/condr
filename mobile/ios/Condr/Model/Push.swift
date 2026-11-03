@@ -33,7 +33,7 @@ final class Push {
     private let defaults: UserDefaults
     private let send: Send
     private var status: UNAuthorizationStatus?
-    private var servers: [String] = []
+    private var servers: [Server] = []
     private var token: Data?
     /// Bumped by every registration, so only the latest one's answer sets the flag.
     private var attempt = 0
@@ -54,10 +54,11 @@ final class Push {
         client.setPush(push: on)
     }
 
-    /// The notification permission and the Devices paired now, as the app last found them.
-    /// A registration that failed, or whose answer never came, is tried again on the next
+    /// The notification permission and the Devices paired now with the names the app lists
+    /// them by, as the app last found them; a rename registers again (ADR 0060). A
+    /// registration that failed, or whose answer never came, is tried again on the next
     /// call even when nothing changed, so the flag does not stay off until something does.
-    func update(status: UNAuthorizationStatus, servers: [String]) async {
+    func update(status: UNAuthorizationStatus, servers: [Server]) async {
         guard status != self.status || servers != self.servers || !on else { return }
         self.status = status
         self.servers = servers
@@ -158,14 +159,21 @@ final class Push {
         let code: String
     }
 
+    /// A Device that may push to this phone: its Device id, and the name the app lists it
+    /// by, which Condr Cloud ends its pushes with (ADR 0060).
+    nonisolated struct Server: Encodable, Equatable, Sendable {
+        let id: String
+        let name: String
+    }
+
     /// What `PUT /api/push/device` registers: the APNs token and the Devices that may push to it.
     nonisolated struct Registration: Encodable {
         let platform = "APNS"
         let environment = Push.environment
         let token: String
-        let servers: [String]
+        let servers: [Server]
 
-        init(token: Data, servers: [String]) {
+        init(token: Data, servers: [Server]) {
             self.token = token.map { String(format: "%02x", $0) }.joined()
             self.servers = servers
         }

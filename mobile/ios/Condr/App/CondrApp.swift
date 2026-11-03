@@ -239,7 +239,9 @@ struct Root: View {
             // welcome for the tabs before its last step is shown.
             if self.onboarding == nil || !paired { self.onboarding = !paired }
         }
-        .onChange(of: session.devices.map(\.address)) { Task { await registerPush() } }
+        .onChange(of: session.devices.map { [$0.address, $0.label] }) {
+            Task { await registerPush() }
+        }
         .overlay(alignment: .top) { BannerView() }
         .overlay(alignment: .bottom) {
             // Inside a Pane the toast sits over the input bar, from the terminal itself.
@@ -303,7 +305,10 @@ struct Root: View {
             status = await center.notificationSettings().authorizationStatus
         }
         if status == .authorized { UIApplication.shared.registerForRemoteNotifications() }
-        await push.update(status: status, servers: session.devices.compactMap(\.deviceId))
+        let servers = session.devices.compactMap { device in
+            device.deviceId.map { Push.Server(id: $0, name: device.label) }
+        }
+        await push.update(status: status, servers: servers)
     }
 
     private func raiseCurtain() {

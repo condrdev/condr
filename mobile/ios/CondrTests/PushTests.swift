@@ -40,6 +40,8 @@ struct PushTests {
     let client = FakeClient()
     let cloud = FakeCloud()
     let defaults = Fixture.defaults()
+    let mac = Push.Server(id: "mac-id", name: "mac")
+    let box = Push.Server(id: "box-id", name: "box")
 
     func push() -> Push {
         Push(
@@ -49,7 +51,7 @@ struct PushTests {
 
     @Test func theRegistrationNamesThePhoneItsTokenAndEveryServer() async throws {
         let push = push()
-        await push.update(status: .authorized, servers: ["mac-id", "box-id"])
+        await push.update(status: .authorized, servers: [mac, box])
         #expect(cloud.methods.isEmpty, "nothing goes out before APNs gives a token")
         await push.received(token: Data([0x0a, 0xff, 0x00]))
 
@@ -64,14 +66,17 @@ struct PushTests {
         #expect(json["platform"] as? String == "APNS")
         #expect(json["environment"] as? String == "SANDBOX", "a Debug build's token is sandbox")
         #expect(json["token"] as? String == "0aff00")
-        #expect(json["servers"] as? [String] == ["mac-id", "box-id"])
+        #expect(
+            json["servers"] as? [[String: String]] == [
+                ["id": "mac-id", "name": "mac"], ["id": "box-id", "name": "box"],
+            ])
         #expect(json.count == 4)
         #expect(push.on)
     }
 
     @Test func theFlagIsKeptAndSaidBeforeTheNextLaunchConnects() async {
         let first = push()
-        await first.update(status: .authorized, servers: ["mac-id"])
+        await first.update(status: .authorized, servers: [mac])
         await first.received(token: Data([1]))
         #expect(client.state.withLock { $0.pushes } == [false, true])
 
@@ -84,11 +89,11 @@ struct PushTests {
         let push = push()
         await push.received(token: Data([1]))
         cloud.status.withLock { $0 = 500 }
-        await push.update(status: .authorized, servers: ["mac-id"])
+        await push.update(status: .authorized, servers: [mac])
         #expect(!push.on)
 
         cloud.status.withLock { $0 = 200 }
-        await push.update(status: .authorized, servers: ["mac-id", "box-id"])
+        await push.update(status: .authorized, servers: [mac, box])
         #expect(push.on)
         #expect(cloud.methods == ["PUT", "PUT"])
     }
@@ -97,11 +102,11 @@ struct PushTests {
         let push = push()
         await push.received(token: Data([1]))
         cloud.status.withLock { $0 = 500 }
-        await push.update(status: .authorized, servers: ["mac-id"])
+        await push.update(status: .authorized, servers: [mac])
         #expect(!push.on)
 
         cloud.status.withLock { $0 = 200 }
-        await push.update(status: .authorized, servers: ["mac-id"])
+        await push.update(status: .authorized, servers: [mac])
         #expect(push.on, "the next return to the foreground registers again")
         #expect(cloud.methods == ["PUT", "PUT"])
     }
@@ -109,13 +114,13 @@ struct PushTests {
     @Test func losingPermissionOrTheLastDeviceRemovesTheRegistration() async {
         let push = push()
         await push.received(token: Data([1]))
-        await push.update(status: .authorized, servers: ["mac-id"])
+        await push.update(status: .authorized, servers: [mac])
         #expect(push.on)
 
         await push.update(status: .authorized, servers: [])
         #expect(!push.on)
-        await push.update(status: .authorized, servers: ["mac-id"])
-        await push.update(status: .denied, servers: ["mac-id"])
+        await push.update(status: .authorized, servers: [mac])
+        await push.update(status: .denied, servers: [mac])
         #expect(!push.on)
         #expect(cloud.methods == ["PUT", "DELETE", "PUT", "DELETE"])
         let delete = cloud.requests.withLock { $0.last }
@@ -124,26 +129,26 @@ struct PushTests {
         #expect(delete?.httpBody == nil)
 
         await push.update(status: .authorized, servers: [])
-        await self.push().update(status: .denied, servers: ["mac-id"])
+        await self.push().update(status: .denied, servers: [mac])
         #expect(cloud.methods.count == 4, "a removed registration is not removed again")
     }
 
     @Test func aFailedRemovalIsTriedAgainNextLaunch() async {
         let push = push()
         await push.received(token: Data([1]))
-        await push.update(status: .authorized, servers: ["mac-id"])
+        await push.update(status: .authorized, servers: [mac])
         cloud.status.withLock { $0 = 500 }
-        await push.update(status: .denied, servers: ["mac-id"])
+        await push.update(status: .denied, servers: [mac])
 
         cloud.status.withLock { $0 = 200 }
-        await self.push().update(status: .denied, servers: ["mac-id"])
-        await self.push().update(status: .denied, servers: ["mac-id"])
+        await self.push().update(status: .denied, servers: [mac])
+        await self.push().update(status: .denied, servers: [mac])
         #expect(cloud.methods == ["PUT", "DELETE", "DELETE"])
     }
 
     @Test func aPhoneThatDeclinedOrNeverPairedSendsNothing() async {
         for (status, servers) in [
-            (UNAuthorizationStatus.notDetermined, ["mac-id"]), (.denied, ["mac-id"]),
+            (UNAuthorizationStatus.notDetermined, [mac]), (.denied, [mac]),
             (.authorized, []),
         ] {
             let push = push()
@@ -157,35 +162,48 @@ struct PushTests {
     @Test func aRemovalAndTheRegistrationAfterItLandInOrder() async {
         let push = push()
         await push.received(token: Data([1]))
-        await push.update(status: .authorized, servers: ["mac-id"])
+        await push.update(status: .authorized, servers: [mac])
         cloud.deleteTakes.withLock { $0 = .milliseconds(200) }
 
         let forget = Task { await push.update(status: .authorized, servers: []) }
-        let pair = Task { await push.update(status: .authorized, servers: ["box-id"]) }
+        let pair = Task { await push.update(status: .authorized, servers: [box]) }
         await forget.value
         await pair.value
         #expect(cloud.answered.withLock { $0 } == ["PUT", "DELETE", "PUT"])
         #expect(push.on)
 
-        await push.update(status: .denied, servers: ["box-id"])
+        await push.update(status: .denied, servers: [box])
         #expect(cloud.methods.last == "DELETE", "the last registration is removed too")
     }
 
     @Test func nothingChangedSendsNothingAgain() async {
         let push = push()
-        await push.update(status: .authorized, servers: ["mac-id"])
+        await push.update(status: .authorized, servers: [mac])
         await push.received(token: Data([1]))
         await push.received(token: Data([1]))
-        await push.update(status: .authorized, servers: ["mac-id"])
+        await push.update(status: .authorized, servers: [mac])
         #expect(cloud.methods == ["PUT"])
 
         await push.received(token: Data([2]))
         #expect(cloud.methods == ["PUT", "PUT"], "a new token registers again")
     }
 
+    @Test func renamingADeviceRegistersAgainWithItsNewName() async throws {
+        let push = push()
+        await push.received(token: Data([1]))
+        await push.update(status: .authorized, servers: [mac])
+        await push.update(
+            status: .authorized, servers: [Push.Server(id: "mac-id", name: "Work Mac")])
+        #expect(cloud.methods == ["PUT", "PUT"])
+
+        let body = try #require(cloud.requests.withLock { $0.last?.httpBody })
+        let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        #expect(json["servers"] as? [[String: String]] == [["id": "mac-id", "name": "Work Mac"]])
+    }
+
     @Test func noTokenFromAPNsTurnsTheFlagOff() async {
         let push = push()
-        await push.update(status: .authorized, servers: ["mac-id"])
+        await push.update(status: .authorized, servers: [mac])
         await push.received(token: Data([1]))
         push.failed()
         #expect(!push.on)
