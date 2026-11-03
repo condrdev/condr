@@ -1315,8 +1315,18 @@ fn programs_and_long_commands_notify_for_their_pane_unless_the_pane_is_in_front(
     notify(None, false, window);
     finished(Some(2), window);
     finished(None, window);
+    // With a second Device saved, each notification ends with its Device's name (ADR 0060).
+    let label = window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.connections
+                .push(ServerConnection::new(2, "box".into(), tcp("127.0.0.1:9")));
+            this.connection(1).unwrap().label.clone()
+        })
+    });
+    notify(Some("cargo"), false, window);
+    finished(None, window);
     let shown = cx.shown_system_notifications();
-    assert_eq!(shown.len(), 4, "none for the Pane in front: {shown:?}");
+    assert_eq!(shown.len(), 6, "none for the Pane in front: {shown:?}");
     assert_eq!(shown[2].title.as_ref(), "Command failed with exit code 2");
     assert!(
         shown[2].body.starts_with("after 1m 15s"),
@@ -1335,6 +1345,9 @@ fn programs_and_long_commands_notify_for_their_pane_unless_the_pane_is_in_front(
         shown[1].tag,
         crate::app::notifications::pane_notification_tag(1, pane_id)
     );
+    let named = |index: usize| shown[index].body.ends_with(&format!(" · {label}"));
+    assert!(!named(0) && !named(3), "one Device saved: {shown:?}");
+    assert!(named(4) && named(5), "two Devices saved: {shown:?}");
 }
 
 #[test]

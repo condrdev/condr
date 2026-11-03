@@ -53,6 +53,7 @@ impl Condr {
             agent.detail.clone(),
             workspace,
             connection.model.terminal_titles.get(&pane_id).cloned(),
+            self.notified_device(connection),
         ]
         .into_iter()
         .flatten()
@@ -120,7 +121,8 @@ impl Condr {
     }
 
     /// Posts one notification for the Pane under the notifications switch, unless the
-    /// Pane is in front: `title` or "Terminal" heads it, the Workspace ends its text.
+    /// Pane is in front: `title` or "Terminal" heads it, the Workspace and, among several
+    /// Devices, the Device's name end its text.
     fn notify_pane(
         &self,
         key: ConnectionKey,
@@ -140,17 +142,27 @@ impl Condr {
                 .workspace_for_pane(pane_id)
                 .map(|workspace| workspace.name().to_owned())
         });
-        let body = [body.filter(|body| !body.is_empty()), workspace]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>()
-            .join(" · ");
+        let body = [
+            body.filter(|body| !body.is_empty()),
+            workspace,
+            self.notified_device(connection),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" · ");
         cx.show_system_notification(SystemNotification {
             tag: pane_notification_tag(key, pane_id),
             title: title.unwrap_or_else(|| "Terminal".into()).into(),
             body: body.into(),
             actions: Vec::new(),
         });
+    }
+
+    /// The name the sidebar lists the Device by, which ends a notification once more than
+    /// one Device is saved (ADR 0060); with only this machine it would always say "Local".
+    fn notified_device(&self, connection: &ServerConnection) -> Option<String> {
+        (self.connections.len() > 1).then(|| connection.label.clone())
     }
 
     pub(in crate::app) fn set_notifications(&mut self, enabled: bool, cx: &mut Context<Self>) {
