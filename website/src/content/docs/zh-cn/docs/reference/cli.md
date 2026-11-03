@@ -151,6 +151,10 @@ condr workspace list [--all-devices]
 # 创建工作区；--cwd 默认继承当前目录（跨机调用 --device 时为必填项）
 condr workspace create [--cwd <路径>] [--label <名称>] [--focus]
 
+# 把仓库克隆到一个新目录并在那里打开工作区；目录默认是 git 会取的名字，放在当前目录下
+# （跨机调用 --device 时为必填项）。第一个窗格在 Shell 显示提示符后输入 `git clone`，结果读那个窗格
+condr workspace clone <url> [<目录>] [--label <名称>] [--focus]
+
 # 获取指定工作区元数据及 Tab、Pane 计数
 condr workspace get <id>
 
@@ -332,6 +336,8 @@ condr device list
 | `server_not_running` | Server 未启动。可通过 `condr server start` 先行拉起。 |
 | `no_current_pane` | 运行于 Condr 外部或附加了 `--device`，且未显式指定 Pane ID。 |
 | `cwd_required` | 使用 `--device` 跨机创建 Workspace 时未传入 `--cwd` 绝对路径。 |
+| `directory_required` | `workspace clone` 带 `--device`，或从 URL 推不出目录名时，没有给出 `<目录>`。 |
+| `invalid_clone_url` | URL 为空、含引号或控制字符、超过 2048 字节，或是相对的本地路径。 |
 | `workspace_not_found` / `tab_not_found` / `pane_not_found` | 指定的实体 ID 不存在或已关闭。 |
 | `pane_busy` | 目标窗格已有 Agent 或待启动的 Agent，或其 Shell 尚未就绪。 |
 | `agent_timeout` | 在 `agent start`、`agent prompt` 或 `agent wait` 设定的超时时间内未等到指定状态。 |

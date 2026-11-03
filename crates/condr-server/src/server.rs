@@ -2,6 +2,7 @@ mod agents;
 mod bootstrap;
 mod client;
 mod clipboard_image;
+mod clones;
 mod config;
 mod layout;
 mod local;
@@ -533,6 +534,8 @@ struct RuntimeState {
     exited_terminals: std::collections::HashSet<PaneId>,
     agents: std::collections::HashMap<PaneId, AgentSnapshot>,
     agent_control: AgentControl,
+    /// A Clone Repository's `git clone`, until its Pane's shell is ready (ADR 0059).
+    pending_clones: std::collections::HashMap<PaneId, clones::PendingClone>,
     terminal_titles: std::collections::HashMap<PaneId, String>,
     /// Each Pane's progress, from OSC 9;4 or an OSC 7501 percentage (ADR 0054).
     terminal_progress: std::collections::HashMap<PaneId, TerminalProgress>,
@@ -724,6 +727,7 @@ impl RuntimeState {
             exited_terminals: std::collections::HashSet::new(),
             agents: std::collections::HashMap::new(),
             agent_control: AgentControl::default(),
+            pending_clones: std::collections::HashMap::new(),
             terminal_titles: std::collections::HashMap::new(),
             terminal_progress: std::collections::HashMap::new(),
             pending_terminal_bells: std::collections::HashSet::new(),

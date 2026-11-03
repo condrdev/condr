@@ -766,7 +766,9 @@ impl RuntimeState {
         }
     }
 
+    /// Forgets what the Server meant to type into a Pane that is gone, a clone included.
     pub(super) fn forget_agent_control(&mut self, pane_id: PaneId) {
+        self.pending_clones.remove(&pane_id);
         self.agent_control.resumes.remove(&pane_id);
         self.agent_control.names.remove(&pane_id);
         self.agent_control.live.remove(&pane_id);

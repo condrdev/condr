@@ -886,6 +886,17 @@ impl TryFrom<&LayoutCommand> for super::LayoutCommand {
                 root_directory: path_text(root_directory)?,
                 name: name.clone(),
             }),
+            LayoutCommand::CreateWorkspaceDirectory {
+                parent_directory,
+                directory_name,
+                name,
+                clone_url,
+            } => Command::CreateWorkspaceDirectory(super::CreateWorkspaceDirectory {
+                parent_directory: path_text(parent_directory)?,
+                directory_name: directory_name.clone(),
+                name: name.clone(),
+                clone_url: clone_url.clone(),
+            }),
             LayoutCommand::CreateWorktree {
                 parent_workspace_id,
                 branch,
@@ -1022,6 +1033,12 @@ impl TryFrom<super::LayoutCommand> for LayoutCommand {
             Command::CreateWorkspace(create) => Self::CreateWorkspace {
                 root_directory: PathBuf::from(create.root_directory),
                 name: create.name,
+            },
+            Command::CreateWorkspaceDirectory(create) => Self::CreateWorkspaceDirectory {
+                parent_directory: PathBuf::from(create.parent_directory),
+                directory_name: create.directory_name,
+                name: create.name,
+                clone_url: create.clone_url,
             },
             Command::CreateWorktree(create) => Self::CreateWorktree {
                 parent_workspace_id: workspace(create.parent_workspace_id),

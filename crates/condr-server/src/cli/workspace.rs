@@ -20,6 +20,20 @@ pub(crate) enum WorkspaceCommand {
         #[arg(long)]
         focus: bool,
     },
+    /// Clone a Git repository into a new directory and open a Workspace there; its first
+    /// Tab types `git clone` once the shell shows its prompt, and the clone runs there
+    Clone {
+        /// The repository: a URL, an scp-like `host:path`, or an absolute local path
+        url: String,
+        /// The new directory; defaults to the name git would pick, in the current directory
+        directory: Option<PathBuf>,
+        /// Name shown in the sidebar; defaults to the directory name
+        #[arg(long, value_name = "TEXT")]
+        label: Option<String>,
+        /// Ask every connected GUI to show the new Workspace
+        #[arg(long)]
+        focus: bool,
+    },
     /// Show one Workspace
     Get { workspace_id: u64 },
     /// Ask every connected GUI to show a Workspace
@@ -171,6 +185,40 @@ fn workspace_root(cwd: Option<PathBuf>, device: Option<&str>) -> Result<PathBuf,
     }
 }
 
+/// Sends a command that creates a Workspace and prints it with its first Tab and Pane.
+fn create_workspace(
+    client: &mut ClientConnection,
+    command: LayoutCommand,
+    focus: bool,
+) -> Result<Value, CliError> {
+    let LayoutResult::WorkspaceCreated {
+        workspace_id,
+        tab_id,
+        ..
+    } = apply(client, command)?
+    else {
+        return Err(CliError::new(
+            "workspace_create_failed",
+            "the Server returned no created Workspace ID",
+        ));
+    };
+    if focus {
+        apply(client, LayoutCommand::ActivateWorkspace { workspace_id })?;
+    }
+    let session = client.session()?;
+    let workspace = find_workspace(&session, workspace_id.as_u64())?;
+    let tab = workspace
+        .tab(tab_id)
+        .ok_or_else(|| CliError::new("tab_not_found", "the created Tab vanished"))?;
+    Ok(json!({
+        "workspace": workspace_info(workspace),
+        "tab": tab_info(workspace, tab),
+        "root_pane": tab
+            .focused_pane()
+            .map(|pane| pane_info(client, workspace, tab, pane.id())),
+    }))
+}
+
 pub(crate) fn run_workspace(device: Option<&str>, command: WorkspaceCommand) -> i32 {
     run(device, |client| workspace(client, device, command))
 }
@@ -209,38 +257,64 @@ fn workspace(
         }
         WorkspaceCommand::Create { cwd, label, focus } => {
             let root_directory = workspace_root(cwd, device)?;
-            let LayoutResult::WorkspaceCreated {
-                workspace_id,
-                tab_id,
-                ..
-            } = apply(
+            create_workspace(
                 client,
                 LayoutCommand::CreateWorkspace {
                     root_directory,
                     name: label,
                 },
-            )?
-            else {
+                focus,
+            )
+        }
+        WorkspaceCommand::Clone {
+            url,
+            directory,
+            label,
+            focus,
+        } => {
+            let url = condr_core::validate_clone_url(&url)
+                .map_err(|message| CliError::new("invalid_clone_url", message))?
+                .to_owned();
+            let directory = match (directory, device) {
+                (Some(directory), Some(_)) => directory,
+                (Some(directory), None) => std::path::absolute(directory)?,
+                (None, Some(_)) => {
+                    return Err(CliError::new(
+                        "directory_required",
+                        "a DIRECTORY is required with --device: the current directory is a path on this machine, not on the Device",
+                    ));
+                }
+                (None, None) => {
+                    let name = condr_core::clone_directory_name(&url).ok_or_else(|| {
+                        CliError::new(
+                            "directory_required",
+                            "no directory name follows from the URL; give a DIRECTORY",
+                        )
+                    })?;
+                    std::path::absolute(std::env::current_dir()?.join(name))?
+                }
+            };
+            let (Some(parent), Some(name)) = (
+                directory
+                    .parent()
+                    .filter(|parent| !parent.as_os_str().is_empty()),
+                directory.file_name().and_then(|name| name.to_str()),
+            ) else {
                 return Err(CliError::new(
-                    "workspace_create_failed",
-                    "the Server returned no created Workspace ID",
+                    "invalid_directory",
+                    format!("{} names no directory to create", directory.display()),
                 ));
             };
-            if focus {
-                apply(client, LayoutCommand::ActivateWorkspace { workspace_id })?;
-            }
-            let session = client.session()?;
-            let workspace = find_workspace(&session, workspace_id.as_u64())?;
-            let tab = workspace
-                .tab(tab_id)
-                .ok_or_else(|| CliError::new("tab_not_found", "the created Tab vanished"))?;
-            Ok(json!({
-                "workspace": workspace_info(workspace),
-                "tab": tab_info(workspace, tab),
-                "root_pane": tab
-                    .focused_pane()
-                    .map(|pane| pane_info(client, workspace, tab, pane.id())),
-            }))
+            create_workspace(
+                client,
+                LayoutCommand::CreateWorkspaceDirectory {
+                    parent_directory: parent.to_path_buf(),
+                    directory_name: name.to_owned(),
+                    name: label,
+                    clone_url: Some(url),
+                },
+                focus,
+            )
         }
         WorkspaceCommand::Get { workspace_id } => {
             let session = client.session()?;

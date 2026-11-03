@@ -337,6 +337,15 @@ pub enum LayoutCommand {
         root_directory: PathBuf,
         name: Option<String>,
     },
+    /// A Workspace on `directory_name`, one directory the Server makes under
+    /// `parent_directory`, and with `clone_url` a `git clone` it types into the
+    /// Workspace's first Pane (ADR 0059).
+    CreateWorkspaceDirectory {
+        parent_directory: PathBuf,
+        directory_name: String,
+        name: Option<String>,
+        clone_url: Option<String>,
+    },
     CreateWorktree {
         parent_workspace_id: WorkspaceId,
         branch: String,

@@ -263,6 +263,7 @@ fn probe_until_closed(
 ) {
     let mut resume_pending = true;
     let mut resume_retry_at = Instant::now();
+    let mut clone_pending = true;
     let mut cwd_scan_due: Option<Instant> = None;
     loop {
         match activity.recv_timeout(agent_probe.poll_interval()) {
@@ -285,6 +286,9 @@ fn probe_until_closed(
         if resume_pending && now >= resume_retry_at {
             resume_pending = agents::resume_agent(state, pane_id, instance_id);
             resume_retry_at = now + RESUME_RETRY_INTERVAL;
+        }
+        if clone_pending {
+            clone_pending = clones::type_pending_clone(state, pane_id, instance_id);
         }
         let agent_update = agent_probe.poll();
         let agent_resume = agent_probe.resume();

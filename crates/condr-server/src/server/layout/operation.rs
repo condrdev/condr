@@ -175,11 +175,22 @@ impl ClientLayouts {
             }
             _ => None,
         };
+        let made_directory = match &prepared {
+            PreparedExternalLayout::CreateWorkspace {
+                root,
+                made_directory: true,
+                ..
+            } => Some(root.clone()),
+            _ => None,
+        };
         let effect = match apply_prepared_external_layout(&mut state, prepared) {
             Ok(effect) => effect,
             Err(reason) => {
                 drop(state);
                 drop(fence);
+                if let Some(root) = made_directory {
+                    remove_made_directory(&root);
+                }
                 return Err(match created_worktree {
                     Some((parent, child)) => prepared_worktree_failure(&parent, &child, reason),
                     None => reason,

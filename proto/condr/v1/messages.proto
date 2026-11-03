@@ -323,6 +323,7 @@ message LayoutCommand {
     WorkspaceTarget close_workspace = 23;
     WorkspacePath show_diff = 24;
     WorkspacePath show_file = 25;
+    CreateWorkspaceDirectory create_workspace_directory = 26;
   }
 }
 
@@ -341,6 +342,15 @@ message PaneTarget {
 message CreateWorkspace {
   string root_directory = 1;
   optional string name = 2;
+}
+
+// A Workspace on a directory the Server makes, with a `git clone` typed into its first
+// Pane when `clone_url` is set (ADR 0059).
+message CreateWorkspaceDirectory {
+  string parent_directory = 1;
+  string directory_name = 2;
+  optional string name = 3;
+  optional string clone_url = 4;
 }
 
 message CreateWorktree {

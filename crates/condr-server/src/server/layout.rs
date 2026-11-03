@@ -17,6 +17,12 @@ pub(super) enum ExternalLayoutPlan {
         root: PathBuf,
         name: Option<String>,
     },
+    CreateWorkspaceDirectory {
+        parent: PathBuf,
+        directory_name: String,
+        name: Option<String>,
+        clone_url: Option<String>,
+    },
     CreateWorktree {
         parent_workspace_id: WorkspaceId,
         parent_root: PathBuf,
@@ -46,6 +52,10 @@ pub(super) enum PreparedExternalLayout {
         root: PathBuf,
         git: Option<GitRepository>,
         name: Option<String>,
+        /// The Server made `root`, so a Workspace that is not created after all takes it
+        /// back while it is still empty (ADR 0059).
+        made_directory: bool,
+        clone_url: Option<String>,
     },
     CreateWorktree {
         parent_workspace_id: WorkspaceId,
@@ -83,6 +93,17 @@ pub(super) fn external_layout_plan(
         } => ExternalLayoutPlan::CreateWorkspace {
             root: root_directory.clone(),
             name: name.clone(),
+        },
+        LayoutCommand::CreateWorkspaceDirectory {
+            parent_directory,
+            directory_name,
+            name,
+            clone_url,
+        } => ExternalLayoutPlan::CreateWorkspaceDirectory {
+            parent: parent_directory.clone(),
+            directory_name: directory_name.clone(),
+            name: name.clone(),
+            clone_url: clone_url.clone(),
         },
         LayoutCommand::CreateWorktree {
             parent_workspace_id,
@@ -147,6 +168,29 @@ pub(super) fn prepare_external_layout(
                 git: discover_repository(&root).ok().flatten(),
                 root,
                 name,
+                made_directory: false,
+                clone_url: None,
+            })
+        }
+        ExternalLayoutPlan::CreateWorkspaceDirectory {
+            parent,
+            directory_name,
+            name,
+            clone_url,
+        } => {
+            let clone_url = clone_url
+                .as_deref()
+                .map(|url| condr_core::validate_clone_url(url).map(str::to_owned))
+                .transpose()?;
+            let root = workspace_directory(&parent, &directory_name)?;
+            std::fs::create_dir(&root)
+                .map_err(|error| format!("cannot create {}: {error}", root.display()))?;
+            Ok(PreparedExternalLayout::CreateWorkspace {
+                git: discover_repository(&root).ok().flatten(),
+                root,
+                name,
+                made_directory: true,
+                clone_url,
             })
         }
         ExternalLayoutPlan::CreateWorktree {
@@ -207,6 +251,21 @@ pub(super) fn prepare_external_layout(
             })
         }
     }
+}
+
+/// `parent/name`, where `name` is one plain component: `PathBuf::join` would put a
+/// drive-relative `C:foo` outside the parent on Windows (ADR 0059).
+fn workspace_directory(parent: &std::path::Path, name: &str) -> Result<PathBuf, String> {
+    validate_root_directory(parent)?;
+    condr_core::validate_directory_name(name)?;
+    let mut components = std::path::Path::new(name).components();
+    if !matches!(
+        (components.next(), components.next()),
+        (Some(std::path::Component::Normal(component)), None) if component == name
+    ) {
+        return Err(format!("{name} is not a directory name"));
+    }
+    Ok(parent.join(name))
 }
 
 pub(super) fn validate_root_directory(root: &std::path::Path) -> Result<(), String> {
@@ -402,12 +461,28 @@ pub(super) fn finish_external_layout(
 pub(super) fn cancel_prepared_external_layout(
     prepared: PreparedExternalLayout,
 ) -> Result<(), String> {
-    if let PreparedExternalLayout::CreateWorktree { parent, child, .. } = prepared {
-        remove_worktree(&parent, &child).map_err(|error| {
-            format!("failed to remove the prepared worktree during rollback: {error}")
-        })?;
+    match prepared {
+        PreparedExternalLayout::CreateWorktree { parent, child, .. } => {
+            remove_worktree(&parent, &child).map_err(|error| {
+                format!("failed to remove the prepared worktree during rollback: {error}")
+            })?;
+        }
+        PreparedExternalLayout::CreateWorkspace {
+            root,
+            made_directory: true,
+            ..
+        } => remove_made_directory(&root),
+        _ => {}
     }
     Ok(())
+}
+
+/// Takes back a directory the Server made for a Workspace that was not created, only
+/// while it is still empty.
+pub(super) fn remove_made_directory(root: &std::path::Path) {
+    if let Err(error) = std::fs::remove_dir(root) {
+        tracing::warn!("left {} behind: {error}", root.display());
+    }
 }
 
 pub(super) fn prepared_worktree_failure(
@@ -461,8 +536,9 @@ pub(super) fn apply_layout_command(
         }
         LayoutCommand::CreateWorktree { .. }
         | LayoutCommand::OpenWorktree { .. }
-        | LayoutCommand::RemoveWorktree { .. } => {
-            return Err("worktree command was not prepared".into());
+        | LayoutCommand::RemoveWorktree { .. }
+        | LayoutCommand::CreateWorkspaceDirectory { .. } => {
+            return Err("external layout command was not prepared".into());
         }
         LayoutCommand::CreateTab {
             workspace_id,
@@ -774,18 +850,32 @@ pub(super) fn apply_prepared_external_layout(
     prepared: PreparedExternalLayout,
 ) -> Result<LayoutEffect, String> {
     match prepared {
-        PreparedExternalLayout::CreateWorkspace { root, git, name } => {
+        PreparedExternalLayout::CreateWorkspace {
+            root,
+            git,
+            name,
+            made_directory: _,
+            clone_url,
+        } => {
             let effect = apply_layout_command(
                 state,
                 LayoutCommand::CreateWorkspace {
-                    root_directory: root,
+                    root_directory: root.clone(),
                     name,
                 },
             )?;
-            let LayoutResult::WorkspaceCreated { workspace_id, .. } = effect.result else {
+            let LayoutResult::WorkspaceCreated {
+                workspace_id,
+                pane_id,
+                ..
+            } = effect.result
+            else {
                 unreachable!("created Workspace returns its identity")
             };
             set_workspace_git(state, workspace_id, git);
+            if let Some(url) = clone_url {
+                state.queue_clone(pane_id, url, root);
+            }
             Ok(effect)
         }
         PreparedExternalLayout::CreateWorktree {

@@ -64,7 +64,7 @@ pub(crate) use view::{
 #[cfg(feature = "runtime")]
 pub use cursor_settle::CURSOR_POSITION_SETTLE;
 #[cfg(feature = "runtime")]
-pub use launch::{ShellReadiness, TerminalLaunchProbe};
+pub use launch::{ShellReadiness, TerminalLaunchProbe, clone_command};
 #[cfg(feature = "runtime")]
 pub use notices::LONG_COMMAND;
 #[cfg(feature = "runtime")]

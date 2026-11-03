@@ -116,21 +116,37 @@ fn handshake_frames_from_protocol_1_keep_decoding() {
 
 #[test]
 fn layout_command_round_trip_preserves_creation_options() {
-    let message = ClientMessage::Layout {
-        server_id: ServerId(4),
-        session_id: SessionId(1),
-        request_id: 9,
-        command: LayoutCommand::CreateWorkspace {
+    for command in [
+        LayoutCommand::CreateWorkspace {
             name: Some("worker".into()),
             root_directory: PathBuf::from("projects/condr"),
         },
-    };
-    let mut bytes = Vec::new();
-    write_message(&mut bytes, &message).unwrap();
-    assert_eq!(
-        read_message::<_, ClientMessage>(&mut bytes.as_slice()).unwrap(),
-        message
-    );
+        LayoutCommand::CreateWorkspaceDirectory {
+            parent_directory: PathBuf::from("/home/me/src"),
+            directory_name: "condr".into(),
+            name: Some("worker".into()),
+            clone_url: Some("git@github.com:condrdev/condr.git".into()),
+        },
+        LayoutCommand::CreateWorkspaceDirectory {
+            parent_directory: PathBuf::from("/home/me/src"),
+            directory_name: "scratch".into(),
+            name: None,
+            clone_url: None,
+        },
+    ] {
+        let message = ClientMessage::Layout {
+            server_id: ServerId(4),
+            session_id: SessionId(1),
+            request_id: 9,
+            command,
+        };
+        let mut bytes = Vec::new();
+        write_message(&mut bytes, &message).unwrap();
+        assert_eq!(
+            read_message::<_, ClientMessage>(&mut bytes.as_slice()).unwrap(),
+            message
+        );
+    }
 }
 
 #[test]

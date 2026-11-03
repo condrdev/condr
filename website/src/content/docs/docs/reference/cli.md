@@ -151,6 +151,11 @@ condr workspace list [--all-devices]
 # Create a workspace; --cwd defaults to the current directory (required with --device)
 condr workspace create [--cwd <path>] [--label <name>] [--focus]
 
+# Clone a repository into a new directory and open a workspace there; the directory
+# defaults to the name git would pick, in the current directory (required with --device).
+# Its first Pane types `git clone` once the shell shows its prompt; read that Pane for the outcome
+condr workspace clone <url> [<directory>] [--label <name>] [--focus]
+
 # Get the workspace's metadata and its Tab and Pane counts
 condr workspace get <id>
 
@@ -332,6 +337,8 @@ In scripts, parse `error.code` for targeted fault handling:
 | `server_not_running` | The Server is not started. Bring it up first with `condr server start`. |
 | `no_current_pane` | Running outside Condr, or with `--device`, without an explicit Pane ID. |
 | `cwd_required` | Creating a Workspace across machines with `--device` without passing an absolute `--cwd` path. |
+| `directory_required` | `workspace clone` with `--device`, or with a URL no directory name follows from, without a `<directory>`. |
+| `invalid_clone_url` | The URL is empty, holds quotes or control characters, is over 2048 bytes, or is a relative local path. |
 | `workspace_not_found` / `tab_not_found` / `pane_not_found` | The given entity ID does not exist or is already closed. |
 | `pane_busy` | The target pane already holds an Agent or a pending launch, or its shell is not ready yet. |
 | `agent_timeout` | The target state was not reached within the timeout set for `agent start`, `agent prompt` or `agent wait`. |

@@ -17,7 +17,7 @@ All commands below start with `condr`.
 
 | Command | Purpose |
 | --- | --- |
-| `workspace`, `tab` | `list`/`get` inspect; `create` opens a shell; `focus` asks every GUI to show it; `rename` changes the label; `close` stops all contained terminals. |
+| `workspace`, `tab` | `list`/`get` inspect; `create` opens a shell; `workspace clone <url> [dir]` makes the directory and types `git clone` into its first Pane once the shell is ready, then returns (read the Pane for the outcome); `focus` asks every GUI to show it; `rename` changes the label; `close` stops all contained terminals. |
 | `pane list`, `pane get`, `pane current` | Inspect Panes or identify the caller. |
 | `pane layout` | Inspect splits, dimensions, and neighbors. |
 | `pane split` | Open a sibling shell right or down, inheriting cwd. |

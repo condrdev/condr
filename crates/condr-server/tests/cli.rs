@@ -369,6 +369,91 @@ fn workspace_and_tab_commands_drive_a_live_server() {
 }
 
 #[test]
+fn workspace_clone_makes_the_directory_and_types_git_clone_into_its_pane() {
+    if Command::new("git").arg("--version").output().is_err() {
+        return;
+    }
+    let suffix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let endpoint_path =
+        std::env::temp_dir().join(format!("condr-clone-{}-{suffix}.sock", std::process::id()));
+    let root =
+        std::path::absolute(std::env::temp_dir().join(format!("condr-clone-{suffix}"))).unwrap();
+    let source = root.join("source repo");
+    std::fs::create_dir_all(&source).unwrap();
+    assert!(
+        Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&source)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let endpoint = Endpoint::local(&endpoint_path);
+    let server =
+        BoundServer::bind(ServerConfig::ephemeral(endpoint.as_local_path().unwrap())).unwrap();
+    let handle = server.handle();
+    let server_thread = thread::spawn(move || server.run());
+    for _ in 0..100 {
+        if endpoint.connect().is_ok() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+
+    let target = root.join("cloned");
+    let created = ok(
+        &endpoint_path,
+        &[
+            "workspace",
+            "clone",
+            source.to_str().unwrap(),
+            target.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(
+        created["workspace"]["root_directory"],
+        target.to_str().unwrap()
+    );
+    assert!(created["root_pane"]["pane_id"].as_u64().is_some());
+    // The shell starts, shows its prompt, and git runs there.
+    for _ in 0..600 {
+        if target.join(".git").is_dir() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    assert!(target.join(".git").is_dir(), "the clone never ran");
+
+    // The same name again: the Server refuses it and leaves the directory alone.
+    assert_eq!(
+        err(
+            &endpoint_path,
+            &[
+                "workspace",
+                "clone",
+                source.to_str().unwrap(),
+                target.to_str().unwrap()
+            ]
+        )["code"],
+        "rejected"
+    );
+    assert!(target.join(".git").is_dir());
+    for refused in ["https://host/x';id;'", "relative/repo"] {
+        assert_eq!(
+            err(&endpoint_path, &["workspace", "clone", refused, "/tmp/x"])["code"],
+            "invalid_clone_url"
+        );
+    }
+
+    handle.stop();
+    server_thread.join().unwrap().unwrap();
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn a_missing_server_is_a_json_error() {
     let missing = std::env::temp_dir().join("condr-cli-no-server.sock");
     assert_eq!(

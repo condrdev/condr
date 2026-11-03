@@ -219,6 +219,47 @@ impl TerminalLaunchProbe {
     }
 }
 
+/// `git clone -- <url> <path>` as one line for `shell` (ADR 0059): POSIX or fish words, a
+/// plain `& git …` in PowerShell, since the URL holds no quote that would need
+/// `Start-Process`, and that line run through `-EncodedCommand` from cmd, which would
+/// expand `%` inside its own quotes.
+pub fn clone_command(shell: &str, url: &str, path: &Path) -> io::Result<String> {
+    if !KNOWN_SHELLS.contains(&shell) {
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            format!("Condr cannot type into '{shell}'"),
+        ));
+    }
+    let path = path
+        .to_str()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "the path is not UTF-8"))?;
+    let args = ["clone", "--", url, path].map(String::from);
+    let powershell = matches!(shell, "pwsh" | "powershell");
+    let line = if cfg!(windows) && (powershell || shell == "cmd") {
+        let script = format!(
+            "& git {}",
+            args.iter()
+                .map(|arg| powershell_quote(arg))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+        if powershell {
+            script
+        } else {
+            encoded_powershell_command(&script)
+        }
+    } else {
+        shell_command(shell, "git", &args)?
+    };
+    if line.len() > 4094 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "the clone command exceeds 4094 bytes",
+        ));
+    }
+    Ok(line)
+}
+
 /// The root process by lower-cased name, whatever it is; callers decide whether Condr
 /// knows how to type a command into it.
 fn process_shell_name(shell: &sysinfo::Process) -> Option<String> {
@@ -479,6 +520,38 @@ mod tests {
             windows_command("codex.ps1", &["\u{2019};calc".into()]).unwrap(),
             "& codex.ps1 '\u{2019}\u{2019};calc'"
         );
+    }
+
+    #[test]
+    fn a_clone_is_one_line_per_shell() {
+        let path = Path::new("/home/me/src/my repo");
+        assert_eq!(
+            clone_command("zsh", "https://host/r.git", path).unwrap(),
+            "git clone -- https://host/r.git '/home/me/src/my repo'"
+        );
+        assert_eq!(
+            clone_command("fish", r"/srv/a\b", path).unwrap(),
+            r"git clone -- '/srv/a\\b' '/home/me/src/my repo'"
+        );
+        if !cfg!(windows) {
+            assert_eq!(
+                clone_command("pwsh", "https://host/r.git", path).unwrap(),
+                "& git clone '--' https://host/r.git '/home/me/src/my repo'"
+            );
+        }
+        assert!(clone_command("tmux", "https://host/r.git", path).is_err());
+        #[cfg(unix)]
+        {
+            let script = clone_command("sh", "/srv/x y", path).unwrap();
+            let output = std::process::Command::new("sh")
+                .args(["-c", &format!("git() {{ printf '%s|' \"$@\"; }}; {script}")])
+                .output()
+                .unwrap();
+            assert_eq!(
+                String::from_utf8(output.stdout).unwrap(),
+                "clone|--|/srv/x y|/home/me/src/my repo|"
+            );
+        }
     }
 
     #[test]

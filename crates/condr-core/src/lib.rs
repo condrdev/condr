@@ -4,6 +4,7 @@
 
 mod agent;
 pub mod agent_discovery;
+mod clone;
 #[cfg(feature = "runtime")]
 mod config;
 mod files;
@@ -24,6 +25,9 @@ pub use agent::{
 };
 #[cfg(feature = "runtime")]
 pub use agent::{ProcessInfo, identify_agent_among, identify_agent_process};
+pub use clone::{
+    MAX_CLONE_URL_BYTES, clone_directory_name, validate_clone_url, validate_directory_name,
+};
 #[cfg(feature = "runtime")]
 pub use config::{config_path, read_config_text, read_config_value, update_config_values};
 pub use files::{
@@ -73,7 +77,7 @@ pub use terminal::{
     CURSOR_POSITION_SETTLE, CommandBuilder, FinishedCommand, LONG_COMMAND, PaneEnvironment,
     ShellReadiness, TERMINAL_IDLE_CHECK, TerminalAgentProbe, TerminalCwdProbe, TerminalLaunchProbe,
     TerminalNoticeBatch, TerminalNoticeProbe, TerminalNotification, TerminalRuntime,
-    TerminalViewSource, default_shell_program, install_shell_integration,
+    TerminalViewSource, clone_command, default_shell_program, install_shell_integration,
 };
 
 pub const APP_NAME: &str = "Condr";
