@@ -519,6 +519,16 @@ impl Condr {
     ) -> AnyElement {
         let open_owner = cx.weak_entity();
         let connect_owner = cx.weak_entity();
+        let way_row = |way: NewWorkspaceWay| {
+            let owner = cx.weak_entity();
+            welcome_row(way.id(), way.icon(), way.title())
+                .disabled(!can_mutate)
+                .on_click(move |_, window, cx| {
+                    let _ = owner.update(cx, |this, cx| {
+                        this.open_new_workspace(key, Some(way), window, cx)
+                    });
+                })
+        };
         v_flex()
             .size_full()
             .items_center()
@@ -571,15 +581,8 @@ impl Condr {
                                 });
                             }),
                     )
-                    .child(
-                        welcome_row(
-                            "clone-repository",
-                            CondrIconName::GitBranch,
-                            "Clone Repository",
-                        )
-                        .disabled(true)
-                        .tooltip("Not available yet"),
-                    )
+                    .child(way_row(NewWorkspaceWay::CloneRepository))
+                    .child(way_row(NewWorkspaceWay::NewDirectory))
                     .child(
                         welcome_row(
                             "connect-remote-device",

@@ -556,7 +556,7 @@ impl Condr {
                                     .on_click(move |_, window, cx| {
                                         cx.stop_propagation();
                                         let _ = owner.update(cx, |this, cx| {
-                                            this.choose_workspace_directory_on(key, window, cx)
+                                            this.open_new_workspace(key, None, window, cx)
                                         });
                                     }),
                             )

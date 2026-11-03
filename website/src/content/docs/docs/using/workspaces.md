@@ -7,10 +7,11 @@ A Workspace is the basic unit Condr uses to manage a project. Each Workspace map
 
 ## Open a project (Workspace)
 
-- **From the interface**: click **New Workspace** in the sidebar, or **Open Project** on the Welcome page.
-  - **Local project**: pick the folder directly.
-  - **Project on a remote server**: enter the absolute path of the folder on the remote server.
-- **From the command line**: run `condr workspace create --cwd ~/code/my-app` in a terminal.
+- **From the interface**: click **New Workspace** in the sidebar and choose one of three ways; the Welcome page lists the same three.
+  - **Open Project**: an existing folder. Locally you pick it directly; on a remote server you enter its absolute path.
+  - **Clone Repository**: paste the repository URL, check where it goes and what the folder is called, and click **Clone**. Condr makes the folder, opens the Workspace and types `git clone` into its first terminal once the shell is ready. The clone runs there with that machine's own git, keys and credentials, so you answer any password or host-key question in the terminal; press Ctrl+C to stop it.
+  - **New Directory**: an empty folder, made on the machine the Workspace belongs to.
+- **From the command line**: run `condr workspace create --cwd ~/code/my-app`, or `condr workspace clone <url> [<directory>]` to clone into a new folder.
 
 ### Read the project status
 

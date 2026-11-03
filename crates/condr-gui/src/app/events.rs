@@ -796,7 +796,9 @@ impl Condr {
                 }
             }
             ServerMessage::BrowsedDirectory { request_id, result } => {
-                self.apply_browsed_directory(key, request_id, result, cx);
+                if !self.apply_new_workspace_lookup(key, request_id, &result, cx) {
+                    self.apply_browsed_directory(key, request_id, result, cx);
+                }
                 IncomingEffect {
                     notify: true,
                     ..IncomingEffect::default()

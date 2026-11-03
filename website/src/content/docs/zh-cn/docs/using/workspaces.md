@@ -7,10 +7,11 @@ Workspace（工作区）是 Condr 管理项目的基本单位。一个工作区�
 
 ## 打开项目（Workspace）
 
-- **界面打开**：在侧边栏点击 **New Workspace** 或欢迎页的 **Open Project**。
-  - **本地项目**：直接选择文件夹。
-  - **远程服务器项目**：输入远程服务器上的文件夹绝对路径。
-- **命令行打开**：在终端运行 `condr workspace create --cwd ~/code/my-app`。
+- **界面打开**：在侧边栏点击 **New Workspace**，从三种方式里选一种；欢迎页也列出同样三项。
+  - **Open Project**：打开已有的文件夹。本地直接选择，远程服务器上输入文件夹的绝对路径。
+  - **Clone Repository**：粘贴仓库 URL，确认放在哪、文件夹叫什么，点 **Clone**。Condr 建好文件夹、打开工作区，等 Shell 就绪后在第一个终端里输入 `git clone`。克隆就在那里用那台机器自己的 git、密钥和凭据运行，密码、主机指纹等提问直接在终端里回答，按 Ctrl+C 可以中止。
+  - **New Directory**：在工作区所在的机器上新建一个空文件夹。
+- **命令行打开**：在终端运行 `condr workspace create --cwd ~/code/my-app`，或用 `condr workspace clone <url> [<目录>]` 克隆到一个新文件夹。
 
 ### 识别项目状态
 

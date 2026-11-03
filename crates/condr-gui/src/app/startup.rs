@@ -143,6 +143,7 @@ pub(super) fn bind_keys(cx: &mut App) {
         KeyBinding::new(secondary!("s"), SaveFile, Some("CondrPreview")),
     ]);
     cx.bind_keys(super::directory_browser::key_bindings());
+    cx.bind_keys(super::new_workspace::key_bindings());
     FIXED_BINDINGS.with(|bindings| cx.bind_keys(bindings.clone()));
 }
 

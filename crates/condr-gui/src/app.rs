@@ -18,6 +18,7 @@ mod ime;
 #[cfg(unix)]
 mod login_environment;
 mod navigation;
+mod new_workspace;
 mod notifications;
 mod open_in;
 mod placeholders;
@@ -105,6 +106,7 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use ime::TerminalComposition;
+use new_workspace::{NewWorkspaceDialog, NewWorkspaceWay};
 use relative_path::{RelativePath, RelativePathBuf};
 use server_connection::*;
 use settings::{
@@ -283,6 +285,8 @@ pub(crate) struct Condr {
     /// What the open Root Directory dialog lists for a remote Device; replaced by the
     /// next such dialog, so a closed one is harmless.
     directory_browser: Option<DirectoryBrowser>,
+    /// The open New Workspace chooser or form (ADR 0059); replaced by the next one.
+    new_workspace: Option<NewWorkspaceDialog>,
     sidebar_workspace_open: HashMap<(ConnectionKey, WorkspaceId), Entity<bool>>,
     terminal_font: TerminalFont,
     terminal_color_scheme: SharedString,
@@ -484,6 +488,7 @@ impl Condr {
                 ..FilesViewState::default()
             },
             directory_browser: None,
+            new_workspace: None,
             sidebar_workspace_open: HashMap::new(),
             terminal_font,
             terminal_color_scheme,

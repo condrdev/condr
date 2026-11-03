@@ -485,6 +485,13 @@ fn server_workspace_button_and_only_tab_close_round_trip() {
         .debug_bounds("new-workspace-server-1")
         .expect("Local server should expose New Workspace");
     window.simulate_click(new_workspace.center(), Modifiers::default());
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
+    let open_project = window
+        .debug_bounds("new-workspace-open-project")
+        .expect("New Workspace should offer Open Project first");
+    window.simulate_click(open_project.center(), Modifiers::default());
+    window.run_until_parked();
     assert!(window.did_prompt_for_paths());
     window.simulate_path_prompt_response(|options| {
         assert!(!options.files);

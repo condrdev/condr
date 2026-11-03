@@ -1308,3 +1308,134 @@ fn a_program_that_fails_to_start_is_one_copyable_toast() {
             == Some("Couldn't open notes in Nothing: not installed")
     }));
 }
+
+/// New Workspace's chooser and its forms, against a real Server (ADR 0059).
+#[test]
+fn new_workspace_chooses_a_way_and_makes_a_directory_on_the_server() {
+    use crate::app::NewWorkspaceWay;
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        super::super::super::startup::bind_keys(cx);
+    });
+    let (view, window, _server) = connected_condr(&mut cx);
+    let draw = |window: &mut VisualTestContext| {
+        window.run_until_parked();
+        window.update(|window, cx| _ = window.draw(cx));
+    };
+    let form = |window: &mut VisualTestContext| {
+        window.read(|app| {
+            view.read(app)
+                .new_workspace
+                .as_ref()
+                .map(|dialog| dialog.form)
+        })
+    };
+
+    // The chooser moves with Up and Down, and Esc in a form goes back to it.
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| this.open_new_workspace(1, None, window, cx))
+    });
+    draw(window);
+    assert!(window.debug_bounds("new-workspace-chooser").is_some());
+    assert_eq!(form(window), Some(None));
+    window.simulate_keystrokes("down enter");
+    draw(window);
+    assert_eq!(form(window), Some(Some(NewWorkspaceWay::CloneRepository)));
+    assert!(window.debug_bounds("new-workspace-url").is_some());
+    window.simulate_input("git@github.com:condrdev/condr.git");
+    draw(window);
+    let name = window.read(|app| {
+        let dialog = view.read(app).new_workspace.as_ref().unwrap();
+        dialog.name.read(app).value().to_string()
+    });
+    assert_eq!(name, "condr", "the name follows the URL");
+    window.simulate_keystrokes("escape");
+    draw(window);
+    assert_eq!(form(window), Some(None));
+    assert!(window.update(|window, cx| window.has_active_dialog(cx)));
+    window.simulate_keystrokes("escape");
+    draw(window);
+    assert!(!window.update(|window, cx| window.has_active_dialog(cx)));
+    assert!(window.read(|app| view.read(app).new_workspace.is_none()));
+
+    // New Directory from the Welcome page, under a parent the native picker chose.
+    let parent = std::env::temp_dir().join(format!(
+        "condr-gui-new-directory-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(parent.join("taken")).unwrap();
+    let parent = std::fs::canonicalize(parent).unwrap();
+    let row = window
+        .debug_bounds("new-directory")
+        .expect("the Welcome page lists New Directory");
+    window.simulate_click(row.center(), Modifiers::default());
+    draw(window);
+    assert_eq!(form(window), Some(Some(NewWorkspaceWay::NewDirectory)));
+    let change = window
+        .debug_bounds("new-workspace-change-parent")
+        .expect("the form offers Change…");
+    window.simulate_click(change.center(), Modifiers::default());
+    window.run_until_parked();
+    assert!(window.did_prompt_for_paths());
+    let chosen = parent.clone();
+    window.simulate_path_prompt_response(move |_| Some(vec![chosen]));
+    assert!(wait_until(window, |window| {
+        window.read(|app| {
+            view.read(app)
+                .new_workspace
+                .as_ref()
+                .is_some_and(|dialog| dialog.taken.is_some() && dialog.parent.is_some())
+        })
+    }));
+    assert_eq!(
+        window.read(|app| view
+            .read(app)
+            .new_workspace
+            .as_ref()
+            .unwrap()
+            .parent
+            .clone()),
+        Some(parent.clone())
+    );
+
+    // A name the parent already holds is marked before anything is sent.
+    window.simulate_input("taken");
+    draw(window);
+    assert!(window.debug_bounds("field-error").is_some());
+    window.update(|window, cx| window.dispatch_action(Box::new(Confirm { secondary: false }), cx));
+    draw(window);
+    assert!(window.update(|window, cx| window.has_active_dialog(cx)));
+
+    window.simulate_keystrokes(if cfg!(target_os = "macos") {
+        "cmd-a"
+    } else {
+        "ctrl-a"
+    });
+    window.simulate_input("fresh");
+    draw(window);
+    assert!(window.debug_bounds("field-error").is_none());
+    window.update(|window, cx| window.dispatch_action(Box::new(Confirm { secondary: false }), cx));
+    let fresh = parent.join("fresh");
+    assert!(
+        wait_until(window, |window| {
+            window.read(|app| {
+                view.read(app).active_session().is_some_and(|session| {
+                    session
+                        .workspaces()
+                        .iter()
+                        .any(|workspace| workspace.root_directory() == fresh)
+                })
+            })
+        }),
+        "the Server never opened the new directory: {:?}",
+        window.read(|app| view.read(app).last_error.clone())
+    );
+    assert!(fresh.is_dir());
+    let _ = std::fs::remove_dir_all(parent);
+}
