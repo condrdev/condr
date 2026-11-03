@@ -986,19 +986,21 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
         .debug_bounds("new-tab")
         .expect("new tab button should be rendered after workspace creation");
     window.simulate_click(new_tab.center(), Modifiers::default());
+    // The Tab arrives in LayoutChanged, and the reply that shows it after; wait for both.
     let tab_created = wait_until(window, |window| {
         window.read(|app| {
-            view.read(app).active_session().is_some_and(|session| {
-                session
-                    .workspaces()
-                    .first()
-                    .is_some_and(|workspace| workspace.tabs().len() == 2)
-            })
+            view.read(app)
+                .presented()
+                .is_some_and(|(_, session, _, tab_id)| {
+                    session.workspaces().first().is_some_and(|workspace| {
+                        workspace.tabs().len() == 2 && workspace.tabs()[1].id() == tab_id
+                    })
+                })
         })
     });
     assert!(
         tab_created,
-        "GUI did not render the tab created by the real server"
+        "GUI did not render and show the tab created by the real server"
     );
 
     // The Client that created the Tab shows it (ADR 0021).
