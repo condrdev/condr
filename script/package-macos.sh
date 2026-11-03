@@ -105,10 +105,17 @@ elif [ -n "${CONDR_NOTARY_KEY:-}" ]; then
     notary="--key $CONDR_NOTARY_KEY --key-id ${CONDR_NOTARY_KEY_ID:?} --issuer ${CONDR_NOTARY_ISSUER:?}"
 fi
 if [ -n "$notary" ]; then
-    xcrun notarytool submit "$dmg" $notary --wait --no-progress >"$stage/notary.txt" 2>&1 || true
-    cat "$stage/notary.txt"
-    if ! grep -q '^ *status: Accepted$' "$stage/notary.txt"; then
+    # An upload that drops before Apple hands out a submission id is the runner's
+    # network, not a rejection, so only that gets a few tries.
+    for attempt in 1 2 3; do
+        xcrun notarytool submit "$dmg" $notary --wait --no-progress >"$stage/notary.txt" 2>&1 || true
+        cat "$stage/notary.txt"
         id=$(sed -n 's/^ *id: //p' "$stage/notary.txt" | head -n 1)
+        [ -z "$id" ] && [ "$attempt" -lt 3 ] || break
+        echo "notarization upload failed (attempt $attempt), retrying in 15 s" >&2
+        sleep 15
+    done
+    if ! grep -q '^ *status: Accepted$' "$stage/notary.txt"; then
         [ -z "$id" ] || xcrun notarytool log "$id" $notary >&2
         exit 1
     fi
