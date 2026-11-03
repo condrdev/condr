@@ -161,13 +161,13 @@ fn shell_command(shell: &str, program: &str, args: &[String]) -> io::Result<Stri
             encoded_powershell_command(&script)
         });
     }
-    // ponytail: every non-PowerShell shell gets the POSIX form. It holds for bare words
-    // and for single-quoted words without an embedded `'` in fish, nu, elvish and xonsh
-    // too; only an argument containing `'` would need a per-shell escape there.
-    let quote = if powershell {
-        powershell_quote
-    } else {
-        posix_quote
+    // ponytail: every other shell gets the POSIX form. It holds for bare words and for
+    // single-quoted words without an embedded `'` in nu, elvish and xonsh too; only an
+    // argument containing `'` would need a per-shell escape there.
+    let quote = match shell {
+        _ if powershell => powershell_quote,
+        "fish" => fish_quote,
+        _ => posix_quote,
     };
     Ok(format!(
         "{}{}",
@@ -194,12 +194,31 @@ fn posix_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
+/// fish reads `\\` and `\'` as escapes inside single quotes, so the POSIX form could end
+/// the quote early there.
+fn fish_quote(value: &str) -> String {
+    if is_bare_word(value, &['@', '%', '_', '+', '=', ':', ',', '.', '/', '-']) {
+        return value.to_owned();
+    }
+    format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
+}
+
 /// A leading `-` is quoted so a `.ps1` cannot bind it as one of its own parameters.
+/// PowerShell ends a single-quoted string at U+2018 to U+201B as well as at `'`, and
+/// reads any of them doubled as the character itself.
 fn powershell_quote(value: &str) -> String {
     if !value.starts_with('-') && is_bare_word(value, &['_', '-', '.', '/', ':', '+', '=']) {
         return value.to_owned();
     }
-    format!("'{}'", value.replace('\'', "''"))
+    let mut quoted = String::from("'");
+    for ch in value.chars() {
+        if matches!(ch, '\'' | '\u{2018}'..='\u{201B}') {
+            quoted.push(ch);
+        }
+        quoted.push(ch);
+    }
+    quoted.push('\'');
+    quoted
 }
 
 /// `powershell.exe -EncodedCommand` takes the script as base64 of UTF-16LE, so cmd.exe
@@ -343,6 +362,31 @@ mod tests {
                 "& pi '' 'two words' 'a''b' '$HOME' 'semi;colon' '@options'"
             );
         }
+    }
+
+    #[test]
+    fn fish_and_powershell_quotes_cannot_be_closed_early() {
+        // fish: `\'` and `\\` are escapes inside single quotes.
+        assert_eq!(
+            shell_command("fish", "pi", &[r"x\';id;\'".into(), r"end\".into()]).unwrap(),
+            r"pi 'x\\\';id;\\\'' 'end\\'"
+        );
+        // PowerShell: U+2018 to U+201B close a single-quoted string too.
+        if !cfg!(windows) {
+            assert_eq!(
+                shell_command(
+                    "pwsh",
+                    "pi",
+                    &["x\u{2019};calc;\u{2018}a'\u{201A}\u{201B}".into()]
+                )
+                .unwrap(),
+                "& pi 'x\u{2019}\u{2019};calc;\u{2018}\u{2018}a''\u{201A}\u{201A}\u{201B}\u{201B}'"
+            );
+        }
+        assert_eq!(
+            windows_command("codex.ps1", &["\u{2019};calc".into()]).unwrap(),
+            "& codex.ps1 '\u{2019}\u{2019};calc'"
+        );
     }
 
     #[test]
