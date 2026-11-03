@@ -206,6 +206,12 @@ pub(super) fn shell_name(program: &str) -> String {
     name.strip_suffix(".exe").unwrap_or(&name).to_owned()
 }
 
+/// Whether [`shell_command`] hooks this shell's prompt to report its directory with
+/// OSC 9;9 at every prompt, after its profile: PowerShell on Windows (ADR 0059).
+pub(super) fn prompt_reports_cwd(program: &str) -> bool {
+    cfg!(windows) && matches!(shell_name(program).as_str(), "pwsh" | "powershell")
+}
+
 /// The interactive shell command, with cwd reporting for the shells we know how to
 /// hook: bash through a wrapper rc file, PowerShell on Windows through a prompt hook.
 /// Any other shell starts plain.

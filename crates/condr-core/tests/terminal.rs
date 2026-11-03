@@ -1298,7 +1298,7 @@ fn launch_probe_counts_any_other_process_in_the_job_as_busy() {
     command.cwd(std::env::temp_dir());
     let mut runtime = TerminalRuntime::spawn(command, TerminalSize::new(24, 80)).unwrap();
     wait_for_terminal_output(&runtime);
-    assert!(runtime.launch_probe().is_idle());
+    assert!(runtime.launch_probe().is_ready());
 
     runtime
         .execute(TerminalCommand::Text(
@@ -1307,7 +1307,7 @@ fn launch_probe_counts_any_other_process_in_the_job_as_busy() {
         ))
         .unwrap();
     let deadline = Instant::now() + Duration::from_secs(8);
-    while runtime.launch_probe().is_idle() {
+    while runtime.launch_probe().is_ready() {
         assert!(
             Instant::now() < deadline,
             "a background process in the Job left the shell idle"

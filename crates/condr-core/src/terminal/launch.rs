@@ -16,6 +16,7 @@ pub struct TerminalLaunchProbe {
     notices: SharedTerminalNotices,
     started: Instant,
     announces: bool,
+    prompt_reports_cwd: bool,
 }
 
 /// Whether a line typed into the Pane now would reach its shell's prompt (ADR 0059).
@@ -39,6 +40,7 @@ impl TerminalRuntime {
             notices: Arc::clone(&self.notices),
             started: self.started,
             announces: self.announces,
+            prompt_reports_cwd: self.prompt_reports_cwd,
         }
     }
 
@@ -95,12 +97,7 @@ impl TerminalLaunchProbe {
                 .current_shell()
                 .map_or(ShellReadiness::Busy, ShellReadiness::Ready);
         }
-        if cfg!(windows)
-            && first_cwd_report.is_none()
-            && self
-                .current_shell()
-                .is_some_and(|shell| matches!(shell.as_str(), "pwsh" | "powershell"))
-        {
+        if self.prompt_reports_cwd && first_cwd_report.is_none() {
             return ShellReadiness::Starting;
         }
         if self.announces && self.started.elapsed() < ANNOUNCE_GRACE {

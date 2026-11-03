@@ -40,6 +40,8 @@ pub struct TerminalRuntime {
     /// itself, for [`TerminalLaunchProbe::readiness`] (ADR 0059).
     pub(super) started: Instant,
     pub(super) announces: bool,
+    /// Its prompt reports the directory with OSC 9;9, a Windows PowerShell's (ADR 0059).
+    pub(super) prompt_reports_cwd: bool,
     /// Whether anyone typed into the Pane: a key, text or a paste (ADR 0059).
     typed: AtomicBool,
 }
@@ -95,6 +97,7 @@ impl TerminalRuntime {
         command.cwd(cwd);
         let mut runtime = Self::spawn(command, size)?;
         runtime.announces = announces;
+        runtime.prompt_reports_cwd = shell::prompt_reports_cwd(&program);
         Ok(runtime)
     }
 
@@ -224,6 +227,7 @@ impl TerminalRuntime {
             writer_cancel: Some(writer_cancel),
             started: Instant::now(),
             announces: false,
+            prompt_reports_cwd: false,
             typed: AtomicBool::new(false),
         };
 
