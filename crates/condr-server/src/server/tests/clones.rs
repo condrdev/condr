@@ -103,11 +103,14 @@ fn a_pending_clone_gives_way_to_keys_typed_first() {
         assert!(Instant::now() < deadline, "no notice");
         thread::sleep(Duration::from_millis(20));
     }
+    // The printed command takes double quotes on Windows, whose cmd has no single ones.
+    let quote = if cfg!(windows) { '"' } else { '\'' };
+    let text = state.terminals[&pane_id]
+        .visible_text()
+        .replace(['\r', '\n'], "");
     assert!(
-        state.terminals[&pane_id]
-            .visible_text()
-            .replace(['\r', '\n'], "")
-            .contains("git clone -- '/srv/none'")
+        text.contains(&format!("git clone -- {quote}/srv/none{quote}")),
+        "{text}"
     );
     drop(state);
     drop(effect.started_terminals);
