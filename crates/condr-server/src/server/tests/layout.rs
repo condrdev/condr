@@ -725,7 +725,6 @@ fn pane_terminal_survives_disconnect_and_reconnects_with_live_state() {
         .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
     subscribe(&mut first, session_id, first_bootstrap.sequence);
-    let mut first_terminal_views = std::collections::HashMap::new();
     condr_core::protocol::write_message(
         &mut first,
         &ClientMessage::Layout {
@@ -768,9 +767,18 @@ fn pane_terminal_survives_disconnect_and_reconnects_with_live_state() {
         pane_id,
         TerminalCommand::Text(pid_command.into()),
     );
-    let first_view =
-        wait_for_terminal_text(&mut first, &mut first_terminal_views, pane_id, "condr-pid=");
-    let first_pid = marker_value(&view_text(&first_view), "condr-pid=");
+    // Read from the Server: a full frame that arrived before LayoutApplied was skipped
+    // with it, and the deltas after it have no base here.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let first_text = loop {
+        let text = handle.state.lock().unwrap().terminals[&pane_id].visible_text();
+        if text.contains("condr-pid=") {
+            break text;
+        }
+        assert!(Instant::now() < deadline, "the shell never printed its pid");
+        thread::sleep(Duration::from_millis(20));
+    };
+    let first_pid = marker_value(&first_text, "condr-pid=");
     let snapshot_before_disconnect = handle.snapshot();
     drop(first);
     thread::sleep(Duration::from_millis(30));
