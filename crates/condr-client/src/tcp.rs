@@ -118,7 +118,7 @@ fn connect_tcp(host: &str, port: u16) -> io::Result<TcpStream> {
         }
         match TcpStream::connect_timeout(&address, remaining) {
             Ok(stream) => {
-                enable_keepalive(&stream)?;
+                configure_tcp(&stream)?;
                 return Ok(stream);
             }
             Err(error) => last_error = Some(error),
@@ -134,8 +134,10 @@ fn connect_tcp(host: &str, port: u16) -> io::Result<TcpStream> {
 
 /// Without probes a peer that vanished (sleep, dropped link) leaves the reader blocked
 /// forever: the GUI shows a live connection, the Server keeps the client and its control.
-/// Both ends set it: the dial here, and the Server on every TCP connection it accepts.
-pub fn enable_keepalive(stream: &TcpStream) -> io::Result<()> {
+/// Nagle would hold a keystroke or a small frame back until the previous one is acked.
+/// Both ends set both: the dial here, and the Server on every TCP connection it accepts.
+pub fn configure_tcp(stream: &TcpStream) -> io::Result<()> {
+    stream.set_nodelay(true)?;
     let keepalive = socket2::TcpKeepalive::new()
         .with_time(Duration::from_secs(15))
         .with_interval(Duration::from_secs(5));

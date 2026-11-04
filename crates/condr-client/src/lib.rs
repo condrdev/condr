@@ -23,4 +23,4 @@ pub use model::{AgentChange, BootstrapChange, SessionModel};
 pub use noise::{Authority, NoiseStream};
 pub use p2p::{P2pEndpoint, P2pNode, P2pStream};
 pub use remote::{RemoteEndpoint, RemoteStream};
-pub use tcp::{TcpEndpoint, enable_keepalive};
+pub use tcp::{TcpEndpoint, configure_tcp};
