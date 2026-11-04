@@ -27,3 +27,5 @@ Tests: the handshake decode-golden fixtures, one with an unknown field, and one 
 > ADR 0039 builds the Swift and Kotlin Clients on one Rust library through uniffi instead of on types generated from the `.proto` files. ADR 0041 adds `WatchTerminals`, the first message gated at the connection rather than hidden as a feature: the Companion fetches no Bootstrap from a Server too old for it. Until the first stable release the Companion ships only to testers, and that release raises the protocol to `2` with `WatchTerminals` as its first gated message. The frame-rate cap and viewport hints stay reserved.
 
 > ADR 0047 adds the first Client hint: `push` in `Hello`, whether this Client takes the Server's pushes through Condr Cloud.
+
+> ADR 0061 adds `stream.proto`, the messages of a Stream connection, and the `streams` member of `ClientHandshake`. The protocol stays `1`; an older Server refuses that handshake as malformed, as ADR 0059 describes for its request.

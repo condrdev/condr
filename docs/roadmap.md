@@ -102,17 +102,28 @@ Condr 要守住的差异是原生 GUI 而非 TUI、Windows 一等公民、Server
 
 **停在哪**：只在当前 Pane 里搜索，不做跨 Pane 或跨 Workspace 的搜索。命令面板和文件快速打开不做。
 
-### 探测 Workspace 里的端口并转发到本机
+### 转发与文件传输
 
-**为什么**：Agent 在远端 Workspace 里起了前端 dev server，用户要在本机浏览器看效果，今天只能自己开 `ssh -L`。"看见 Agent 做出来的东西"是介入和收尾闭环的一部分；Server 已有按平台实现的进程表（Agent 检测用），加一步"该进程树在监听哪些端口"是同一条路。
+**为什么**：Agent 在远端 Workspace 里起了前端 dev server，用户要在本机浏览器看效果；Agent 写出了报告、构建产物或截图，用户要拿到本机；用户手上有 Agent 需要的文件。今天只有 SSH Device 能靠手敲 `ssh -L` 转发，TCP 与 Peer-to-peer Device 什么都做不了，文件只能借终端想办法。"看见 Agent 做出来的东西"是介入和收尾闭环的一部分。
 
-**做到哪**（按顺序，落地前先写 ADR）：
+**做到哪**（按 [ADR 0061](adr/0061-streams-carry-port-forwarding-and-file-transfer.md) 的 Delivery，依次合并）：
 
-1. 探测：Server 在进程表变化时查 Pane 进程树的监听端口（Linux `/proc/net/tcp*`，macOS `proc_pidfdinfo`，Windows `GetExtendedTcpTable`），作为 Pane 状态经事件下发；GUI 在 Workspace 和 Pane 上显示端口徽标，`condr pane|workspace` 的 JSON 携带端口。
-2. 转发（SSH Device）：点击端口即在本机开 listener，另起一条 `ssh -N -L` 到远端 `localhost:<port>`；`condr port forward <device> <port>` 同义。
-3. 一键在浏览器打开本机转发地址。
+1. Stream 连接：每台 Device 在终端连接之外另开一条，四种连接方式都支持，终端连接不改。
+2. 转发的核心与 CLI：`condr --device <name> port forward <port>...`。
+3. GUI 的 Ports 页面：左侧栏底部和远端 Device 标题上各有入口。
+4. 文件传输的核心与 CLI：`condr file download|upload`。
+5. GUI：Files、Changes、Preview Tab 里的下载，拖入和 Upload Files… 上传，右侧栏底部的传输条。
+6. Windows 验收（限速 10 Mbit/s 边下载边打字）、`--skill`、CONTEXT.md、官网与 SECURITY.md。
 
-**停在哪**：只做 SSH Device 的转发。TCP 与 Peer-to-peer Device 的转发要在协议里新增一种多路复用的字节流帧，改动大，放进摩擦记录等真实需求。不做反向转发、不做 UDP、不自动转发所有探测到的端口（默认只列出，点了才转）、不解析进程输出里的 URL。
+**停在哪**：只转发到远端 Server 本机的回环地址，本机 listener 只绑回环；转发不跨 GUI 运行保存。只传单个文件，限 Workspace 之内，不做目录、断点续传或同步。不做反向转发、UDP、两台远端 Device 之间互传、拖文件进远程终端，也不做手机端的转发与传输。远程贴图仍按 ADR 0012 走终端连接。慢链路上大传输会让终端多等几百毫秒；若 Windows 验收里 ping 的增量超过 100 ms，再做按延迟收放窗口。
+
+### 探测 Workspace 里的端口
+
+**为什么**：转发要用户自己知道端口号。Server 已有按平台实现的进程表（Agent 检测用），加一步"该进程树在监听哪些端口"是同一条路；探测到的端口点一下就转发，不必再看终端里打出的地址。
+
+**做到哪**（落地前先写 ADR，排在"转发与文件传输"之后）：Server 在进程表变化时查 Pane 进程树的监听端口（Linux `/proc/net/tcp*`，macOS `proc_pidfdinfo`，Windows `GetExtendedTcpTable`），作为 Pane 状态经事件下发；GUI 在 Pane 上显示端口徽标，Ports 页面列出探测到、尚未转发的端口，点一下即调用 ADR 0061 的转发；`condr pane|workspace` 的 JSON 携带端口。
+
+**停在哪**：不自动转发探测到的端口（默认只列出，点了才转），不解析进程输出里的 URL。
 
 ### GitHub：PR 状态与检出 PR
 
@@ -188,8 +199,7 @@ ADR 要回答三个问题：
 - Diff Tab 内跳到编辑器。
 - GUI 里启动 Agent 的菜单：列出这台 Device 上装了哪些 Agent，点一下就在 Pane 里启动。现在在终端里输入命令已经够快。真要做时，用协议里现成的 `AgentCommand::Available` 和 `Start`。
 - 定时任务：按 cron 启动新的 Agent，或定时给已有的 Agent 发提示。现有的 `agent start`、`agent prompt` 和 `agent wait` 已经覆盖了大半。它会让 Condr 从看着 Agent 干活走向无人值守地派活，用户的期待也会跟着变，所以等有人提出需求再定。
-- TCP 与 Peer-to-peer Device 的端口转发：协议增加一种多路复用的字节流帧，把本机 listener 的连接经 Noise 或 iroh 连接接到远端 `localhost:<port>`。默认只有配对设备能开转发；若届时已有 observe/control capability，则只允许 `control`。
-- `observe` 与 `control` 两级 capability（观察者拿 Bootstrap 和视觉流，不能输入、改布局、读文件；配对时决定，`condr server clients` 可看可改）：触发条件是第二个人开始共用同一个 Server。之后再谈设备密钥进 OS Keychain、密钥轮换、审计日志。不做账号体系、不做公网 listener。
+- `observe` 与 `control` 两级 capability（观察者拿 Bootstrap 和视觉流，不能输入、改布局、读文件；配对时决定，`condr server clients` 可看可改；开 Stream，即转发与文件传输，归 `control`，ADR 0061）：触发条件是第二个人开始共用同一个 Server。之后再谈设备密钥进 OS Keychain、密钥轮换、审计日志。不做账号体系、不做公网 listener。
 - Kimi hooks（等上游能区分主任务与子 agent 的 Stop）。
 
 ## 远期

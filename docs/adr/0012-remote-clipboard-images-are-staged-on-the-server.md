@@ -19,3 +19,5 @@ This does not enable OSC 52 clipboard loading. A Terminal program still cannot r
 Consequences: remote image paste continues to depend on the Agent CLI accepting a pasted image-file path, but Condr remains Agent-agnostic and keeps the native CLI as the conversation owner. A large upload can temporarily occupy the connection's ordered Client-to-Server writer, bounded by the image limit. Configurable image-paste shortcuts, local-file drag and drop, image previews, general file transfer, clipboard synchronization and Server-initiated clipboard reads are outside this decision.
 
 The behavioral reference is Herdr commit `9a2a7af5402f2bc67ab24c8b4c14c6dd20a43bb2`, specifically its remote clipboard-image bridge, stable terminal targeting, Server staging and cleanup behavior. Condr uses GPUI's native clipboard image entries instead of Herdr's platform-specific clipboard readers.
+
+> ADR 0061 adds general file transfer on a Stream connection beside the terminal connection and keeps clipboard images here, on the terminal connection, as the quick gesture they are.

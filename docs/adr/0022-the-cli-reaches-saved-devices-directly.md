@@ -15,3 +15,5 @@ ADR 0011 and 0015 still describe how a TCP and an SSH connection are made; this 
 > ADR 0025 narrows this boundary: the local Server is its machine's Peer-to-peer Endpoint and forwards bytes for the GUI and CLI over `Tunnel`, holding no credential but the machine's own key and owning no remote Session.
 
 > ADR 0039 moves the parsing and dialling of `tcp://` and `p2p://` addresses and the Device key into a new `condr-client` crate, which `condr-server` and the Companion's library both use; `condr-core` still keeps no notion of a remote machine.
+
+> ADR 0061 adds `condr port forward` and `condr file download|upload`. A forward is held by the process that started it and no Server holds one, so this boundary stands.
