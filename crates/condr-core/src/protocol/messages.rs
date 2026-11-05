@@ -72,6 +72,17 @@ pub enum ClientMessage {
         /// working tree; `against` is then ignored (ADR 0046).
         commit: Option<String>,
     },
+    /// The side `GitDiff` compares one file with, as a checkout would write it, for the
+    /// Preview Tab's change marks (ADR 0050); answered with [`ServerMessage::GitOldFile`].
+    GitOldFile {
+        server_id: ServerId,
+        session_id: SessionId,
+        request_id: u64,
+        workspace_id: WorkspaceId,
+        /// Relative to the Workspace root.
+        path: RelativePathBuf,
+        against: DiffBase,
+    },
     /// A page of a Workspace's History (ADR 0046): up to `limit` commits after skipping
     /// `skip`, walking from `from`, or from `HEAD` when `from` is `None`. Answered with
     /// [`ServerMessage::GitLog`]. Only a Server that reports [`WorkspaceGitSnapshot::head`]
@@ -182,7 +193,7 @@ pub enum ClientMessage {
 }
 
 /// What a diff compares the working tree against.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
 pub enum DiffBase {
     #[default]
     Head,
@@ -853,6 +864,14 @@ pub enum ServerMessage {
         /// Relative to the Workspace root, as requested.
         path: RelativePathBuf,
         result: Result<crate::FileDiff, String>,
+    },
+    /// The reply to [`ClientMessage::GitOldFile`].
+    GitOldFile {
+        request_id: u64,
+        workspace_id: WorkspaceId,
+        /// Relative to the Workspace root, as requested.
+        path: RelativePathBuf,
+        result: Result<crate::OldFile, String>,
     },
     /// The reply to [`ClientMessage::GitLog`].
     GitLog {

@@ -54,6 +54,9 @@ pub const PROTOCOL_VERSION: u32 = 1;
 pub const MIN_CLIENT_PROTOCOL: u32 = 1;
 /// The oldest Server protocol this Client works with.
 pub const MIN_SERVER_PROTOCOL: u32 = 1;
+/// The [`ServerMessage::Error`] a Server answers [`ClientMessage::Unknown`] with. Released
+/// Servers send exactly this, and a Client tells a refusal by it (ADR 0050), so it is frozen.
+pub const UNSUPPORTED_REQUEST: &str = "this Server does not support that request; update it";
 pub const MAX_FRAME_SIZE: usize = 2 * 1024 * 1024;
 /// How long a subscribed Client's writer may stay silent before it sends a `Ping`, so the
 /// Server can tell a window that went away from one that is only idle (ADR 0036).

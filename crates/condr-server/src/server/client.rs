@@ -332,7 +332,7 @@ pub(super) fn handle_client(
             ClientMessage::Unknown => queue_message(
                 &outbound,
                 ServerMessage::Error {
-                    message: "this Server does not support that request; update it".into(),
+                    message: condr_core::protocol::UNSUPPORTED_REQUEST.into(),
                 },
             ),
             ClientMessage::SnapshotRequest { session_id } => layouts.snapshot(session_id),
@@ -709,42 +709,12 @@ pub(super) fn handle_client(
                 full_context,
                 commit,
             } => {
-                let repository = {
-                    let state = state.lock().or_abort();
-                    if server_id != state.server_id {
-                        Err("unknown Server".to_string())
-                    } else if session_id != state.session_id {
-                        Err("unknown Session".to_string())
-                    } else if state.session.workspace(workspace_id).is_none() {
-                        Err("unknown Workspace".to_string())
-                    } else {
-                        state
-                            .workspace_git
-                            .get(&workspace_id)
-                            .ok_or_else(|| "the Workspace is not in a Git repository".to_string())
-                            .and_then(|git| {
-                                if commit.is_some() {
-                                    // A commit's own changes name a renamed file's old path.
-                                    return Ok((git.repository.clone(), None, None));
-                                }
-                                let (changes, base) = match (against, &git.base) {
-                                    (DiffBase::Head, _) => (&git.changes, None),
-                                    (DiffBase::MergeBase, Some((base, changes))) => {
-                                        (changes, Some(base.clone()))
-                                    }
-                                    (DiffBase::MergeBase, None) => {
-                                        return Err("the Workspace has no base branch".to_string());
-                                    }
-                                };
-                                // A renamed file diffs against where that side has it.
-                                let old_path = changes
-                                    .entries
-                                    .iter()
-                                    .find(|entry| entry.path == path)
-                                    .and_then(|entry| entry.old_path.clone());
-                                Ok((git.repository.clone(), old_path, base))
-                            })
-                    }
+                let repository = if commit.is_some() {
+                    // A commit's own changes name a renamed file's old path.
+                    workspace_repository(&state, server_id, session_id, workspace_id)
+                        .map(|repository| (repository, None, None))
+                } else {
+                    compared_side(&state, server_id, session_id, workspace_id, &path, against)
                 };
                 // The diff reads blobs and files, never under the state lock, and a whole
                 // large file takes a while: off this loop, which also carries the Client's
@@ -773,6 +743,41 @@ pub(super) fn handle_client(
                     queue_message(
                         &outbound,
                         ServerMessage::GitDiff {
+                            request_id,
+                            workspace_id,
+                            path,
+                            result,
+                        },
+                    )
+                });
+                false
+            }
+            ClientMessage::GitOldFile {
+                server_id,
+                session_id,
+                request_id,
+                workspace_id,
+                path,
+                against,
+            } => {
+                let repository =
+                    compared_side(&state, server_id, session_id, workspace_id, &path, against);
+                // A blob read and a checkout's filters: off this loop, as `GitDiff` (ADR 0050).
+                let outbound = outbound.clone();
+                thread::spawn(move || {
+                    let result = answer_or_fail(
+                        || {
+                            repository.and_then(|(repository, old_path, base)| {
+                                repository
+                                    .old_file(&path, old_path.as_deref(), base.as_ref())
+                                    .map_err(|error| error.to_string())
+                            })
+                        },
+                        Err,
+                    );
+                    queue_message(
+                        &outbound,
+                        ServerMessage::GitOldFile {
                             request_id,
                             workspace_id,
                             path,
@@ -1258,6 +1263,45 @@ fn agent_request(
     } else {
         state.handle_agent(client_id, outbound, command, installations, launch);
     }
+}
+
+/// What a working-tree diff of `path` compares with: the repository, where `against`'s side
+/// has a renamed file, and the base when `against` names one (ADR 0034).
+fn compared_side(
+    state: &Arc<Mutex<RuntimeState>>,
+    server_id: ServerId,
+    session_id: SessionId,
+    workspace_id: WorkspaceId,
+    path: &relative_path::RelativePath,
+    against: DiffBase,
+) -> Result<
+    (
+        GitRepository,
+        Option<RelativePathBuf>,
+        Option<condr_core::GitBase>,
+    ),
+    String,
+> {
+    workspace_root(state, server_id, session_id, workspace_id)?;
+    let state = state.lock().or_abort();
+    let git = state
+        .workspace_git
+        .get(&workspace_id)
+        .ok_or_else(|| "the Workspace is not in a Git repository".to_string())?;
+    let (changes, base) = match (against, &git.base) {
+        (DiffBase::Head, _) => (&git.changes, None),
+        (DiffBase::MergeBase, Some((base, changes))) => (changes, Some(base.clone())),
+        (DiffBase::MergeBase, None) => {
+            return Err("the Workspace has no base branch".to_string());
+        }
+    };
+    // A renamed file compares with where that side has it.
+    let old_path = changes
+        .entries
+        .iter()
+        .find(|entry| entry.path == path)
+        .and_then(|entry| entry.old_path.clone());
+    Ok((git.repository.clone(), old_path, base))
 }
 
 fn workspace_repository(

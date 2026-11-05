@@ -119,6 +119,60 @@ impl GitRepository {
         })
     }
 
+    /// The side [`Self::file_diff`] compares `path` with, as a checkout would write it
+    /// (ADR 0050): `HEAD`'s blob, or `base`'s merge base's, at `old_path` when renamed.
+    /// The filters run toward the worktree, with `path`'s attributes, because the editor
+    /// holds the file in that form and only the Server can run them.
+    pub fn old_file(
+        &self,
+        path: &RelativePath,
+        old_path: Option<&RelativePath>,
+        base: Option<&GitBase>,
+    ) -> Result<OldFile, GitError> {
+        use std::io::Read;
+        if !crate::valid_diff_path(path) || old_path.is_some_and(|old| !crate::valid_diff_path(old))
+        {
+            return Err(GitError("invalid path for a diff".into()));
+        }
+        if fs::symlink_metadata(path.to_path(&self.root)).is_ok_and(|meta| meta.is_symlink()) {
+            return Ok(OldFile::None);
+        }
+        let repo = self.open()?;
+        let tree = compared_tree(&repo, base)?;
+        let Some((id, kind)) = Differ::tree_entry(tree.as_ref(), old_path.unwrap_or(path))? else {
+            let ignored =
+                self.with_excludes(|_, excludes| is_excluded(excludes, &path.to_path(""), false));
+            return Ok(if ignored == Some(true) {
+                OldFile::None
+            } else {
+                OldFile::Added
+            });
+        };
+        // Checked before the blob is read, so a huge one is never loaded.
+        if kind == EntryKind::Link
+            || repo.find_header(id).map_err(git_error)?.size() > MAX_DIFF_BYTES
+        {
+            return Ok(OldFile::None);
+        }
+        let blob = repo.find_blob(id).map_err(git_error)?;
+        let (mut pipeline, _) = repo.filter_pipeline(None).map_err(git_error)?;
+        let options = gix::filter::plumbing::pipeline::convert::to_worktree::Options {
+            can_delay: gix::filter::plumbing::driver::apply::Delay::Forbid,
+            ..Default::default()
+        };
+        let mut text = Vec::new();
+        pipeline
+            .convert_to_worktree(&blob.data, repository_path(path).as_ref(), options)
+            .map_err(git_error)?
+            .read_to_end(&mut text)
+            .map_err(git_error)?;
+        // gix's diff pipeline calls a NUL in the first 8000 bytes binary; so does the Diff Tab.
+        if text.len() as u64 > MAX_DIFF_BYTES || text[..text.len().min(8000)].contains(&0) {
+            return Ok(OldFile::None);
+        }
+        Ok(OldFile::Text(String::from_utf8_lossy(&text).into_owned()))
+    }
+
     /// Whether every one of `paths`, relative to the work tree, is excluded by the ignore
     /// rules, so a change to them cannot change the status. `false` on any doubt.
     pub fn ignores_all<P: AsRef<Path>>(&self, paths: impl IntoIterator<Item = P>) -> bool {
@@ -258,6 +312,18 @@ fn base_tree(repo: &gix::Repository, base: &GitBase) -> Result<gix::ObjectId, Gi
         .tree_id()
         .map(gix::Id::detach)
         .map_err(git_error)
+}
+
+/// What the working tree is compared with: the merge base's tree, else `HEAD`'s, which an
+/// unborn branch lacks.
+fn compared_tree<'repo>(
+    repo: &'repo gix::Repository,
+    base: Option<&GitBase>,
+) -> Result<Option<gix::Tree<'repo>>, GitError> {
+    Ok(match base {
+        Some(base) => Some(repo.find_tree(base_tree(repo, base)?).map_err(git_error)?),
+        None => repo.head_tree().ok(),
+    })
 }
 
 fn fold_status_item(item: gix::status::Item) -> Option<FoldedStatus> {
@@ -403,10 +469,7 @@ impl<'repo> Differ<'repo> {
             .workdir()
             .ok_or_else(|| GitError("repository has no work tree".into()))?
             .to_path_buf();
-        let head_tree = match base {
-            Some(base) => Some(repo.find_tree(base_tree(repo, base)?).map_err(git_error)?),
-            None => repo.head_tree().ok(),
-        };
+        let head_tree = compared_tree(repo, base)?;
         let cache = repo
             .diff_resource_cache(
                 gix::diff::blob::pipeline::Mode::ToGit,

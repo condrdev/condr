@@ -1464,6 +1464,7 @@ dependencies = [
  "resvg 0.46.0",
  "serde",
  "serde_json",
+ "similar",
  "smol_str",
  "syntect",
  "toml 1.1.4+spec-1.1.0",

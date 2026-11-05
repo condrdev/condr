@@ -98,6 +98,19 @@ pub struct FileDiff {
     pub content: FileDiffContent,
 }
 
+/// The side a Workspace file is compared with, for the Preview Tab's change marks
+/// (ADR 0050): what `GitDiff` would diff the working tree against.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum OldFile {
+    /// That side's text as a checkout would write it, decoded lossily.
+    Text(String),
+    /// That side lacks the path, and the ignore rules do not exclude it: every line is new.
+    Added,
+    /// Nothing to compare: ignored, binary, over [`MAX_DIFF_BYTES`], or a symlink on
+    /// either side.
+    None,
+}
+
 /// One commit as History lists it (ADR 0046).
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CommitSummary {

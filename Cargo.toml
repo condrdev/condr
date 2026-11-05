@@ -42,6 +42,9 @@ gpui-kit = "0.9"
 gpui-pre-reqwest-client = "0.3"
 gpui-pre-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots"] }
 gpui-pre-http-client-tls = "0.3"
+# The Preview Tab's line diff for its change marks (ADR 0050); Kit already builds it into
+# the GUI for its `Diff`, so this adds no code. Keep it on Kit's version.
+similar = "2.7"
 # Reads GPUI's `AsyncBody`, a `futures::AsyncRead`; already built for GPUI.
 futures-lite = "2"
 gpui-fps = "0.6"

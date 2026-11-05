@@ -586,6 +586,17 @@ impl Condr {
                     notify: true,
                 }
             }
+            // An older Server refusing the change marks' request: nobody asked for the marks,
+            // so nothing is reported, and the strip they kept goes (ADR 0050).
+            ServerMessage::Error { message }
+                if message == condr_core::protocol::UNSUPPORTED_REQUEST
+                    && self.connections[index].resources.refused_old_file() =>
+            {
+                IncomingEffect {
+                    rebuild: self.presents(key),
+                    ..IncomingEffect::default()
+                }
+            }
             ServerMessage::Error { message } => {
                 // A refused or failed command; a pending restart is not happening.
                 self.connections[index].reconnect_deadline = None;
@@ -719,6 +730,25 @@ impl Condr {
                 IncomingEffect {
                     rebuild: self.presents(key),
                     notify: true,
+                    ..IncomingEffect::default()
+                }
+            }
+            ServerMessage::GitOldFile {
+                request_id,
+                workspace_id,
+                path,
+                result,
+            } => {
+                if !self.connections[index].resources.accept_old_file(
+                    workspace_id,
+                    &path,
+                    request_id,
+                    result,
+                ) {
+                    return IncomingEffect::default();
+                }
+                IncomingEffect {
+                    rebuild: self.presents(key),
                     ..IncomingEffect::default()
                 }
             }

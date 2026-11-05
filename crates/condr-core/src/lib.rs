@@ -44,7 +44,7 @@ pub use files::{
 pub use git::{
     CommitDetails, CommitSummary, DiffHunk, DiffLine, DiffLineKind, FileDiff, FileDiffContent,
     GitChangeEntry, GitChangeStatus, GitChanges, GitDiffStat, GitLog, GitUpstream, HISTORY_PAGE,
-    MAX_DIFF_BYTES, MAX_GIT_CHANGES,
+    MAX_DIFF_BYTES, MAX_GIT_CHANGES, OldFile,
 };
 #[cfg(feature = "runtime")]
 pub use git::{

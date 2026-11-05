@@ -256,6 +256,8 @@ pub(super) struct FileEditor {
     /// A file the Tab can render shows its text instead. Each file opens rendered, except
     /// one "Show File" opens at a line.
     pub(super) source: bool,
+    /// The lines the text changed against its Workspace's comparison (ADR 0050).
+    pub(super) marks: super::change_marks::ChangeMarks,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1095,6 +1097,7 @@ impl Condr {
         cx: &mut Context<Self>,
     ) {
         self.sync_file_editor(key, workspace_id, tab_id, path, window, cx);
+        self.sync_change_marks(key, workspace_id, tab_id, cx);
         self.feed_images(key, workspace_id, cx);
     }
 
@@ -1182,6 +1185,7 @@ impl Condr {
                     markdown: None,
                     markdown_scroll: Rc::default(),
                     source: false,
+                    marks: Default::default(),
                 }
             });
         let Some((generation, answer)) = answer else {
@@ -1332,10 +1336,13 @@ impl Condr {
                 land_on_line(state, line, window, cx);
             }
         });
+        // `set_value` emits no change event.
+        self.schedule_change_marks(key, tab_id, cx);
     }
 
     /// The Editor's text moved: it is unsaved while it differs from what was read.
     fn file_text_changed(&mut self, key: ConnectionKey, tab_id: TabId, cx: &mut Context<Self>) {
+        self.schedule_change_marks(key, tab_id, cx);
         let Some(editor) = self.files_view.file_editors.get_mut(&(key, tab_id)) else {
             return;
         };

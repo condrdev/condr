@@ -64,6 +64,7 @@ History only reads the repository: it does not check out, revert or create commi
 The **Source** view of the Preview Tab is an editor, on local and remote Devices alike:
 
 - **Edit and save**: type into the file, then press `Cmd + S` (macOS) or `Ctrl + S` (Windows/Linux). A dot in the Tab header marks unsaved changes. Nothing is saved automatically, so your edits never race the Agent's.
+- **Changed lines**: beside the line numbers, a bar marks each line added (green) or modified (yellow) and a red mark shows where lines were deleted; the scrollbar shows the same marks, so changes are easy to find in a long file. They compare with what **Changes** compares with (`HEAD` or the base branch), follow your unsaved edits as you type, and appear only in Git projects.
 - **Line endings are kept**: a file that uses Windows line endings (`CRLF`) keeps them for the lines you add.
 - **When the file changes on disk**: if the Agent writes the file while you have unsaved changes, your text stays as it is and the header says **Changed on disk**. Saving then asks whether to **Overwrite** the file with your text or to **Discard and Reload** it.
 - **Unsaved changes are never dropped silently**: before you switch to another file, close the Tab or quit Condr, Condr asks whether to save. If another device switches or closes the Tab, you can still save your text, copy it or discard it.

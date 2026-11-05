@@ -538,6 +538,14 @@ fn a_refresh_and_a_full_context_diff_round_trip() {
             full_context: true,
             commit: Some("8f3c".into()),
         },
+        ClientMessage::GitOldFile {
+            server_id: crate::protocol::ServerId(1),
+            session_id: crate::protocol::SessionId(2),
+            request_id: 7,
+            workspace_id: crate::WorkspaceId::from_u64(3),
+            path: "src/lib.rs".into(),
+            against: crate::protocol::DiffBase::MergeBase,
+        },
         ClientMessage::GitLog {
             server_id: crate::protocol::ServerId(1),
             session_id: crate::protocol::SessionId(2),
@@ -614,6 +622,26 @@ fn history_replies_round_trip() {
             crate::protocol::ServerMessage::try_from(encoded).unwrap(),
             message
         );
+    }
+}
+
+#[test]
+fn old_file_replies_round_trip() {
+    for result in [
+        Ok(crate::OldFile::Text("one\r\ntwo\r\n".into())),
+        Ok(crate::OldFile::Text(String::new())),
+        Ok(crate::OldFile::Added),
+        Ok(crate::OldFile::None),
+        Err("the Workspace has no base branch".into()),
+    ] {
+        let message = ServerMessage::GitOldFile {
+            request_id: 8,
+            workspace_id: crate::WorkspaceId::from_u64(3),
+            path: "src/lib.rs".into(),
+            result,
+        };
+        let encoded = super::ServerMessage::try_from(&message).unwrap();
+        assert_eq!(ServerMessage::try_from(encoded).unwrap(), message);
     }
 }
 

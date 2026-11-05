@@ -113,3 +113,80 @@ fn a_refresh_rescans_the_workspace_and_refuses_an_unknown_one() {
     drop(state);
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// ADR 0050: `GitOldFile` answers with the side `GitDiff` compares with, and refuses what
+/// `GitDiff` refuses.
+#[test]
+fn the_old_side_is_heads_text_and_refuses_an_unknown_workspace_or_a_missing_base() {
+    let root = std::env::temp_dir().join(format!(
+        "condr-server-old-file-{}-{}",
+        std::process::id(),
+        unique_suffix()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    run_git(&root, &["init", "-q", "-b", "main"]);
+    run_git(&root, &["config", "user.email", "condr@example.com"]);
+    run_git(&root, &["config", "user.name", "Condr"]);
+    run_git(&root, &["config", "commit.gpgsign", "false"]);
+    std::fs::write(root.join("notes.txt"), "one\n").unwrap();
+    run_git(&root, &["add", "notes.txt"]);
+    run_git(&root, &["commit", "-q", "-m", "notes"]);
+    std::fs::write(root.join("notes.txt"), "two\n").unwrap();
+
+    let (handle, endpoint, thread) = start();
+    let connection = ClientConnection::connect(&endpoint, "old-file").unwrap();
+    let bootstrap = connection.bootstrap().unwrap().clone();
+    let mut stream = connection.into_stream();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    let workspace_id = {
+        let mut state = handle.state.lock().unwrap();
+        let workspace_id = state.session.create_workspace(root.clone()).unwrap();
+        let git = discover_repository(&root).unwrap().unwrap();
+        state
+            .workspace_git
+            .insert(workspace_id, WorkspaceGit::discovered(git));
+        workspace_id
+    };
+    let mut old_file = |request_id, workspace_id, against| {
+        condr_core::protocol::write_message(
+            &mut stream,
+            &ClientMessage::GitOldFile {
+                server_id: bootstrap.server_id,
+                session_id: bootstrap.session_id,
+                request_id,
+                workspace_id,
+                path: "notes.txt".into(),
+                against,
+            },
+        )
+        .unwrap();
+        let reply = wait_for_message(
+            &mut stream,
+            |message| matches!(message, ServerMessage::GitOldFile { request_id: id, .. } if *id == request_id),
+        );
+        let ServerMessage::GitOldFile { result, .. } = reply else {
+            unreachable!("the predicate only accepts GitOldFile");
+        };
+        result
+    };
+
+    assert_eq!(
+        old_file(1, workspace_id, DiffBase::Head),
+        Ok(condr_core::OldFile::Text("one\n".into()))
+    );
+    assert_eq!(
+        old_file(2, WorkspaceId::from_u64(999), DiffBase::Head),
+        Err("unknown Workspace".into())
+    );
+    assert_eq!(
+        old_file(3, workspace_id, DiffBase::MergeBase),
+        Err("the Workspace has no base branch".into())
+    );
+
+    handle.stop();
+    drop(stream);
+    thread.join().unwrap().unwrap();
+    let _ = std::fs::remove_dir_all(root);
+}

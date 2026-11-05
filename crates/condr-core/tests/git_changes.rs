@@ -10,7 +10,8 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use condr_core::{
-    DiffLineKind, FileDiffContent, GitChangeStatus, GitDiffStat, discover_repository,
+    DiffLineKind, FileDiffContent, GitChangeStatus, GitDiffStat, MAX_DIFF_BYTES, OldFile,
+    discover_repository,
 };
 
 static NEXT_REPO: AtomicU64 = AtomicU64::new(0);
@@ -828,4 +829,127 @@ fn a_commit_past_the_change_cap_is_truncated_without_line_counts() {
             .iter()
             .all(|entry| entry.stat.is_none())
     );
+}
+
+/// ADR 0050: the Preview Tab's marks compare the editor with the side `file_diff` uses.
+#[test]
+fn old_file_is_the_compared_blob_added_or_nothing() {
+    let root = scratch_repository("old-file");
+    commit_file(&root, ".gitignore", "*.log\n");
+    commit_file(&root, "notes.txt", "alpha\nbeta\n");
+    commit_file(&root, "image.bin", "\0\u{1}\u{2}binary\0");
+    commit_file(&root, "huge.txt", &"x\n".repeat(600_000));
+    fs::write(root.join("notes.txt"), "alpha\nBETA\n").unwrap();
+    fs::write(root.join("fresh.txt"), "new\n").unwrap();
+    fs::write(root.join("staged.txt"), "staged\n").unwrap();
+    git(&root, ["add", "staged.txt"]);
+    fs::write(root.join("noise.log"), "noise\n").unwrap();
+    let repository = discover_repository(&root).unwrap().unwrap();
+    let old = |path: &str| repository.old_file(RelativePath::new(path), None, None);
+
+    assert_eq!(
+        old("notes.txt").unwrap(),
+        OldFile::Text("alpha\nbeta\n".into())
+    );
+    assert_eq!(old("fresh.txt").unwrap(), OldFile::Added, "untracked");
+    assert_eq!(
+        old("staged.txt").unwrap(),
+        OldFile::Added,
+        "staged, not in HEAD"
+    );
+    assert_eq!(old("noise.log").unwrap(), OldFile::None, "ignored");
+    assert_eq!(old("image.bin").unwrap(), OldFile::None, "binary");
+    assert!("x\n".repeat(600_000).len() as u64 > MAX_DIFF_BYTES);
+    assert_eq!(old("huge.txt").unwrap(), OldFile::None, "too large");
+    assert!(old("../outside.txt").is_err());
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn old_file_follows_a_rename_and_the_base() {
+    let root = scratch_repository("old-file-base");
+    commit_file(&root, "shared.txt", "base\n");
+    commit_file(&root, "old.txt", "one\ntwo\n");
+    git(&root, ["switch", "-q", "-c", "feature"]);
+    commit_file(&root, "shared.txt", "feature\n");
+    git(&root, ["mv", "old.txt", "new.txt"]);
+    fs::write(root.join("new.txt"), "one\n2\n").unwrap();
+    fs::write(root.join("shared.txt"), "edited\n").unwrap();
+    let repository = discover_repository(&root).unwrap().unwrap();
+    let base = repository.base(Some("main")).unwrap().unwrap();
+    let shared = RelativePath::new("shared.txt");
+    let new = RelativePath::new("new.txt");
+
+    assert_eq!(
+        repository.old_file(shared, None, None).unwrap(),
+        OldFile::Text("feature\n".into())
+    );
+    assert_eq!(
+        repository.old_file(shared, None, Some(&base)).unwrap(),
+        OldFile::Text("base\n".into())
+    );
+    assert_eq!(
+        repository
+            .old_file(new, Some(RelativePath::new("old.txt")), None)
+            .unwrap(),
+        OldFile::Text("one\ntwo\n".into())
+    );
+    assert_eq!(
+        repository.old_file(new, None, None).unwrap(),
+        OldFile::Added
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// The editor holds the file as a checkout wrote it, so the old side is converted the same
+/// way.
+#[test]
+fn old_file_is_converted_as_a_checkout_writes_it() {
+    let root = scratch_repository("old-file-eol");
+    commit_file(&root, ".gitattributes", "crlf.txt eol=crlf\n");
+    commit_file(&root, "crlf.txt", "one\ntwo\n");
+    commit_file(&root, "auto.txt", "one\ntwo\n");
+    let repository = discover_repository(&root).unwrap().unwrap();
+    let old = |path: &str| {
+        repository
+            .old_file(RelativePath::new(path), None, None)
+            .unwrap()
+    };
+
+    assert_eq!(old("crlf.txt"), OldFile::Text("one\r\ntwo\r\n".into()));
+    assert_eq!(old("auto.txt"), OldFile::Text("one\ntwo\n".into()));
+    git(&root, ["config", "core.autocrlf", "true"]);
+    assert_eq!(old("auto.txt"), OldFile::Text("one\r\ntwo\r\n".into()));
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[cfg(unix)]
+#[test]
+fn old_file_has_nothing_for_a_symlink_on_either_side() {
+    let root = scratch_repository("old-file-symlink");
+    commit_file(&root, "target.txt", "target\n");
+    commit_file(&root, "now-a-link.txt", "file\n");
+    std::os::unix::fs::symlink("target.txt", root.join("was-a-link.txt")).unwrap();
+    git(&root, ["add", "was-a-link.txt"]);
+    git(&root, ["commit", "-q", "-m", "link"]);
+    fs::remove_file(root.join("was-a-link.txt")).unwrap();
+    fs::write(root.join("was-a-link.txt"), "file\n").unwrap();
+    fs::remove_file(root.join("now-a-link.txt")).unwrap();
+    std::os::unix::fs::symlink("target.txt", root.join("now-a-link.txt")).unwrap();
+    let repository = discover_repository(&root).unwrap().unwrap();
+
+    for path in ["was-a-link.txt", "now-a-link.txt"] {
+        assert_eq!(
+            repository
+                .old_file(RelativePath::new(path), None, None)
+                .unwrap(),
+            OldFile::None,
+            "{path}"
+        );
+    }
+
+    let _ = fs::remove_dir_all(&root);
 }

@@ -513,7 +513,11 @@ impl Condr {
     }
 
     /// What a Workspace's Changes and Diff Tabs compare against, HEAD without Git.
-    fn workspace_diff_base(&self, key: ConnectionKey, workspace_id: WorkspaceId) -> DiffBase {
+    pub(super) fn workspace_diff_base(
+        &self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+    ) -> DiffBase {
         self.connection(key)
             .and_then(|connection| connection.model.workspace_git.get(&workspace_id))
             .map_or(DiffBase::Head, |git| self.diff_base(key, workspace_id, git))

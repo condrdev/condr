@@ -1,4 +1,5 @@
 mod actions;
+mod change_marks;
 mod change_tree;
 mod changes;
 mod config;
@@ -434,8 +435,10 @@ impl Condr {
         apply_terminal_font(&terminal_font, cx);
         apply_terminal_color_scheme(&terminal_color_scheme, cx);
         syntax::set_code_theme(code_theme, cx);
-        let theme_subscription =
-            cx.observe_global::<Theme>(|this, cx| this.sync_diff_highlighters(cx));
+        let theme_subscription = cx.observe_global::<Theme>(|this, cx| {
+            this.sync_diff_highlighters(cx);
+            this.recolor_change_marks(cx);
+        });
         let owner = cx.weak_entity();
         let system_wake_subscription = cx.on_system_wake(move |cx| {
             let _ = owner.update(cx, |this, cx| this.probe_connections(cx));

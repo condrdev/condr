@@ -1038,3 +1038,224 @@ fn files_view_creates_renames_and_deletes_entries() {
 
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// The Preview Tab marks the lines a file changed against its Workspace's comparison
+/// (ADR 0050), in the gutter and on the scrollbar: what an agent changed on disk and what
+/// the person types, against `HEAD` or the base branch. The old side is asked for again on
+/// a Git change but not when only files moved, and a Server too old to answer shows no
+/// marks and reports nothing.
+#[test]
+// A file with one changed run has one marked range.
+#[allow(clippy::single_range_in_vec_init)]
+fn preview_tab_marks_changed_lines_in_its_gutter_and_on_its_scrollbar() {
+    use condr_core::protocol::DiffBase;
+    let _serial_guard = acquire_visual_test_lock();
+    let repository = std::env::temp_dir().join(format!(
+        "condr-gui-marks-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let _ = std::fs::remove_dir_all(&repository);
+    std::fs::create_dir_all(&repository).unwrap();
+    run_git(&repository, ["init", "-q", "-b", "main"]);
+    run_git(&repository, ["config", "user.email", "condr@example.com"]);
+    run_git(&repository, ["config", "user.name", "Condr"]);
+    run_git(&repository, ["config", "commit.gpgsign", "false"]);
+    let notes = repository.join("notes.txt");
+    std::fs::write(&notes, "one\ntwo\nthree\nfour\n").unwrap();
+    run_git(&repository, ["add", "notes.txt"]);
+    run_git(&repository, ["commit", "-q", "-m", "notes"]);
+    // The branch adds a line over the base; the working tree then modifies another.
+    run_git(&repository, ["switch", "-q", "-c", "feature"]);
+    std::fs::write(&notes, "one\ntwo\nthree\nfour\nfive\n").unwrap();
+    run_git(&repository, ["commit", "-q", "-am", "agent work"]);
+    std::fs::write(&notes, "one\nTWO\nthree\nfour\nfive\n").unwrap();
+
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|window, cx| _ = window.draw(cx));
+    let button = window.debug_bounds("open-project").unwrap();
+    window.simulate_click(button.center(), Modifiers::default());
+    let selected_root = repository.clone();
+    window.simulate_path_prompt_response(move |_| Some(vec![selected_root]));
+    assert!(
+        wait_until(window, |window| {
+            window.read(|app| {
+                view.read(app)
+                    .active_connection()
+                    .and_then(|connection| connection.model.workspace_git.values().next())
+                    .is_some_and(|git| git.base.is_some())
+            })
+        }),
+        "the Server should report the Workspace's Git with its base branch"
+    );
+    let workspace_id =
+        window.read(|app| view.read(app).active_session().unwrap().workspaces()[0].id());
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.send_layout_to(
+                1,
+                LayoutCommand::ShowFile {
+                    workspace_id,
+                    path: "notes.txt".into(),
+                },
+            );
+        });
+    });
+    let marks = |window: &mut VisualTestContext| {
+        window.read(|app| {
+            let view = view.read(app);
+            let editor = view.files_view.file_editors.values().next()?;
+            editor.marks.ranges(app)
+        })
+    };
+    let marks_become = |window: &mut VisualTestContext, gutter: Vec<std::ops::Range<usize>>| {
+        wait_until(window, |window| {
+            window.update(|window, cx| _ = window.draw(cx));
+            // The scrollbar marks the same lines as the gutter.
+            marks(window) == Some([gutter.clone(), gutter.clone()])
+        })
+    };
+    let requests = |window: &mut VisualTestContext| {
+        window.read(|app| {
+            let resources = &view.read(app).connection(1).unwrap().resources;
+            (resources.old_file_requests, resources.old_files_generation)
+        })
+    };
+
+    // Against HEAD only the working tree's line differs: `TWO`.
+    assert!(
+        marks_become(window, vec![4..8]),
+        "the modified line should be marked: {:?}",
+        marks(window)
+    );
+    // Against the base the branch's added line is marked as well.
+    let compare = |window: &mut VisualTestContext, against| {
+        window.update(|window, cx| {
+            view.update(cx, |this, cx| {
+                this.compare_changes_against(1, workspace_id, against, window, cx)
+            });
+        });
+    };
+    compare(window, DiffBase::MergeBase);
+    assert!(
+        marks_become(window, vec![4..8, 19..24]),
+        "against the base the added line should be marked too: {:?}",
+        marks(window)
+    );
+    compare(window, DiffBase::Head);
+    assert!(marks_become(window, vec![4..8]));
+
+    // Only files moving (`WorkspaceFilesChanged`) leaves the old side alone.
+    let before = requests(window);
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| {
+            this.refresh_workspace_files(1, workspace_id);
+            this.rebuild_dock(window, cx);
+        });
+    });
+    window.run_until_parked();
+    assert_eq!(
+        requests(window),
+        before,
+        "a files batch should not ask again"
+    );
+
+    // An agent deletes `four` on disk: a Git change asks again, and the marks follow the
+    // new text, the deletion a boundary at the top of `five`.
+    std::fs::write(&notes, "one\nTWO\nthree\nfive\n").unwrap();
+    assert!(
+        marks_become(window, vec![4..8, 14..14]),
+        "the deletion and the modified line should be marked: {:?}",
+        marks(window)
+    );
+    // The re-read text can move the marks before the Git change arrives.
+    assert!(
+        wait_until(window, |window| requests(window).0 > before.0),
+        "a Git change asks again"
+    );
+    assert!(marks_become(window, vec![4..8, 14..14]));
+
+    // Typing moves the marks with the text at once, and a burst of edits diffs once more,
+    // on the latest text.
+    let (tab_id, editor) = window.read(|app| {
+        let (&(_, tab_id), editor) = view
+            .read(app)
+            .files_view
+            .file_editors
+            .iter()
+            .next()
+            .unwrap();
+        (tab_id, editor.state.clone())
+    });
+    let type_at = |window: &mut VisualTestContext, at: usize, text: &str| {
+        window.update(|window, cx| {
+            editor.update(cx, |state, cx| {
+                state.set_selected_range(at..at, cx);
+                state.replace(text.to_owned(), window, cx);
+            });
+        });
+    };
+    let runs = |window: &mut VisualTestContext| {
+        window.read(|app| {
+            view.read(app).files_view.file_editors[&(1, tab_id)]
+                .marks
+                .runs
+        })
+    };
+    type_at(window, 0, "zero\n");
+    assert_eq!(
+        marks(window).map(|[gutter, _]| gutter),
+        Some(vec![9..13, 19..19]),
+        "Kit moves the marks with the edit before any diff"
+    );
+    let before = runs(window);
+    for (at, letter) in [(0, "z"), (1, "e"), (2, "r"), (3, "o")] {
+        type_at(window, at, letter);
+    }
+    // "zerozero\none\nTWO\nthree\nfive\n": the typed line is added.
+    assert!(
+        marks_become(window, vec![0..9, 13..17, 23..23]),
+        "the latest text's diff should replace the moved marks: {:?}",
+        marks(window)
+    );
+    assert!(
+        runs(window) - before <= 2,
+        "a burst should diff at most once per throttle, ran {}",
+        runs(window) - before
+    );
+
+    // A Server too old to know `GitOldFile` answers with a bare refusal: no marks, no strip,
+    // no toast, and it is not asked again.
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| {
+            let connection = this.connection_mut(1).unwrap();
+            let request_id = connection.next_request_id();
+            connection.resources.invalidate_diffs(workspace_id);
+            connection.resources.asked_old_file(
+                (workspace_id, "notes.txt".into(), DiffBase::Head),
+                request_id,
+            );
+            let connect_generation = connection.connect_generation;
+            let refusal = Incoming::Message(ServerMessage::Error {
+                message: condr_core::protocol::UNSUPPORTED_REQUEST.into(),
+            });
+            this.handle_incoming(1, connect_generation, refusal, cx);
+            this.rebuild_dock(window, cx);
+        });
+    });
+    window.run_until_parked();
+    assert_eq!(
+        marks(window),
+        None,
+        "no side to compare with keeps no strip"
+    );
+    assert!(window.read(|app| view.read(app).last_error.is_none()));
+    let before = requests(window);
+    window.update(|window, cx| view.update(cx, |this, cx| this.rebuild_dock(window, cx)));
+    window.run_until_parked();
+    assert_eq!(requests(window), before);
+
+    let _ = std::fs::remove_dir_all(&repository);
+}

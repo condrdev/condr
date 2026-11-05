@@ -1,5 +1,7 @@
 //! Server answers and their current requests share one lifecycle per connection.
 use super::*;
+use condr_core::OldFile;
+use condr_core::protocol::DiffBase;
 
 type ResourcePath = (WorkspaceId, RelativePathBuf);
 
@@ -102,7 +104,21 @@ pub(super) struct WorkspaceResources {
     pub(super) commit_diffs: HashMap<CommitPath, Result<FileDiff, String>>,
     /// The `GitDiff` requests for them; the reply names only the path.
     pub(super) pending_commit_diffs: HashMap<u64, CommitPath>,
+    /// The side each Preview Tab's file is compared with for its change marks (ADR 0050),
+    /// with the generation it landed at; `None` marks nothing.
+    pub(super) old_files: Fetched<OldFilePath, (u64, Option<Arc<str>>)>,
+    pub(super) old_files_generation: u64,
+    /// `GitOldFile` requests sent and not answered, dropped ones included: an older Server
+    /// answers each with a bare `Error` that names no request.
+    old_files_in_flight: u32,
+    /// The Server refused `GitOldFile`, so it is older; asked no more until a Bootstrap.
+    pub(super) old_files_unsupported: bool,
+    #[cfg(test)]
+    pub(super) old_file_requests: u32,
 }
+
+/// A Workspace, a path in it and what that path is compared with.
+pub(super) type OldFilePath = (WorkspaceId, RelativePathBuf, DiffBase);
 
 /// A Workspace, a commit id and a path in that commit.
 pub(super) type CommitPath = (WorkspaceId, String, RelativePathBuf);
@@ -115,6 +131,8 @@ impl WorkspaceResources {
         self.pending_logs.clear();
         self.commits.clear_pending();
         self.pending_commit_diffs.clear();
+        self.old_files.clear_pending();
+        self.old_files_in_flight = 0;
     }
 
     pub(super) fn reset(&mut self) {
@@ -127,6 +145,8 @@ impl WorkspaceResources {
         self.logs.clear();
         self.commits.clear();
         self.commit_diffs.clear();
+        self.old_files.clear();
+        self.old_files_unsupported = false;
     }
 
     pub(super) fn retain_workspaces(&mut self, live: &HashSet<WorkspaceId>) {
@@ -139,11 +159,76 @@ impl WorkspaceResources {
         self.commit_diffs.retain(|(id, _, _), _| live.contains(id));
         self.pending_commit_diffs
             .retain(|_, (id, _, _)| live.contains(id));
+        self.old_files.retain(|(id, _, _)| live.contains(id));
     }
 
+    /// The Workspace's Git state or comparison moved: diffs and old sides are asked for
+    /// again. A Preview Tab keeps its marks until the new side lands.
     pub(super) fn invalidate_diffs(&mut self, workspace_id: WorkspaceId) {
         self.diffs.retain(|(id, _)| *id != workspace_id);
         self.diffs_generation += 1;
+        self.old_files.retain(|(id, _, _)| *id != workspace_id);
+    }
+
+    pub(super) fn asked_old_file(&mut self, slot: OldFilePath, request_id: u64) {
+        self.old_files.asked(slot, request_id);
+        self.old_files_in_flight += 1;
+        #[cfg(test)]
+        {
+            self.old_file_requests += 1;
+        }
+    }
+
+    /// A `GitOldFile` answer, which names no comparison: the slot is the one its request
+    /// waits on. A failure marks nothing and is only logged: nobody asked for the marks,
+    /// so there is nothing to report (ADR 0050).
+    pub(super) fn accept_old_file(
+        &mut self,
+        workspace_id: WorkspaceId,
+        path: &RelativePath,
+        request_id: u64,
+        result: Result<OldFile, String>,
+    ) -> bool {
+        self.old_files_in_flight = self.old_files_in_flight.saturating_sub(1);
+        let Some(slot) = self
+            .old_files
+            .pending
+            .iter()
+            .find(|((id, pending, _), asked)| {
+                **asked == request_id && *id == workspace_id && pending == path
+            })
+            .map(|(slot, _)| slot.clone())
+        else {
+            return false;
+        };
+        let text = match result {
+            Ok(OldFile::Text(text)) => Some(text.into()),
+            Ok(OldFile::Added) => Some("".into()),
+            Ok(OldFile::None) => None,
+            Err(error) => {
+                tracing::debug!(path = %slot.1, %error, "no change marks");
+                None
+            }
+        };
+        self.old_files.settle(&slot, request_id);
+        self.old_files_generation += 1;
+        self.old_files
+            .answers
+            .insert(slot, (self.old_files_generation, text));
+        true
+    }
+
+    /// Whether a bare "does not support" `Error` is an older Server refusing `GitOldFile`:
+    /// one is in flight. That Server is not asked again (ADR 0050).
+    pub(super) fn refused_old_file(&mut self) -> bool {
+        if self.old_files_in_flight == 0 {
+            return false;
+        }
+        self.old_files_in_flight -= 1;
+        self.old_files_unsupported = true;
+        self.old_files.clear_pending();
+        tracing::debug!("the Server predates change marks");
+        true
     }
 
     pub(super) fn fold_directory(&mut self, workspace_id: WorkspaceId, path: &RelativePath) {
@@ -402,5 +487,48 @@ mod tests {
         resources.retain_workspaces(&HashSet::new());
         assert!(resources.commits.get(&commit).is_none());
         assert!(resources.commit_diffs.is_empty());
+    }
+
+    #[test]
+    fn old_files_take_the_latest_answer_and_an_older_servers_refusal_is_theirs() {
+        use condr_core::OldFile;
+        use condr_core::protocol::DiffBase;
+        let workspace = WorkspaceId::from_u64(1);
+        let path = RelativePathBuf::from("src/lib.rs");
+        let head = (workspace, path.clone(), DiffBase::Head);
+        let base = (workspace, path.clone(), DiffBase::MergeBase);
+        let mut resources = WorkspaceResources::default();
+
+        // The answer lands in the comparison its request asked for.
+        resources.asked_old_file(base.clone(), 1);
+        assert!(resources.accept_old_file(workspace, &path, 1, Ok(OldFile::Added)));
+        assert_eq!(
+            resources.old_files.get(&base).unwrap().1.as_deref(),
+            Some("")
+        );
+        assert!(resources.old_files.get(&head).is_none());
+
+        // A Git change drops the answer and what was asked; the late reply lands nowhere.
+        resources.asked_old_file(head.clone(), 2);
+        resources.invalidate_diffs(workspace);
+        assert!(resources.old_files.wants(&head) && resources.old_files.wants(&base));
+        assert!(!resources.accept_old_file(workspace, &path, 2, Ok(OldFile::None)));
+        resources.asked_old_file(head.clone(), 3);
+        assert!(resources.accept_old_file(workspace, &path, 3, Err("gone".into())));
+        assert_eq!(resources.old_files.get(&head).unwrap().1, None);
+
+        // No request in flight: a bare refusal is someone else's.
+        assert!(!resources.refused_old_file());
+        // An older Server answers each request with one; it is not asked again.
+        resources.asked_old_file(base.clone(), 4);
+        resources.invalidate_diffs(workspace);
+        assert!(resources.refused_old_file());
+        assert!(resources.old_files_unsupported);
+        assert!(!resources.refused_old_file());
+
+        // A Bootstrap may be a different Server.
+        resources.reset();
+        assert!(!resources.old_files_unsupported);
+        assert!(resources.old_files.wants(&head));
     }
 }

@@ -38,6 +38,7 @@ message ClientMessage {
     GitLogRequest git_log = 25;
     GitCommitRequest git_commit = 26;
     TerminalColors terminal_colors = 27;
+    GitOldFileRequest git_old_file = 28;
   }
 }
 
@@ -164,6 +165,17 @@ message GitDiffRequest {
   bool full_context = 7;
   // The path as this commit changed it, against its first parent; `against` is ignored.
   optional string commit = 8;
+}
+
+// The side GitDiff compares a file with, as a checkout would write it, for the Preview
+// Tab's change marks (ADR 0050).
+message GitOldFileRequest {
+  uint64 server_id = 1;
+  uint64 session_id = 2;
+  uint64 request_id = 3;
+  uint64 workspace_id = 4;
+  string path = 5;
+  DiffBase against = 6;
 }
 
 message PathRequest {
@@ -460,6 +472,7 @@ message ServerMessage {
     FileMutationReply file_mutated = 30;
     GitLogReply git_log = 31;
     GitCommitReply git_commit = 32;
+    GitOldFileReply git_old_file = 33;
   }
 }
 
@@ -773,6 +786,20 @@ message GitDiffReply {
   oneof result {
     FileDiff ok = 4;
     string err = 5;
+  }
+}
+
+message GitOldFileReply {
+  uint64 request_id = 1;
+  uint64 workspace_id = 2;
+  string path = 3;
+  oneof result {
+    string text = 4;
+    // That side lacks the path and it is not ignored: every line is new.
+    Empty added = 5;
+    // Ignored, binary, too large, or a symlink on either side: nothing to mark.
+    Empty none = 6;
+    string err = 7;
   }
 }
 

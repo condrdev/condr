@@ -30,7 +30,6 @@ fn test_endpoint() -> Endpoint {
     )))
 }
 
-#[cfg(any(target_os = "linux", target_os = "windows"))]
 fn run_git(cwd: &std::path::Path, args: &[&str]) {
     let output = std::process::Command::new("git")
         .arg("-C")

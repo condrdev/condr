@@ -18,8 +18,8 @@ use crate::protocol::{
 use crate::snapshot::MAX_SNAPSHOT_PANES;
 use crate::{
     AgentKind, AgentSnapshot, BrowsedDirectory, CommitDetails, DirectoryListing, FileContent,
-    FileDiff, FileKind, FileMutation, FileMutationResult, GitLog, PaneId, ProxyMode, ProxySetting,
-    SessionSnapshot, TabId, TerminalColors, TerminalCommand, TerminalProgress,
+    FileDiff, FileKind, FileMutation, FileMutationResult, GitLog, OldFile, PaneId, ProxyMode,
+    ProxySetting, SessionSnapshot, TabId, TerminalColors, TerminalCommand, TerminalProgress,
     TerminalProgressState, TerminalView, TerminalViewFrame, WorkspaceId,
 };
 
@@ -397,6 +397,24 @@ impl TryFrom<&ClientMessage> for super::ClientMessage {
                 full_context: *full_context,
                 commit: commit.clone(),
             }),
+            ClientMessage::GitOldFile {
+                server_id,
+                session_id,
+                request_id,
+                workspace_id,
+                path,
+                against,
+            } => Message::GitOldFile(super::GitOldFileRequest {
+                server_id: server_id.0,
+                session_id: session_id.0,
+                request_id: *request_id,
+                workspace_id: workspace_id.as_u64(),
+                path: path.to_string(),
+                against: match against {
+                    DiffBase::Head => super::DiffBase::Head,
+                    DiffBase::MergeBase => super::DiffBase::MergeBase,
+                } as i32,
+            }),
             ClientMessage::GitLog {
                 server_id,
                 session_id,
@@ -621,6 +639,18 @@ fn decode_client_message(message: super::ClientMessage) -> WireResult<ClientMess
                 },
                 full_context: diff.full_context,
                 commit: diff.commit,
+            },
+            Message::GitOldFile(request) => ClientMessage::GitOldFile {
+                server_id: ServerId(request.server_id),
+                session_id: SessionId(request.session_id),
+                request_id: request.request_id,
+                workspace_id: workspace(request.workspace_id),
+                path: relative_path(request.path)?,
+                against: match enum_value(request.against, "diff base")? {
+                    super::DiffBase::Unspecified => unreachable!("enum_value rejects 0"),
+                    super::DiffBase::Head => DiffBase::Head,
+                    super::DiffBase::MergeBase => DiffBase::MergeBase,
+                },
             },
             Message::GitLog(request) => ClientMessage::GitLog {
                 server_id: ServerId(request.server_id),
@@ -1857,6 +1887,22 @@ impl TryFrom<&ServerMessage> for super::ServerMessage {
                     Err(error) => git_diff_reply::Result::Err(error.clone()),
                 }),
             }),
+            ServerMessage::GitOldFile {
+                request_id,
+                workspace_id,
+                path,
+                result,
+            } => Message::GitOldFile(super::GitOldFileReply {
+                request_id: *request_id,
+                workspace_id: workspace_id.as_u64(),
+                path: path.to_string(),
+                result: Some(match result {
+                    Ok(OldFile::Text(text)) => git_old_file_reply::Result::Text(text.clone()),
+                    Ok(OldFile::Added) => git_old_file_reply::Result::Added(super::Empty {}),
+                    Ok(OldFile::None) => git_old_file_reply::Result::None(super::Empty {}),
+                    Err(error) => git_old_file_reply::Result::Err(error.clone()),
+                }),
+            }),
             ServerMessage::GitLog {
                 request_id,
                 workspace_id,
@@ -2091,6 +2137,17 @@ fn decode_server_message(message: server_message::Message) -> WireResult<ServerM
             result: match member(reply.result)? {
                 git_diff_reply::Result::Ok(diff) => Ok(FileDiff::try_from(diff)?),
                 git_diff_reply::Result::Err(error) => Err(error),
+            },
+        },
+        Message::GitOldFile(reply) => ServerMessage::GitOldFile {
+            request_id: reply.request_id,
+            workspace_id: workspace(reply.workspace_id),
+            path: relative_path(reply.path)?,
+            result: match member(reply.result)? {
+                git_old_file_reply::Result::Text(text) => Ok(OldFile::Text(text)),
+                git_old_file_reply::Result::Added(_) => Ok(OldFile::Added),
+                git_old_file_reply::Result::None(_) => Ok(OldFile::None),
+                git_old_file_reply::Result::Err(error) => Err(error),
             },
         },
         Message::GitLog(reply) => ServerMessage::GitLog {
