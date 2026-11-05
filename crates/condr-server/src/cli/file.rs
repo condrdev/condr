@@ -117,7 +117,10 @@ pub(super) fn transfer(
                 },
                 &destination,
                 replace,
-                |done, total| meter.show(done, total),
+                |done, total| {
+                    meter.show(done, total);
+                    true
+                },
             )
             .map_err(failed)?;
             meter.end();
@@ -144,7 +147,10 @@ pub(super) fn transfer(
                     path: path.clone(),
                 },
                 replace,
-                |done, total| meter.show(done, total),
+                |done, total| {
+                    meter.show(done, total);
+                    true
+                },
             )
             .map_err(failed)?;
             meter.end();

@@ -330,7 +330,7 @@ fn terminal_round_trip_with_and_without_a_concurrent_download() {
             },
             &destination,
             false,
-            |_, _| {},
+            |_, _| true,
         )
     });
     thread::sleep(Duration::from_millis(200));

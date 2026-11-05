@@ -27,13 +27,14 @@ fn io_failure(error: &io::Error) -> StreamFailure {
 }
 
 /// Downloads `file` to `destination`; `progress` hears bytes written so far and the size
-/// the Server named when it opened. An existing destination fails without `replace`.
+/// the Server named when it opened, and answers whether to go on: `false` cancels. An
+/// existing destination fails without `replace`.
 pub fn download(
     opener: &dyn StreamOpener,
     file: StreamFile,
     destination: &Path,
     replace: bool,
-    mut progress: impl FnMut(u64, Option<u64>),
+    mut progress: impl FnMut(u64, Option<u64>) -> bool,
 ) -> Result<u64, StreamFailure> {
     if !replace && fs::symlink_metadata(destination).is_ok() {
         return Err(failure(
@@ -65,7 +66,10 @@ pub fn download(
             return Err(io_failure(&error));
         }
         done += data.len() as u64;
-        progress(done, size);
+        if !progress(done, size) {
+            stream.reset(StreamError::Cancelled, "");
+            return Err(failure(StreamError::Cancelled, ""));
+        }
     }
     let placed = output
         .sync_all()
@@ -80,13 +84,13 @@ pub fn download(
 }
 
 /// Uploads `source` as `file`; `progress` hears bytes handed to the Stream and the file's
-/// size. Complete when the Server answers with its own `Finish`, the file in place.
+/// size, and answers whether to go on. Complete when the Server answers with its own `Finish`, the file in place.
 pub fn upload(
     opener: &dyn StreamOpener,
     source: &Path,
     file: StreamFile,
     replace: bool,
-    mut progress: impl FnMut(u64, Option<u64>),
+    mut progress: impl FnMut(u64, Option<u64>) -> bool,
 ) -> Result<u64, StreamFailure> {
     let mut input = File::open(source).map_err(|error| io_failure(&error))?;
     let meta = input.metadata().map_err(|error| io_failure(&error))?;
@@ -112,7 +116,10 @@ pub fn upload(
         };
         stream.write(&buffer[..read])?;
         done += read as u64;
-        progress(done, Some(size));
+        if !progress(done, Some(size)) {
+            stream.reset(StreamError::Cancelled, "");
+            return Err(failure(StreamError::Cancelled, ""));
+        }
     }
     stream.finish();
     while stream.read()?.is_some() {}

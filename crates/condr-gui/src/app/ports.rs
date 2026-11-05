@@ -6,7 +6,7 @@
 
 use super::sidebar::CondrIconName;
 use super::*;
-use condr_client::{Forward, LinkStatus, LocalPort, StreamConnection, StreamLink, StreamOpener};
+use condr_client::{Forward, LinkStatus, LocalPort, StreamLink, StreamOpener};
 use std::sync::Arc;
 
 /// Width of the page's Device column.
@@ -39,7 +39,14 @@ struct ForwardEntry {
 }
 
 /// One forward's hold on the link; the last released closes the Stream connection.
-struct Retained(Arc<StreamLink>);
+pub(super) struct Retained(Arc<StreamLink>);
+
+impl Retained {
+    /// A hold taken with [`StreamLink::retain`], released when dropped.
+    pub(super) fn new(link: Arc<StreamLink>) -> Self {
+        Self(link)
+    }
+}
 
 impl Drop for Retained {
     fn drop(&mut self) {
@@ -62,6 +69,18 @@ impl DeviceForwards {
     /// Disconnect, Remove and editing the Device's address end its forwards.
     pub(super) fn clear(&mut self) {
         self.entries.clear();
+    }
+
+    /// The Stream link this Device's forwards and transfers share, made on first use.
+    pub(super) fn link(
+        &mut self,
+        endpoint: &Endpoint,
+        events: &async_channel::Sender<()>,
+    ) -> Arc<StreamLink> {
+        Arc::clone(
+            self.link
+                .get_or_insert_with(|| super::transfers::new_link(endpoint, events)),
+        )
     }
 
     fn status(&self) -> LinkStatus {
@@ -139,7 +158,7 @@ impl Condr {
     }
 
     /// Wakes the page when a forward or a link changes, at most ten times a second.
-    fn ports_events(&mut self, cx: &mut Context<Self>) -> async_channel::Sender<()> {
+    pub(super) fn ports_events(&mut self, cx: &mut Context<Self>) -> async_channel::Sender<()> {
         if let Some(sender) = &self.ports_events {
             return sender.clone();
         }
@@ -209,23 +228,7 @@ impl Condr {
             let error = format!("Port {remote} on {} is already forwarded", connection.label);
             return refuse(self, error, cx);
         }
-        let link = connection
-            .forwards
-            .link
-            .get_or_insert_with(|| {
-                let endpoint = connection.endpoint.for_streams();
-                let changed = events.clone();
-                Arc::new(StreamLink::new(
-                    move || {
-                        StreamConnection::connect(&endpoint, "condr-gui")
-                            .map(|(connection, _)| connection)
-                    },
-                    move || {
-                        let _ = changed.try_send(());
-                    },
-                ))
-            })
-            .clone();
+        let link = connection.forwards.link(&connection.endpoint, &events);
         if let Some(form) = self.ports_form.as_mut() {
             form.pending = true;
             form.error = None;

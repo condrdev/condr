@@ -160,7 +160,13 @@ impl SshEndpoint {
     /// than follow them.
     #[cfg(unix)]
     fn connection_sharing(&self, extra: &[&str]) -> Vec<String> {
-        let options = self.multiplexing_options(extra);
+        self.sharing_for(self.multiplexing_options(extra))
+    }
+
+    /// What a separate connection makes of the options Condr would add: none when the
+    /// person's own master rides, else no master at all.
+    #[cfg(unix)]
+    fn sharing_for(&self, options: Vec<String>) -> Vec<String> {
         if self.separate && !options.is_empty() {
             return ["-o", "ControlMaster=no", "-o", "ControlPath=none"]
                 .map(str::to_owned)
@@ -371,25 +377,19 @@ mod tests {
         assert_eq!(options[5], "ControlPersist=60");
     }
 
+    /// Without `ssh -G`: a test that forks can hold another test's socket open.
     #[cfg(unix)]
     #[test]
     fn a_separate_connection_never_rides_condrs_master_but_keeps_the_persons_own() {
-        let path = std::env::temp_dir().join(format!("condr-ssh-sep-{}", uuid::Uuid::new_v4()));
-        let endpoint = SshEndpoint::parse("ssh://sep-target").unwrap().separate();
-        let config = path.to_str().unwrap();
-
-        std::fs::write(&path, "Host sep-target\n User someone\n").unwrap();
+        let endpoint = SshEndpoint::parse("ssh://sep-target").unwrap();
+        let condrs = vec!["-o".to_owned(), "ControlMaster=auto".to_owned()];
+        assert_eq!(endpoint.sharing_for(condrs.clone()), condrs);
         assert_eq!(
-            endpoint.connection_sharing(&["-F", config]),
+            endpoint.separate().sharing_for(condrs),
             ["-o", "ControlMaster=no", "-o", "ControlPath=none"]
         );
-        std::fs::write(
-            &path,
-            "Host sep-target\n ControlMaster auto\n ControlPath ~/.ssh/cm-%C\n",
-        )
-        .unwrap();
-        assert!(endpoint.connection_sharing(&["-F", config]).is_empty());
-        std::fs::remove_file(&path).unwrap();
+        // The person's own master: Condr adds nothing, so the separate connection rides it.
+        assert!(endpoint.separate().sharing_for(Vec::new()).is_empty());
     }
 
     #[cfg(unix)]

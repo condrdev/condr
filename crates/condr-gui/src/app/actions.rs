@@ -1,3 +1,4 @@
+use super::dialogs::{DangerConfirm, confirm_danger};
 use super::*;
 
 impl Condr {
@@ -22,9 +23,36 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.confirm_unsaved(
-            UnsavedScope::All,
-            Box::new(|_, _, cx| cx.quit()),
+        let live = self.live_transfers();
+        if live == 0 {
+            return self.confirm_unsaved(
+                UnsavedScope::All,
+                Box::new(|_, _, cx| cx.quit()),
+                window,
+                cx,
+            );
+        }
+        // Quitting cancels transfers, so it asks once first (ADR 0061).
+        let confirm = DangerConfirm {
+            title: match live {
+                1 => "A transfer is running".to_owned(),
+                count => format!("{count} transfers are running"),
+            },
+            description: "Quitting cancels it and leaves nothing half-written behind.".into(),
+            ok: "Quit",
+            cancel: "Keep Going",
+        };
+        confirm_danger(
+            cx.weak_entity(),
+            confirm,
+            |this, window, cx| {
+                this.confirm_unsaved(
+                    UnsavedScope::All,
+                    Box::new(|_, _, cx| cx.quit()),
+                    window,
+                    cx,
+                )
+            },
             window,
             cx,
         );

@@ -34,6 +34,7 @@ mod startup;
 mod syntax;
 mod terminal_input;
 mod terminal_panel;
+mod transfers;
 mod updates;
 mod viewer_header;
 mod window_view;
@@ -292,6 +293,11 @@ pub(crate) struct Condr {
     ports_form: Option<ports::PortsForm>,
     /// Wakes the GUI when a forward or a Stream connection changes.
     ports_events: Option<async_channel::Sender<()>>,
+    /// Where the last download was saved this run; the save dialog opens there.
+    last_download_directory: Option<PathBuf>,
+    next_transfer_id: u64,
+    /// Whether the transfer strip lists each file.
+    transfer_strip_open: bool,
     sidebar_workspace_open: HashMap<(ConnectionKey, WorkspaceId), Entity<bool>>,
     terminal_font: TerminalFont,
     terminal_color_scheme: SharedString,
@@ -496,6 +502,9 @@ impl Condr {
             new_workspace: None,
             ports_form: None,
             ports_events: None,
+            last_download_directory: None,
+            next_transfer_id: 0,
+            transfer_strip_open: false,
             sidebar_workspace_open: HashMap::new(),
             terminal_font,
             terminal_color_scheme,

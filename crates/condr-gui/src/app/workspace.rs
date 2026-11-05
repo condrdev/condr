@@ -196,6 +196,8 @@ impl Condr {
             let tab_id = tab.id();
             let tab_name = tab.name().to_owned();
             let tab_label = tab_label(tab_index, &tab_name);
+            // A Preview Tab's file can be downloaded from its menu (ADR 0061).
+            let preview_file = tab.file().map(|file| file.path().to_relative_path_buf());
             let activate_owner = cx.weak_entity();
             let menu_owner = cx.weak_entity();
             let target = DropTarget::Tab {
@@ -383,6 +385,14 @@ impl Condr {
                             });
                         },
                     ))
+                    .when_some(preview_file.clone(), |menu, path| {
+                        let download_owner = menu_owner.clone();
+                        menu.item(PopupMenuItem::new("Download…").on_click(move |_, _, cx| {
+                            let _ = download_owner.update(cx, |this, cx| {
+                                this.download_file(key, workspace_id, path.clone(), cx)
+                            });
+                        }))
+                    })
                     .separator()
                     .item(
                         PopupMenuItem::new("Close Tab")

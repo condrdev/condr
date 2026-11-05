@@ -8,6 +8,7 @@ mod ports;
 mod session_model;
 mod settings;
 mod terminal;
+mod transfers;
 mod windows;
 mod workflows;
 

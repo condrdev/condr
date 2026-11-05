@@ -263,6 +263,8 @@ impl Condr {
         connection.cancellation.cancel();
         // Disconnect ends the Device's forwards; nothing restores them (ADR 0061).
         connection.forwards.clear();
+        // Running transfers fail with the Stream connection.
+        connection.forwards.terminal_connected(false);
         if let Some(io) = connection.io.take() {
             let _ = io.outgoing.send(ClientMessage::Detach);
         }

@@ -367,7 +367,11 @@ impl Condr {
                 .child(self.render_history(key, workspace_id, shown_diff.as_deref(), cx))
                 .into_any_element(),
         };
-        column.child(header).child(body).into_any_element()
+        column
+            .child(header)
+            .child(body)
+            .children(self.render_transfer_strip(key, workspace_id, cx))
+            .into_any_element()
     }
 
     /// The Files / Changes / History tabs, sized to their labels, with the change count in

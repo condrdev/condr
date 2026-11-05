@@ -366,6 +366,8 @@ impl Condr {
                     .debug_selector(|| "condr-files-root-area".into())
                     .flex_1()
                     .min_h(rems(2.))
+                    .drag_over::<ExternalPaths>(|style, _, _, cx| style.bg(cx.theme().accent))
+                    .on_drop(self.upload_drop(key, workspace_id, RelativePathBuf::new(), cx))
                     .context_menu(self.root_context_menu(key, workspace_id, cx)),
             )
             .into_any_element()
@@ -502,6 +504,8 @@ impl Condr {
                     this.toggle_files_directory(key, workspace_id, toggle_path.clone(), cx);
                 });
             })
+            .drag_over::<ExternalPaths>(|style, _, _, cx| style.bg(cx.theme().accent))
+            .on_drop(self.upload_drop(key, workspace_id, path.to_relative_path_buf(), cx))
             .context_menu(menu)
             .child(type_icon(file_icons::folder_icon(theme.is_dark()), ignored))
             .child(
@@ -540,6 +544,14 @@ impl Condr {
         let selector: SharedString = format!("file-{}", path.as_str()).into();
         let owner = cx.weak_entity();
         let menu = self.file_context_menu(context.key, context.workspace_id, path, None, cx);
+        let drop = self.upload_drop(
+            context.key,
+            context.workspace_id,
+            path.parent()
+                .map(RelativePath::to_relative_path_buf)
+                .unwrap_or_default(),
+            cx,
+        );
         let (key, workspace_id, path) = (
             context.key,
             context.workspace_id,
@@ -557,6 +569,9 @@ impl Condr {
                     this.show_file_on(key, workspace_id, path.clone(), window, cx);
                 });
             })
+            // Dropped on a file, uploads go beside it, as New File does (ADR 0045).
+            .drag_over::<ExternalPaths>(|style, _, _, cx| style.bg(cx.theme().accent))
+            .on_drop(drop)
             .context_menu(menu)
             .child(type_icon(
                 file_icons::file_icon(name, theme.is_dark()),
@@ -655,6 +670,18 @@ impl Condr {
                 .separator()
             });
             let menu = path_copy_items(menu, relative.clone(), absolute.clone()).separator();
+            // A remote file comes here through the Stream connection (ADR 0061).
+            let download_owner = owner.clone();
+            let download_path = show_path.clone();
+            let menu = menu
+                .item(PopupMenuItem::new("Download…").disabled(!exists).on_click(
+                    move |_, _, cx| {
+                        let _ = download_owner.update(cx, |this, cx| {
+                            this.download_file(key, workspace_id, download_path.clone(), cx)
+                        });
+                    },
+                ))
+                .separator();
             let menu = match &editor {
                 Some((target_id, label, enabled)) => {
                     let target_id = target_id.clone();
@@ -741,8 +768,9 @@ impl Condr {
         let (absolute, reveal) = self.entry_locations(key, workspace_id, path);
         let path = path.to_relative_path_buf();
         move |menu, _, _| {
-            let menu = Condr::create_items(menu, key, workspace_id, path.clone(), owner.clone())
-                .separator();
+            let menu = Condr::create_items(menu, key, workspace_id, path.clone(), owner.clone());
+            let menu =
+                upload_item(menu, key, workspace_id, path.clone(), owner.clone()).separator();
             let menu = path_copy_items(menu, path.to_string(), absolute.clone());
             let menu = reveal_item(menu, reveal.clone(), true, owner.clone()).separator();
             Condr::rename_delete_items(
@@ -766,7 +794,14 @@ impl Condr {
     ) -> impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static {
         let owner = cx.weak_entity();
         move |menu, _, _| {
-            Condr::create_items(
+            let menu = Condr::create_items(
+                menu,
+                key,
+                workspace_id,
+                RelativePathBuf::new(),
+                owner.clone(),
+            );
+            upload_item(
                 menu,
                 key,
                 workspace_id,
@@ -1531,6 +1566,42 @@ pub(super) fn truncated_note(cx: &App) -> AnyElement {
         cx.theme().warning,
     )
     .into_any_element()
+}
+
+/// Upload Files… on a directory or the space below the tree (ADR 0061).
+fn upload_item(
+    menu: PopupMenu,
+    key: ConnectionKey,
+    workspace_id: WorkspaceId,
+    directory: RelativePathBuf,
+    owner: WeakEntity<Condr>,
+) -> PopupMenu {
+    menu.item(
+        PopupMenuItem::new("Upload Files…").on_click(move |_, window, cx| {
+            let _ = owner.update(cx, |this, cx| {
+                this.pick_uploads(key, workspace_id, directory.clone(), window, cx)
+            });
+        }),
+    )
+}
+
+impl Condr {
+    /// What a drop from the system's file manager onto `directory` does: one batch.
+    fn upload_drop(
+        &self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        directory: RelativePathBuf,
+        cx: &Context<Self>,
+    ) -> impl Fn(&ExternalPaths, &mut Window, &mut App) + 'static {
+        let owner = cx.weak_entity();
+        move |paths, window, cx| {
+            let paths = paths.paths().to_vec();
+            let _ = owner.update(cx, |this, cx| {
+                this.upload_files(key, workspace_id, directory.clone(), paths, window, cx)
+            });
+        }
+    }
 }
 
 #[cfg(test)]

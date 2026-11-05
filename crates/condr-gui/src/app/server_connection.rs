@@ -23,6 +23,8 @@ pub(super) struct ServerConnection {
     pub(super) status: ConnectionStatus,
     /// This Device's forwards and their Stream connection (ADR 0061).
     pub(super) forwards: super::ports::DeviceForwards,
+    /// This Client's downloads and uploads to this Device (ADR 0061).
+    pub(super) transfers: Vec<super::transfers::Transfer>,
     /// The Server's build identity from its last `Welcome` (ADR 0027).
     pub(super) server_build: Option<String>,
     /// The machine's name the Server gave in `Welcome` (ADR 0040); empty until it
@@ -171,6 +173,7 @@ impl ServerConnection {
             endpoint,
             status: ConnectionStatus::Disconnected,
             forwards: super::ports::DeviceForwards::default(),
+            transfers: Vec::new(),
             server_build: None,
             device_name: String::new(),
             build_notice_dismissed: false,
