@@ -177,7 +177,12 @@ impl Condr {
         sender
     }
 
-    fn submit_forward(&mut self, scope: PortsScope, cx: &mut Context<Self>) {
+    pub(super) fn submit_forward(
+        &mut self,
+        scope: PortsScope,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(form) = self.ports_form.as_ref() else {
             return;
         };
@@ -234,48 +239,61 @@ impl Condr {
             form.error = None;
         }
         cx.notify();
-        cx.spawn(async move |this, cx| {
-            let result = cx
-                .background_spawn(async move {
-                    // The first forward dials here, so a Device that cannot be reached
-                    // says so under the form at once.
-                    link.retain()?;
-                    let retained = Retained(Arc::clone(&link));
-                    let opener: Arc<dyn StreamOpener> = link;
-                    let forward = Forward::bind(remote, local, opener, move |_| {
-                        let _ = events.try_send(());
+        let owner = cx.weak_entity();
+        window
+            .spawn(cx, async move |cx| {
+                let result = cx
+                    .background_spawn(async move {
+                        // The first forward dials here, so a Device that cannot be reached
+                        // says so under the form at once.
+                        link.retain()?;
+                        let retained = Retained(Arc::clone(&link));
+                        let opener: Arc<dyn StreamOpener> = link;
+                        let forward = Forward::bind(remote, local, opener, move |_| {
+                            let _ = events.try_send(());
+                        })
+                        .map_err(|error| error.to_string())?;
+                        Ok::<_, String>((forward, retained))
                     })
-                    .map_err(|error| error.to_string())?;
-                    Ok::<_, String>((forward, retained))
-                })
-                .await;
-            let _ = this.update(cx, |this, cx| {
-                if let Some(form) = this.ports_form.as_mut() {
-                    form.pending = false;
-                }
-                match result {
-                    Ok((forward, retained)) => {
-                        let local = forward.local_port();
-                        let note = (local != remote)
-                            .then(|| format!("localhost:{remote} was in use, so {local} is used"));
-                        if let Some(connection) = this.connection_mut(key) {
-                            connection.forwards.entries.push(ForwardEntry {
-                                forward,
-                                note,
-                                _retained: retained,
-                            });
-                        }
-                    }
-                    Err(error) => {
+                    .await;
+                let _ = cx.update(|window, cx| {
+                    owner.update(cx, |this, cx| {
                         if let Some(form) = this.ports_form.as_mut() {
-                            form.error = Some(error);
+                            form.pending = false;
                         }
-                    }
-                }
-                cx.notify();
-            });
-        })
-        .detach();
+                        match result {
+                            Ok((forward, retained)) => {
+                                let local = forward.local_port();
+                                let note = (local != remote).then(|| {
+                                    format!("localhost:{remote} was in use, so {local} is used")
+                                });
+                                if let Some(connection) = this.connection_mut(key) {
+                                    connection.forwards.entries.push(ForwardEntry {
+                                        forward,
+                                        note,
+                                        _retained: retained,
+                                    });
+                                }
+                                // Ready for the next port.
+                                if let Some(form) = this.ports_form.as_ref() {
+                                    for input in [&form.port, &form.local] {
+                                        input.update(cx, |input, cx| {
+                                            input.set_value("", window, cx)
+                                        });
+                                    }
+                                }
+                            }
+                            Err(error) => {
+                                if let Some(form) = this.ports_form.as_mut() {
+                                    form.error = Some(error);
+                                }
+                            }
+                        }
+                        cx.notify();
+                    })
+                });
+            })
+            .detach();
     }
 
     fn stop_forward(&mut self, key: ConnectionKey, remote: u16, cx: &mut Context<Self>) {
@@ -536,9 +554,10 @@ impl Condr {
                             .small()
                             .label("Forward")
                             .loading(form.pending)
-                            .on_click(move |_, _, cx| {
-                                let _ = owner
-                                    .update(cx, |this, cx| this.submit_forward(submit_scope, cx));
+                            .on_click(move |_, window, cx| {
+                                let _ = owner.update(cx, |this, cx| {
+                                    this.submit_forward(submit_scope, window, cx)
+                                });
                             }),
                     ),
             )
@@ -603,6 +622,7 @@ impl Condr {
                     .id(("forward-link", id))
                     .text_sm()
                     .text_color(cx.theme().link)
+                    .underline()
                     .cursor_pointer()
                     .child(url)
                     .on_click(move |_, _, cx| cx.open_url(&link_url)),
@@ -713,7 +733,7 @@ fn forward_id(key: ConnectionKey, remote: u16) -> u64 {
     key << 16 | u64::from(remote)
 }
 
-#[cfg(all(test, feature = "test-support"))]
+#[cfg(feature = "test-support")]
 impl Condr {
     /// Types into the form as a person would, for tests.
     pub(super) fn fill_ports_form(
@@ -731,6 +751,7 @@ impl Condr {
         });
     }
 
+    #[cfg(test)]
     pub(super) fn ports_form_error(&self) -> Option<String> {
         self.ports_form.as_ref().and_then(|form| form.error.clone())
     }

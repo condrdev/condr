@@ -432,13 +432,17 @@ impl Condr {
             .iter()
             .filter(|transfer| transfer.live())
             .collect();
-        let (done, total) = live.iter().fold((0u64, 0u64), |(done, total), transfer| {
-            let (bytes, size) = *transfer
-                .progress
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner);
-            (done + bytes, total + size.unwrap_or(bytes))
-        });
+        // The percentage follows what moves; a file waiting its turn counts, not weighs.
+        let (done, total) = live
+            .iter()
+            .filter(|transfer| transfer.state == TransferState::Running)
+            .fold((0u64, 0u64), |(done, total), transfer| {
+                let (bytes, size) = *transfer
+                    .progress
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner);
+                (done + bytes, total + size.unwrap_or(bytes))
+            });
         let headline = if live.is_empty() {
             format!("⇅ {} finished", transfers.len())
         } else {
@@ -623,8 +627,45 @@ pub(super) fn new_link(endpoint: &Endpoint, events: &async_channel::Sender<()>) 
     ))
 }
 
-#[cfg(all(test, feature = "test-support"))]
+#[cfg(feature = "test-support")]
 impl Condr {
+    /// A transfer drawn in a given state without running it: the offscreen screenshots
+    /// cannot catch one mid-flight, since their dispatcher runs background work to the end.
+    pub(super) fn show_transfer(
+        &mut self,
+        key: ConnectionKey,
+        workspace: WorkspaceId,
+        name: &str,
+        upload: bool,
+        progress: (u64, Option<u64>),
+        state: TransferState,
+    ) {
+        self.next_transfer_id += 1;
+        let id = self.next_transfer_id;
+        let path = RelativePathBuf::from(name);
+        let direction = if upload {
+            Direction::Upload {
+                source: PathBuf::from(name),
+                replace: false,
+            }
+        } else {
+            Direction::Download {
+                destination: PathBuf::from(name),
+            }
+        };
+        if let Some(connection) = self.connection_mut(key) {
+            connection.transfers.push(Transfer {
+                id,
+                workspace,
+                path,
+                direction,
+                progress: Arc::new(Mutex::new(progress)),
+                cancel: Arc::default(),
+                state,
+            });
+        }
+    }
+
     /// The states of a Device's transfers, oldest first, for tests.
     pub(super) fn transfer_states(&self, key: ConnectionKey) -> Vec<TransferState> {
         self.connection(key).map_or_else(Vec::new, |connection| {
