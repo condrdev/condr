@@ -91,6 +91,7 @@ mod platform {
 
     /// Runs on a thread the console starts for the event; returning TRUE keeps the
     /// process alive so the command can finish on its own.
+    #[allow(unsafe_code)] // A console control handler is an `extern "system"` callback.
     unsafe extern "system" fn handler(_event: u32) -> BOOL {
         if let Some(interrupt) = INTERRUPT.get() {
             interrupt.fire();
@@ -98,6 +99,7 @@ mod platform {
         TRUE
     }
 
+    #[allow(unsafe_code)] // SetConsoleCtrlHandler has no safe wrapper.
     pub(super) fn install(interrupt: Interrupt) -> io::Result<()> {
         let _ = INTERRUPT.set(interrupt);
         // SAFETY: `handler` is a plain function that lives as long as the process.

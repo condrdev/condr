@@ -18,8 +18,9 @@ fn main() {
         println!("condr-gui {}", condr_core::version_text());
         return;
     }
-    // Offscreen screenshots, for builds with `test-support` only; see `app::screenshots`.
-    #[cfg(feature = "test-support")]
+    // Offscreen screenshots, for macOS builds with `test-support` only; see
+    // `app::screenshots`.
+    #[cfg(all(feature = "test-support", target_os = "macos"))]
     if let Some(directory) = std::env::var_os("CONDR_GUI_SCREENSHOTS") {
         app::screenshots::run(directory.into());
         return;

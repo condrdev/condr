@@ -26,7 +26,8 @@ mod ports;
 mod power;
 mod presentation;
 mod preview;
-#[cfg(feature = "test-support")]
+// GPUI renders offscreen on macOS alone.
+#[cfg(all(feature = "test-support", target_os = "macos"))]
 pub(crate) mod screenshots;
 mod server_connection;
 mod server_management;

@@ -1,6 +1,7 @@
-//! Offscreen screenshots of the GUI, for looking at a change without a display (built with
-//! `test-support` only). macOS renders the window through Metal without showing it, which
-//! needs the main thread, so this runs from `main` rather than the test harness:
+//! Offscreen screenshots of the GUI, for looking at a change without a display (built on
+//! macOS with `test-support` only, since GPUI renders offscreen there alone). macOS renders
+//! the window through Metal without showing it, which needs the main thread, so this runs
+//! from `main` rather than the test harness:
 //!
 //! ```sh
 //! CONDR_GUI_SCREENSHOTS=/tmp/condr-shots cargo run -p condr-gui --features test-support
