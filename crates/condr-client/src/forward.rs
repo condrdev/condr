@@ -129,12 +129,14 @@ pub enum ForwardEvent {
 }
 
 /// One forward: listeners on `127.0.0.1` and, where the system has one, `[::1]`, for one
-/// port of one Device. Dropping it stops listening; connections through it run on.
+/// port of one Device. Dropping it stops listening, the port free once it returns;
+/// connections through it run on.
 pub struct Forward {
     remote: u16,
     local: u16,
     shared: Arc<ForwardShared>,
-    addresses: Vec<SocketAddr>,
+    /// Each listener's address and the thread that owns it.
+    accepters: Vec<(SocketAddr, thread::JoinHandle<()>)>,
 }
 
 struct ForwardShared {
@@ -164,20 +166,21 @@ impl Forward {
             last_refused: AtomicBool::new(false),
             on_event: Box::new(on_event),
         });
-        let mut addresses = Vec::new();
+        let mut accepters = Vec::new();
         for listener in listeners {
-            addresses.push(listener.local_addr()?);
+            let address = listener.local_addr()?;
             let shared = Arc::clone(&shared);
             let opener = Arc::clone(&opener);
-            thread::Builder::new()
+            let accepter = thread::Builder::new()
                 .name("condr-forward-accept".into())
                 .spawn(move || accept_loop(&listener, remote, &opener, &shared))?;
+            accepters.push((address, accepter));
         }
         Ok(Self {
             remote,
             local,
             shared,
-            addresses,
+            accepters,
         })
     }
 
@@ -203,9 +206,12 @@ impl Forward {
 impl Drop for Forward {
     fn drop(&mut self) {
         self.shared.stopped.store(true, Ordering::Release);
-        // A blocked accept returns for this connection and sees the flag.
-        for address in &self.addresses {
-            let _ = TcpStream::connect_timeout(address, PROBE_TIMEOUT);
+        // A blocked accept returns for this connection and sees the flag; its thread
+        // owns the listener, so waiting for it frees the port before this returns.
+        for (address, accepter) in std::mem::take(&mut self.accepters) {
+            if TcpStream::connect_timeout(&address, PROBE_TIMEOUT).is_ok() {
+                let _ = accepter.join();
+            }
         }
     }
 }
