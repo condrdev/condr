@@ -28,6 +28,8 @@ fn scratch_repository(name: &str) -> PathBuf {
     git(&root, ["config", "user.email", "condr@example.com"]);
     git(&root, ["config", "user.name", "Condr"]);
     git(&root, ["config", "commit.gpgsign", "false"]);
+    // Git for Windows turns this on system-wide; a checkout's line breaks are the test's.
+    git(&root, ["config", "core.autocrlf", "false"]);
     root
 }
 

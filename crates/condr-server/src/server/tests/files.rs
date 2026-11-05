@@ -128,6 +128,8 @@ fn the_old_side_is_heads_text_and_refuses_an_unknown_workspace_or_a_missing_base
     run_git(&root, &["config", "user.email", "condr@example.com"]);
     run_git(&root, &["config", "user.name", "Condr"]);
     run_git(&root, &["config", "commit.gpgsign", "false"]);
+    // Git for Windows turns this on system-wide; the old side's line breaks are the test's.
+    run_git(&root, &["config", "core.autocrlf", "false"]);
     std::fs::write(root.join("notes.txt"), "one\n").unwrap();
     run_git(&root, &["add", "notes.txt"]);
     run_git(&root, &["commit", "-q", "-m", "notes"]);
