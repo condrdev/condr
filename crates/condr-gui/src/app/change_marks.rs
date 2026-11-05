@@ -169,6 +169,8 @@ impl Condr {
         if markable {
             self.schedule_change_marks(key, tab_id, cx);
         } else {
+            // A diff in flight against the previous side must not draw its marks back.
+            marks.task = None;
             marks.set(&[], cx);
         }
     }

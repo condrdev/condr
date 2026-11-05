@@ -835,7 +835,7 @@ fn a_commit_past_the_change_cap_is_truncated_without_line_counts() {
 #[test]
 fn old_file_is_the_compared_blob_added_or_nothing() {
     let root = scratch_repository("old-file");
-    commit_file(&root, ".gitignore", "*.log\n");
+    commit_file(&root, ".gitignore", "*.log\ntarget/\n");
     commit_file(&root, "notes.txt", "alpha\nbeta\n");
     commit_file(&root, "image.bin", "\0\u{1}\u{2}binary\0");
     commit_file(&root, "huge.txt", &"x\n".repeat(600_000));
@@ -844,6 +844,10 @@ fn old_file_is_the_compared_blob_added_or_nothing() {
     fs::write(root.join("staged.txt"), "staged\n").unwrap();
     git(&root, ["add", "staged.txt"]);
     fs::write(root.join("noise.log"), "noise\n").unwrap();
+    fs::create_dir_all(root.join("target/debug")).unwrap();
+    fs::write(root.join("target/debug/out.rs"), "built\n").unwrap();
+    fs::write(root.join("forced.log"), "forced\n").unwrap();
+    git(&root, ["add", "-f", "forced.log"]);
     let repository = discover_repository(&root).unwrap().unwrap();
     let old = |path: &str| repository.old_file(RelativePath::new(path), None, None);
 
@@ -858,6 +862,13 @@ fn old_file_is_the_compared_blob_added_or_nothing() {
         "staged, not in HEAD"
     );
     assert_eq!(old("noise.log").unwrap(), OldFile::None, "ignored");
+    assert_eq!(
+        old("target/debug/out.rs").unwrap(),
+        OldFile::None,
+        "inside an ignored directory"
+    );
+    // Changes lists it as added: the index tracks it whatever the ignore rules say.
+    assert_eq!(old("forced.log").unwrap(), OldFile::Added, "force-added");
     assert_eq!(old("image.bin").unwrap(), OldFile::None, "binary");
     assert!("x\n".repeat(600_000).len() as u64 > MAX_DIFF_BYTES);
     assert_eq!(old("huge.txt").unwrap(), OldFile::None, "too large");

@@ -1282,8 +1282,9 @@ fn compared_side(
     ),
     String,
 > {
-    workspace_root(state, server_id, session_id, workspace_id)?;
+    // One lock: a Workspace closed in between is "unknown", not "not in a repository".
     let state = state.lock().or_abort();
+    checked_root(&state, server_id, session_id, workspace_id)?;
     let git = state
         .workspace_git
         .get(&workspace_id)
@@ -1326,7 +1327,20 @@ fn workspace_root(
     session_id: SessionId,
     workspace_id: WorkspaceId,
 ) -> Result<PathBuf, String> {
-    let state = state.lock().or_abort();
+    checked_root(
+        &state.lock().or_abort(),
+        server_id,
+        session_id,
+        workspace_id,
+    )
+}
+
+fn checked_root(
+    state: &RuntimeState,
+    server_id: ServerId,
+    session_id: SessionId,
+    workspace_id: WorkspaceId,
+) -> Result<PathBuf, String> {
     if server_id != state.server_id {
         Err("unknown Server".into())
     } else if session_id != state.session_id {

@@ -216,6 +216,7 @@ impl Condr {
         )
         .map_err(|error| ConnectionInstallError::Unavailable(error.to_string()))?;
         connection.io = Some(io);
+        connection.resources.connection_closed();
         connection.reset_sync_state();
         Ok(application)
     }
@@ -502,6 +503,7 @@ impl Condr {
         connection.forwards.terminal_connected(false);
         connection.reset_sync_state();
         connection.resources.clear_pending();
+        connection.resources.connection_closed();
         connection.error = Some(message);
         connection.disconnected_at = Some(Instant::now());
         connection.cancellation.cancel();

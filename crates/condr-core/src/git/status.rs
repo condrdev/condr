@@ -140,9 +140,18 @@ impl GitRepository {
         let repo = self.open()?;
         let tree = compared_tree(&repo, base)?;
         let Some((id, kind)) = Differ::tree_entry(tree.as_ref(), old_path.unwrap_or(path))? else {
-            let ignored =
-                self.with_excludes(|_, excludes| is_excluded(excludes, &path.to_path(""), false));
-            return Ok(if ignored == Some(true) {
+            // A path the index tracks is added whatever the ignore rules say (`git add -f`),
+            // as Changes lists it.
+            let tracked = repo
+                .index_or_empty()
+                .map_err(git_error)?
+                .entry_by_path(path.as_str().into())
+                .is_some();
+            let ignored = !tracked
+                && self
+                    .with_excludes(|_, excludes| is_excluded(excludes, &path.to_path(""), false))
+                    == Some(true);
+            return Ok(if ignored {
                 OldFile::None
             } else {
                 OldFile::Added
@@ -161,9 +170,12 @@ impl GitRepository {
             ..Default::default()
         };
         let mut text = Vec::new();
+        // A smudge filter (git-lfs) can turn a small pointer into any size: read one byte
+        // past the limit, enough to tell it is too large.
         pipeline
             .convert_to_worktree(&blob.data, repository_path(path).as_ref(), options)
             .map_err(git_error)?
+            .take(MAX_DIFF_BYTES + 1)
             .read_to_end(&mut text)
             .map_err(git_error)?;
         // gix's diff pipeline calls a NUL in the first 8000 bytes binary; so does the Diff Tab.

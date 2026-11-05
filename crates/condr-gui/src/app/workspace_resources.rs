@@ -132,6 +132,11 @@ impl WorkspaceResources {
         self.commits.clear_pending();
         self.pending_commit_diffs.clear();
         self.old_files.clear_pending();
+    }
+
+    /// The transport closed or was replaced: nothing sent on it is answered any more. A
+    /// recovery Bootstrap keeps it, so only this forgets the requests in flight.
+    pub(super) fn connection_closed(&mut self) {
         self.old_files_in_flight = 0;
     }
 
@@ -527,8 +532,15 @@ mod tests {
         assert!(!resources.refused_old_file());
 
         // A Bootstrap may be a different Server.
+        resources.asked_old_file(head.clone(), 5);
         resources.reset();
         assert!(!resources.old_files_unsupported);
         assert!(resources.old_files.wants(&head));
+        // A recovery Bootstrap keeps the connection: a refusal sent before it is still theirs.
+        assert!(resources.refused_old_file());
+        // A closed connection answers nothing more.
+        resources.asked_old_file(head.clone(), 6);
+        resources.connection_closed();
+        assert!(!resources.refused_old_file());
     }
 }
