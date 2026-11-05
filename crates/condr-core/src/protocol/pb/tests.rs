@@ -684,3 +684,167 @@ fn an_unknown_progress_state_reads_as_indeterminate() {
     assert_eq!(progress.state, crate::TerminalProgressState::Indeterminate);
     assert_eq!(progress.percent, Some(40));
 }
+
+mod streams {
+    use crate::WorkspaceId;
+    use crate::protocol::{
+        ClientHandshake, Hello, MAX_STREAM_FRAME_SIZE, StreamClientMessage, StreamError,
+        StreamFile, StreamMessage, StreamServerMessage, StreamTarget, encode_frame,
+        read_message_with_limit,
+    };
+    use prost::Message as _;
+
+    fn round_trip<M: crate::protocol::WireMessage + PartialEq + std::fmt::Debug>(message: &M) -> M {
+        let frame = encode_frame(message, MAX_STREAM_FRAME_SIZE).unwrap();
+        read_message_with_limit(&mut frame.as_slice(), MAX_STREAM_FRAME_SIZE)
+            .unwrap()
+            .0
+    }
+
+    fn file() -> StreamFile {
+        StreamFile {
+            workspace: WorkspaceId::from_u64(7),
+            path: "src/main.rs".into(),
+        }
+    }
+
+    #[test]
+    fn every_stream_message_survives_a_round_trip_in_its_direction() {
+        let client = [
+            StreamMessage::Open {
+                stream: 1,
+                target: StreamTarget::Forward { port: 5173 },
+            },
+            StreamMessage::Open {
+                stream: 2,
+                target: StreamTarget::Download(file()),
+            },
+            StreamMessage::Open {
+                stream: 3,
+                target: StreamTarget::Upload {
+                    file: file(),
+                    replace: true,
+                },
+            },
+            StreamMessage::Data {
+                stream: 1,
+                data: vec![1, 2, 3],
+            },
+            StreamMessage::Credit {
+                stream: 1,
+                max_offset: 1 << 21,
+            },
+            StreamMessage::Finish { stream: 1 },
+            StreamMessage::Reset {
+                stream: 2,
+                error: StreamError::Cancelled,
+                detail: "by hand".into(),
+            },
+            StreamMessage::Ping,
+        ];
+        for message in client {
+            let message = StreamClientMessage(message);
+            assert_eq!(round_trip(&message), message);
+        }
+        let server = [
+            StreamMessage::Opened {
+                stream: 2,
+                size: Some(42),
+            },
+            StreamMessage::Opened {
+                stream: 1,
+                size: None,
+            },
+            StreamMessage::OpenFailed {
+                stream: 3,
+                error: StreamError::AlreadyExists,
+                detail: String::new(),
+            },
+            StreamMessage::Data {
+                stream: 1,
+                data: Vec::new(),
+            },
+            StreamMessage::Pong,
+        ];
+        for message in server {
+            let message = StreamServerMessage(message);
+            assert_eq!(round_trip(&message), message);
+        }
+    }
+
+    #[test]
+    fn a_member_of_the_other_direction_is_refused_when_encoded() {
+        let opened = StreamClientMessage(StreamMessage::Opened {
+            stream: 1,
+            size: None,
+        });
+        assert!(encode_frame(&opened, MAX_STREAM_FRAME_SIZE).is_err());
+        let open = StreamServerMessage(StreamMessage::Open {
+            stream: 1,
+            target: StreamTarget::Forward { port: 1 },
+        });
+        assert!(encode_frame(&open, MAX_STREAM_FRAME_SIZE).is_err());
+    }
+
+    #[test]
+    fn unknown_input_is_kept_apart_rather_than_refused() {
+        // An unset top-level member is one a newer peer added.
+        let decoded =
+            StreamClientMessage::try_from(super::super::StreamClientMessage { message: None })
+                .unwrap();
+        assert_eq!(decoded.0, StreamMessage::Unknown);
+        let decoded =
+            StreamServerMessage::try_from(super::super::StreamServerMessage { message: None })
+                .unwrap();
+        assert_eq!(decoded.0, StreamMessage::Unknown);
+        // An `Open` whose target this build does not know is answered, not dropped.
+        let open = super::super::StreamClientMessage {
+            message: Some(super::super::stream_client_message::Message::Open(
+                super::super::StreamOpen {
+                    stream: 4,
+                    target: None,
+                },
+            )),
+        };
+        assert_eq!(
+            StreamClientMessage::try_from(open).unwrap().0,
+            StreamMessage::Open {
+                stream: 4,
+                target: StreamTarget::Unknown,
+            }
+        );
+        // An error code from a newer peer reads as `Other`.
+        let reset = super::super::StreamServerMessage {
+            message: Some(super::super::stream_server_message::Message::Reset(
+                super::super::StreamReset {
+                    stream: 1,
+                    error: 999,
+                    detail: String::new(),
+                },
+            )),
+        };
+        let StreamMessage::Reset { error, .. } = StreamServerMessage::try_from(reset).unwrap().0
+        else {
+            panic!("a reset decodes as one");
+        };
+        assert_eq!(error, StreamError::Other);
+    }
+
+    #[test]
+    fn the_streams_handshake_round_trips_and_an_unknown_kind_stays_unknown() {
+        let handshake = ClientHandshake::Streams(Hello::new("gui"));
+        let frame = encode_frame(&handshake, MAX_STREAM_FRAME_SIZE).unwrap();
+        let decoded: ClientHandshake = read_message_with_limit(&mut frame.as_slice(), 1024)
+            .unwrap()
+            .0;
+        assert_eq!(decoded, handshake);
+        // What a Server from before this kind sees: an unset `oneof`, which it refuses.
+        let empty = super::super::ClientHandshake { kind: None }.encode_to_vec();
+        assert_eq!(
+            ClientHandshake::try_from(
+                super::super::ClientHandshake::decode(empty.as_slice()).unwrap()
+            ),
+            Err(super::WireError::Unknown)
+        );
+    }
+}

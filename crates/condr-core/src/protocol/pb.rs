@@ -19,6 +19,7 @@ pub(crate) use generated::*;
 mod handshake;
 mod messages;
 mod session;
+mod stream;
 mod terminal;
 
 pub(crate) use messages::decode_bootstrap_record;

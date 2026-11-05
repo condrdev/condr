@@ -11,6 +11,7 @@ mod framing;
 mod handshake;
 mod messages;
 pub(crate) mod pb;
+mod stream;
 
 use crate::{
     AgentSnapshot, PaneDirection, PaneId, SessionSnapshot, SplitDirection, TabId, TerminalColors,
@@ -39,6 +40,10 @@ pub use messages::{
     ServerId, ServerLogRecord, ServerMessage, ServerSetting, ServerSettings, SessionBootstrap,
     SessionEvent, SessionId, SessionOverview, TerminalFrameBatch, TerminalFrameChunk,
     UnknownMessage, WorkspaceGitSnapshot, relative_age, uptime_text,
+};
+pub use stream::{
+    MAX_STREAM_CHUNK, MAX_STREAM_FRAME_SIZE, MAX_STREAMS, STREAM_WINDOW, StreamClientMessage,
+    StreamError, StreamFile, StreamMessage, StreamServerMessage, StreamTarget,
 };
 
 /// This build's protocol (ADR 0028). Fields and oneof members are added without raising

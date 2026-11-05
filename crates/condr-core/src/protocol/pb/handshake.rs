@@ -7,16 +7,33 @@ fn key(bytes: Vec<u8>, field: &str) -> WireResult<[u8; 32]> {
         .map_err(|_| malformed(format!("{field} is not 32 bytes")))
 }
 
+fn encode_hello(hello: &Hello) -> super::Hello {
+    super::Hello {
+        protocol: hello.protocol,
+        build: hello.build.clone(),
+        client_name: hello.client_name.clone(),
+        min_server_protocol: hello.min_server_protocol,
+        push: hello.push,
+    }
+}
+
+fn decode_hello(hello: super::Hello) -> Hello {
+    Hello {
+        protocol: hello.protocol,
+        build: hello.build,
+        client_name: hello.client_name,
+        min_server_protocol: hello.min_server_protocol,
+        push: hello.push,
+    }
+}
+
 impl From<&ClientHandshake> for super::ClientHandshake {
     fn from(handshake: &ClientHandshake) -> Self {
         use client_handshake::Kind;
         let kind = match handshake {
-            ClientHandshake::Hello(hello) => Kind::Hello(super::Hello {
-                protocol: hello.protocol,
-                build: hello.build.clone(),
-                client_name: hello.client_name.clone(),
-                min_server_protocol: hello.min_server_protocol,
-                push: hello.push,
+            ClientHandshake::Hello(hello) => Kind::Hello(encode_hello(hello)),
+            ClientHandshake::Streams(hello) => Kind::Streams(StreamsHello {
+                hello: Some(encode_hello(hello)),
             }),
             ClientHandshake::Credential { invite } => Kind::Credential(Credential {
                 invite: invite.to_vec(),
@@ -36,13 +53,10 @@ impl TryFrom<super::ClientHandshake> for ClientHandshake {
     fn try_from(handshake: super::ClientHandshake) -> WireResult<Self> {
         use client_handshake::Kind;
         Ok(match member(handshake.kind)? {
-            Kind::Hello(hello) => Self::Hello(Hello {
-                protocol: hello.protocol,
-                build: hello.build,
-                client_name: hello.client_name,
-                min_server_protocol: hello.min_server_protocol,
-                push: hello.push,
-            }),
+            Kind::Hello(hello) => Self::Hello(decode_hello(hello)),
+            Kind::Streams(streams) => {
+                Self::Streams(decode_hello(required(streams.hello, "streams hello")?))
+            }
             Kind::Credential(credential) => Self::Credential {
                 invite: key(credential.invite, "invite")?,
             },

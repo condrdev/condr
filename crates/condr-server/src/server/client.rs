@@ -64,6 +64,12 @@ impl Drop for DisconnectLog {
     }
 }
 
+/// Whether a handshake opens a terminal connection or a Stream connection (ADR 0061).
+enum HandshakeKind {
+    Session,
+    Streams,
+}
+
 pub(super) fn handle_client(
     mut stream: EndpointStream,
     client_id: u64,
@@ -77,7 +83,7 @@ pub(super) fn handle_client(
     if stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT)).is_err() {
         return;
     }
-    let hello = loop {
+    let (hello, streams) = loop {
         let message = match condr_core::protocol::read_message::<_, ClientHandshake>(&mut stream) {
             Ok(message) => message,
             Err(error) => {
@@ -89,6 +95,10 @@ pub(super) fn handle_client(
                 );
                 return;
             }
+        };
+        let message_kind = match &message {
+            ClientHandshake::Streams(_) => HandshakeKind::Streams,
+            _ => HandshakeKind::Session,
         };
         match message {
             // A local Client asking its own Server to reach a Peer-to-peer Device (ADR 0025).
@@ -133,7 +143,9 @@ pub(super) fn handle_client(
                     return;
                 }
             }
-            ClientHandshake::Hello(hello) => {
+            // A Stream connection (ADR 0061) is authorized exactly as a terminal one.
+            ClientHandshake::Hello(hello) | ClientHandshake::Streams(hello) => {
+                let streams = matches!(message_kind, HandshakeKind::Streams);
                 // An unknown Peer-to-peer Device that skipped the invite is refused here.
                 let unproven = matches!(
                     &stream,
@@ -148,7 +160,7 @@ pub(super) fn handle_client(
                     );
                     return;
                 }
-                break hello;
+                break (hello, streams);
             }
         }
     };
@@ -195,8 +207,11 @@ pub(super) fn handle_client(
                     client_id,
                 });
                 drop(state_guard);
-                // Best effort: a failed bookkeeping write must not cost the connection.
-                let _ = stream.record_peer_seen(&hello.client_name, hello.push);
+                // Best effort: a failed bookkeeping write must not cost the connection. A
+                // Stream connection carries no push setting and records nothing.
+                if !streams {
+                    let _ = stream.record_peer_seen(&hello.client_name, hello.push);
+                }
             }
             Ok(false) => {
                 drop(state_guard);
@@ -220,6 +235,10 @@ pub(super) fn handle_client(
     }
 
     if send_welcome(&mut stream, &state, None).is_err() {
+        return;
+    }
+    if streams {
+        super::streams::serve(stream, &hello.client_name);
         return;
     }
     let (server_id, session_id) = {

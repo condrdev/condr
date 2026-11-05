@@ -62,6 +62,16 @@ impl Endpoint {
         Self::Tcp(endpoint)
     }
 
+    /// This address for a GUI's Stream connection (ADR 0061): SSH logs in separately rather
+    /// than ride the master the terminal connection uses; every other method already
+    /// opens a connection of its own.
+    pub fn for_streams(&self) -> Self {
+        match self {
+            Self::Ssh(ssh) => Self::Ssh(ssh.separate()),
+            other => other.clone(),
+        }
+    }
+
     pub fn connect(&self) -> io::Result<EndpointStream> {
         match self {
             Self::Local(path) => connect_local(path).map(EndpointStream::Local),

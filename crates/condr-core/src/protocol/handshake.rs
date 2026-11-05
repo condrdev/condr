@@ -11,6 +11,7 @@ use std::fmt;
 
 /// The Client's first frame. `Credential` and `Tunnel` precede `Hello` on a Peer-to-peer
 /// connection from an unknown Device (ADR 0026) and a local tunnel request (ADR 0025).
+/// `Streams` takes `Hello`'s place on a Stream connection (ADR 0061).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ClientHandshake {
     Hello(Hello),
@@ -21,6 +22,7 @@ pub enum ClientHandshake {
         device: [u8; 32],
         invite: Option<[u8; 32]>,
     },
+    Streams(Hello),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

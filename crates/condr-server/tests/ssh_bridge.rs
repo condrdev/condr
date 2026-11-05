@@ -242,3 +242,107 @@ fn bridge_starts_the_server_on_the_default_socket_when_none_runs() {
     }
     panic!("the stopped Server should release {}", root.display());
 }
+
+/// The bridge's pipes as a transport, which is all SSH adds on the Server's machine.
+#[derive(Clone)]
+struct BridgePipes {
+    child: std::sync::Arc<std::sync::Mutex<Child>>,
+    stdin: std::sync::Arc<std::sync::Mutex<ChildStdin>>,
+    stdout: std::sync::Arc<std::sync::Mutex<std::process::ChildStdout>>,
+}
+
+impl std::io::Read for BridgePipes {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        self.stdout.lock().unwrap().read(buffer)
+    }
+}
+
+impl std::io::Write for BridgePipes {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        self.stdin.lock().unwrap().write(buffer)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.stdin.lock().unwrap().flush()
+    }
+}
+
+impl condr_client::ServerStream for BridgePipes {
+    fn try_clone(&self) -> std::io::Result<Self> {
+        Ok(self.clone())
+    }
+    fn set_read_timeout(&self, _: Option<Duration>) -> std::io::Result<()> {
+        Ok(())
+    }
+    fn shutdown(&self) -> std::io::Result<()> {
+        self.child.lock().unwrap().kill()
+    }
+}
+
+struct BridgeConnector(Endpoint);
+
+impl condr_client::Connector for BridgeConnector {
+    type Stream = BridgePipes;
+
+    fn connect(&self) -> std::io::Result<BridgePipes> {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_condr"))
+            .args(["server", "bridge", "--endpoint"])
+            .arg(self.0.as_local_path().unwrap())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()?;
+        let stdin = child.stdin.take().unwrap();
+        let stdout = child.stdout.take().unwrap();
+        Ok(BridgePipes {
+            child: std::sync::Arc::new(std::sync::Mutex::new(child)),
+            stdin: std::sync::Arc::new(std::sync::Mutex::new(stdin)),
+            stdout: std::sync::Arc::new(std::sync::Mutex::new(stdout)),
+        })
+    }
+
+    fn without_invite(&self) -> Option<Self> {
+        None
+    }
+}
+
+/// A Stream connection through the bridge, as an SSH Device's GUI opens one (ADR 0061).
+#[test]
+fn a_stream_connection_forwards_through_the_bridge() {
+    use std::io::Write as _;
+    let root = std::env::temp_dir().join(format!("condr-bridge-streams-{}", unique_suffix()));
+    std::fs::create_dir(&root).unwrap();
+    let endpoint = Endpoint::local(root.join("server.sock"));
+    let server =
+        BoundServer::bind(ServerConfig::ephemeral(endpoint.as_local_path().unwrap())).unwrap();
+    let handle = server.handle();
+    let runtime = thread::spawn(move || server.run().unwrap());
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        let mut request = Vec::new();
+        socket.read_to_end(&mut request).unwrap();
+        socket.write_all(&request).unwrap();
+    });
+
+    let (connection, welcome) =
+        condr_client::StreamConnection::connect(&BridgeConnector(endpoint), "ssh-streams").unwrap();
+    assert_eq!(welcome.refusal, None);
+    let stream = connection
+        .open(protocol::StreamTarget::Forward { port: port.into() })
+        .unwrap();
+    let payload = vec![42; 3 * protocol::STREAM_WINDOW as usize];
+    stream.write(&payload).unwrap();
+    stream.finish();
+    let mut echoed = Vec::new();
+    while let Some(data) = stream.read().unwrap() {
+        echoed.extend(data);
+    }
+    assert_eq!(echoed.len(), payload.len());
+    drop(stream);
+    drop(connection);
+    handle.stop();
+    runtime.join().unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}

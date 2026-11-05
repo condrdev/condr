@@ -9,12 +9,19 @@ message Empty {}
 
 // The Client's first frame. Credential and Tunnel precede Hello on a Peer-to-peer
 // connection from an unknown Device (ADR 0026) and a local tunnel request (ADR 0025).
+// Streams takes Hello's place on a Stream connection (ADR 0061); a Server that predates
+// it refuses the handshake as malformed.
 message ClientHandshake {
   oneof kind {
     Hello hello = 1;
     Credential credential = 2;
     Tunnel tunnel = 3;
+    StreamsHello streams = 4;
   }
+}
+
+message StreamsHello {
+  Hello hello = 1;
 }
 
 message Hello {

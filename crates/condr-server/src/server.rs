@@ -8,6 +8,7 @@ mod layout;
 mod local;
 mod push;
 mod recovery;
+mod streams;
 mod subscriptions;
 mod terminal_monitor;
 mod terminal_state;

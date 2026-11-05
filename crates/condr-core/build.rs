@@ -4,7 +4,7 @@
 fn main() {
     let proto = concat!(env!("CARGO_MANIFEST_DIR"), "/../../proto");
     println!("cargo:rerun-if-changed={proto}");
-    let files = ["handshake", "session", "terminal", "messages"]
+    let files = ["handshake", "session", "terminal", "messages", "stream"]
         .map(|name| format!("{proto}/condr/v1/{name}.proto"));
     let descriptors = protox::compile(&files, [proto]).expect("proto/condr/v1 compiles");
     prost_build::Config::new()

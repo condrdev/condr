@@ -2,7 +2,7 @@ use super::*;
 use prost::Message as _;
 
 /// A message that travels as one frame: the handshake types, `ClientMessage` and
-/// `ServerMessage`. Sealed; the protobuf types behind it stay inside the crate.
+/// `ServerMessage`, and the Stream connection's two (ADR 0061). Sealed; the protobuf types behind it stay inside the crate.
 pub trait WireMessage: Sized + private::Sealed {}
 
 mod private {
@@ -77,6 +77,8 @@ fn admit_client_frame(body: &[u8]) -> Result<(), FramingError> {
     Ok(())
 }
 wire_message!(ServerMessage, pb::ServerMessage, encode: fallible, admit: admit_any);
+wire_message!(StreamClientMessage, pb::StreamClientMessage, encode: fallible, admit: admit_any);
+wire_message!(StreamServerMessage, pb::StreamServerMessage, encode: fallible, admit: admit_any);
 
 /// The longest varint length a frame carries: ten bytes encode any `u64`.
 pub const MAX_FRAME_PREFIX: usize = 10;

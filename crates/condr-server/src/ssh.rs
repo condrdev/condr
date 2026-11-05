@@ -20,6 +20,9 @@ pub struct SshEndpoint {
     destination: String,
     port: Option<u16>,
     binary: Option<String>,
+    /// A GUI's Stream connection (ADR 0061): never on Condr's master, so it does not share
+    /// the terminal connection's TCP connection. Not part of the address.
+    separate: bool,
 }
 
 impl SshEndpoint {
@@ -94,7 +97,17 @@ impl SshEndpoint {
             destination: user.map_or_else(|| host.clone(), |user| format!("{user}@{host}")),
             port,
             binary,
+            separate: false,
         })
+    }
+
+    /// This address for a GUI's Stream connection: a second login of its own where Condr
+    /// manages the ControlMaster, the person's own master where they configured one.
+    pub fn separate(&self) -> Self {
+        Self {
+            separate: true,
+            ..self.clone()
+        }
     }
 
     pub fn destination(&self) -> &str {
@@ -120,7 +133,7 @@ impl SshEndpoint {
     fn command(&self) -> Command {
         let mut command = Command::new("ssh");
         #[cfg(unix)]
-        command.args(self.multiplexing_options(&[]));
+        command.args(self.connection_sharing(&[]));
         self.configure(&mut command);
         command
     }
@@ -142,6 +155,20 @@ impl SshEndpoint {
     /// own under the runtime directory for a minute after the last use. Windows OpenSSH
     /// has no multiplexing, so this is Unix only. `extra` lets tests point `-G` at a
     /// config file.
+    /// What `command` adds: Condr's master, or for a separate connection none at all.
+    /// OpenSSH keeps the first value of an option, so these replace the options rather
+    /// than follow them.
+    #[cfg(unix)]
+    fn connection_sharing(&self, extra: &[&str]) -> Vec<String> {
+        let options = self.multiplexing_options(extra);
+        if self.separate && !options.is_empty() {
+            return ["-o", "ControlMaster=no", "-o", "ControlPath=none"]
+                .map(str::to_owned)
+                .to_vec();
+        }
+        options
+    }
+
     #[cfg(unix)]
     fn multiplexing_options(&self, extra: &[&str]) -> Vec<String> {
         let effective = Command::new("ssh")
@@ -342,6 +369,27 @@ mod tests {
         // OpenSSH binds `<path>.<16 random>` before renaming; it must fit macOS `sun_path`.
         assert!(control_path.len() + 17 < 104, "{options:?}");
         assert_eq!(options[5], "ControlPersist=60");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_separate_connection_never_rides_condrs_master_but_keeps_the_persons_own() {
+        let path = std::env::temp_dir().join(format!("condr-ssh-sep-{}", uuid::Uuid::new_v4()));
+        let endpoint = SshEndpoint::parse("ssh://sep-target").unwrap().separate();
+        let config = path.to_str().unwrap();
+
+        std::fs::write(&path, "Host sep-target\n User someone\n").unwrap();
+        assert_eq!(
+            endpoint.connection_sharing(&["-F", config]),
+            ["-o", "ControlMaster=no", "-o", "ControlPath=none"]
+        );
+        std::fs::write(
+            &path,
+            "Host sep-target\n ControlMaster auto\n ControlPath ~/.ssh/cm-%C\n",
+        )
+        .unwrap();
+        assert!(endpoint.connection_sharing(&["-F", config]).is_empty());
+        std::fs::remove_file(&path).unwrap();
     }
 
     #[cfg(unix)]

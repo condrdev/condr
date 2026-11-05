@@ -185,4 +185,119 @@ mod tests {
         let _ = std::fs::remove_dir_all(&server_dir);
         let _ = std::fs::remove_dir_all(&client_dir);
     }
+
+    /// A dialed stream, handed to `StreamConnection::connect` once.
+    struct Dialed(std::sync::Mutex<Option<condr_client::RemoteStream>>);
+
+    impl condr_client::Connector for Dialed {
+        type Stream = condr_client::RemoteStream;
+
+        fn connect(&self) -> io::Result<condr_client::RemoteStream> {
+            self.0
+                .lock()
+                .unwrap()
+                .take()
+                .ok_or_else(|| io::Error::other("dialed once"))
+        }
+
+        fn without_invite(&self) -> Option<Self> {
+            None
+        }
+    }
+
+    /// A Stream connection (ADR 0061) runs on a Peer-to-peer stream as on any other:
+    /// the Client's handshake carries `Credential` then `Streams`, and bytes beyond one
+    /// window flow both ways.
+    #[test]
+    fn a_stream_connection_runs_over_peer_to_peer() {
+        use condr_client::StreamConnection;
+        use condr_core::protocol::{STREAM_WINDOW, ServerId, SessionId, StreamTarget, Welcome};
+
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let handle = runtime.handle().clone();
+        let lookup = MemoryLookup::new();
+        let server_dir = temp_dir("streams-server");
+        let server_identity = Arc::new(ServerIdentity::load_or_create(&server_dir).unwrap());
+        let invite = create_invite(&server_dir).unwrap().secret;
+        let client_dir = temp_dir("streams-client");
+        let client_identity = Arc::new(ServerIdentity::load_or_create(&client_dir).unwrap());
+        let server_id = server_identity.public_key();
+        let (server_node, accepted) = make_node(&handle, server_identity, true, &lookup);
+        server_node.start().unwrap();
+        let (client_node, _client_rx) = make_node(&handle, client_identity, false, &lookup);
+
+        let server = std::thread::spawn(move || {
+            let mut peer = match accepted.recv_timeout(Duration::from_secs(10)).unwrap() {
+                EndpointStream::P2p(peer) => peer,
+                other => panic!("expected a p2p stream, got {}", other.transport()),
+            };
+            peer.set_read_timeout(Some(Duration::from_secs(10)));
+            let ClientHandshake::Credential { invite } = read_message(&mut peer).unwrap() else {
+                panic!("expected a credential");
+            };
+            peer.present_invite(&Secret::from_bytes(invite)).unwrap();
+            let ClientHandshake::Streams(hello) = read_message(&mut peer).unwrap() else {
+                panic!("expected the Streams handshake");
+            };
+            peer.complete_pairing(&hello.client_name).unwrap();
+            write_message(
+                &mut peer,
+                &Welcome::new(ServerId(1), SessionId(1), None, "server".into()),
+            )
+            .unwrap();
+            let connection =
+                StreamConnection::serve(EndpointStream::P2p(peer), |stream, _target| {
+                    std::thread::spawn(move || {
+                        stream.accept(None);
+                        while let Ok(Some(data)) = stream.read() {
+                            stream.write(&data).unwrap();
+                        }
+                        stream.finish();
+                        std::thread::sleep(Duration::from_millis(200));
+                    });
+                })
+                .unwrap();
+            connection.wait_closed()
+        });
+
+        let mut stream = client_node.dial(server_id, None).unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(10)));
+        stream
+            .write_all(&frame(&ClientHandshake::Credential {
+                invite: *invite.as_bytes(),
+            }))
+            .unwrap();
+        let (connection, welcome) = StreamConnection::connect(
+            &Dialed(std::sync::Mutex::new(Some(
+                condr_client::RemoteStream::P2p(stream),
+            ))),
+            "laptop",
+        )
+        .unwrap();
+        assert_eq!(welcome.refusal, None);
+        let echo = Arc::new(connection.open(StreamTarget::Forward { port: 1 }).unwrap());
+        let payload = vec![9; 2 * STREAM_WINDOW as usize];
+        let writer = {
+            let echo = Arc::clone(&echo);
+            let payload = payload.clone();
+            std::thread::spawn(move || {
+                echo.write(&payload).unwrap();
+                echo.finish();
+            })
+        };
+        let mut received = 0;
+        while let Some(data) = echo.read().unwrap() {
+            received += data.len();
+        }
+        assert_eq!(received, payload.len());
+        writer.join().unwrap();
+        drop(echo);
+        drop(connection);
+        assert!(!server.join().unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&server_dir);
+        let _ = std::fs::remove_dir_all(&client_dir);
+    }
 }

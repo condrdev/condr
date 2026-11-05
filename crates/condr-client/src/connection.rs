@@ -498,35 +498,8 @@ impl<S: ServerStream> ClientConnection<S> {
     /// Hello/Welcome only: enough to know a compatible Server answers, without pulling
     /// its whole Bootstrap. The local probe uses this so startup does not transfer every
     /// terminal view once for the probe and again for the real connection.
-    pub fn welcome(mut stream: S, hello: impl Into<Hello>) -> io::Result<(S, Welcome)> {
-        // A refused handshake surfaces as an I/O error with its own kind; keep it so
-        // callers can tell "not authorized" from a framing problem. A read timeout is
-        // `WouldBlock` on macOS and iOS ("os error 35"), which says nothing to a person.
-        let io_error = |error: FramingError| match error {
-            FramingError::Io(error)
-                if matches!(
-                    error.kind(),
-                    io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
-                ) =>
-            {
-                io::Error::new(io::ErrorKind::TimedOut, "the device did not answer")
-            }
-            FramingError::Io(error) => error,
-            other => io::Error::other(other.to_string()),
-        };
-        stream.set_read_timeout(Some(stream.welcome_timeout()))?;
-        condr_core::protocol::write_message(&mut stream, &ClientHandshake::Hello(hello.into()))
-            .map_err(io_error)?;
-        let welcome: Welcome = condr_core::protocol::read_message(&mut stream).map_err(io_error)?;
-        if let Some(refusal) = welcome.refusal.clone() {
-            return Err(Refused {
-                refusal,
-                server_protocol: welcome.protocol,
-                server_build: welcome.build,
-            }
-            .into());
-        }
-        Ok((stream, welcome))
+    pub fn welcome(stream: S, hello: impl Into<Hello>) -> io::Result<(S, Welcome)> {
+        handshake_exchange(stream, ClientHandshake::Hello(hello.into()))
     }
 
     /// Reads one complete Bootstrap: the header followed by its batches.
@@ -588,3 +561,39 @@ impl<S: ServerStream> ClientConnection<S> {
 
 #[cfg(test)]
 mod tests;
+
+/// Sends `handshake` and reads the Server's `Welcome`, turning a refusal into an error
+/// whose kind and [`Refused`] say why: `Hello` for a terminal connection, `Streams` for a
+/// Stream connection (ADR 0061).
+pub(crate) fn handshake_exchange<S: ServerStream>(
+    mut stream: S,
+    handshake: ClientHandshake,
+) -> io::Result<(S, Welcome)> {
+    // A refused handshake surfaces as an I/O error with its own kind; keep it so
+    // callers can tell "not authorized" from a framing problem. A read timeout is
+    // `WouldBlock` on macOS and iOS ("os error 35"), which says nothing to a person.
+    let io_error = |error: FramingError| match error {
+        FramingError::Io(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+            ) =>
+        {
+            io::Error::new(io::ErrorKind::TimedOut, "the device did not answer")
+        }
+        FramingError::Io(error) => error,
+        other => io::Error::other(other.to_string()),
+    };
+    stream.set_read_timeout(Some(stream.welcome_timeout()))?;
+    condr_core::protocol::write_message(&mut stream, &handshake).map_err(io_error)?;
+    let welcome: Welcome = condr_core::protocol::read_message(&mut stream).map_err(io_error)?;
+    if let Some(refusal) = welcome.refusal.clone() {
+        return Err(Refused {
+            refusal,
+            server_protocol: welcome.protocol,
+            server_build: welcome.build,
+        }
+        .into());
+    }
+    Ok((stream, welcome))
+}

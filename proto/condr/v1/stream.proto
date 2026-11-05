@@ -1,0 +1,110 @@
+// The Stream connection (ADR 0061): opened with ClientHandshake.streams beside a Client's
+// terminal connection, it carries forwarded connections and file transfers. Each frame is
+// one StreamClientMessage or StreamServerMessage. Fields and oneof members are only added;
+// an unknown top-level member is ignored and an unknown Open target is answered
+// UNSUPPORTED, so neither closes the connection.
+syntax = "proto3";
+
+package condr.v1;
+
+import "condr/v1/handshake.proto";
+
+message StreamClientMessage {
+  oneof message {
+    StreamOpen open = 1;
+    StreamData data = 2;
+    StreamCredit credit = 3;
+    StreamFinish finish = 4;
+    StreamReset reset = 5;
+    Empty ping = 6;
+  }
+}
+
+message StreamServerMessage {
+  oneof message {
+    StreamOpened opened = 1;
+    StreamOpenFailed open_failed = 2;
+    StreamData data = 3;
+    StreamCredit credit = 4;
+    StreamFinish finish = 5;
+    StreamReset reset = 6;
+    Empty pong = 7;
+  }
+}
+
+// Only the Client opens Streams, numbering them from 1 upward without reuse.
+message StreamOpen {
+  uint64 stream = 1;
+  oneof target {
+    // A port on the Server's own loopback; 0 and values above 65535 are INVALID_PORT.
+    uint32 forward_port = 2;
+    StreamFile download = 3;
+    StreamUpload upload = 4;
+  }
+}
+
+// A file inside a Workspace's Root Directory.
+message StreamFile {
+  uint64 workspace = 1;
+  // `/`-separated and relative to the Root Directory.
+  string path = 2;
+}
+
+message StreamUpload {
+  StreamFile file = 1;
+  bool replace = 2;
+}
+
+message StreamOpened {
+  uint64 stream = 1;
+  // A download's size when it opened, a guide for progress only.
+  optional uint64 size = 2;
+}
+
+message StreamOpenFailed {
+  uint64 stream = 1;
+  StreamError error = 2;
+  string detail = 3;
+}
+
+// At most 32 KiB of a Stream's bytes, within the receiver's credit.
+message StreamData {
+  uint64 stream = 1;
+  bytes data = 2;
+}
+
+// The receiver lets the sender send this Stream's bytes up to `max_offset`, counted from
+// the Stream's first byte. Absolute, so a repeated or late one is harmless.
+message StreamCredit {
+  uint64 stream = 1;
+  uint64 max_offset = 2;
+}
+
+// The sender's direction of this Stream has ended, as a TCP FIN.
+message StreamFinish {
+  uint64 stream = 1;
+}
+
+// Both directions of this Stream end at once.
+message StreamReset {
+  uint64 stream = 1;
+  StreamError error = 2;
+  string detail = 3;
+}
+
+// An unknown value decodes to OTHER.
+enum StreamError {
+  STREAM_ERROR_UNSPECIFIED = 0;
+  STREAM_ERROR_CONNECTION_REFUSED = 1;
+  STREAM_ERROR_NOT_FOUND = 2;
+  STREAM_ERROR_ALREADY_EXISTS = 3;
+  STREAM_ERROR_NOT_A_FILE = 4;
+  STREAM_ERROR_INVALID_PATH = 5;
+  STREAM_ERROR_INVALID_PORT = 6;
+  STREAM_ERROR_WORKSPACE_GONE = 7;
+  STREAM_ERROR_TOO_MANY_STREAMS = 8;
+  STREAM_ERROR_IO = 9;
+  STREAM_ERROR_UNSUPPORTED = 10;
+  STREAM_ERROR_CANCELLED = 11;
+  STREAM_ERROR_OTHER = 12;
+}

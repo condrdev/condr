@@ -13,6 +13,7 @@ mod persistence;
 mod protocol;
 mod push;
 mod shutdown;
+mod streams;
 mod subscriptions;
 mod unit;
 mod viewers;

@@ -11,6 +11,7 @@ mod model;
 mod noise;
 pub mod p2p;
 mod remote;
+mod streams;
 mod tcp;
 
 pub use connection::{
@@ -23,4 +24,5 @@ pub use model::{AgentChange, BootstrapChange, SessionModel};
 pub use noise::{Authority, NoiseStream};
 pub use p2p::{P2pEndpoint, P2pNode, P2pStream};
 pub use remote::{RemoteEndpoint, RemoteStream};
+pub use streams::{Stream, StreamConnection, StreamFailure};
 pub use tcp::{TcpEndpoint, configure_tcp};
