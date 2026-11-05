@@ -714,10 +714,12 @@ pub(super) fn new_link(
     ))
 }
 
-#[cfg(feature = "test-support")]
+// For tests and the offscreen screenshots, which build on macOS alone.
+#[cfg(any(test, all(feature = "test-support", target_os = "macos")))]
 impl Condr {
     /// A transfer drawn in a given state without running it: the offscreen screenshots
     /// cannot catch one mid-flight, since their dispatcher runs background work to the end.
+    #[cfg(all(feature = "test-support", target_os = "macos"))]
     pub(super) fn show_transfer(
         &mut self,
         key: ConnectionKey,

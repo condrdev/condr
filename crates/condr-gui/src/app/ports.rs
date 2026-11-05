@@ -741,7 +741,8 @@ fn forward_id(key: ConnectionKey, remote: u16) -> u64 {
     key << 16 | u64::from(remote)
 }
 
-#[cfg(feature = "test-support")]
+// For tests and the offscreen screenshots, which build on macOS alone.
+#[cfg(any(test, all(feature = "test-support", target_os = "macos")))]
 impl Condr {
     /// Types into the form as a person would, for tests.
     pub(super) fn fill_ports_form(
