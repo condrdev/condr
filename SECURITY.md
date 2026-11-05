@@ -20,6 +20,10 @@ Anything that lets a party do more than the local user intended, for example:
 
 Bugs in the embedded agent CLIs themselves (Claude Code, Codex, OpenCode, …) belong to their own vendors.
 
+## Port forwarding and file transfer
+
+A forward listens only on the loopback of the machine that started it and connects only to the Device's own loopback. While it runs, any process on that machine, other users' included, can reach the forwarded port through it, as with `ssh -L`. Forwarding through `condr server bridge` is not governed by sshd's `AllowTcpForwarding`, `PermitOpen` or `DisableForwarding`, any more than socat run in a shell is. Opening a forward or a file transfer takes the same rights as typing into a Pane: every connection that may do one may do the other.
+
 ## Peer-to-peer and the Condr relay
 
 Peer-to-peer is Condr's first hosted online service, and it is optional. A Server contacts the relay and DNS only while `[server.p2p] enabled` is set or while it is dialling out for a `p2p://` connection from this machine (it lets go of them a minute after the last such connection closes); a Device that never uses Peer-to-peer contacts nothing of ours. When it is on, be aware of what the Condr relay (`relay.condr.dev`) and DNS (`dns.condr.dev`) can and cannot see:

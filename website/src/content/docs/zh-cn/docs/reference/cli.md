@@ -290,6 +290,32 @@ condr agent hooks uninstall <种类>
 
 ---
 
+### `port`
+
+```bash
+# 把远程设备的端口转发到本机，按 Ctrl+C 结束。每个端口写作 REMOTE 或 LOCAL:REMOTE；
+# LOCAL 为 0 时由系统分配。所有端口都开始监听后输出一行 JSON。
+condr --device my-server port forward 5173 8080:80
+```
+
+本机端口严格按所写的使用，被占用时报 `port_in_use`。可以放到后台或另一个 Pane 运行，读到第一行输出就说明转发已就绪。连接断开时以 `connection_lost` 退出。
+
+---
+
+### `file`
+
+```bash
+# 下载远程设备上某个 Workspace 里的一个文件，默认保存为当前目录下的同名文件
+condr --device my-server file download docs/report.pdf --workspace 3
+
+# 上传一个文件到远程设备上的 Workspace
+condr --device my-server file upload ./hero.png public/hero.png --workspace 3
+```
+
+路径相对于 Workspace 的根目录；不接受目录。目标已存在时，无论在本机还是在设备上，都会报 `already_exists`，加 `--replace` 才覆盖。stderr 是终端时会显示进度。两个命令都需要 `--device`。
+
+---
+
 ### `device`
 
 ```bash

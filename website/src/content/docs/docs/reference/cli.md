@@ -291,6 +291,32 @@ condr agent hooks uninstall <kind>
 
 ---
 
+### `port`
+
+```bash
+# Forward ports of a remote device to this computer until Ctrl+C. Each port is REMOTE or LOCAL:REMOTE;
+# LOCAL 0 lets the system choose. Prints one JSON line once every port listens.
+condr --device my-server port forward 5173 8080:80
+```
+
+The local port is taken as written; a taken one fails with `port_in_use`. Run it in the background or another Pane, and read its first line to know the forward is ready. A lost connection exits with `connection_lost`.
+
+---
+
+### `file`
+
+```bash
+# Download one file of a Workspace on a remote device; defaults to its name in the current directory
+condr --device my-server file download docs/report.pdf --workspace 3
+
+# Upload one file into a Workspace on a remote device
+condr --device my-server file upload ./hero.png public/hero.png --workspace 3
+```
+
+Paths are relative to the Workspace's root directory; directories are refused. An existing target, here or there, fails with `already_exists` unless `--replace` is given. Progress shows on stderr when it is a terminal. Both commands need `--device`.
+
+---
+
 ### `device`
 
 ```bash
@@ -335,6 +361,8 @@ In scripts, parse `error.code` for targeted fault handling:
 | Code | Cause and suggested handling |
 | --- | --- |
 | `server_not_running` | The Server is not started. Bring it up first with `condr server start`. |
+| `feature_unavailable` | The device runs a Condr too old for `port forward` or `file`; update it. |
+| `already_exists` | `file download` or `file upload` found its target; pass `--replace` to overwrite it. |
 | `no_current_pane` | Running outside Condr, or with `--device`, without an explicit Pane ID. |
 | `cwd_required` | Creating a Workspace across machines with `--device` without passing an absolute `--cwd` path. |
 | `directory_required` | `workspace clone` with `--device`, or with a URL no directory name follows from, without a `<directory>`. |

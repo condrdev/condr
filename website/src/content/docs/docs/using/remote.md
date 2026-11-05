@@ -90,6 +90,18 @@ For servers with a fixed IP address, or ones directly reachable on an internal L
   4. **Connect from the Client**: In the Condr Client, click **Connect Remote Device** → **Pairing link**, paste the link and confirm.
   5. **Complete the key handshake**: The Client and Server set up a secure point-to-point channel using the pre-shared key. Once pairing completes, Condr stores only the Device key and the address, not the invite.
 
+## Forwarding ports
+
+An Agent on a remote device often starts a dev server. To open it in this computer's browser, forward its port:
+
+1. Click **⇄** on the device's header in the sidebar, or **⇄** at the bottom of the sidebar for every device.
+2. On the **Ports** page, enter the device's port, and optionally the port to use here, then click **Forward**.
+3. Click the address on its card, or **Open in Browser**.
+
+The port listens on this computer's loopback only, and reaches only the device's own loopback. When the port is taken here, Condr takes the next free one and says so on the card. Forwarding works over SSH, TCP and P2P alike. A forward lasts while Condr runs: quitting, disconnecting or removing the device ends it. While the connection is lost the forward waits and works again once it returns.
+
+From a terminal or a script, `condr --device <name> port forward <port>` does the same until you press Ctrl+C; see the CLI reference.
+
 ## Troubleshooting
 
 ### SSH reports condr: not found

@@ -45,6 +45,14 @@ _Avoid_: push relay, 推送中转, push server, hub
 The GUI, the CLI or the Companion connecting to a Server to inspect or change its Sessions. The native GUI and the Companion can present several Servers; the CLI reaches one per call, its own Pane's Server by default or a saved Device named with `--device` (ADR 0022); no Client owns Terminal processes.
 _Avoid_: Server, runtime owner
 
+**Stream**:
+An ordered, reliable byte stream between a Client and a Server for one forwarded connection or one file transfer (ADR 0061). A Client's Streams to one Device share a Stream connection of their own beside its terminal connection, so a transfer never waits in line with the terminal. An engineering term: the interface says forward, download and upload. It is not ADR 0004's visual stream.
+_Avoid_: channel, tunnel, pipe
+
+**Forward**:
+A listener on the loopback of the Client's machine for one port of one Device, each connection it accepts one Stream to the Device's own loopback (ADR 0061). It belongs to the Client process that started it, the GUI or a running `condr port forward`, and ends with it; no Server holds one. The interface calls it a forward and lists the GUI's on the Ports page.
+_Avoid_: tunnel, port mapping
+
 **Companion**:
 Condr's iOS and Android app (ADR 0039, ADR 0040, ADR 0041): a Client, and a Device without a Server. Paired through an Invite and connected only while in the foreground and reached by pushes through Condr Cloud otherwise, it shows every paired Device's Workspaces, Agents and "Needs you"; inside a Pane it is one more window, sizing the terminal it shows. It changes no Session structure. Companion is an engineering term: the interface names the phone by the name given at pairing.
 _Avoid_: mobile client, mobile app (as a name)

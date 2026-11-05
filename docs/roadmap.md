@@ -31,7 +31,7 @@ Condr 要守住的差异是原生 GUI 而非 TUI、Windows 一等公民、Server
 | Agent | 每种 CLI 一个规格模块，9 种完整支持，Kimi 仅识别（ADR 0035）；状态只来自 CLI 自己：会说 Program Status Protocol 的经 OSC 7501 上报（ADR 0044），否则靠 hooks 经 OSC 777 回写（ADR 0014）；`Blocked` 和 `Error` 带 `detail`，sidebar、OS 通知、CLI JSON 和左侧栏顶部跨 Device 的「Needs you」列表都显示它（ADR 0024）；完成、失败或需输入时发 OS 通知 |
 | Agent 驱动 | `condr workspace|tab|pane|agent` 全部 JSON 输出；内嵌 Skill（`condr --skill`）；`agent start|prompt|wait` 可跨 Pane 编排；`--device <name>` 直连保存的远程 Device，`device list` 与 `workspace list --all-devices` 汇总多机（ADR 0022） |
 | Git | gix 只读查询 + Managed Worktree；右侧栏 Changes 和 Files、Diff Tab、Preview Tab（ADR 0017/0018）；Changes 与 Diff Tab 可在对 HEAD 和对 base 分支之间切换，Condr 新建的 worktree 记下分叉时父 Workspace 的分支（ADR 0034）；Preview Tab 用 syntect 高亮，主题和字号在 Settings 里选（ADR 0032），渲染 Markdown、SVG 和常见图片，动图始终播放（ADR 0037），并能编辑保存；Files 能新建、重命名、删除条目并在系统文件管理器中显示（ADR 0045）；Diff Tab 可并排或单栏显示并折叠未改动的行，右侧栏的 History 列出提交并在 Diff Tab 打开其文件（ADR 0046） |
-| 远程 | `ssh://` 转发远端私有 socket 并可拉起远端 Server（ADR 0015）；`tcp://` 走 `Noise_IKpsk2` 静态密钥 + 一次性 invite（ADR 0011）；`p2p://` 经 iroh 打洞或自建 relay 连 NAT 后的机器（ADR 0025/0026）；Settings 可签 invite、撤销设备；新建 Workspace 时可浏览远程 Device 的目录；机器唤醒后 GUI 重新探测每条连接 |
+| 远程 | `ssh://` 转发远端私有 socket 并可拉起远端 Server（ADR 0015）；`tcp://` 走 `Noise_IKpsk2` 静态密钥 + 一次性 invite（ADR 0011）；`p2p://` 经 iroh 打洞或自建 relay 连 NAT 后的机器（ADR 0025/0026）；Settings 可签 invite、撤销设备；新建 Workspace 时可浏览远程 Device 的目录；机器唤醒后 GUI 重新探测每条连接；任一远程 Device 的端口可转发到本机（GUI 的 Ports 页面与 `condr port forward`），Files 可下载、上传单个文件（`condr file`），二者走每台 Device 一条单独的 Stream 连接，终端连接不受影响（ADR 0061） |
 | 移动端 | iOS 与 Android 的 Companion 共用一份 Rust 客户端库（ADR 0039），扫码或粘贴链接配对，经 `p2p://` 或 `tcp://` 连接（ADR 0040）；列出各 Device 的 Agent 与「Needs you」，打开的 Pane 是又一个窗口，能输入、滚动、选择并接管终端尺寸（ADR 0041）；App 锁可选；iPhone 在 Agent 完成、失败或进入 Blocked 时经 Condr Cloud 收到推送（ADR 0047） |
 | 诊断 | `tracing` 日志按天滚动写入 Log 目录，panic 带 backtrace（ADR 0019）；`condr server status --json` 报 uptime、各类计数、订阅客户端数和最近的 warn/error；三个带负载的 `cargo test` 分别量 VT 增量合并、monitor 按显示节拍发布和 GUI shaping 缓存 |
 | 发布 | nightly 与 `v*` 正式版共用一条流水线，产出 Linux x86_64/arm64、macOS arm64 与 Windows x86_64 的 desktop 与 headless 包（Windows 的 GUI 只有安装包）、校验和、安装脚本；macOS 包以 Developer ID 签名并公证；release notes 由 git-cliff 从 `feat`/`fix` 提交生成；GUI 按渠道检查新版本并提示，不自动安装（ADR 0029），更新后提示重启本机旧版 Server；协议按字段号演进，CI 对 `proto/` 跑 `buf lint` 和 `buf breaking`（ADR 0027/0028）；Companion 有自己的版本与 `companion-v*` 发布（ADR 0049） |
@@ -106,14 +106,7 @@ Condr 要守住的差异是原生 GUI 而非 TUI、Windows 一等公民、Server
 
 **为什么**：Agent 在远端 Workspace 里起了前端 dev server，用户要在本机浏览器看效果；Agent 写出了报告、构建产物或截图，用户要拿到本机；用户手上有 Agent 需要的文件。今天只有 SSH Device 能靠手敲 `ssh -L` 转发，TCP 与 Peer-to-peer Device 什么都做不了，文件只能借终端想办法。"看见 Agent 做出来的东西"是介入和收尾闭环的一部分。
 
-**做到哪**（按 [ADR 0061](adr/0061-streams-carry-port-forwarding-and-file-transfer.md) 的 Delivery，依次合并）：
-
-1. Stream 连接：每台 Device 在终端连接之外另开一条，四种连接方式都支持，终端连接不改。
-2. 转发的核心与 CLI：`condr --device <name> port forward <port>...`。
-3. GUI 的 Ports 页面：左侧栏底部和远端 Device 标题上各有入口。
-4. 文件传输的核心与 CLI：`condr file download|upload`。
-5. GUI：Files、Changes、Preview Tab 里的下载，拖入和 Upload Files… 上传，右侧栏底部的传输条。
-6. Windows 验收（限速 10 Mbit/s 边下载边打字）、`--skill`、CONTEXT.md、官网与 SECURITY.md。
+**做到哪**（按 [ADR 0061](adr/0061-streams-carry-port-forwarding-and-file-transfer.md) 的 Delivery）：第 1–5 步已于 2026-11-05 合并，即 Stream 连接、`condr port forward`、GUI 的 Ports 页面、`condr file`、Files 的下载上传与传输条；第 6 步的 `--skill`、CONTEXT.md、官网与 SECURITY.md 也已完成。还剩 Windows 手动验收：限速 10 Mbit/s 边下载边打字，看 ping 的增量是否超过 100 ms，并确认 Windows SSH 的第二次登录、从 Explorer 拖入、Ports 页面与传输条。
 
 **停在哪**：只转发到远端 Server 本机的回环地址，本机 listener 只绑回环；转发不跨 GUI 运行保存。只传单个文件，限 Workspace 之内，不做目录、断点续传或同步。不做反向转发、UDP、两台远端 Device 之间互传、拖文件进远程终端，也不做手机端的转发与传输。远程贴图仍按 ADR 0012 走终端连接。慢链路上传输会让终端变慢，10 Mbit/s 下每个进行中的传输最多约 0.8 秒，两条连接挤在同一条 TCP（用户自己的 SSH master、走 Relay）时可达数秒；若 Windows 验收里 ping 的增量超过 100 ms，再做按延迟收放窗口。
 

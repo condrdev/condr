@@ -37,6 +37,8 @@ All commands below start with `condr`.
 | `server stop`, `server restart` | Stop all terminals; restart restores layout/cwd and resumes saved native conversations in fresh shells. Run restart from outside Condr. |
 | `server invite`, `server clients`, `server revoke` | Pair remote devices, list paired devices, or revoke access. |
 | `device list` | List the remote Devices saved on this machine, whether each answers, and its Workspace count. |
+| `--device <name> port forward <port>...` | Forward a Device's ports to this machine's loopback (`REMOTE` or `LOCAL:REMOTE`, `0:REMOTE` lets the system choose). Keeps running: start it in the background or another Pane; its first JSON line means the ports listen. |
+| `--device <name> file download <path> [dest] --workspace <id>`, `file upload <file> <path> --workspace <id>` | Move one file between this machine and a Device's Workspace. Paths are Workspace-relative; an existing target needs `--replace`. |
 | `--device <name>` (before any group) | Run the command on a saved Device instead of the local Server; `CONDR_DEVICE` sets the default. `workspace list --all-devices` lists every Device's Workspaces, each tagged `device`, plus `unreachable` Devices. |
 
 ## Targets and Results
