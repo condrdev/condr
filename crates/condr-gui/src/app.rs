@@ -22,6 +22,7 @@ mod new_workspace;
 mod notifications;
 mod open_in;
 mod placeholders;
+mod ports;
 mod power;
 mod presentation;
 mod preview;
@@ -287,6 +288,10 @@ pub(crate) struct Condr {
     directory_browser: Option<DirectoryBrowser>,
     /// The open New Workspace chooser or form (ADR 0059); replaced by the next one.
     new_workspace: Option<NewWorkspaceDialog>,
+    /// The Ports page's form, made the first time a window opens the page (ADR 0061).
+    ports_form: Option<ports::PortsForm>,
+    /// Wakes the GUI when a forward or a Stream connection changes.
+    ports_events: Option<async_channel::Sender<()>>,
     sidebar_workspace_open: HashMap<(ConnectionKey, WorkspaceId), Entity<bool>>,
     terminal_font: TerminalFont,
     terminal_color_scheme: SharedString,
@@ -489,6 +494,8 @@ impl Condr {
             },
             directory_browser: None,
             new_workspace: None,
+            ports_form: None,
+            ports_events: None,
             sidebar_workspace_open: HashMap::new(),
             terminal_font,
             terminal_color_scheme,

@@ -21,6 +21,8 @@ pub(super) struct ServerConnection {
     pub(super) label: String,
     pub(super) endpoint: Endpoint,
     pub(super) status: ConnectionStatus,
+    /// This Device's forwards and their Stream connection (ADR 0061).
+    pub(super) forwards: super::ports::DeviceForwards,
     /// The Server's build identity from its last `Welcome` (ADR 0027).
     pub(super) server_build: Option<String>,
     /// The machine's name the Server gave in `Welcome` (ADR 0040); empty until it
@@ -168,6 +170,7 @@ impl ServerConnection {
             label,
             endpoint,
             status: ConnectionStatus::Disconnected,
+            forwards: super::ports::DeviceForwards::default(),
             server_build: None,
             device_name: String::new(),
             build_notice_dismissed: false,
@@ -350,6 +353,7 @@ impl ServerConnection {
         self.carry_view(change.previous);
         self.resources.reset();
         self.status = ConnectionStatus::Connected;
+        self.forwards.terminal_connected(true);
         self.bootstrap_resync_session_id = None;
         self.error = None;
         self.disconnected_at = None;

@@ -4,6 +4,7 @@ mod connection_lifecycle;
 mod dock;
 mod files;
 mod layout;
+mod ports;
 mod session_model;
 mod settings;
 mod terminal;

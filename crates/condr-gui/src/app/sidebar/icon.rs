@@ -29,6 +29,8 @@ pub(in crate::app) enum CondrIconName {
     ServerPlus,
     /// Lucide `folder-plus`: create a Workspace from a directory.
     FolderPlus,
+    /// Lucide `arrow-left-right`: forwarded ports (ADR 0061).
+    ArrowLeftRight,
     /// Lucide `git-branch`: clone a repository.
     GitBranch,
     /// Lucide `maximize-2` / `minimize-2`: a Pane's zoom toggle.
@@ -72,6 +74,7 @@ impl IconNamed for CondrIconName {
             Self::CircleAlert => "icons/circle-alert.svg",
             Self::ServerPlus => "icons/server-plus.svg",
             Self::FolderPlus => "icons/folder-plus.svg",
+            Self::ArrowLeftRight => "icons/arrow-left-right.svg",
             Self::GitBranch => "icons/git-branch.svg",
             Self::Maximize2 => "icons/maximize-2.svg",
             Self::Minimize2 => "icons/minimize-2.svg",

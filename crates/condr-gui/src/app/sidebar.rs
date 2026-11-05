@@ -471,6 +471,8 @@ impl Condr {
                 let connect_reason = connection.error.clone();
                 let build_notice = connection.build_notice();
                 let is_local = connection.endpoint.as_local_path().is_some();
+                let ports_count = connection.forwards.count();
+                let ports_owner = owner.clone();
                 let new_workspace_label = connection.label.clone();
                 let descendant_selected =
                     workspaces.iter().any(CondrSidebarTreeItem::subtree_active);
@@ -545,6 +547,14 @@ impl Condr {
                             .gap_1()
                             .items_center()
                             .children(indicator)
+                            // Forwarding needs a remote Device; this one's ports are here.
+                            .when(!is_local, |row| {
+                                row.child(super::ports::device_ports_button(
+                                    key,
+                                    ports_count,
+                                    ports_owner.clone(),
+                                ))
+                            })
                             .child(
                                 Button::new(("new-workspace", key))
                                     .debug_selector(move || format!("new-workspace-server-{key}"))
@@ -686,6 +696,7 @@ impl Condr {
                         cx,
                     ))
                     .child(div().flex_1())
+                    .child(self.render_ports_button(view, cx))
                     .child(
                         Button::new("add-server")
                             .debug_selector(|| "add-server".into())

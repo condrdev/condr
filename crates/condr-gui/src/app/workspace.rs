@@ -62,6 +62,14 @@ impl Condr {
         view: &WindowView,
         cx: &mut Context<Self>,
     ) -> WorkspaceChrome {
+        // The Ports page covers the content area, the Tab strip included (ADR 0061).
+        if let Some(scope) = view.ports {
+            return WorkspaceChrome {
+                tab_strip: Some(self.render_ports_title(cx)),
+                open_in: None,
+                body: self.render_ports_page(view, scope, cx),
+            };
+        }
         let Some(connection) = self.connection(self.presented_key(view)) else {
             return WorkspaceChrome::body(div().size_full().into_any_element());
         };
@@ -759,11 +767,11 @@ impl Render for Condr {
             open_in,
             body,
         } = self.render_workspace(view, cx);
-        let has_workspace =
-            self.presented_workspace_in(view).is_some() && self.draws_workspace(view);
+        let has_workspace = view.ports.is_none()
+            && self.presented_workspace_in(view).is_some()
+            && self.draws_workspace(view);
         let changes_toggle = has_workspace.then(|| self.render_changes_toggle(view, cx));
-        let changes_column = self
-            .changes_sidebar_open(view)
+        let changes_column = (view.ports.is_none() && self.changes_sidebar_open(view))
             .then(|| self.render_right_sidebar(view, cx));
         let tab_window = matches!(view.scope, WindowScope::Tab(..));
         let title = self.window_title(view.scope);

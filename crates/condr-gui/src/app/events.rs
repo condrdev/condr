@@ -218,10 +218,13 @@ impl Condr {
                             let connection = self.connection(key)?;
                             connection.viewed_tab_id(connection.session()?, workspace_id)
                         });
-                        self.activate_window(
-                            self.home_window(key, Some(workspace_id), shown_tab),
-                            cx,
-                        );
+                        let home = self.home_window(key, Some(workspace_id), shown_tab);
+                        // The window that shows it leaves its Ports page (ADR 0061).
+                        if let Some(view) = self.windows.iter_mut().find(|view| view.handle == home)
+                        {
+                            view.ports = None;
+                        }
+                        self.activate_window(home, cx);
                         return IncomingEffect {
                             rebuild: false,
                             rebuild_active: changed,

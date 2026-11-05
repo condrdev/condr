@@ -261,6 +261,8 @@ impl Condr {
             return needs_active_rebuild;
         }
         connection.cancellation.cancel();
+        // Disconnect ends the Device's forwards; nothing restores them (ADR 0061).
+        connection.forwards.clear();
         if let Some(io) = connection.io.take() {
             let _ = io.outgoing.send(ClientMessage::Detach);
         }
@@ -494,6 +496,7 @@ impl Condr {
         // Bootstrap already decoded when the writer reported its failure.
         connection.connect_generation = connection.connect_generation.wrapping_add(1);
         connection.status = ConnectionStatus::Disconnected;
+        connection.forwards.terminal_connected(false);
         connection.reset_sync_state();
         connection.resources.clear_pending();
         connection.error = Some(message);

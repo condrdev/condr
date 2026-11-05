@@ -71,6 +71,8 @@ pub(super) struct WindowView {
     /// Where the window is, as last observed, so a save needs no `Window` (ADR 0023).
     pub(super) bounds: gui_state::WindowState,
     pub(super) display: Option<DisplayId>,
+    /// The Ports page, when it covers this window's content area (ADR 0061).
+    pub(super) ports: Option<super::ports::PortsScope>,
     _activation_subscription: Subscription,
     _bounds_subscription: Subscription,
     _focus_lost_subscription: Subscription,
@@ -123,6 +125,7 @@ impl WindowView {
             last_scrolled_tab: Cell::new(None),
             bounds: window.window_bounds().into(),
             display: window.display(cx).map(|display| display.id()),
+            ports: None,
             _activation_subscription: activation_subscription,
             _bounds_subscription: bounds_subscription,
             _focus_lost_subscription: focus_lost_subscription,

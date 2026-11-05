@@ -59,6 +59,7 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.window_view_mut(window).ports = None;
         // A Device window shows its own Device whatever its rows say.
         if self.connection(key).is_none() || !self.is_main(window) || self.active_connection == key
         {
@@ -79,7 +80,9 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let mut changed = self.show_view(key, workspace_id, None);
+        // Choosing a Workspace leaves the Ports page (ADR 0061).
+        let left_ports = self.window_view_mut(window).ports.take().is_some();
+        let mut changed = self.show_view(key, workspace_id, None) || left_ports;
         // A Workspace another window draws is still selected here, and shows its page:
         // the sidebar and the keys agree on the order (ADR 0043).
         if let Some(connection) = self.connection_mut(key)
