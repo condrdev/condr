@@ -5074,8 +5074,8 @@ THE SOFTWARE.
 ## Overview of licenses
 
 * Apache License 2.0 (673)
-* MIT License (206)
-* Unicode License v3 (19)
+* MIT License (204)
+* Unicode License v3 (22)
 * BSD 3-Clause "New" or "Revised" License (12)
 * ISC License (8)
 * BSD Zero Clause License (4)
@@ -13814,7 +13814,6 @@ Used by:
 * [log 0.4.34](https://github.com/rust-lang/log)
 * [markup5ever 0.12.1](https://github.com/servo/html5ever)
 * [markup5ever_rcdom 0.3.0](https://github.com/servo/html5ever)
-* [metal 0.33.0](https://github.com/gfx-rs/metal-rs)
 * [mime 0.3.17](https://github.com/hyperium/mime)
 * [multimap 0.10.1](https://github.com/havarnov/multimap)
 * [num-bigint-dig 0.9.1](https://github.com/dignifiedquire/num-bigint)
@@ -19160,8 +19159,8 @@ Used by:
 * [gix 0.87.1](https://github.com/GitoxideLabs/gitoxide)
 * [gl_generator 0.14.0](https://github.com/brendanzab/gl-rs/)
 * [gpui-fps 0.6.4](https://github.com/longbridge/gpui-kit/tree/main/crates/fps)
-* [gpui-kit-assets 0.8.1](https://github.com/longbridge/gpui-kit)
-* [gpui-kit 0.8.1](https://github.com/longbridge/gpui-kit)
+* [gpui-kit-assets 0.9.0](https://github.com/longbridge/gpui-kit)
+* [gpui-kit 0.9.0](https://github.com/longbridge/gpui-kit)
 * [granit-parser 0.0.7](https://github.com/bourumir-wyngs/granit-parser)
 * [half 2.7.1](https://github.com/VoidStarKat/half-rs)
 * [ident_case 1.0.1](https://github.com/TedDriggs/ident_case)
@@ -19211,6 +19210,7 @@ Used by:
 * [objc2-security-foundation 0.3.2](https://github.com/madsmtm/objc2)
 * [objc2-security 0.3.2](https://github.com/madsmtm/objc2)
 * [objc2-system-configuration 0.3.2](https://github.com/madsmtm/objc2)
+* [objc2-uniform-type-identifiers 0.3.2](https://github.com/madsmtm/objc2)
 * [objc2-user-notifications 0.3.2](https://github.com/madsmtm/objc2)
 * [paste 1.0.15](https://github.com/dtolnay/paste)
 * [pathfinder_geometry 0.5.1](https://github.com/servo/pathfinder)
@@ -19362,26 +19362,26 @@ limitations under the License.
 
 Used by:
 
-* [gpui-pre-apple 0.3.10](https://github.com/zed-industries/zed)
-* [gpui-pre-collections 0.3.10](https://github.com/zed-industries/zed)
-* [gpui-pre-derive-refineable 0.3.10](https://github.com/zed-industries/zed)
-* [gpui-pre-http-client-tls 0.3.10](https://github.com/zed-industries/zed)
-* [gpui-pre-http-client 0.3.10](https://github.com/zed-industries/zed)
-* [gpui-pre-linux 0.3.10](https://github.com/zed-industries/zed)
-* [gpui-pre-macos 0.3.10](https://github.com/zed-industries/zed)
-* [gpui-pre-macros 0.3.10](https://github.com/zed-industries/zed)
-* [gpui-pre-platform 0.3.10](https://github.com/zed-industries/zed)
-* [gpui-pre-refineable 0.3.10](https://github.com/zed-industries/zed)
-* [gpui-pre-reqwest-client 0.3.10](https://github.com/zed-industries/zed)
-* [gpui-pre-scheduler 0.3.10](https://github.com/zed-industries/zed)
-* [gpui-pre-shared-string 0.3.10](https://github.com/zed-industries/zed)
-* [gpui-pre-sum-tree 0.3.10](https://github.com/zed-industries/zed)
-* [gpui-pre-util 0.3.10](https://github.com/zed-industries/zed)
-* [gpui-pre-wgpu 0.3.10](https://github.com/zed-industries/zed)
-* [gpui-pre-windows 0.3.10](https://github.com/zed-industries/zed)
-* [gpui-pre-ztracing-macro 0.3.10](https://github.com/zed-industries/zed)
-* [gpui-pre-ztracing 0.3.10](https://github.com/zed-industries/zed)
-* [gpui-pre 0.3.10](https://github.com/zed-industries/zed)
+* [gpui-pre-apple 0.3.11](https://github.com/zed-industries/zed)
+* [gpui-pre-collections 0.3.11](https://github.com/zed-industries/zed)
+* [gpui-pre-derive-refineable 0.3.11](https://github.com/zed-industries/zed)
+* [gpui-pre-http-client-tls 0.3.11](https://github.com/zed-industries/zed)
+* [gpui-pre-http-client 0.3.11](https://github.com/zed-industries/zed)
+* [gpui-pre-linux 0.3.11](https://github.com/zed-industries/zed)
+* [gpui-pre-macos 0.3.11](https://github.com/zed-industries/zed)
+* [gpui-pre-macros 0.3.11](https://github.com/zed-industries/zed)
+* [gpui-pre-platform 0.3.11](https://github.com/zed-industries/zed)
+* [gpui-pre-refineable 0.3.11](https://github.com/zed-industries/zed)
+* [gpui-pre-reqwest-client 0.3.11](https://github.com/zed-industries/zed)
+* [gpui-pre-scheduler 0.3.11](https://github.com/zed-industries/zed)
+* [gpui-pre-shared-string 0.3.11](https://github.com/zed-industries/zed)
+* [gpui-pre-sum-tree 0.3.11](https://github.com/zed-industries/zed)
+* [gpui-pre-util 0.3.11](https://github.com/zed-industries/zed)
+* [gpui-pre-wgpu 0.3.11](https://github.com/zed-industries/zed)
+* [gpui-pre-windows 0.3.11](https://github.com/zed-industries/zed)
+* [gpui-pre-ztracing-macro 0.3.11](https://github.com/zed-industries/zed)
+* [gpui-pre-ztracing 0.3.11](https://github.com/zed-industries/zed)
+* [gpui-pre 0.3.11](https://github.com/zed-industries/zed)
 
 Copyright 2022 - 2025 Zed Industries, Inc.
 
@@ -19613,9 +19613,9 @@ Apache License
 
 Used by:
 
-* [gpui-base 0.8.1](https://github.com/longbridge/gpui-kit)
-* [gpui-component-macros 0.8.1](https://crates.io/crates/gpui-component-macros)
-* [gpui-component 0.8.1](https://github.com/longbridge/gpui-kit)
+* [gpui-base 0.9.0](https://github.com/longbridge/gpui-kit)
+* [gpui-component-macros 0.9.0](https://crates.io/crates/gpui-component-macros)
+* [gpui-component 0.9.0](https://github.com/longbridge/gpui-kit)
 
 Copyright 2024 - 2026 Longbridge <https://longbridge.com>
 
@@ -22105,6 +22105,7 @@ DEALINGS IN THE SOFTWARE.
 Used by:
 
 * [synstructure 0.13.2](https://github.com/mystor/synstructure)
+* [synstructure 0.14.0](https://github.com/mystor/synstructure)
 
 Copyright 2016 Nika Layzell
 
@@ -23096,10 +23097,8 @@ SOFTWARE.
 Used by:
 
 * [block2 0.6.2](https://github.com/madsmtm/objc2)
-* [block 0.1.6](http://github.com/SSheldon/rust-block)
 * [harfrust 0.5.2](https://github.com/harfbuzz/harfrust)
 * [libm 0.2.16](https://github.com/rust-lang/compiler-builtins)
-* [malloc_buf 0.0.6](https://github.com/SSheldon/malloc_buf)
 * [netlink-packet-core 0.8.2](https://github.com/rust-netlink/netlink-packet-core)
 * [netlink-packet-core 0.9.0](https://github.com/rust-netlink/netlink-packet-core)
 * [netlink-proto 0.12.2](https://github.com/rust-netlink/netlink-proto)
@@ -23138,37 +23137,6 @@ LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE A
 EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 USE OR OTHER DEALINGS IN THE SOFTWARE.
-
-
---------------------------------------------------------------------------------
-
-### MIT License
-
-Used by:
-
-* [objc 0.2.7](http://github.com/SSheldon/rust-objc)
-
-MIT License
-
-Copyright (c) Steven Sheldon
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
 
 
 --------------------------------------------------------------------------------
@@ -25346,24 +25314,27 @@ authorization of the copyright holder.
 
 Used by:
 
-* [icu_collections 2.3.0](https://github.com/unicode-org/icu4x)
-* [icu_locale_core 2.3.0](https://github.com/unicode-org/icu4x)
-* [icu_normalizer 2.3.0](https://github.com/unicode-org/icu4x)
-* [icu_normalizer_data 2.3.0](https://github.com/unicode-org/icu4x)
-* [icu_properties 2.3.0](https://github.com/unicode-org/icu4x)
-* [icu_properties_data 2.3.0](https://github.com/unicode-org/icu4x)
-* [icu_provider 2.3.1](https://github.com/unicode-org/icu4x)
+* [icu_collections 2.4.0](https://github.com/unicode-org/icu4x)
+* [icu_locale_core 2.4.0](https://github.com/unicode-org/icu4x)
+* [icu_locale_fallback 2.4.0](https://github.com/unicode-org/icu4x)
+* [icu_normalizer 2.4.0](https://github.com/unicode-org/icu4x)
+* [icu_normalizer_data 2.4.0](https://github.com/unicode-org/icu4x)
+* [icu_properties 2.4.0](https://github.com/unicode-org/icu4x)
+* [icu_properties_data 2.4.0](https://github.com/unicode-org/icu4x)
+* [icu_provider 2.4.0](https://github.com/unicode-org/icu4x)
+* [icu_segmenter 2.4.0](https://github.com/unicode-org/icu4x)
+* [icu_segmenter_data 2.4.0](https://github.com/unicode-org/icu4x)
 * [litemap 0.8.3](https://github.com/unicode-org/icu4x)
 * [potential_utf 0.1.6](https://github.com/unicode-org/icu4x)
-* [tinystr 0.8.4](https://github.com/unicode-org/icu4x)
+* [tinystr 0.8.5](https://github.com/unicode-org/icu4x)
 * [writeable 0.6.4](https://github.com/unicode-org/icu4x)
-* [yoke-derive 0.8.2](https://github.com/unicode-org/icu4x)
-* [yoke 0.8.3](https://github.com/unicode-org/icu4x)
+* [yoke-derive 0.8.4](https://github.com/unicode-org/icu4x)
+* [yoke 0.8.4](https://github.com/unicode-org/icu4x)
 * [zerofrom-derive 0.1.7](https://github.com/unicode-org/icu4x)
 * [zerofrom 0.1.8](https://github.com/unicode-org/icu4x)
 * [zerotrie 0.2.5](https://github.com/unicode-org/icu4x)
-* [zerovec-derive 0.11.6](https://github.com/unicode-org/icu4x)
-* [zerovec 0.11.8](https://github.com/unicode-org/icu4x)
+* [zerovec-derive 0.11.7](https://github.com/unicode-org/icu4x)
+* [zerovec 0.11.9](https://github.com/unicode-org/icu4x)
 
 UNICODE LICENSE V3
 
