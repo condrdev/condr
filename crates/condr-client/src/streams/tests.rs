@@ -58,7 +58,7 @@ fn connected() -> (
         let _ = opened.lock().unwrap().send((stream, target));
     })
     .unwrap();
-    let client = StreamConnection::start(client, Side::Client, None).unwrap();
+    let client = StreamConnection::start(client, Side::Client, None, HEARTBEAT_INTERVAL).unwrap();
     (client, server, streams)
 }
 
@@ -318,4 +318,110 @@ fn dropping_the_connection_fails_every_stream_on_it() {
     drop(server);
     assert!(stream.read().is_err());
     assert!(!client.wait_closed().is_empty());
+}
+
+/// A Server that sends a little data every 50 ms to a Client that only reads still hears
+/// the Client ping on its clock; each wakeup must not push the next Ping back.
+#[test]
+fn the_client_pings_on_a_clock_while_it_only_receives() {
+    let heartbeat = Duration::from_millis(200);
+    let (client, mut server) = pipe();
+    server
+        .0
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let client = StreamConnection::start(client, Side::Client, None, heartbeat).unwrap();
+    let stream = client.open(forward(1)).unwrap();
+    let receive = |server: &mut Pipe| {
+        read_message_with_limit::<_, StreamClientMessage>(server, MAX_STREAM_FRAME_SIZE)
+            .map(|(message, _)| message.0)
+            .unwrap()
+    };
+    assert!(matches!(receive(&mut server), StreamMessage::Open { .. }));
+    let mut writer = Pipe(server.0.try_clone().unwrap());
+    let sender = thread::spawn(move || {
+        let send = |writer: &mut Pipe, message| {
+            write_message_with_limit(writer, &StreamServerMessage(message), MAX_STREAM_FRAME_SIZE)
+                .unwrap();
+        };
+        send(
+            &mut writer,
+            StreamMessage::Opened {
+                stream: 1,
+                size: None,
+            },
+        );
+        for _ in 0..30 {
+            send(
+                &mut writer,
+                StreamMessage::Data {
+                    stream: 1,
+                    data: vec![1; 10],
+                },
+            );
+            thread::sleep(Duration::from_millis(50));
+        }
+    });
+    let started = Instant::now();
+    let mut pings = 0;
+    while started.elapsed() < Duration::from_millis(1400) {
+        if receive(&mut server) == StreamMessage::Ping {
+            pings += 1;
+        }
+    }
+    sender.join().unwrap();
+    assert!(pings >= 4, "{pings} pings in 1.4 s at a 200 ms heartbeat");
+    assert!(stream.read().unwrap().is_some());
+}
+
+/// A transport whose shutdown wakes nothing and whose reads never time out, like a
+/// Windows named pipe.
+struct Stubborn(TcpStream);
+
+impl io::Read for Stubborn {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        self.0.read(buffer)
+    }
+}
+
+impl io::Write for Stubborn {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        self.0.write(buffer)
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        self.0.flush()
+    }
+}
+
+impl ServerStream for Stubborn {
+    fn try_clone(&self) -> io::Result<Self> {
+        self.0.try_clone().map(Stubborn)
+    }
+    fn set_read_timeout(&self, _: Option<Duration>) -> io::Result<()> {
+        Ok(())
+    }
+    fn shutdown(&self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Closing one end over such a transport still ends the other, which hears `Close`.
+#[test]
+fn closing_ends_the_peer_on_a_transport_that_cannot_shut_down() {
+    for client_closes in [true, false] {
+        let (client, server) = pipe();
+        let server = StreamConnection::serve(Stubborn(server.0), |_, _| {}).unwrap();
+        let client =
+            StreamConnection::start(Stubborn(client.0), Side::Client, None, HEARTBEAT_INTERVAL)
+                .unwrap();
+        let (closing, peer) = if client_closes {
+            (&client, &server)
+        } else {
+            (&server, &client)
+        };
+        let started = Instant::now();
+        closing.close();
+        assert_eq!(peer.wait_closed(), "the device closed the connection");
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
 }

@@ -4,11 +4,62 @@
 //! both use these.
 
 use crate::forward::StreamOpener;
-use crate::streams::StreamFailure;
+use crate::streams::{Stream, StreamFailure};
 use condr_core::protocol::{MAX_STREAM_CHUNK, StreamError, StreamFile, StreamTarget};
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::Path;
+use std::sync::{Arc, Mutex, PoisonError};
+
+/// Cancels a transfer from another thread, at once even while it waits on the Device:
+/// cancelling resets its Stream, which wakes whatever it was blocked on.
+#[derive(Clone, Default)]
+pub struct TransferCancel(Arc<Mutex<CancelState>>);
+
+#[derive(Default)]
+struct CancelState {
+    cancelled: bool,
+    stream: Option<Arc<Stream>>,
+}
+
+impl TransferCancel {
+    pub fn cancel(&self) {
+        let mut state = self.lock();
+        state.cancelled = true;
+        if let Some(stream) = &state.stream {
+            stream.reset(StreamError::Cancelled, "");
+        }
+    }
+
+    /// No transfer holds this token's Stream any more: whatever it wrote beside its
+    /// target is gone, so quitting may go on.
+    pub fn settled(&self) -> bool {
+        self.lock().stream.is_none()
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, CancelState> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Lends the transfer's Stream to [`Self::cancel`] until the guard drops.
+    fn attach(&self, stream: &Arc<Stream>) -> Result<Attached<'_>, StreamFailure> {
+        let mut state = self.lock();
+        if state.cancelled {
+            stream.reset(StreamError::Cancelled, "");
+            return Err(failure(StreamError::Cancelled, ""));
+        }
+        state.stream = Some(Arc::clone(stream));
+        Ok(Attached(self))
+    }
+}
+
+struct Attached<'a>(&'a TransferCancel);
+
+impl Drop for Attached<'_> {
+    fn drop(&mut self) {
+        self.0.lock().stream = None;
+    }
+}
 
 fn failure(error: StreamError, detail: impl Into<String>) -> StreamFailure {
     StreamFailure {
@@ -27,14 +78,14 @@ fn io_failure(error: &io::Error) -> StreamFailure {
 }
 
 /// Downloads `file` to `destination`; `progress` hears bytes written so far and the size
-/// the Server named when it opened, and answers whether to go on: `false` cancels. An
-/// existing destination fails without `replace`.
+/// the Server named when it opened. An existing destination fails without `replace`.
 pub fn download(
     opener: &dyn StreamOpener,
     file: StreamFile,
     destination: &Path,
     replace: bool,
-    mut progress: impl FnMut(u64, Option<u64>) -> bool,
+    cancel: &TransferCancel,
+    mut progress: impl FnMut(u64, Option<u64>),
 ) -> Result<u64, StreamFailure> {
     if !replace && fs::symlink_metadata(destination).is_ok() {
         return Err(failure(
@@ -42,7 +93,8 @@ pub fn download(
             format!("{} already exists", destination.display()),
         ));
     }
-    let stream = opener.open(StreamTarget::Download(file))?;
+    let stream = Arc::new(opener.open(StreamTarget::Download(file))?);
+    let _attached = cancel.attach(&stream)?;
     let size = stream.opened()?;
     let (temp, mut output) =
         condr_core::create_transfer_temp(destination, "download").map_err(|error| {
@@ -66,10 +118,7 @@ pub fn download(
             return Err(io_failure(&error));
         }
         done += data.len() as u64;
-        if !progress(done, size) {
-            stream.reset(StreamError::Cancelled, "");
-            return Err(failure(StreamError::Cancelled, ""));
-        }
+        progress(done, size);
     }
     let placed = output
         .sync_all()
@@ -83,25 +132,29 @@ pub fn download(
     Ok(done)
 }
 
-/// Uploads `source` as `file`; `progress` hears bytes handed to the Stream and the file's
-/// size, and answers whether to go on. Complete when the Server answers with its own `Finish`, the file in place.
+/// Uploads `source` as `file`; `progress` hears bytes handed to the Stream, at most a
+/// window ahead of what the Server wrote, and the file's size. Complete when the Server
+/// answers with its own `Finish`, the file in place.
 pub fn upload(
     opener: &dyn StreamOpener,
     source: &Path,
     file: StreamFile,
     replace: bool,
-    mut progress: impl FnMut(u64, Option<u64>) -> bool,
+    cancel: &TransferCancel,
+    mut progress: impl FnMut(u64, Option<u64>),
 ) -> Result<u64, StreamFailure> {
-    let mut input = File::open(source).map_err(|error| io_failure(&error))?;
-    let meta = input.metadata().map_err(|error| io_failure(&error))?;
+    // Looked at before opening: Windows refuses to open a directory at all.
+    let meta = fs::metadata(source).map_err(|error| io_failure(&error))?;
     if !meta.is_file() {
         return Err(failure(
             StreamError::NotAFile,
             "only files can be uploaded; archive a folder first",
         ));
     }
+    let mut input = File::open(source).map_err(|error| io_failure(&error))?;
     let size = meta.len();
-    let stream = opener.open(StreamTarget::Upload { file, replace })?;
+    let stream = Arc::new(opener.open(StreamTarget::Upload { file, replace })?);
+    let _attached = cancel.attach(&stream)?;
     let mut buffer = vec![0; MAX_STREAM_CHUNK];
     let mut done = 0;
     loop {
@@ -116,10 +169,7 @@ pub fn upload(
         };
         stream.write(&buffer[..read])?;
         done += read as u64;
-        if !progress(done, Some(size)) {
-            stream.reset(StreamError::Cancelled, "");
-            return Err(failure(StreamError::Cancelled, ""));
-        }
+        progress(done, Some(size));
     }
     stream.finish();
     while stream.read()?.is_some() {}

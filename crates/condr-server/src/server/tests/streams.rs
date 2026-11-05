@@ -330,7 +330,8 @@ fn terminal_round_trip_with_and_without_a_concurrent_download() {
             },
             &destination,
             false,
-            |_, _| true,
+            &condr_client::TransferCancel::default(),
+            |_, _| {},
         )
     });
     thread::sleep(Duration::from_millis(200));

@@ -261,9 +261,8 @@ impl Condr {
             return needs_active_rebuild;
         }
         connection.cancellation.cancel();
-        // Disconnect ends the Device's forwards; nothing restores them (ADR 0061).
-        connection.forwards.clear();
-        // Running transfers fail with the Stream connection.
+        // Forwards wait for the new connection; running transfers fail with the Stream
+        // connection (ADR 0061).
         connection.forwards.terminal_connected(false);
         if let Some(io) = connection.io.take() {
             let _ = io.outgoing.send(ClientMessage::Detach);
@@ -298,6 +297,8 @@ impl Condr {
             return active_projection_cleared;
         };
         connection.cancellation.cancel();
+        // Disconnect and Remove end the Device's forwards; nothing restores them (ADR 0061).
+        connection.forwards.end();
         if let Some(io) = connection.io.take() {
             let _ = io.outgoing.send(ClientMessage::Detach);
         }

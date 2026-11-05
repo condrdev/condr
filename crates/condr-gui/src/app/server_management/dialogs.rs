@@ -365,8 +365,8 @@ impl Condr {
         connection.label = name.to_owned();
         let moved = connection.endpoint != endpoint;
         if moved {
-            // A forward reached the old address (ADR 0061).
-            connection.forwards.clear();
+            // A forward and the Stream link reached the old address (ADR 0061).
+            connection.forwards.end();
         }
         connection.endpoint = endpoint;
         let was_up = connection.status != ConnectionStatus::Disconnected;

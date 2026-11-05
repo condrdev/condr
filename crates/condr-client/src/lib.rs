@@ -32,4 +32,4 @@ pub use p2p::{P2pEndpoint, P2pNode, P2pStream};
 pub use remote::{RemoteEndpoint, RemoteStream};
 pub use streams::{Stream, StreamConnection, StreamFailure};
 pub use tcp::{TcpEndpoint, configure_tcp};
-pub use transfer::{download, upload};
+pub use transfer::{TransferCancel, download, upload};

@@ -64,12 +64,6 @@ impl Drop for DisconnectLog {
     }
 }
 
-/// Whether a handshake opens a terminal connection or a Stream connection (ADR 0061).
-enum HandshakeKind {
-    Session,
-    Streams,
-}
-
 pub(super) fn handle_client(
     mut stream: EndpointStream,
     client_id: u64,
@@ -96,10 +90,8 @@ pub(super) fn handle_client(
                 return;
             }
         };
-        let message_kind = match &message {
-            ClientHandshake::Streams(_) => HandshakeKind::Streams,
-            _ => HandshakeKind::Session,
-        };
+        // A Stream connection (ADR 0061) rather than a terminal one.
+        let streams = matches!(message, ClientHandshake::Streams(_));
         match message {
             // A local Client asking its own Server to reach a Peer-to-peer Device (ADR 0025).
             // Only a local connection may tunnel, or any paired Device could hop through here.
@@ -145,7 +137,6 @@ pub(super) fn handle_client(
             }
             // A Stream connection (ADR 0061) is authorized exactly as a terminal one.
             ClientHandshake::Hello(hello) | ClientHandshake::Streams(hello) => {
-                let streams = matches!(message_kind, HandshakeKind::Streams);
                 // An unknown Peer-to-peer Device that skipped the invite is refused here.
                 let unproven = matches!(
                     &stream,

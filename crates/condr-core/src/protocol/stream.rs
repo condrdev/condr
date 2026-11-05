@@ -112,6 +112,9 @@ pub enum StreamMessage {
     },
     Ping,
     Pong,
+    /// The sender is closing the connection; the receiver closes its own at once, since
+    /// some transports cannot interrupt a blocked read.
+    Close,
     /// A top-level member from a newer peer; ignored.
     Unknown,
 }

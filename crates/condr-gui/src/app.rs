@@ -363,20 +363,15 @@ impl Condr {
         } = state;
         let (connect_results_tx, connect_results_rx) =
             async_channel::bounded(CONNECTION_RESULT_BUFFER_CAPACITY);
-        // Closing the window takes every Preview Tab's unsaved text with it (ADR 0045).
+        // Closing the main window quits, so it asks what quitting asks (ADR 0045, ADR 0061).
         let owner = cx.weak_entity();
         window.on_window_should_close(cx, move |window, cx| {
             owner
                 .update(cx, |this, cx| {
-                    if !this.files_view.has_unsaved() {
+                    if !this.files_view.has_unsaved() && this.live_transfers() == 0 {
                         return true;
                     }
-                    this.confirm_unsaved(
-                        UnsavedScope::All,
-                        Box::new(|_, window, _| window.remove_window()),
-                        window,
-                        cx,
-                    );
+                    this.confirm_quit(Box::new(|_, window, _| window.remove_window()), window, cx);
                     false
                 })
                 .unwrap_or(true)
@@ -445,6 +440,7 @@ impl Condr {
             let _ = owner.update(cx, |this, cx| this.probe_connections(cx));
         });
         let quit_subscription = cx.on_app_quit(|this, cx| {
+            this.cancel_transfers_before_quit();
             // A change made less than a debounce before quitting is still saved.
             if this._font_save.is_some() {
                 this.save_terminal_font(cx);

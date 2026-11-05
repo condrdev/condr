@@ -391,6 +391,9 @@ impl BoundServer {
                     .into_values()
                     .flatten(),
             );
+            for temp in std::mem::take(&mut state.uploads) {
+                let _ = std::fs::remove_file(temp);
+            }
             state.terminal_instances.clear();
             for runtime in state.terminals.values() {
                 runtime.prepare_agent_shutdown();
@@ -582,6 +585,8 @@ struct RuntimeState {
     pushes: Option<push::Pushes>,
     /// Clipboard images staged for each Client (ADR 0012); removed with the Client.
     staged_images: std::collections::HashMap<u64, Vec<PathBuf>>,
+    /// Temporary files of uploads in progress (ADR 0061); a stopping Server removes them.
+    uploads: std::collections::HashSet<PathBuf>,
     settings_write: Arc<Mutex<()>>,
     persistence: Option<SnapshotPersistence>,
     settings: ServerSettings,
@@ -748,6 +753,7 @@ impl RuntimeState {
             p2p: None,
             pushes: None,
             staged_images: std::collections::HashMap::new(),
+            uploads: std::collections::HashSet::new(),
             settings_write: Arc::new(Mutex::new(())),
             persistence,
             settings,

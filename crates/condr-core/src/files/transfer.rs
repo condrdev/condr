@@ -15,10 +15,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const TEMP_INFIX: &str = ".condr-";
 /// The longest name a common filesystem holds, in bytes.
 const MAX_NAME_BYTES: usize = 255;
-/// How long a replacing rename on Windows waits out a sharing violation from an
+/// How long a rename or removal on Windows waits out a sharing violation from an
 /// antivirus or an indexer that opened the new file.
 #[cfg(windows)]
-const RENAME_RETRY: Duration = Duration::from_secs(1);
+const SHARING_RETRY: Duration = Duration::from_secs(1);
 
 /// Whether `name` is a transfer's temporary file, which the Git watcher ignores.
 pub fn is_transfer_temp(name: &str) -> bool {
@@ -79,7 +79,13 @@ pub fn create_transfer_temp(target: &Path, kind: &str) -> io::Result<(PathBuf, F
 pub fn place_transfer(temp: &Path, target: &Path, replace: bool) -> io::Result<()> {
     if !replace {
         return match fs::hard_link(temp, target) {
-            Ok(()) => fs::remove_file(temp),
+            Ok(()) => {
+                // The file is in place; a second name left behind is litter, not failure.
+                if let Err(error) = retried(|| fs::remove_file(temp)) {
+                    tracing::warn!(path = %temp.display(), "could not remove a transfer's temporary name: {error}");
+                }
+                Ok(())
+            }
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Err(error),
             Err(_) => {
                 if fs::symlink_metadata(target).is_ok() {
@@ -93,31 +99,48 @@ pub fn place_transfer(temp: &Path, target: &Path, replace: bool) -> io::Result<(
         };
     }
     if let Ok(meta) = fs::metadata(target) {
-        let _ = fs::set_permissions(temp, meta.permissions());
+        let permissions = meta.permissions();
+        // Windows renames over no read-only file: the old one is made writable for the
+        // rename, and the file in place, new or old, is read-only again after it.
+        #[cfg(windows)]
+        if permissions.readonly() {
+            let mut writable = permissions.clone();
+            #[allow(clippy::permissions_set_readonly_false)] // Windows: only the attribute.
+            writable.set_readonly(false);
+            fs::set_permissions(target, writable)?;
+            let placed = rename(temp, target);
+            let _ = fs::set_permissions(target, permissions);
+            return placed;
+        }
+        let _ = fs::set_permissions(temp, permissions);
     }
     rename(temp, target)
 }
 
-#[cfg(not(windows))]
 fn rename(from: &Path, to: &Path) -> io::Result<()> {
-    fs::rename(from, to)
+    retried(|| fs::rename(from, to))
 }
 
-#[cfg(windows)]
-fn rename(from: &Path, to: &Path) -> io::Result<()> {
-    let started = Instant::now();
-    loop {
-        match fs::rename(from, to) {
-            // ERROR_SHARING_VIOLATION and ERROR_ACCESS_DENIED from a scanner holding it.
-            Err(error)
-                if matches!(error.raw_os_error(), Some(32 | 5))
-                    && started.elapsed() < RENAME_RETRY =>
-            {
-                std::thread::sleep(Duration::from_millis(50));
+/// Runs `operation`, on Windows again for a second while a scanner holding the file
+/// makes it fail with ERROR_SHARING_VIOLATION or ERROR_ACCESS_DENIED.
+fn retried(mut operation: impl FnMut() -> io::Result<()>) -> io::Result<()> {
+    #[cfg(windows)]
+    {
+        let started = Instant::now();
+        loop {
+            match operation() {
+                Err(error)
+                    if matches!(error.raw_os_error(), Some(32 | 5))
+                        && started.elapsed() < SHARING_RETRY =>
+                {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                result => return result,
             }
-            result => return result,
         }
     }
+    #[cfg(not(windows))]
+    operation()
 }
 
 /// Whether this machine can hold `name` as an ordinary file: on Windows no alternate

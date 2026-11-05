@@ -48,6 +48,8 @@ pub fn splice(stream: &Arc<Stream>, mut socket: TcpStream) {
                 Ok(Some(data)) => {
                     if socket.write_all(&data).is_err() {
                         stream.reset(StreamError::Io, "the forwarded connection closed");
+                        // Wakes the reader, which may be blocked on this socket.
+                        let _ = socket.shutdown(Shutdown::Both);
                         break;
                     }
                 }
@@ -218,7 +220,11 @@ fn accept_loop(
         if shared.stopped.load(Ordering::Acquire) {
             return;
         }
-        let Ok(socket) = socket else { continue };
+        let Ok(socket) = socket else {
+            // Out of descriptors and the like: wait for one to free up rather than spin.
+            thread::sleep(Duration::from_millis(50));
+            continue;
+        };
         let stream = match opener.open(StreamTarget::Forward {
             port: remote.into(),
         }) {
@@ -235,20 +241,20 @@ fn accept_loop(
             .spawn(move || {
                 shared.connections.fetch_add(1, Ordering::AcqRel);
                 (shared.on_event)(ForwardEvent::Changed);
+                // `Open` is not a round trip: the browser's request follows it at once,
+                // and a refusal ends the splice like any reset.
+                splice(&stream, socket);
                 match stream.opened() {
                     Ok(_) => {
                         if shared.last_refused.swap(false, Ordering::AcqRel) {
                             (shared.on_event)(ForwardEvent::Changed);
                         }
-                        splice(&stream, socket);
                     }
-                    Err(failure) => {
-                        let _ = socket.shutdown(Shutdown::Both);
-                        if failure.error == StreamError::ConnectionRefused {
-                            shared.last_refused.store(true, Ordering::Release);
-                            (shared.on_event)(ForwardEvent::Refused(failure.to_string()));
-                        }
+                    Err(failure) if failure.error == StreamError::ConnectionRefused => {
+                        shared.last_refused.store(true, Ordering::Release);
+                        (shared.on_event)(ForwardEvent::Refused(failure.to_string()));
                     }
+                    Err(_) => {}
                 }
                 shared.connections.fetch_sub(1, Ordering::AcqRel);
                 (shared.on_event)(ForwardEvent::Changed);
@@ -356,6 +362,8 @@ pub struct StreamLink {
 type Dial = dyn Fn() -> io::Result<StreamConnection> + Send + Sync;
 
 struct LinkShared {
+    /// The Device's name, for what a person reads.
+    device: String,
     dial: Box<Dial>,
     on_change: Box<dyn Fn() + Send + Sync>,
     state: Mutex<LinkState>,
@@ -368,18 +376,27 @@ struct LinkState {
     connection: Option<Arc<StreamConnection>>,
     status: LinkStatus,
     worker: bool,
+    /// A `retain` is dialling; the others wait for its result rather than dial too.
+    dialing: bool,
+    /// Bumped when a `retain`'s dial ends, with its error if it failed, so the callers
+    /// that waited on it share the outcome.
+    dials: u64,
+    dial_error: Option<String>,
     /// Bumped whenever the terminal connection comes back, so a waiting retry runs now.
     nudge: u64,
 }
 
 impl StreamLink {
-    /// `dial` opens the Stream connection; `on_change` runs whenever the status changes.
+    /// `dial` opens the Stream connection to `device`; `on_change` runs whenever the
+    /// status changes.
     pub fn new(
+        device: impl Into<String>,
         dial: impl Fn() -> io::Result<StreamConnection> + Send + Sync + 'static,
         on_change: impl Fn() + Send + Sync + 'static,
     ) -> Self {
         Self {
             shared: Arc::new(LinkShared {
+                device: device.into(),
                 dial: Box::new(dial),
                 on_change: Box::new(on_change),
                 state: Mutex::new(LinkState {
@@ -388,6 +405,9 @@ impl StreamLink {
                     connection: None,
                     status: LinkStatus::Idle,
                     worker: false,
+                    dialing: false,
+                    dials: 0,
+                    dial_error: None,
                     nudge: 0,
                 }),
                 wake: Condvar::new(),
@@ -401,9 +421,25 @@ impl StreamLink {
 
     /// One more forward or transfer needs the connection. The first dials here, on the
     /// caller's thread, so a Device that cannot be reached says so to the person at once;
-    /// that failure leaves nothing held.
+    /// that failure leaves nothing held. Callers that arrive while it dials wait for it
+    /// and share its outcome, so a batch of transfers logs in once.
     pub fn retain(&self) -> Result<(), String> {
         let mut state = self.shared.lock();
+        while state.dialing {
+            let dials = state.dials;
+            while state.dials == dials {
+                state = self
+                    .shared
+                    .wake
+                    .wait(state)
+                    .unwrap_or_else(PoisonError::into_inner);
+            }
+            if state.users == 0
+                && let Some(error) = &state.dial_error
+            {
+                return Err(error.clone());
+            }
+        }
         if state.users > 0 && state.connection.is_some() {
             state.users += 1;
             return Ok(());
@@ -416,9 +452,15 @@ impl StreamLink {
             self.shared.wake.notify_all();
             return Ok(());
         }
+        state.dialing = true;
         drop(state);
-        let connection = (self.shared.dial)().map_err(|error| describe(&error))?;
+        let dialed = (self.shared.dial)().map_err(|error| describe(&self.shared.device, &error));
         let mut state = self.shared.lock();
+        state.dialing = false;
+        state.dials += 1;
+        state.dial_error = dialed.as_ref().err().cloned();
+        self.shared.wake.notify_all();
+        let connection = dialed?;
         state.users += 1;
         state.connection = Some(Arc::new(connection));
         state.status = LinkStatus::Connected;
@@ -575,7 +617,8 @@ impl LinkShared {
             match (self.dial)() {
                 Ok(connection) => {
                     let mut state = self.lock();
-                    if state.users == 0 || !state.terminal_up {
+                    // A `retain` may have dialled meanwhile; keep the one in place.
+                    if state.users == 0 || !state.terminal_up || state.connection.is_some() {
                         connection.close();
                         continue;
                     }
@@ -590,9 +633,9 @@ impl LinkShared {
                 Err(error) => {
                     let mut state = self.lock();
                     let status = if Refused::from_error(&error).is_some() {
-                        LinkStatus::Refused(describe(&error))
+                        LinkStatus::Refused(describe(&self.device, &error))
                     } else {
-                        LinkStatus::Reconnecting(describe(&error))
+                        LinkStatus::Reconnecting(describe(&self.device, &error))
                     };
                     let changed = Self::set_status(&mut state, status);
                     drop(state);
@@ -606,13 +649,13 @@ impl LinkShared {
     }
 }
 
-/// What a person reads when a Stream connection cannot open: an older Server's refusal
-/// of the handshake names the cause (ADR 0061).
-pub fn describe(error: &io::Error) -> String {
+/// What a person reads when a Stream connection to `device` cannot open: an older
+/// Server's refusal of the handshake names the cause (ADR 0061).
+pub fn describe(device: &str, error: &io::Error) -> String {
     match Refused::from_error(error) {
         Some(refused) if matches!(refused.refusal, condr_core::protocol::Refusal::Malformed(_)) => {
             format!(
-                "this Device runs a Condr too old to forward ports or transfer files (build {}); update it",
+                "{device} runs a Condr too old to forward ports or transfer files (build {}); update it",
                 refused.server_build
             )
         }

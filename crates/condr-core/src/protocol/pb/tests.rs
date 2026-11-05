@@ -741,6 +741,7 @@ mod streams {
                 detail: "by hand".into(),
             },
             StreamMessage::Ping,
+            StreamMessage::Close,
         ];
         for message in client {
             let message = StreamClientMessage(message);
@@ -765,6 +766,7 @@ mod streams {
                 data: Vec::new(),
             },
             StreamMessage::Pong,
+            StreamMessage::Close,
         ];
         for message in server {
             let message = StreamServerMessage(message);

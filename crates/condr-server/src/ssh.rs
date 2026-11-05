@@ -147,14 +147,6 @@ impl SshEndpoint {
         )
     }
 
-    /// Every `condr --device` call and every GUI connection is its own `ssh` process;
-    /// OpenSSH connection sharing lets them ride one authenticated connection instead of
-    /// paying a handshake (and possibly a second factor) each time. A user who already
-    /// configured `ControlPath` for this host keeps their own master, so Condr can also
-    /// reuse a session they opened interactively; otherwise Condr keeps a master of its
-    /// own under the runtime directory for a minute after the last use. Windows OpenSSH
-    /// has no multiplexing, so this is Unix only. `extra` lets tests point `-G` at a
-    /// config file.
     /// What `command` adds: Condr's master, or for a separate connection none at all.
     /// OpenSSH keeps the first value of an option, so these replace the options rather
     /// than follow them.
@@ -175,6 +167,14 @@ impl SshEndpoint {
         options
     }
 
+    /// Every `condr --device` call and every GUI connection is its own `ssh` process;
+    /// OpenSSH connection sharing lets them ride one authenticated connection instead of
+    /// paying a handshake (and possibly a second factor) each time. A user who already
+    /// configured `ControlPath` for this host keeps their own master, so Condr can also
+    /// reuse a session they opened interactively; otherwise Condr keeps a master of its
+    /// own under the runtime directory for a minute after the last use. Windows OpenSSH
+    /// has no multiplexing, so this is Unix only. `extra` lets tests point `-G` at a
+    /// config file.
     #[cfg(unix)]
     fn multiplexing_options(&self, extra: &[&str]) -> Vec<String> {
         let effective = Command::new("ssh")

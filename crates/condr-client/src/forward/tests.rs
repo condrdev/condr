@@ -189,6 +189,7 @@ fn a_link_dials_once_reconnects_after_a_loss_and_stops_on_a_refusal() {
         let dials = Arc::clone(&dials);
         let refuse = Arc::clone(&refuse);
         StreamLink::new(
+            "test",
             move || {
                 dials.fetch_add(1, Ordering::AcqRel);
                 if refuse.load(Ordering::Acquire) {
@@ -243,4 +244,72 @@ fn a_link_dials_once_reconnects_after_a_loss_and_stops_on_a_refusal() {
     link.release();
     link.release();
     assert_eq!(link.status(), LinkStatus::Idle);
+}
+
+/// Transfers that start together on an idle link log in once and all get the connection;
+/// when that one dial fails, every one of them hears why.
+#[test]
+fn retains_that_arrive_together_share_one_dial() {
+    for fail in [false, true] {
+        let dials = Arc::new(AtomicUsize::new(0));
+        let link = {
+            let dials = Arc::clone(&dials);
+            Arc::new(StreamLink::new(
+                "test",
+                move || {
+                    dials.fetch_add(1, Ordering::AcqRel);
+                    // A login takes a while; the others arrive meanwhile.
+                    thread::sleep(Duration::from_millis(150));
+                    if fail {
+                        return Err(io::Error::other("unreachable"));
+                    }
+                    stream_connection()
+                },
+                || {},
+            ))
+        };
+        let service = echo_service();
+        let threads: Vec<_> = (0..4)
+            .map(|_| {
+                let link = Arc::clone(&link);
+                thread::spawn(move || {
+                    link.retain()?;
+                    let stream = link
+                        .open(StreamTarget::Forward {
+                            port: service.into(),
+                        })
+                        .map_err(|failure| failure.to_string())?;
+                    stream.opened().map_err(|failure| failure.to_string())?;
+                    stream.write(b"hi").map_err(|failure| failure.to_string())?;
+                    let echoed = stream.read().map_err(|failure| failure.to_string())?;
+                    stream.finish();
+                    Ok::<_, String>(echoed)
+                })
+            })
+            .collect();
+        let results: Vec<_> = threads
+            .into_iter()
+            .map(|thread| thread.join().unwrap())
+            .collect();
+        assert_eq!(dials.load(Ordering::Acquire), 1, "{results:?}");
+        if fail {
+            assert!(
+                results
+                    .iter()
+                    .all(|result| result.as_ref().is_err_and(|error| error == "unreachable")),
+                "{results:?}"
+            );
+        } else {
+            assert!(
+                results.iter().all(|result| result
+                    .as_ref()
+                    .is_ok_and(|echoed| echoed.as_deref() == Some(&b"hi"[..]))),
+                "{results:?}"
+            );
+            for _ in 0..4 {
+                link.release();
+            }
+        }
+        assert_eq!(link.status(), LinkStatus::Idle);
+    }
 }

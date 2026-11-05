@@ -264,6 +264,11 @@ fn check_upload_target(target: &Path, replace: bool) -> Result<(), TransferRefus
 }
 
 impl Upload {
+    /// The temporary file the bytes go to, which a stopping Server removes.
+    pub fn temp_path(&self) -> &Path {
+        &self.temp
+    }
+
     pub fn write(&mut self, data: &[u8]) -> io::Result<()> {
         use std::io::Write as _;
         self.file
@@ -301,7 +306,14 @@ mod tests {
     #[test]
     fn windows_names_refuse_streams_trailing_dots_and_devices() {
         for name in [
-            "a:b", "notes.", "notes ", "CON", "con.txt", "Com1.log", "a?b",
+            "a:b",
+            "notes.",
+            "notes ",
+            "CON",
+            "con.txt",
+            "Com1.log",
+            "a?b",
+            "tab\there",
         ] {
             assert!(!valid_windows_name(name), "{name}");
         }

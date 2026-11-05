@@ -83,7 +83,7 @@ pub(super) fn serve_forwards(
     out: &mut impl io::Write,
 ) -> Result<(), CliError> {
     let (connection, _) = StreamConnection::connect(endpoint, "condr-cli")
-        .map_err(|error| stream_connect_error(endpoint, &error))?;
+        .map_err(|error| stream_connect_error(endpoint, device, &error))?;
     let connection = Arc::new(connection);
     {
         let connection = Arc::clone(&connection);
@@ -127,10 +127,14 @@ pub(super) fn serve_forwards(
 
 /// How a Stream connection that would not open reads: an older Server is
 /// `feature_unavailable`, naming its build (ADR 0061).
-pub(super) fn stream_connect_error(endpoint: &Endpoint, error: &io::Error) -> CliError {
+pub(super) fn stream_connect_error(
+    endpoint: &Endpoint,
+    device: &str,
+    error: &io::Error,
+) -> CliError {
     match condr_server::Refused::from_error(error).map(|refused| &refused.refusal) {
         Some(Refusal::Malformed(_)) => {
-            CliError::new("feature_unavailable", describe_stream_error(error))
+            CliError::new("feature_unavailable", describe_stream_error(device, error))
         }
         Some(Refusal::IncompatibleProtocol) => {
             CliError::new("protocol_mismatch", endpoint.describe_connect_error(error))

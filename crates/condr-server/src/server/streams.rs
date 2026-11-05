@@ -135,6 +135,16 @@ fn upload(
         Ok(upload) => upload,
         Err((error, detail)) => return stream.refuse(error, detail),
     };
+    // Listed while it runs, so a Server that stops meanwhile removes its temporary file.
+    struct Listed<'a>(&'a Arc<Mutex<RuntimeState>>, PathBuf);
+    impl Drop for Listed<'_> {
+        fn drop(&mut self) {
+            self.0.lock().or_abort().uploads.remove(&self.1);
+        }
+    }
+    let temp = upload.temp_path().to_path_buf();
+    state.lock().or_abort().uploads.insert(temp.clone());
+    let _listed = Listed(state, temp);
     stream.accept(None);
     loop {
         match stream.read() {
@@ -190,8 +200,18 @@ fn forward(stream: &Arc<Stream>, port: u16) {
 fn connect_loopback(port: u16) -> io::Result<TcpStream> {
     let v4 = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
     let v6 = SocketAddr::from((Ipv6Addr::LOCALHOST, port));
-    let socket = TcpStream::connect_timeout(&v4, LOOPBACK_CONNECT_TIMEOUT)
-        .or_else(|_| TcpStream::connect_timeout(&v6, LOOPBACK_CONNECT_TIMEOUT))?;
+    let socket = TcpStream::connect_timeout(&v4, LOOPBACK_CONNECT_TIMEOUT).or_else(|refused| {
+        // Without IPv6 loopback the second try fails otherwise; the refusal is the answer.
+        TcpStream::connect_timeout(&v6, LOOPBACK_CONNECT_TIMEOUT).map_err(|error| {
+            if refused.kind() == io::ErrorKind::ConnectionRefused
+                && error.kind() != io::ErrorKind::ConnectionRefused
+            {
+                refused
+            } else {
+                error
+            }
+        })
+    })?;
     let _ = socket.set_nodelay(true);
     Ok(socket)
 }

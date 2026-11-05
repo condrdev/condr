@@ -46,7 +46,10 @@ impl Interrupt {
     }
 
     pub(super) fn fire(&self) {
-        self.fired.store(true, Ordering::Release);
+        // A second Ctrl+C does not wait for the first one's cleanup.
+        if self.fired.swap(true, Ordering::AcqRel) {
+            std::process::exit(130);
+        }
         match &*self.action.lock().unwrap_or_else(PoisonError::into_inner) {
             Some(action) => action(),
             None => std::process::exit(130),
@@ -68,7 +71,7 @@ mod platform {
         std::thread::Builder::new()
             .name("condr-interrupt".into())
             .spawn(move || {
-                if signals.wait().is_ok() {
+                while signals.wait().is_ok() {
                     interrupt.fire();
                 }
             })?;

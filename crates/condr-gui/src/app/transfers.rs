@@ -5,9 +5,8 @@
 
 use super::dialogs::{DangerConfirm, confirm_danger};
 use super::*;
-use condr_client::{StreamConnection, StreamLink};
+use condr_client::{StreamConnection, StreamLink, TransferCancel};
 use condr_core::protocol::{StreamError, StreamFile};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 /// Transfers to one Device that run at once; the rest wait in the strip.
@@ -36,7 +35,7 @@ pub(super) struct Transfer {
     direction: Direction,
     /// Bytes done and the total, overwritten by the transfer, read when the GUI repaints.
     progress: Arc<Mutex<(u64, Option<u64>)>>,
-    cancel: Arc<AtomicBool>,
+    cancel: TransferCancel,
     pub(super) state: TransferState,
 }
 
@@ -117,7 +116,8 @@ impl Condr {
     }
 
     /// One batch, dropped or picked: folders are refused, names the directory already
-    /// lists are asked about once, and the rest queue at once.
+    /// lists are asked about once, and the rest queue at once; one the Device refuses as
+    /// existing, in a folded directory or made meanwhile, is asked about then.
     pub(super) fn upload_files(
         &mut self,
         key: ConnectionKey,
@@ -164,6 +164,24 @@ impl Condr {
         for source in fresh {
             self.queue_upload(key, workspace, &directory, source, false, cx);
         }
+        self.confirm_replace(key, workspace, directory, clashing, window, cx);
+    }
+
+    /// Asks once whether to replace `clashing`, files that exist in `directory`.
+    fn confirm_replace(
+        &mut self,
+        key: ConnectionKey,
+        workspace: WorkspaceId,
+        directory: RelativePathBuf,
+        clashing: Vec<PathBuf>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let named = |source: &PathBuf| {
+            source
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        };
         if clashing.is_empty() {
             return;
         }
@@ -240,13 +258,18 @@ impl Condr {
         let Some(connection) = self.connection_mut(key) else {
             return;
         };
+        // The Stream connection lives only while the terminal connection is up (ADR 0061).
+        if connection.status != ConnectionStatus::Connected {
+            let error = format!("{} is not connected", connection.label);
+            return self.report_error(error, cx);
+        }
         connection.transfers.push(Transfer {
             id,
             workspace,
             path,
             direction,
             progress: Arc::default(),
-            cancel: Arc::default(),
+            cancel: TransferCancel::default(),
             state: TransferState::Queued,
         });
         self.start_transfers(key, cx);
@@ -259,12 +282,24 @@ impl Condr {
         let Some(connection) = self.connection_mut(key) else {
             return;
         };
+        // Lost meanwhile: what waits would dial a Device that is not there.
+        if connection.status != ConnectionStatus::Connected {
+            let reason = format!("{} disconnected", connection.label);
+            for transfer in &mut connection.transfers {
+                if transfer.state == TransferState::Queued {
+                    transfer.state = TransferState::Failed(reason.clone());
+                }
+            }
+            return;
+        }
         let running = connection
             .transfers
             .iter()
             .filter(|transfer| transfer.state == TransferState::Running)
             .count();
-        let link = connection.forwards.link(&connection.endpoint, &events);
+        let link = connection
+            .forwards
+            .link(&connection.label, &connection.endpoint, &events);
         let mut started = Vec::new();
         for transfer in connection
             .transfers
@@ -281,7 +316,7 @@ impl Condr {
                 },
                 transfer.direction.clone(),
                 Arc::clone(&transfer.progress),
-                Arc::clone(&transfer.cancel),
+                transfer.cancel.clone(),
             ));
         }
         for (id, file, direction, progress, cancel) in started {
@@ -310,13 +345,42 @@ impl Condr {
             return;
         };
         let label = connection.label.clone();
-        let Some(transfer) = connection
+        let Some(index) = connection
             .transfers
-            .iter_mut()
-            .find(|transfer| transfer.id == id)
+            .iter()
+            .position(|transfer| transfer.id == id)
         else {
             return;
         };
+        let exists = matches!(&result, Err(failure) if failure.error == StreamError::AlreadyExists);
+        if let Direction::Upload {
+            source,
+            replace: false,
+        } = &connection.transfers[index].direction
+            && exists
+        {
+            let clashing = vec![source.clone()];
+            let transfer = connection.transfers.remove(index);
+            let directory = transfer
+                .path
+                .parent()
+                .map(RelativePath::to_relative_path_buf)
+                .unwrap_or_default();
+            let handle = self.active_view().handle;
+            let owner = cx.weak_entity();
+            cx.defer(move |cx| {
+                let _ = handle.update(cx, |_, window, cx| {
+                    let _ = owner.update(cx, |this, cx| {
+                        let workspace = transfer.workspace;
+                        this.confirm_replace(key, workspace, directory, clashing, window, cx);
+                    });
+                });
+            });
+            self.start_transfers(key, cx);
+            cx.notify();
+            return;
+        }
+        let transfer = &mut connection.transfers[index];
         let name = transfer.name();
         let downloaded = match &transfer.direction {
             Direction::Download { destination } => Some(destination.clone()),
@@ -380,7 +444,7 @@ impl Condr {
                 .iter_mut()
                 .find(|transfer| transfer.id == id)
         }) {
-            transfer.cancel.store(true, Ordering::Release);
+            transfer.cancel.cancel();
             if transfer.state == TransferState::Queued {
                 transfer.state = TransferState::Cancelled;
             }
@@ -400,6 +464,25 @@ impl Condr {
                 .retain(|transfer| transfer.workspace != workspace || transfer.live());
         }
         cx.notify();
+    }
+
+    /// Quitting cancels every transfer and gives them up to two seconds to remove what
+    /// they wrote beside their targets, which their threads do once woken.
+    pub(super) fn cancel_transfers_before_quit(&self) {
+        let cancels: Vec<_> = self
+            .connections
+            .iter()
+            .flat_map(|connection| &connection.transfers)
+            .filter(|transfer| transfer.live())
+            .map(|transfer| transfer.cancel.clone())
+            .collect();
+        for cancel in &cancels {
+            cancel.cancel();
+        }
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while cancels.iter().any(|cancel| !cancel.settled()) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 
     /// Transfers running or waiting, which quitting asks about.
@@ -590,7 +673,7 @@ fn run_transfer(
     file: StreamFile,
     direction: &Direction,
     progress: &Arc<Mutex<(u64, Option<u64>)>>,
-    cancel: &Arc<AtomicBool>,
+    cancel: &TransferCancel,
     events: &async_channel::Sender<()>,
 ) -> Result<(), condr_client::StreamFailure> {
     link.retain()
@@ -602,24 +685,28 @@ fn run_transfer(
     let report = |done: u64, total: Option<u64>| {
         *progress.lock().unwrap_or_else(PoisonError::into_inner) = (done, total);
         let _ = events.try_send(());
-        !cancel.load(Ordering::Acquire)
     };
     match direction {
         Direction::Download { destination } => {
-            condr_client::download(link.as_ref(), file, destination, true, report)
+            condr_client::download(link.as_ref(), file, destination, true, cancel, report)
         }
         Direction::Upload { source, replace } => {
-            condr_client::upload(link.as_ref(), source, file, *replace, report)
+            condr_client::upload(link.as_ref(), source, file, *replace, cancel, report)
         }
     }
     .map(drop)
 }
 
 /// The Stream link a Device's forwards and transfers share.
-pub(super) fn new_link(endpoint: &Endpoint, events: &async_channel::Sender<()>) -> Arc<StreamLink> {
+pub(super) fn new_link(
+    device: &str,
+    endpoint: &Endpoint,
+    events: &async_channel::Sender<()>,
+) -> Arc<StreamLink> {
     let endpoint = endpoint.for_streams();
     let changed = events.clone();
     Arc::new(StreamLink::new(
+        device,
         move || StreamConnection::connect(&endpoint, "condr-gui").map(|(connection, _)| connection),
         move || {
             let _ = changed.try_send(());
@@ -660,7 +747,7 @@ impl Condr {
                 path,
                 direction,
                 progress: Arc::new(Mutex::new(progress)),
-                cancel: Arc::default(),
+                cancel: TransferCancel::default(),
                 state,
             });
         }

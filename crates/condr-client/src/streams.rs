@@ -14,13 +14,10 @@ use condr_core::protocol::{
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::io;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread;
-use std::time::Duration;
-
-/// How long either end hears nothing before it gives the connection up: the Client
-/// pings when idle and the Server answers, so a live connection is never this quiet.
-const SILENCE: Duration = Duration::from_secs(HEARTBEAT_INTERVAL.as_secs() * 3);
+use std::time::{Duration, Instant};
 
 /// Why a Stream operation did not happen: the Stream was refused or reset, or the whole
 /// Stream connection ended (`Other`, with its reason).
@@ -58,6 +55,10 @@ enum Side {
 
 struct Shared {
     side: Side,
+    /// How often the Client pings, whatever else it sends, and the Server answers, so
+    /// each end hears the other at least this often; three of them heard nothing gives
+    /// the connection up.
+    heartbeat: Duration,
     state: Mutex<State>,
     /// One condition for every change: the writer, blocked writes and blocked reads all
     /// re-check their own condition when woken.
@@ -92,7 +93,6 @@ struct Entry {
     outgoing: VecDeque<Outgoing>,
     queued: bool,
     finish_queued: bool,
-    finish_sent: bool,
     inbound: VecDeque<Vec<u8>>,
     received: u64,
     consumed: u64,
@@ -113,7 +113,6 @@ impl Entry {
             outgoing: VecDeque::new(),
             queued: false,
             finish_queued: false,
-            finish_sent: false,
             inbound: VecDeque::new(),
             received: 0,
             consumed: 0,
@@ -181,7 +180,10 @@ impl StreamConnection {
     ) -> io::Result<(Self, Welcome)> {
         let stream = connector.connect()?;
         let (stream, welcome) = handshake_exchange(stream, ClientHandshake::Streams(hello.into()))?;
-        Ok((Self::start(stream, Side::Client, None)?, welcome))
+        Ok((
+            Self::start(stream, Side::Client, None, HEARTBEAT_INTERVAL)?,
+            welcome,
+        ))
     }
 
     /// Runs the Server's end on a connection whose handshake was `Streams`. `on_open`
@@ -192,26 +194,33 @@ impl StreamConnection {
         stream: S,
         on_open: impl Fn(Stream, StreamTarget) + Send + Sync + 'static,
     ) -> io::Result<Self> {
-        Self::start(stream, Side::Server, Some(Box::new(on_open)))
+        Self::start(
+            stream,
+            Side::Server,
+            Some(Box::new(on_open)),
+            HEARTBEAT_INTERVAL,
+        )
     }
 
     /// A Client end on a stream whose handshake already happened, for this crate's tests.
     #[cfg(test)]
     pub(crate) fn start_client_for_tests<S: ServerStream>(stream: S) -> io::Result<Self> {
-        Self::start(stream, Side::Client, None)
+        Self::start(stream, Side::Client, None, HEARTBEAT_INTERVAL)
     }
 
     fn start<S: ServerStream>(
         stream: S,
         side: Side,
         on_open: Option<Box<OnOpen>>,
+        heartbeat: Duration,
     ) -> io::Result<Self> {
-        stream.set_read_timeout(Some(SILENCE))?;
+        stream.set_read_timeout(Some(heartbeat * 3))?;
         // A stream is `Send` but not `Sync`; the lock lets any thread shut it down.
         let closer = Mutex::new(stream.try_clone()?);
         let writer = stream.try_clone()?;
         let shared = Arc::new(Shared {
             side,
+            heartbeat,
             state: Mutex::new(State::default()),
             wake: Condvar::new(),
             shutdown: Box::new(move || {
@@ -284,11 +293,6 @@ impl StreamConnection {
 
     pub fn is_closed(&self) -> bool {
         self.shared.lock().closed.is_some()
-    }
-
-    /// The Streams open on this connection.
-    pub fn stream_count(&self) -> usize {
-        self.shared.lock().streams.len()
     }
 
     /// Ends the connection and every Stream on it.
@@ -529,12 +533,24 @@ impl Drop for Stream {
 }
 
 fn write_loop<S: ServerStream>(shared: &Shared, mut stream: S) {
+    // The Client pings on a clock, not when idle: one end that only receives must still
+    // be heard, and the Server's Pong does the same for the other direction.
+    let mut next_ping = Instant::now() + shared.heartbeat;
     loop {
         let message = {
             let mut state = shared.lock();
             loop {
                 if state.closed.is_some() {
+                    drop(state);
+                    // Best effort: a transport whose shutdown cannot wake the peer's
+                    // read, a local socket or a tunnel, ends when the peer hears this.
+                    let _ = write_frame(shared.side, &mut stream, StreamMessage::Close);
                     return;
+                }
+                let now = Instant::now();
+                if shared.side == Side::Client && now >= next_ping {
+                    next_ping = now + shared.heartbeat;
+                    break StreamMessage::Ping;
                 }
                 if let Some(message) = state.control.pop_front() {
                     break message;
@@ -542,33 +558,45 @@ fn write_loop<S: ServerStream>(shared: &Shared, mut stream: S) {
                 if let Some(message) = next_data(&mut state) {
                     break message;
                 }
-                let (next, timeout) = shared
-                    .wake
-                    .wait_timeout(state, HEARTBEAT_INTERVAL)
-                    .unwrap_or_else(PoisonError::into_inner);
-                state = next;
-                if timeout.timed_out() && shared.side == Side::Client {
-                    break StreamMessage::Ping;
-                }
+                state = match shared.side {
+                    Side::Client => {
+                        shared
+                            .wake
+                            .wait_timeout(state, next_ping - now)
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .0
+                    }
+                    Side::Server => shared
+                        .wake
+                        .wait(state)
+                        .unwrap_or_else(PoisonError::into_inner),
+                };
             }
         };
-        let result = match shared.side {
-            Side::Client => condr_core::protocol::write_message_with_limit(
-                &mut stream,
-                &StreamClientMessage(message),
-                MAX_STREAM_FRAME_SIZE,
-            ),
-            Side::Server => condr_core::protocol::write_message_with_limit(
-                &mut stream,
-                &StreamServerMessage(message),
-                MAX_STREAM_FRAME_SIZE,
-            ),
-        };
-        if let Err(error) = result {
+        if let Err(error) = write_frame(shared.side, &mut stream, message) {
             let mut state = shared.lock();
             shared.close(&mut state, format!("write failed: {error}"));
             return;
         }
+    }
+}
+
+fn write_frame<S: ServerStream>(
+    side: Side,
+    stream: &mut S,
+    message: StreamMessage,
+) -> Result<(), FramingError> {
+    match side {
+        Side::Client => condr_core::protocol::write_message_with_limit(
+            stream,
+            &StreamClientMessage(message),
+            MAX_STREAM_FRAME_SIZE,
+        ),
+        Side::Server => condr_core::protocol::write_message_with_limit(
+            stream,
+            &StreamServerMessage(message),
+            MAX_STREAM_FRAME_SIZE,
+        ),
     }
 }
 
@@ -589,10 +617,7 @@ fn next_data(state: &mut State) -> Option<StreamMessage> {
         }
         let message = match item {
             Outgoing::Data(data) => StreamMessage::Data { stream: id, data },
-            Outgoing::Finish => {
-                entry.finish_sent = true;
-                StreamMessage::Finish { stream: id }
-            }
+            Outgoing::Finish => StreamMessage::Finish { stream: id },
         };
         Shared::remove_if_finished(state, id);
         return Some(message);
@@ -636,6 +661,11 @@ fn read_loop<S: ServerStream>(shared: &Arc<Shared>, stream: S) {
                 return;
             }
         };
+        if message == StreamMessage::Close {
+            let mut state = shared.lock();
+            shared.close(&mut state, "the device closed the connection".into());
+            return;
+        }
         if let Err(reason) = receive(shared, message) {
             tracing::warn!("closing the Stream connection: {reason}");
             let mut state = shared.lock();
@@ -679,8 +709,11 @@ fn receive(shared: &Arc<Shared>, message: StreamMessage) -> Result<(), String> {
                 id: stream,
                 shared: Arc::clone(shared),
             };
-            if let Some(on_open) = &shared.on_open {
-                on_open(handle, target);
+            // A panic drops the handle, which resets that Stream alone (ADR 0053).
+            if let Some(on_open) = &shared.on_open
+                && catch_unwind(AssertUnwindSafe(|| on_open(handle, target))).is_err()
+            {
+                tracing::warn!("opening stream {stream} panicked");
             }
         }
         (Side::Client, StreamMessage::Opened { stream, size }) => {

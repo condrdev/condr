@@ -61,7 +61,7 @@ fn file(device: Option<&str>, command: FileCommand) -> Result<Value, CliError> {
     })?;
     let endpoint = device::device_endpoint(&device::saved_devices()?, device)?;
     let interrupt = Interrupt::install()?;
-    transfer(&endpoint, command, &interrupt)
+    transfer(&endpoint, device, command, &interrupt)
 }
 
 fn relative(text: &str) -> Result<RelativePathBuf, CliError> {
@@ -77,21 +77,28 @@ fn relative(text: &str) -> Result<RelativePathBuf, CliError> {
 /// Runs one transfer and prints its JSON result's value.
 pub(super) fn transfer(
     endpoint: &Endpoint,
+    device: &str,
     command: FileCommand,
     interrupt: &Interrupt,
 ) -> Result<Value, CliError> {
     let (connection, _) = StreamConnection::connect(endpoint, "condr-cli")
-        .map_err(|error| stream_connect_error(endpoint, &error))?;
+        .map_err(|error| stream_connect_error(endpoint, device, &error))?;
     let connection = std::sync::Arc::new(connection);
     {
         let connection = std::sync::Arc::clone(&connection);
         interrupt.on_interrupt(move || connection.close());
     }
-    let failed = |failure: StreamFailure| {
-        if interrupt.fired() {
-            CliError::new("cancelled", "cancelled; nothing was left behind")
-        } else {
+    let failed = |failure: StreamFailure, upload: bool| {
+        if !interrupt.fired() {
             transfer_error(failure)
+        } else if upload {
+            // Ctrl+C may land after the last byte, while the Device places the file.
+            CliError::new(
+                "cancelled",
+                "cancelled; the Device keeps the file only if it had all of it",
+            )
+        } else {
+            CliError::new("cancelled", "cancelled; nothing was left behind")
         }
     };
     match command {
@@ -117,12 +124,10 @@ pub(super) fn transfer(
                 },
                 &destination,
                 replace,
-                |done, total| {
-                    meter.show(done, total);
-                    true
-                },
+                &condr_client::TransferCancel::default(),
+                |done, total| meter.show(done, total),
             )
-            .map_err(failed)?;
+            .map_err(|failure| failed(failure, false))?;
             meter.end();
             let destination = std::path::absolute(&destination).unwrap_or(destination);
             Ok(json!({ "download": {
@@ -147,12 +152,10 @@ pub(super) fn transfer(
                     path: path.clone(),
                 },
                 replace,
-                |done, total| {
-                    meter.show(done, total);
-                    true
-                },
+                &condr_client::TransferCancel::default(),
+                |done, total| meter.show(done, total),
             )
-            .map_err(failed)?;
+            .map_err(|failure| failed(failure, true))?;
             meter.end();
             Ok(json!({ "upload": {
                 "source": file.display().to_string(),
@@ -263,8 +266,8 @@ mod tests {
     use condr_server::{BoundServer, ServerConfig};
 
     /// Downloads and uploads against a real Server with a Workspace on disk: an existing
-    /// target needs `--replace` on both sides, a directory is refused, and the uploaded
-    /// file arrives whole under its name.
+    /// target needs `--replace` on both sides, a directory is refused, the uploaded file
+    /// arrives whole under its name, and a Server stopping mid-upload leaves nothing.
     #[test]
     fn files_move_both_ways_and_an_existing_target_needs_replace() {
         let root = std::env::temp_dir().join(format!(
@@ -300,7 +303,7 @@ mod tests {
         };
         let workspace = workspace_id.as_u64();
 
-        let run = |command| transfer(&endpoint, command, &Interrupt::by_hand());
+        let run = |command| transfer(&endpoint, "test", command, &Interrupt::by_hand());
         let saved = local.join("report.bin");
         let result = run(FileCommand::Download {
             path: "docs/report.bin".into(),
@@ -366,8 +369,37 @@ mod tests {
             .collect();
         assert!(leftovers.is_empty(), "{leftovers:?}");
 
+        // A Server that stops while an upload runs removes the upload's temporary file.
+        let (connection, _) = StreamConnection::connect(&endpoint, "test").unwrap();
+        let unfinished = connection
+            .open(condr_core::protocol::StreamTarget::Upload {
+                file: StreamFile {
+                    workspace: workspace_id,
+                    path: "docs/unfinished.bin".into(),
+                },
+                replace: false,
+            })
+            .unwrap();
+        unfinished.opened().unwrap();
+        unfinished.write(&[7; 100_000]).unwrap();
+        let temps = || {
+            std::fs::read_dir(workspace_root.join("docs"))
+                .unwrap()
+                .flatten()
+                .filter(|entry| condr_core::is_transfer_temp(&entry.file_name().to_string_lossy()))
+                .count()
+        };
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while temps() == 0 {
+            assert!(Instant::now() < deadline, "the upload never started");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
         handle.stop();
         runtime.join().unwrap().unwrap();
+        assert_eq!(temps(), 0);
+        assert!(!workspace_root.join("docs/unfinished.bin").exists());
+        drop(unfinished);
         std::fs::remove_dir_all(root).unwrap();
     }
 }

@@ -167,6 +167,7 @@ pub(crate) fn valid_windows_name(name: &str) -> bool {
     ];
     let stem = name.split('.').next().unwrap_or_default().trim_end();
     !name.contains([':', '<', '>', '"', '|', '?', '*'])
+        && !name.chars().any(|c| c < ' ')
         && !name.ends_with(['.', ' '])
         && !RESERVED
             .iter()

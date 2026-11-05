@@ -66,20 +66,26 @@ impl DeviceForwards {
         }
     }
 
-    /// Disconnect, Remove and editing the Device's address end its forwards.
-    pub(super) fn clear(&mut self) {
+    /// Disconnect, Remove and editing the Device's address end its forwards and close
+    /// its Stream connection, failing the transfers on it; the next use dials anew, at
+    /// the address the Device has then.
+    pub(super) fn end(&mut self) {
         self.entries.clear();
+        if let Some(link) = self.link.take() {
+            link.set_terminal_connected(false);
+        }
     }
 
     /// The Stream link this Device's forwards and transfers share, made on first use.
     pub(super) fn link(
         &mut self,
+        device: &str,
         endpoint: &Endpoint,
         events: &async_channel::Sender<()>,
     ) -> Arc<StreamLink> {
         Arc::clone(
             self.link
-                .get_or_insert_with(|| super::transfers::new_link(endpoint, events)),
+                .get_or_insert_with(|| super::transfers::new_link(device, endpoint, events)),
         )
     }
 
@@ -233,7 +239,9 @@ impl Condr {
             let error = format!("Port {remote} on {} is already forwarded", connection.label);
             return refuse(self, error, cx);
         }
-        let link = connection.forwards.link(&connection.endpoint, &events);
+        let link = connection
+            .forwards
+            .link(&connection.label, &connection.endpoint, &events);
         if let Some(form) = self.ports_form.as_mut() {
             form.pending = true;
             form.error = None;

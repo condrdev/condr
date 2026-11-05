@@ -101,6 +101,7 @@ impl TryFrom<&StreamClientMessage> for super::StreamClientMessage {
                 detail: detail.clone(),
             }),
             StreamMessage::Ping => Message::Ping(Empty {}),
+            StreamMessage::Close => Message::Close(Empty {}),
             other => return Err(wrong_direction(other)),
         };
         Ok(Self {
@@ -153,6 +154,7 @@ impl TryFrom<super::StreamClientMessage> for StreamClientMessage {
                 detail: reset.detail,
             },
             Message::Ping(_) => StreamMessage::Ping,
+            Message::Close(_) => StreamMessage::Close,
         }))
     }
 }
@@ -195,6 +197,7 @@ impl TryFrom<&StreamServerMessage> for super::StreamServerMessage {
                 detail: detail.clone(),
             }),
             StreamMessage::Pong => Message::Pong(Empty {}),
+            StreamMessage::Close => Message::Close(Empty {}),
             other => return Err(wrong_direction(other)),
         };
         Ok(Self {
@@ -239,6 +242,7 @@ impl TryFrom<super::StreamServerMessage> for StreamServerMessage {
                 detail: reset.detail,
             },
             Message::Pong(_) => StreamMessage::Pong,
+            Message::Close(_) => StreamMessage::Close,
         }))
     }
 }

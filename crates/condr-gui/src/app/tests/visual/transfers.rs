@@ -6,7 +6,8 @@ use condr_core::protocol::{LayoutCommand, LayoutResult};
 /// Uploads and a download through the GUI (ADR 0061), over a TCP Device's Stream
 /// connection: a batch lands under its names, the strip collects them and Clear empties
 /// it once they finished, a download goes through the save dialog, and an upload onto a
-/// name the directory lists asks once and replaces on Replace.
+/// name the directory lists asks once and replaces on Replace, as does one the Device
+/// refuses as existing in a directory Files never listed.
 #[test]
 fn files_upload_and_download_through_the_gui_and_collect_in_the_strip() {
     let _serial_guard = acquire_visual_test_lock();
@@ -145,6 +146,44 @@ fn files_upload_and_download_through_the_gui_and_collect_in_the_strip() {
     }));
     assert_eq!(
         std::fs::read_to_string(workspace_root.join("two.txt")).unwrap(),
+        "changed"
+    );
+
+    // A directory Files never listed: the Device's refusal asks the same question, and
+    // the refused row leaves the strip.
+    std::fs::create_dir_all(workspace_root.join("docs")).unwrap();
+    std::fs::write(workspace_root.join("docs/two.txt"), "old").unwrap();
+    let before = window.read(|app| view.read(app).transfer_states(1)).len();
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| {
+            this.upload_files(
+                1,
+                workspace_id,
+                RelativePathBuf::from("docs"),
+                vec![local.join("two.txt")],
+                window,
+                cx,
+            )
+        })
+    });
+    assert!(wait_until(window, |window| {
+        window.read(|app| view.read(app).transfer_states(1).len() == before)
+    }));
+    assert_eq!(
+        std::fs::read_to_string(workspace_root.join("docs/two.txt")).unwrap(),
+        "old"
+    );
+    confirm_alert_dialog(window);
+    assert!(wait_until(window, |window| {
+        window.read(|app| {
+            view.read(app)
+                .transfer_states(1)
+                .last()
+                .is_some_and(|state| *state == TransferState::Done)
+        })
+    }));
+    assert_eq!(
+        std::fs::read_to_string(workspace_root.join("docs/two.txt")).unwrap(),
         "changed"
     );
     let _ = std::fs::remove_dir_all(&root);

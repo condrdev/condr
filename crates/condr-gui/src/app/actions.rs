@@ -14,8 +14,7 @@ impl Condr {
         self.activate_tab_at_index(action.index, window, cx);
     }
 
-    /// Quitting takes every Preview Tab's unsaved text with it, so it asks first (ADR
-    /// 0045). Handled here, the global handler only quits.
+    /// Handled here, the global handler only quits.
     // ponytail: Cmd+Q from the Settings window reaches only the global handler.
     pub(super) fn action_quit_app(
         &mut self,
@@ -23,16 +22,21 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.confirm_quit(Box::new(|_, _, cx| cx.quit()), window, cx);
+    }
+
+    /// Quitting cancels transfers and takes every Preview Tab's unsaved text with it, so
+    /// it asks first, about each once (ADR 0045, ADR 0061); `quit` runs once agreed.
+    pub(super) fn confirm_quit(
+        &mut self,
+        quit: Continuation,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let live = self.live_transfers();
         if live == 0 {
-            return self.confirm_unsaved(
-                UnsavedScope::All,
-                Box::new(|_, _, cx| cx.quit()),
-                window,
-                cx,
-            );
+            return self.confirm_unsaved(UnsavedScope::All, quit, window, cx);
         }
-        // Quitting cancels transfers, so it asks once first (ADR 0061).
         let confirm = DangerConfirm {
             title: match live {
                 1 => "A transfer is running".to_owned(),
@@ -42,16 +46,14 @@ impl Condr {
             ok: "Quit",
             cancel: "Keep Going",
         };
+        let quit = std::cell::Cell::new(Some(quit));
         confirm_danger(
             cx.weak_entity(),
             confirm,
-            |this, window, cx| {
-                this.confirm_unsaved(
-                    UnsavedScope::All,
-                    Box::new(|_, _, cx| cx.quit()),
-                    window,
-                    cx,
-                )
+            move |this, window, cx| {
+                if let Some(quit) = quit.take() {
+                    this.confirm_unsaved(UnsavedScope::All, quit, window, cx);
+                }
             },
             window,
             cx,

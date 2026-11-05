@@ -17,6 +17,9 @@ message StreamClientMessage {
     StreamFinish finish = 4;
     StreamReset reset = 5;
     Empty ping = 6;
+    // This end is closing the connection; the peer closes its own at once, so a
+    // transport whose reads cannot be interrupted still ends.
+    Empty close = 7;
   }
 }
 
@@ -29,6 +32,7 @@ message StreamServerMessage {
     StreamFinish finish = 5;
     StreamReset reset = 6;
     Empty pong = 7;
+    Empty close = 8;
   }
 }
 
