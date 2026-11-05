@@ -397,6 +397,23 @@ mod tests {
     const CHILD_ENDPOINT_ENV: &str = "CONDR_ENDPOINT_BIND_CHILD_PATH";
     const CHILD_READY_ENV: &str = "CONDR_ENDPOINT_BIND_CHILD_READY";
 
+    /// A socket file nothing listens on. A child that another test forks meanwhile holds
+    /// the listener until it execs, and a connect then still succeeds, so this waits for
+    /// the refusal that makes the file stale.
+    #[cfg(unix)]
+    fn stale_socket(path: &Path) {
+        use std::os::unix::net::{UnixListener, UnixStream};
+        drop(UnixListener::bind(path).unwrap());
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while UnixStream::connect(path).is_ok() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the stale socket still answers"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
     #[test]
     fn socket_is_in_the_platform_runtime_directory() {
         assert_eq!(
@@ -627,12 +644,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn stale_local_endpoint_is_replaced() {
-        use std::os::unix::net::UnixListener;
-
         let path = test_path("stale");
         let endpoint = Endpoint::local(&path);
-        let stale_listener = UnixListener::bind(&path).unwrap();
-        drop(stale_listener);
+        stale_socket(&path);
         assert!(path.exists());
 
         let replacement = EndpointListener::local(endpoint.as_local_path().unwrap()).unwrap();
@@ -673,12 +687,10 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn concurrent_binders_cannot_both_replace_one_stale_endpoint() {
-        use std::os::unix::net::UnixListener;
         use std::sync::mpsc;
 
         let path = test_path("concurrent-stale");
-        let stale_listener = UnixListener::bind(&path).unwrap();
-        drop(stale_listener);
+        stale_socket(&path);
 
         let endpoint = Endpoint::local(&path);
         let (sender, receiver) = mpsc::channel();
