@@ -195,6 +195,12 @@ impl StreamConnection {
         Self::start(stream, Side::Server, Some(Box::new(on_open)))
     }
 
+    /// A Client end on a stream whose handshake already happened, for this crate's tests.
+    #[cfg(test)]
+    pub(crate) fn start_client_for_tests<S: ServerStream>(stream: S) -> io::Result<Self> {
+        Self::start(stream, Side::Client, None)
+    }
+
     fn start<S: ServerStream>(
         stream: S,
         side: Side,

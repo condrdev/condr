@@ -4,6 +4,7 @@
 
 pub mod cloud;
 mod connection;
+mod forward;
 pub mod frames;
 mod io;
 mod key;
@@ -17,6 +18,10 @@ mod tcp;
 pub use connection::{
     Cancellation, ClientConnection, Connector, HANDSHAKE_TIMEOUT, Refused, SLOW_HANDSHAKE_TIMEOUT,
     ServerStream,
+};
+pub use forward::{
+    Forward, ForwardEvent, LinkStatus, LocalPort, StreamLink, StreamOpener, bind_loopback,
+    describe as describe_stream_error, isolated, splice,
 };
 pub use io::{ConnectionIo, Incoming, disconnect_reason};
 pub use key::{DeviceKey, PublicKey, Secret};

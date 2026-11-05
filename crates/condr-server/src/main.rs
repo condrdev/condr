@@ -54,6 +54,9 @@ enum Command {
     /// Remote Devices saved in config.toml, the targets of `--device`
     #[command(subcommand)]
     Device(cli::DeviceCommand),
+    /// Ports of a remote Device, forwarded to this machine (needs `--device`)
+    #[command(subcommand)]
+    Port(cli::PortCommand),
     /// Installed into an agent CLI's hooks: reports one lifecycle event to the Pane's
     /// Server (ADR 0014). Inert outside a Condr Pane; always exits 0.
     #[command(hide = true)]
@@ -263,6 +266,7 @@ fn main() {
         Command::Pane(command) => cli::run_pane(device, command),
         Command::Agent(command) => cli::run_agent(device, command),
         Command::Device(command) => cli::run_device(device, command),
+        Command::Port(command) => cli::run_port(device, command),
         Command::AgentHook { agent, event } => {
             condr_core::agent_hook::run(&agent, &event);
             0

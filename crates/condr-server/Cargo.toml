@@ -54,8 +54,10 @@ widestring.workspace = true
 windows-registry.workspace = true
 windows-spawn.workspace = true
 windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
     "Win32_Security",
     "Win32_Storage_FileSystem",
+    "Win32_System_Console",
     "Win32_System_Threading",
     "Win32_UI_WindowsAndMessaging",
 ] }

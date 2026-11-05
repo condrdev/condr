@@ -2,11 +2,10 @@
 //! carries Streams, and each `Open` is answered here. A forward reaches this machine's own
 //! loopback and nothing else.
 
-use condr_client::{Stream, StreamConnection};
-use condr_core::protocol::{MAX_STREAM_CHUNK, StreamError, StreamTarget};
-use std::io::{self, Read, Write};
-use std::net::{Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr, TcpStream};
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use condr_client::{Stream, StreamConnection, isolated, splice};
+use condr_core::protocol::{StreamError, StreamTarget};
+use std::io;
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -51,16 +50,6 @@ fn open(stream: Stream, target: StreamTarget) {
     }
 }
 
-/// Runs a Stream's worker so that its panic resets that Stream alone (ADR 0053).
-fn isolated(stream: &Arc<Stream>, work: impl FnOnce(&Arc<Stream>)) {
-    if catch_unwind(AssertUnwindSafe(|| work(stream))).is_err() {
-        stream.reset(
-            StreamError::Other,
-            "the Server's worker for this stream failed",
-        );
-    }
-}
-
 fn forward(stream: &Arc<Stream>, port: u16) {
     let socket = match connect_loopback(port) {
         Ok(socket) => socket,
@@ -89,66 +78,4 @@ fn connect_loopback(port: u16) -> io::Result<TcpStream> {
         .or_else(|_| TcpStream::connect_timeout(&v6, LOOPBACK_CONNECT_TIMEOUT))?;
     let _ = socket.set_nodelay(true);
     Ok(socket)
-}
-
-/// Copies both ways until both directions finished. Each end's FIN becomes the other's,
-/// so a response delimited by closing arrives whole.
-fn splice(stream: &Arc<Stream>, mut socket: TcpStream) {
-    let upstream = match socket.try_clone() {
-        Ok(socket) => socket,
-        Err(error) => {
-            stream.reset(StreamError::Io, error.to_string());
-            return;
-        }
-    };
-    let reader_stream = Arc::clone(stream);
-    let reader = thread::Builder::new()
-        .name("condr-forward-read".into())
-        .spawn(move || isolated(&reader_stream, |stream| socket_to_stream(stream, upstream)));
-    let Ok(reader) = reader else {
-        stream.reset(StreamError::Io, "could not start the forward's reader");
-        return;
-    };
-    loop {
-        match stream.read() {
-            Ok(Some(data)) => {
-                if socket.write_all(&data).is_err() {
-                    stream.reset(StreamError::Io, "the forwarded port closed");
-                    break;
-                }
-            }
-            Ok(None) => {
-                let _ = socket.shutdown(Shutdown::Write);
-                break;
-            }
-            Err(_) => {
-                let _ = socket.shutdown(Shutdown::Both);
-                break;
-            }
-        }
-    }
-    let _ = reader.join();
-}
-
-fn socket_to_stream(stream: &Arc<Stream>, mut socket: TcpStream) {
-    let mut buffer = vec![0; MAX_STREAM_CHUNK];
-    loop {
-        match socket.read(&mut buffer) {
-            Ok(0) => {
-                stream.finish();
-                return;
-            }
-            Ok(read) => {
-                if stream.write(&buffer[..read]).is_err() {
-                    let _ = socket.shutdown(Shutdown::Both);
-                    return;
-                }
-            }
-            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
-            Err(error) => {
-                stream.reset(StreamError::Io, error.to_string());
-                return;
-            }
-        }
-    }
 }
