@@ -115,7 +115,7 @@ Condr 要守住的差异是原生 GUI 而非 TUI、Windows 一等公民、Server
 5. GUI：Files、Changes、Preview Tab 里的下载，拖入和 Upload Files… 上传，右侧栏底部的传输条。
 6. Windows 验收（限速 10 Mbit/s 边下载边打字）、`--skill`、CONTEXT.md、官网与 SECURITY.md。
 
-**停在哪**：只转发到远端 Server 本机的回环地址，本机 listener 只绑回环；转发不跨 GUI 运行保存。只传单个文件，限 Workspace 之内，不做目录、断点续传或同步。不做反向转发、UDP、两台远端 Device 之间互传、拖文件进远程终端，也不做手机端的转发与传输。远程贴图仍按 ADR 0012 走终端连接。慢链路上大传输会让终端多等几百毫秒；若 Windows 验收里 ping 的增量超过 100 ms，再做按延迟收放窗口。
+**停在哪**：只转发到远端 Server 本机的回环地址，本机 listener 只绑回环；转发不跨 GUI 运行保存。只传单个文件，限 Workspace 之内，不做目录、断点续传或同步。不做反向转发、UDP、两台远端 Device 之间互传、拖文件进远程终端，也不做手机端的转发与传输。远程贴图仍按 ADR 0012 走终端连接。慢链路上传输会让终端变慢，10 Mbit/s 下每个进行中的传输最多约 0.8 秒，两条连接挤在同一条 TCP（用户自己的 SSH master、走 Relay）时可达数秒；若 Windows 验收里 ping 的增量超过 100 ms，再做按延迟收放窗口。
 
 ### 探测 Workspace 里的端口
 

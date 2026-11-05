@@ -28,4 +28,4 @@ Tests: the handshake decode-golden fixtures, one with an unknown field, and one 
 
 > ADR 0047 adds the first Client hint: `push` in `Hello`, whether this Client takes the Server's pushes through Condr Cloud.
 
-> ADR 0061 adds `stream.proto`, the messages of a Stream connection, and the `streams` member of `ClientHandshake`. The protocol stays `1`; an older Server refuses that handshake as malformed, as ADR 0059 describes for its request.
+> ADR 0061 adds `stream.proto`, the messages of a Stream connection, and the `streams` member of `ClientHandshake`. The protocol stays `1`; an older Server refuses that handshake as malformed and closes the connection, and like ADR 0059's request it is not gated until the protocol is raised.
