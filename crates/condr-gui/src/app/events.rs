@@ -610,6 +610,8 @@ impl Condr {
                         panes,
                         agents,
                         clients,
+                        // The Ports page shows this Client's own; the count is for the CLI.
+                        streams: _,
                         recent_errors,
                         running_listen,
                         running_p2p,

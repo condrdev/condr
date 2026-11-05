@@ -623,7 +623,7 @@ pub(super) fn new_link(endpoint: &Endpoint, events: &async_channel::Sender<()>) 
     ))
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "test-support"))]
 impl Condr {
     /// The states of a Device's transfers, oldest first, for tests.
     pub(super) fn transfer_states(&self, key: ConnectionKey) -> Vec<TransferState> {

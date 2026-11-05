@@ -487,6 +487,7 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                 panes,
                 agents,
                 clients,
+                streams,
                 recent_errors,
                 running_listen,
                 running_p2p,
@@ -519,6 +520,7 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                         "panes": panes,
                         "agents": agents,
                         "clients": clients,
+                        "streams": streams,
                         "recent_errors": recent_errors,
                         "autostart": autostart_json(&autostart),
                     })
@@ -556,6 +558,7 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
             field("Panes", panes);
             field("Agents", agents);
             field("Clients", clients);
+            field("Streams", format_args!("{streams} open"));
             field(
                 "Devices",
                 format_args!("{} connected over TCP", connected.len()),

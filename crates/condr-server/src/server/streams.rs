@@ -8,6 +8,7 @@ use condr_core::protocol::{MAX_STREAM_CHUNK, StreamError, StreamFile, StreamTarg
 use std::io::{self, Read as _};
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -33,6 +34,14 @@ pub(super) fn serve(stream: EndpointStream, client_name: &str, state: Arc<Mutex<
     tracing::info!(name = %client_name, "stream connection opened");
     let reason = connection.wait_closed();
     tracing::info!(name = %client_name, %reason, "stream connection closed");
+}
+
+/// Streams whose worker runs now, every Stream connection's together, for
+/// `condr server status`.
+static OPEN_STREAMS: AtomicU32 = AtomicU32::new(0);
+
+pub(super) fn open_streams() -> u32 {
+    OPEN_STREAMS.load(Ordering::Relaxed)
 }
 
 /// What a Stream's worker thread does with it.
@@ -62,7 +71,11 @@ fn open(state: &Arc<Mutex<RuntimeState>>, stream: Stream, target: StreamTarget) 
     // Off the reader thread, which must never block on a consumer.
     let spawned = thread::Builder::new()
         .name("condr-stream-worker".into())
-        .spawn(move || isolated(&Arc::new(stream), work));
+        .spawn(move || {
+            OPEN_STREAMS.fetch_add(1, Ordering::Relaxed);
+            isolated(&Arc::new(stream), work);
+            OPEN_STREAMS.fetch_sub(1, Ordering::Relaxed);
+        });
     if let Err(error) = spawned {
         tracing::warn!("stream worker failed to start: {error}");
     }

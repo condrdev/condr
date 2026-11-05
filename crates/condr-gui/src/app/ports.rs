@@ -713,7 +713,7 @@ fn forward_id(key: ConnectionKey, remote: u16) -> u64 {
     key << 16 | u64::from(remote)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "test-support"))]
 impl Condr {
     /// Types into the form as a person would, for tests.
     pub(super) fn fill_ports_form(

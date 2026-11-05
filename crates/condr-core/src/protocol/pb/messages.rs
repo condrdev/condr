@@ -1594,6 +1594,7 @@ impl From<&ServerAdminResponse> for super::ServerAdminResponse {
                     panes,
                     agents,
                     clients,
+                    streams,
                     recent_errors,
                     running_listen,
                     running_p2p,
@@ -1614,6 +1615,7 @@ impl From<&ServerAdminResponse> for super::ServerAdminResponse {
                     panes: *panes,
                     agents: *agents,
                     clients: *clients,
+                    streams: *streams,
                     recent_errors: recent_errors
                         .iter()
                         .map(|record| super::ServerLogRecord {
@@ -1678,6 +1680,7 @@ impl TryFrom<super::ServerAdminResponse> for ServerAdminResponse {
                 panes: status.panes,
                 agents: status.agents,
                 clients: status.clients,
+                streams: status.streams,
                 recent_errors: status
                     .recent_errors
                     .into_iter()

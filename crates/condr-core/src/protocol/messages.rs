@@ -949,6 +949,8 @@ pub enum ServerAdminResponse {
         agents: u32,
         /// Subscribed clients (GUIs and CLIs holding a live subscription).
         clients: u32,
+        /// Streams open now (ADR 0061); Stream connections are not clients.
+        streams: u32,
         /// Newest last; `warn` and `error` records the Server kept in memory.
         recent_errors: Vec<ServerLogRecord>,
         /// What this Server process bound at startup; differs from `listen` and `p2p`

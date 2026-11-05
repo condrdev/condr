@@ -919,6 +919,8 @@ message ServerStatus {
   // Saved and running, like `listen`; Peer-to-peer takes the proxy when it starts.
   ProxySetting proxy = 14;
   ProxySetting running_proxy = 15;
+  // Streams open now on every Stream connection (ADR 0061); 0 from an older Server.
+  uint32 streams = 16;
 }
 
 message ServerClients {

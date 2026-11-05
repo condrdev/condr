@@ -1393,6 +1393,7 @@ fn server_admin(
                 panes: tabs.map(|tab| tab.panes().len() as u32).sum(),
                 agents: state.agents.len() as u32,
                 clients: state.subscribers.len() as u32,
+                streams: super::streams::open_streams(),
                 recent_errors: crate::logging::recent_errors(),
                 running_listen: state.running_listen.clone(),
                 running_p2p: state.p2p.as_ref().is_some_and(|p2p| p2p.enabled()),
