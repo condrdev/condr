@@ -26,6 +26,8 @@ mod ports;
 mod power;
 mod presentation;
 mod preview;
+#[cfg(feature = "test-support")]
+pub(crate) mod screenshots;
 mod server_connection;
 mod server_management;
 mod settings;
