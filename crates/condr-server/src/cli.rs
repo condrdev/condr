@@ -5,6 +5,7 @@
 
 mod agent;
 mod device;
+mod file;
 mod interrupt;
 mod pane;
 mod port;
@@ -27,6 +28,7 @@ use workspace::find_workspace;
 
 pub(crate) use agent::{AgentCommand, run_agent};
 pub(crate) use device::{DeviceCommand, run_device};
+pub(crate) use file::{FileCommand, run_file};
 pub(crate) use pane::{PaneCommand, run_pane};
 pub(crate) use port::{PortCommand, run_port};
 pub(crate) use workspace::{TabCommand, WorkspaceCommand, run_tab, run_workspace};

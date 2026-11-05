@@ -3,7 +3,7 @@
 use super::*;
 use condr_client::{Stream, StreamConnection};
 use condr_core::WorkspaceId;
-use condr_core::protocol::{AgentCommand, STREAM_WINDOW, StreamError, StreamFile, StreamTarget};
+use condr_core::protocol::{STREAM_WINDOW, StreamError, StreamFile, StreamTarget};
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpListener};
 
@@ -27,6 +27,20 @@ fn echo_service() -> u16 {
         }
     });
     port
+}
+
+/// One `Ping` and its `Pong` on a terminal connection: a round trip that starts no
+/// process, so no fork can hold another test's socket open.
+fn ping(stream: &mut EndpointStream, server_id: ServerId, nonce: u64) {
+    condr_core::protocol::write_message(stream, &ClientMessage::Ping { server_id, nonce }).unwrap();
+    loop {
+        match condr_core::protocol::read_message::<_, ServerMessage>(stream).unwrap() {
+            ServerMessage::Pong {
+                nonce: answered, ..
+            } if answered == nonce => return,
+            _ => {}
+        }
+    }
 }
 
 fn read_all(stream: &Stream) -> Vec<u8> {
@@ -125,7 +139,7 @@ fn opens_the_server_cannot_serve_fail_with_their_reason() {
         too_high.opened().unwrap_err().error,
         StreamError::InvalidPort
     );
-    // File transfer arrives with step 4 of ADR 0061's Delivery.
+    // A Workspace that does not exist.
     let download = connection
         .open(StreamTarget::Download(StreamFile {
             workspace: WorkspaceId::from_u64(1),
@@ -134,7 +148,7 @@ fn opens_the_server_cannot_serve_fail_with_their_reason() {
         .unwrap();
     assert_eq!(
         download.opened().unwrap_err().error,
-        StreamError::Unsupported
+        StreamError::WorkspaceGone
     );
     assert!(!connection.is_closed());
     handle.stop();
@@ -216,7 +230,9 @@ fn stalled_streams_leave_the_terminal_connection_answering() {
     });
 
     let (handle, endpoint, thread) = start();
-    let mut terminal = ClientConnection::connect_overview(&endpoint, "terminal").unwrap();
+    let terminal = ClientConnection::connect_overview(&endpoint, "terminal").unwrap();
+    let server_id = terminal.overview().server_id;
+    let mut terminal = terminal.into_stream();
     let (streams, _) = StreamConnection::connect(&endpoint, "streams").unwrap();
     let upload = Arc::new(streams.open(forward(sink_port)).unwrap());
     upload.opened().unwrap();
@@ -235,12 +251,9 @@ fn stalled_streams_leave_the_terminal_connection_answering() {
         "the upload should be waiting for credit"
     );
 
-    for _ in 0..5 {
+    for nonce in 0..5 {
         let started = Instant::now();
-        terminal
-            .agent(AgentCommand::Available)
-            .unwrap()
-            .expect("the Server lists its agents");
+        ping(&mut terminal, server_id, nonce);
         assert!(
             started.elapsed() < Duration::from_secs(2),
             "a request on the terminal connection took {:?}",
@@ -258,4 +271,73 @@ fn stalled_streams_leave_the_terminal_connection_answering() {
     let _ = uploading.join();
     handle.stop();
     thread.join().unwrap().unwrap();
+}
+
+/// Not a gate (ADR 0061): how a 1 GiB download on the Stream connection moves a round
+/// trip on the terminal connection. Loopback has no bottleneck queue, so this shows only
+/// what Condr itself adds. Run with
+/// `cargo test --release -p condr-server --lib terminal_round_trip -- --ignored --nocapture`.
+#[test]
+#[ignore = "benchmark; run in release with --ignored --nocapture"]
+fn terminal_round_trip_with_and_without_a_concurrent_download() {
+    use condr_core::protocol::{LayoutCommand, LayoutResult};
+    let root = std::env::temp_dir().join(format!("condr-bench-{}", unique_suffix()));
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::File::create(root.join("big.bin"))
+        .unwrap()
+        .set_len(1 << 30)
+        .unwrap();
+    let (handle, endpoint, thread) = start();
+    let mut terminal = ClientConnection::connect_overview(&endpoint, "terminal").unwrap();
+    let LayoutResult::WorkspaceCreated { workspace_id, .. } = terminal
+        .layout(LayoutCommand::CreateWorkspace {
+            root_directory: root.clone(),
+            name: None,
+        })
+        .unwrap()
+        .unwrap()
+    else {
+        panic!("expected a Workspace");
+    };
+    let server_id = terminal.overview().server_id;
+    let mut terminal = terminal.into_stream();
+    let mut nonce = 0;
+    let mut measure = |label: &str| {
+        let mut samples: Vec<Duration> = (0..200)
+            .map(|_| {
+                let started = Instant::now();
+                nonce += 1;
+                ping(&mut terminal, server_id, nonce);
+                started.elapsed()
+            })
+            .collect();
+        samples.sort();
+        println!(
+            "{label}: p50 {:?}, p99 {:?}",
+            samples[samples.len() / 2],
+            samples[samples.len() * 99 / 100]
+        );
+    };
+    measure("idle");
+    let (streams, _) = StreamConnection::connect(&endpoint, "streams").unwrap();
+    let destination = root.join("copy.bin");
+    let downloading = thread::spawn(move || {
+        condr_client::download(
+            &streams,
+            StreamFile {
+                workspace: workspace_id,
+                path: "big.bin".into(),
+            },
+            &destination,
+            false,
+            |_, _| {},
+        )
+    });
+    thread::sleep(Duration::from_millis(200));
+    measure("during a 1 GiB download");
+    let bytes = downloading.join().unwrap().unwrap();
+    println!("downloaded {bytes} bytes");
+    handle.stop();
+    thread.join().unwrap().unwrap();
+    std::fs::remove_dir_all(root).unwrap();
 }

@@ -743,6 +743,14 @@ fn relevant_change(entry: &Watched, path: &Path) -> Option<PathBuf> {
         .strip_prefix(&entry.root)
         .or_else(|_| path.strip_prefix(&entry.real_root))
         .ok()?;
+    // An upload's temporary file changes nothing until it is placed (ADR 0061).
+    if relative
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(condr_core::is_transfer_temp)
+    {
+        return None;
+    }
     if relative.starts_with(".git") {
         let inside = relative.strip_prefix(".git").unwrap_or(relative);
         return (!inside.starts_with("objects") && !inside.starts_with("lfs"))

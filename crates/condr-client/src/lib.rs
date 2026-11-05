@@ -14,6 +14,7 @@ pub mod p2p;
 mod remote;
 mod streams;
 mod tcp;
+mod transfer;
 
 pub use connection::{
     Cancellation, ClientConnection, Connector, HANDSHAKE_TIMEOUT, Refused, SLOW_HANDSHAKE_TIMEOUT,
@@ -31,3 +32,4 @@ pub use p2p::{P2pEndpoint, P2pNode, P2pStream};
 pub use remote::{RemoteEndpoint, RemoteStream};
 pub use streams::{Stream, StreamConnection, StreamFailure};
 pub use tcp::{TcpEndpoint, configure_tcp};
+pub use transfer::{download, upload};

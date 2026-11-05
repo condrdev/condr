@@ -238,7 +238,7 @@ pub(super) fn handle_client(
         return;
     }
     if streams {
-        super::streams::serve(stream, &hello.client_name);
+        super::streams::serve(stream, &hello.client_name, Arc::clone(&state));
         return;
     }
     let (server_id, session_id) = {

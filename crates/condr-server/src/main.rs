@@ -57,6 +57,9 @@ enum Command {
     /// Ports of a remote Device, forwarded to this machine (needs `--device`)
     #[command(subcommand)]
     Port(cli::PortCommand),
+    /// Files of a remote Device's Workspaces, downloaded and uploaded (needs `--device`)
+    #[command(subcommand)]
+    File(cli::FileCommand),
     /// Installed into an agent CLI's hooks: reports one lifecycle event to the Pane's
     /// Server (ADR 0014). Inert outside a Condr Pane; always exits 0.
     #[command(hide = true)]
@@ -267,6 +270,7 @@ fn main() {
         Command::Agent(command) => cli::run_agent(device, command),
         Command::Device(command) => cli::run_device(device, command),
         Command::Port(command) => cli::run_port(device, command),
+        Command::File(command) => cli::run_file(device, command),
         Command::AgentHook { agent, event } => {
             condr_core::agent_hook::run(&agent, &event);
             0

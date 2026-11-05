@@ -32,11 +32,15 @@ pub use clone::{
 pub use config::{config_path, read_config_text, read_config_value, update_config_values};
 pub use files::{
     BrowsedDirectory, DirectoryEntry, DirectoryListing, FileContent, FileKind, FileMutation,
-    FileMutationResult, MAX_DIRECTORY_ENTRIES, MAX_FILE_BYTES, MAX_IMAGE_BYTES, file_version,
-    is_image, valid_directory_path,
+    FileMutationResult, MAX_DIRECTORY_ENTRIES, MAX_FILE_BYTES, MAX_IMAGE_BYTES,
+    create_transfer_temp, file_version, is_image, is_transfer_temp, local_name, place_transfer,
+    valid_directory_path, valid_local_name,
 };
 #[cfg(feature = "runtime")]
-pub use files::{browse_directory, list_directory, mutate_file, read_file};
+pub use files::{
+    TransferRefusal, Upload, begin_upload, browse_directory, list_directory, mutate_file,
+    open_download, read_file,
+};
 pub use git::{
     CommitDetails, CommitSummary, DiffHunk, DiffLine, DiffLineKind, FileDiff, FileDiffContent,
     GitChangeEntry, GitChangeStatus, GitChanges, GitDiffStat, GitLog, GitUpstream, HISTORY_PAGE,

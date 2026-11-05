@@ -14,13 +14,17 @@ use crate::valid_diff_path;
 
 #[cfg(feature = "runtime")]
 mod read;
+mod transfer;
 #[cfg(feature = "runtime")]
 mod write;
 
 #[cfg(feature = "runtime")]
 pub use read::{browse_directory, list_directory, read_file};
+pub use transfer::{
+    create_transfer_temp, is_transfer_temp, local_name, place_transfer, valid_local_name,
+};
 #[cfg(feature = "runtime")]
-pub use write::mutate_file;
+pub use write::{TransferRefusal, Upload, begin_upload, mutate_file, open_download};
 
 /// The largest file the Preview Tab shows; larger ones yield a placeholder like a diff.
 pub const MAX_FILE_BYTES: u64 = crate::MAX_DIFF_BYTES;
@@ -152,4 +156,19 @@ pub fn is_image(path: &RelativePath) -> bool {
             .iter()
             .any(|image| extension.eq_ignore_ascii_case(image))
     })
+}
+
+/// No `:`, which names an alternate data stream, no trailing dot or space, which Windows
+/// strips, and no reserved device name, with or without an extension.
+pub(crate) fn valid_windows_name(name: &str) -> bool {
+    const RESERVED: &[&str] = &[
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    ];
+    let stem = name.split('.').next().unwrap_or_default().trim_end();
+    !name.contains([':', '<', '>', '"', '|', '?', '*'])
+        && !name.ends_with(['.', ' '])
+        && !RESERVED
+            .iter()
+            .any(|reserved| stem.eq_ignore_ascii_case(reserved))
 }

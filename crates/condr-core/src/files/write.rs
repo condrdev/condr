@@ -165,21 +165,6 @@ fn check_path(path: &RelativePath) -> Result<(), FileMutationResult> {
     Ok(())
 }
 
-/// No `:`, which names an alternate data stream, no trailing dot or space, which Windows
-/// strips, and no reserved device name, with or without an extension.
-fn valid_windows_name(name: &str) -> bool {
-    const RESERVED: &[&str] = &[
-        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
-        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
-    ];
-    let stem = name.split('.').next().unwrap_or_default().trim_end();
-    !name.contains([':', '<', '>', '"', '|', '?', '*'])
-        && !name.ends_with(['.', ' '])
-        && !RESERVED
-            .iter()
-            .any(|reserved| stem.eq_ignore_ascii_case(reserved))
-}
-
 /// Whether `a` and `b` name one directory entry.
 #[cfg(unix)]
 fn same_entry(a: &Path, b: &Path) -> bool {
@@ -198,9 +183,120 @@ fn same_entry(a: &Path, b: &Path) -> bool {
     matches!((fs::canonicalize(a), fs::canonicalize(b)), (Ok(a), Ok(b)) if a == b)
 }
 
+/// Why a transfer cannot go on, as the Stream connection says it (ADR 0061).
+pub type TransferRefusal = (crate::protocol::StreamError, String);
+
+fn transfer_io(error: io::Error) -> TransferRefusal {
+    use crate::protocol::StreamError;
+    let kind = match error.kind() {
+        io::ErrorKind::NotFound => StreamError::NotFound,
+        io::ErrorKind::AlreadyExists => StreamError::AlreadyExists,
+        _ => StreamError::Io,
+    };
+    (kind, error.to_string())
+}
+
+/// A download's source: `read_file`'s rules, a regular file reached through symlinks.
+pub fn open_download(
+    root: &Path,
+    relative: &RelativePath,
+) -> Result<(fs::File, u64), TransferRefusal> {
+    use crate::protocol::StreamError;
+    if !valid_diff_path(relative) {
+        return Err((StreamError::InvalidPath, "invalid path".into()));
+    }
+    let path = relative.to_path(root);
+    let meta = fs::metadata(&path).map_err(transfer_io)?;
+    if !meta.is_file() {
+        return Err((StreamError::NotAFile, "only files can be downloaded".into()));
+    }
+    let file = fs::File::open(&path).map_err(transfer_io)?;
+    Ok((file, meta.len()))
+}
+
+/// An upload in progress: bytes go to a temporary file beside the target with no lock
+/// held, and only [`Upload::commit`] takes the mutation lock, for the final check and the
+/// placing. Dropped uncommitted, it removes the temporary file and leaves the target.
+pub struct Upload {
+    temp: std::path::PathBuf,
+    target: std::path::PathBuf,
+    file: Option<fs::File>,
+    replace: bool,
+}
+
+/// Starts an upload of `relative` under `root`, under ADR 0045's write rules. A target
+/// that exists is `ALREADY_EXISTS` without `replace`; a symlink is never replaced, since
+/// that would turn the link into a file.
+pub fn begin_upload(
+    root: &Path,
+    relative: &RelativePath,
+    replace: bool,
+) -> Result<Upload, TransferRefusal> {
+    use crate::protocol::StreamError;
+    check_path(relative).map_err(|refusal| match refusal {
+        FileMutationResult::Invalid(reason) => (StreamError::InvalidPath, reason),
+        other => (StreamError::Other, format!("{other:?}")),
+    })?;
+    let target = relative.to_path(root);
+    check_upload_target(&target, replace)?;
+    let (temp, file) = super::create_transfer_temp(&target, "upload").map_err(transfer_io)?;
+    Ok(Upload {
+        temp,
+        target,
+        file: Some(file),
+        replace,
+    })
+}
+
+fn check_upload_target(target: &Path, replace: bool) -> Result<(), TransferRefusal> {
+    use crate::protocol::StreamError;
+    match fs::symlink_metadata(target) {
+        Ok(meta) if meta.file_type().is_symlink() => Err((
+            StreamError::NotAFile,
+            "a symlink is not replaced by an upload".into(),
+        )),
+        Ok(meta) if !meta.is_file() => Err((StreamError::NotAFile, "not a regular file".into())),
+        Ok(_) if !replace => Err((StreamError::AlreadyExists, "already exists".into())),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(transfer_io(error)),
+    }
+}
+
+impl Upload {
+    pub fn write(&mut self, data: &[u8]) -> io::Result<()> {
+        use std::io::Write as _;
+        self.file
+            .as_mut()
+            .expect("an uncommitted upload has its file")
+            .write_all(data)
+    }
+
+    /// Syncs the temporary file and places it under the target's name.
+    pub fn commit(mut self) -> Result<(), TransferRefusal> {
+        let file = self.file.take().expect("an upload commits once");
+        file.sync_all().map_err(transfer_io)?;
+        drop(file);
+        let _serialized = MUTATIONS.lock().unwrap_or_else(PoisonError::into_inner);
+        check_upload_target(&self.target, self.replace)?;
+        super::place_transfer(&self.temp, &self.target, self.replace).map_err(transfer_io)?;
+        self.temp = std::path::PathBuf::new();
+        Ok(())
+    }
+}
+
+impl Drop for Upload {
+    fn drop(&mut self) {
+        if !self.temp.as_os_str().is_empty() {
+            let _ = fs::remove_file(&self.temp);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::valid_windows_name;
+    use relative_path::RelativePath;
 
     #[test]
     fn windows_names_refuse_streams_trailing_dots_and_devices() {
@@ -212,5 +308,77 @@ mod tests {
         for name in ["notes.md", "console", "COM10", ".env", "CONFIG"] {
             assert!(valid_windows_name(name), "{name}");
         }
+    }
+
+    fn workspace(tag: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "condr-upload-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    /// An upload holds no lock while it writes, so Condr's own saves elsewhere go on.
+    #[test]
+    fn an_unfinished_upload_does_not_hold_up_a_save() {
+        let root = workspace("lock");
+        std::fs::write(root.join("notes.md"), "old").unwrap();
+        let mut upload = super::begin_upload(&root, RelativePath::new("big.bin"), false).unwrap();
+        upload.write(b"half").unwrap();
+        let saved = super::mutate_file(
+            &root,
+            &super::FileMutation::Write {
+                path: "notes.md".into(),
+                text: "new".into(),
+                base: None,
+            },
+        );
+        assert!(
+            matches!(saved, super::FileMutationResult::Done { .. }),
+            "{saved:?}"
+        );
+        assert!(
+            !root.join("big.bin").exists(),
+            "nothing under the real name yet"
+        );
+        upload.commit().unwrap();
+        assert_eq!(std::fs::read(root.join("big.bin")).unwrap(), b"half");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_is_never_replaced_and_a_dropped_upload_leaves_nothing() {
+        use crate::protocol::StreamError;
+        let root = workspace("link");
+        std::fs::write(root.join("real.txt"), "real").unwrap();
+        std::os::unix::fs::symlink("real.txt", root.join("link.txt")).unwrap();
+        let refused = super::begin_upload(&root, RelativePath::new("link.txt"), true)
+            .err()
+            .unwrap();
+        assert_eq!(refused.0, StreamError::NotAFile);
+        let refused = super::begin_upload(&root, RelativePath::new("real.txt"), false)
+            .err()
+            .unwrap();
+        assert_eq!(refused.0, StreamError::AlreadyExists);
+        let mut upload = super::begin_upload(&root, RelativePath::new("real.txt"), true).unwrap();
+        upload.write(b"partial").unwrap();
+        drop(upload);
+        assert_eq!(
+            std::fs::read_to_string(root.join("real.txt")).unwrap(),
+            "real"
+        );
+        let left: Vec<_> = std::fs::read_dir(&root)
+            .unwrap()
+            .flatten()
+            .filter(|entry| super::super::is_transfer_temp(&entry.file_name().to_string_lossy()))
+            .collect();
+        assert!(left.is_empty(), "{left:?}");
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
