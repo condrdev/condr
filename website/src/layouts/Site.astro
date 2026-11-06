@@ -1,5 +1,6 @@
 ---
 import '../styles/home.css';
+import { nightly, nightlyBanner } from '../channel';
 
 interface Props {
   title: string;
@@ -20,6 +21,7 @@ const github = 'https://github.com/condrdev/condr';
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&display=swap" />
     <title>{title}</title>
+    {nightly && <meta name="robots" content="noindex" />}
     <script is:inline>
       // The visitor's platform, for the pages that name or reorder downloads by it. iPadOS reports
       // itself as a Mac, so a Mac with touch points is an iPad.
@@ -41,6 +43,7 @@ const github = 'https://github.com/condrdev/condr';
     </script>
   </head>
   <body>
+    {nightly && <p class="nightly-banner" set:html={nightlyBanner.en} />}
     <header class="site-header">
       <div class="shell">
         <a class="brand" href="/" aria-label="Condr home"><img src="/condr.svg" alt="" /><span>Condr</span></a>

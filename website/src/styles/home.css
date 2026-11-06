@@ -23,6 +23,8 @@ code { font-family: var(--mono); font-size: .875em; }
 /* Header */
 /* Header: the old site's frosted glass, values unchanged: a translucent blur with a fine dot grid
    that fades out downward, a hairline and a soft shadow. */
+.nightly-banner { margin: 0; padding: 8px var(--gap); background: var(--accent); color: var(--paper); font-size: 14px; text-align: center; }
+.nightly-banner a { color: inherit; text-decoration: underline; }
 .site-header { position: sticky; top: 0; z-index: 20; isolation: isolate; border-bottom: 1px solid rgba(176, 198, 245, .22); background: rgba(13, 17, 27, .62); -webkit-backdrop-filter: blur(24px) saturate(145%); backdrop-filter: blur(24px) saturate(145%); box-shadow: 0 8px 30px rgba(2, 5, 12, .28); }
 .site-header::before { content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; background-image: radial-gradient(rgba(177, 198, 255, .54) 1px, transparent 1px); background-size: 4px 4px; mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, .5) 62%, transparent 100%); opacity: .22; }
 .site-header .shell { position: relative; z-index: 1; display: flex; align-items: center; justify-content: space-between; height: 62px; }

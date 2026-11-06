@@ -1,14 +1,19 @@
 name: Website
 
-# Builds website/ and uploads it to the Cloudflare Pages project `condr`
-# (a Direct Upload project; it is not connected to GitHub). The install
-# scripts come from script/ and the logo and agent marks from assets/, so
-# changes there also redeploy the site. /download/ links to the files of the
-# Cargo.toml version and /version.txt names it for the install scripts and the
-# GUI's stable update check, so release.yml calls this once that release is
-# published (a Cargo.toml push alone would point at files that do not exist yet).
-# Its Android link names mobile/version.xcconfig's APK, so companion.yml calls it
-# once the Companion's release is published too (ADR 0049).
+# Builds website/ and uploads it to the Cloudflare Pages project `condr` (a Direct
+# Upload project; it is not connected to GitHub). Two sites come out of it:
+#
+# - production, condr.dev: the docs, install scripts and download page of the latest
+#   release, built from its tag. release.yml calls this once a release is published, and
+#   companion.yml once the Companion's is, so the download page links files that exist.
+# - preview, next.condr.pages.dev: main, the nightly's docs, rebuilt on every push that
+#   touches the site; every page says so and asks search engines not to index it.
+#
+# Either way the download page and /version.txt (read by the install scripts and the
+# GUI's stable update check) name the latest published releases, desktop and Companion,
+# not the version files of the ref built. By hand, `gh workflow run website.yml -f
+# target=production -f ref=<branch>` puts a fix to the released docs on condr.dev from a
+# branch cut from the release tag.
 
 on:
   push:
@@ -20,29 +25,68 @@ on:
       - 'script/install-condr.ps1'
       - '.github/workflows/website.yml'
   workflow_dispatch:
+    inputs:
+      target:
+        description: production (condr.dev) or preview (next.condr.pages.dev)
+        type: choice
+        options: [preview, production]
+        default: preview
+      ref:
+        description: What to build; empty is the latest release tag for production, main for preview
+        type: string
+        default: ''
   workflow_call:
+    inputs:
+      target:
+        type: string
+        default: production
 
 permissions:
   contents: read
 
 concurrency:
-  group: website
+  # A preview never cancels a release's deploy, nor the other way round.
+  group: website-${{ inputs.target || 'preview' }}
   cancel-in-progress: true
 
 jobs:
   deploy:
-    name: Build and deploy condr.dev
+    name: Build and deploy ${{ inputs.target || 'preview' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: website
+    env:
+      TARGET: ${{ inputs.target || 'preview' }}
     steps:
-      # main, not the triggering commit: a release tag can be older than the
-      # site on main, and deploying it would roll the site back.
+      - name: Find the latest releases and what to build
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          REF: ${{ inputs.ref }}
+        run: |
+          release=$(gh api "repos/$REPO/releases/latest" --jq .tag_name)
+          companion=$(gh release list --repo "$REPO" --exclude-drafts --limit 100 \
+            --json tagName --jq '[.[].tagName | select(startswith("companion-v"))][0] // ""')
+          if [ -z "$release" ] || [ -z "$companion" ]; then
+            echo "::error::no published desktop or Companion release to name"
+            exit 1
+          fi
+          if [ -n "$REF" ]; then
+            ref=$REF
+          elif [ "$TARGET" = production ]; then
+            ref=$release
+          else
+            ref=main
+          fi
+          echo "Building $ref for $TARGET; releases $release and $companion"
+          {
+            echo "ref=$ref"
+            echo "release=${release#v}"
+            echo "companion=${companion#companion-v}"
+          } >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v7
         with:
-          ref: main
+          ref: ${{ steps.resolve.outputs.ref }}
           persist-credentials: false
       - uses: pnpm/action-setup@v6
         with:
@@ -53,9 +97,18 @@ jobs:
           cache: pnpm
           cache-dependency-path: website/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
+        working-directory: website
       - run: pnpm build
+        working-directory: website
+        env:
+          CONDR_RELEASE_VERSION: ${{ steps.resolve.outputs.release }}
+          CONDR_COMPANION_VERSION: ${{ steps.resolve.outputs.companion }}
+          CONDR_SITE_CHANNEL: ${{ env.TARGET == 'production' && 'release' || 'next' }}
       - name: Deploy to Cloudflare Pages
+        working-directory: website
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: npx --yes wrangler@4 pages deploy dist --project-name condr --branch main --commit-hash "$(git rev-parse HEAD)"
+          # main is the project's production branch; next is the preview's alias.
+          BRANCH: ${{ env.TARGET == 'production' && 'main' || 'next' }}
+        run: npx --yes wrangler@4 pages deploy dist --project-name condr --branch "$BRANCH" --commit-hash "$(git rev-parse HEAD)"
