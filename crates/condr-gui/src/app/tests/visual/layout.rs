@@ -1117,3 +1117,63 @@ fn closing_a_pane_with_a_running_agent_asks_first() {
         "a Pane without an agent closes at once"
     );
 }
+
+/// A Device's heading folds its Workspaces away from the chevron before its name, which
+/// stays to unfold it, and the GUI state remembers the fold.
+#[test]
+fn a_device_folds_its_workspaces_away_and_remembers_it() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                root_directory: std::env::temp_dir(),
+            });
+        });
+    });
+    let mut workspace_id = None;
+    assert!(wait_until(window, |window| {
+        workspace_id = window.read(|app| {
+            let session = view.read(app).active_session()?;
+            session.workspaces().first().map(|workspace| workspace.id())
+        });
+        workspace_id.is_some()
+    }));
+    let row = sidebar_workspace_selector(workspace_id.unwrap());
+    let fold = |window: &mut VisualTestContext| {
+        window.update(|window, cx| _ = window.draw(cx));
+        let chevron = window
+            .debug_bounds("device-fold-1")
+            .expect("the Device heading has a fold chevron");
+        window.simulate_click(chevron.center(), Modifiers::default());
+        window.run_until_parked();
+        window.update(|window, cx| _ = window.draw(cx));
+    };
+    window.update(|window, cx| _ = window.draw(cx));
+    assert!(window.debug_bounds(row).is_some());
+
+    fold(window);
+    assert!(
+        window.debug_bounds(row).is_none(),
+        "folded, its Workspaces hide"
+    );
+    assert!(window.debug_bounds("device-fold-1").is_some());
+    window.read(|app| {
+        let state = view.read(app).collect_state(app);
+        assert!(!state.servers.is_empty());
+        assert!(state.servers.values().all(|server| server.folded));
+    });
+
+    fold(window);
+    assert!(
+        window.debug_bounds(row).is_some(),
+        "unfolded, they are back"
+    );
+    window.read(|app| {
+        let state = view.read(app).collect_state(app);
+        assert!(state.servers.values().all(|server| !server.folded));
+    });
+}

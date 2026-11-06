@@ -9,7 +9,7 @@
 //!
 //! It starts a TCP Server with one Workspace, opens Condr against it, and saves one PNG
 //! per state: the Workspace, the Ports page empty, with forwards, for one Device, and the
-//! right sidebar's transfer strip.
+//! right sidebar's transfer strip, and the left sidebar with its Device folded.
 
 use super::ports::PortsScope;
 use super::*;
@@ -110,6 +110,15 @@ pub(crate) fn run(directory: PathBuf) {
                 .is_some_and(|session| !session.workspaces().is_empty())
     });
     shot(&mut cx, window, &directory, "01-workspace");
+    update(&mut cx, window, &view, |this, _, cx| {
+        this.sidebar_folded_devices.insert(1);
+        cx.notify();
+    });
+    shot(&mut cx, window, &directory, "01b-device-folded");
+    update(&mut cx, window, &view, |this, _, cx| {
+        this.sidebar_folded_devices.remove(&1);
+        cx.notify();
+    });
 
     update(&mut cx, window, &view, |this, window, cx| {
         this.open_ports(PortsScope::All, window, cx)

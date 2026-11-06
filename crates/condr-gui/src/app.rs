@@ -303,6 +303,8 @@ pub(crate) struct Condr {
     /// Whether the transfer strip lists each file.
     transfer_strip_open: bool,
     sidebar_workspace_open: HashMap<(ConnectionKey, WorkspaceId), Entity<bool>>,
+    /// Devices folded in the left sidebar, their Workspaces hidden under the heading.
+    sidebar_folded_devices: HashSet<ConnectionKey>,
     terminal_font: TerminalFont,
     terminal_color_scheme: SharedString,
     /// The Preview Tab's font size; it shares the terminal's font family.
@@ -508,6 +510,7 @@ impl Condr {
             next_transfer_id: 0,
             transfer_strip_open: false,
             sidebar_workspace_open: HashMap::new(),
+            sidebar_folded_devices: HashSet::new(),
             terminal_font,
             terminal_color_scheme,
             code_font_size,

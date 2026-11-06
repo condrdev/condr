@@ -19,6 +19,7 @@ The project list in the sidebar shows each project's status directly:
 
 - **Project name**: the folder name by default. Right-click → **Rename Workspace** to rename it.
 - **Git status**: the second line shows the current branch and how many commits it is ahead of and behind its upstream, for example `main ↑1 ↓2`. Outside a Git repository it shows `no git`.
+- **Fold a device**: hover a device's heading and click the arrow before its name to hide its projects. A folded device counts its Agents by state beside its name, stays folded after a restart, and lights up while the project you are looking at is inside it.
 
 ## Split and organize the terminal view
 

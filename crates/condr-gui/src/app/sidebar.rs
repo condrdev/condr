@@ -16,18 +16,7 @@ fn workspace_suffix(
     upstream: Option<&[UpstreamCount]>,
     cx: &App,
 ) -> AnyElement {
-    let states = h_flex()
-        .items_center()
-        .gap_x_1p5()
-        .text_xs()
-        .text_color(cx.theme().muted_foreground)
-        .children(summary.iter().map(|(status, count)| {
-            h_flex()
-                .items_center()
-                .gap_x_0p5()
-                .children(status_badge(status.glyph, status.tone, cx))
-                .child(count.to_string())
-        }));
+    let states = status_counts(summary, cx);
     v_flex()
         .items_end()
         .justify_center()
@@ -40,6 +29,22 @@ fn workspace_suffix(
                 .children(upstream.map(|counts| upstream_label(counts, cx))),
         )
         .into_any_element()
+}
+
+/// Agents counted by state, `✓2 ◐1`: a folded Workspace's or a folded Device's.
+fn status_counts(summary: &[(SidebarStatusVisual, usize)], cx: &App) -> Div {
+    h_flex()
+        .items_center()
+        .gap_x_1p5()
+        .text_xs()
+        .text_color(cx.theme().muted_foreground)
+        .children(summary.iter().map(|(status, count)| {
+            h_flex()
+                .items_center()
+                .gap_x_0p5()
+                .children(status_badge(status.glyph, status.tone, cx))
+                .child(count.to_string())
+        }))
 }
 
 /// `↑2` or `↓1` against the upstream, in the tone it shows in.
@@ -476,6 +481,32 @@ impl Condr {
                 let new_workspace_label = connection.label.clone();
                 let descendant_selected =
                     workspaces.iter().any(CondrSidebarTreeItem::subtree_active);
+                let folded = self.sidebar_folded_devices.contains(&key);
+                // Folded, the heading counts what its Workspaces' rows would show.
+                let device_summary = if folded {
+                    let statuses = connection
+                        .presented_session()
+                        .into_iter()
+                        .flat_map(|session| session.workspaces())
+                        .filter(|workspace| scope.lists_workspace(key, workspace.id()))
+                        .flat_map(|workspace| workspace.tabs())
+                        .flat_map(|tab| tab.panes())
+                        .filter_map(|pane| {
+                            let pane_id = pane.id();
+                            connection.model.agents.get(&pane_id)?;
+                            let state = connection.model.agent_display_state(pane_id)?;
+                            Some(if connection.model.attention.contains(&pane_id) {
+                                BELL_SIDEBAR_STATUS
+                            } else {
+                                agent_sidebar_status(state)
+                            })
+                        })
+                        .collect::<Vec<_>>();
+                    agent_status_summary(statuses)
+                } else {
+                    Vec::new()
+                };
+                let fold_owner = owner.clone();
                 CondrSidebarSection::new(
                     connection.label.clone(),
                     format!("server-heading-{key}"),
@@ -574,7 +605,18 @@ impl Condr {
                     },
                     workspaces,
                 )
-                .active(active_server && !descendant_selected)
+                .foldable(folded, format!("device-fold-{key}"), move |_, _, cx| {
+                    let _ = fold_owner.update(cx, |this, cx| {
+                        if !this.sidebar_folded_devices.remove(&key) {
+                            this.sidebar_folded_devices.insert(key);
+                        }
+                        this.schedule_state_save(cx);
+                        cx.notify();
+                    });
+                })
+                .summary(device_summary)
+                // Folded, the heading is the only sign that the shown Workspace is here.
+                .active(active_server && (folded || !descendant_selected))
                 .draggable(DraggedServer {
                     key,
                     name: connection.label.clone().into(),

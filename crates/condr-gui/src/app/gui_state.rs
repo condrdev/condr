@@ -67,6 +67,8 @@ pub(super) enum SavedScope {
 pub(super) struct ServerState {
     pub view_workspace: Option<WorkspaceId>,
     pub workspaces: HashMap<WorkspaceId, WorkspaceState>,
+    /// Folded in the left sidebar, its Workspaces hidden.
+    pub folded: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -334,6 +336,8 @@ mod wire {
         view_workspace: Option<u64>,
         #[prost(map = "uint64, message", tag = "2")]
         workspaces: HashMap<u64, Workspace>,
+        #[prost(bool, tag = "3")]
+        folded: bool,
     }
 
     /// `sidebar_view` 1 Changes, 2 Files, 3 History.
@@ -403,6 +407,7 @@ mod wire {
                         let server_state = Server {
                             view_workspace: state.view_workspace.map(WorkspaceId::as_u64),
                             workspaces,
+                            folded: state.folded,
                         };
                         (server.0, server_state)
                     })
@@ -464,6 +469,7 @@ mod wire {
                         let server_state = super::ServerState {
                             view_workspace: state.view_workspace.map(WorkspaceId::from_u64),
                             workspaces,
+                            folded: state.folded,
                         };
                         (ServerId(server), server_state)
                     })
@@ -575,6 +581,7 @@ impl Condr {
                 ServerState {
                     view_workspace: connection.view_workspace,
                     workspaces,
+                    folded: self.sidebar_folded_devices.contains(&key),
                 },
             );
         }
@@ -613,6 +620,9 @@ impl Condr {
         let Some(saved) = self.restored_state.servers.get(&server_id).cloned() else {
             return;
         };
+        if saved.folded {
+            self.sidebar_folded_devices.insert(key);
+        }
         let mut view_tabs = Vec::new();
         for workspace in session.workspaces() {
             let workspace_id = workspace.id();
@@ -772,6 +782,7 @@ mod tests {
             ServerState {
                 view_workspace: Some(WorkspaceId::from_u64(3)),
                 workspaces,
+                folded: true,
             },
         );
         let bytes = state.to_bytes().unwrap();

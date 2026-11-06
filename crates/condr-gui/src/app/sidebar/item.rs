@@ -445,6 +445,10 @@ pub(in crate::app) struct CondrSidebarSection {
     pub(super) on_drop: Option<SidebarServerDropHandler>,
     pub(super) drop_indicator: Option<bool>,
     pub(super) on_drop_move: Option<SidebarDropMoveHandler>,
+    /// Whether the heading folds its items away, and the handler that flips it.
+    pub(super) fold: Option<(bool, SharedString, SidebarClickHandler)>,
+    /// Shown beside the label while folded: the hidden agents counted by state.
+    pub(super) summary: Vec<(SidebarStatusVisual, usize)>,
 }
 
 impl CondrSidebarSection {
@@ -467,7 +471,26 @@ impl CondrSidebarSection {
             on_drop: None,
             drop_indicator: None,
             on_drop_move: None,
+            fold: None,
+            summary: Vec::new(),
         }
+    }
+
+    /// A chevron before the label folds the items away; it shows while the heading is
+    /// hovered, and always once folded, so a folded section reads as one.
+    pub(in crate::app) fn foldable(
+        mut self,
+        folded: bool,
+        selector: impl Into<SharedString>,
+        on_toggle: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.fold = Some((folded, selector.into(), Rc::new(on_toggle)));
+        self
+    }
+
+    pub(in crate::app) fn summary(mut self, summary: Vec<(SidebarStatusVisual, usize)>) -> Self {
+        self.summary = summary;
+        self
     }
 
     pub(in crate::app) fn draggable(mut self, drag: DraggedServer) -> Self {
@@ -537,11 +560,47 @@ impl SidebarItem for CondrSidebarSection {
         let heading_row_debug_selector =
             SharedString::from(format!("{}-row", self.heading_selector));
         let heading_debug_selector = self.heading_selector.clone();
-        let rendered_items = self
-            .items
-            .into_iter()
-            .map(|item| item.render(window, cx))
-            .collect::<Vec<_>>();
+        let group = self.heading_selector.clone();
+        let folded = self.fold.as_ref().is_some_and(|(folded, ..)| *folded);
+        let rendered_items = if folded {
+            Vec::new()
+        } else {
+            self.items
+                .into_iter()
+                .map(|item| item.render(window, cx))
+                .collect::<Vec<_>>()
+        };
+        let label = self.label.clone();
+        let chevron = self.fold.map(|(folded, selector, on_toggle)| {
+            let debug_selector = selector.clone();
+            let button = Button::new(ElementId::Name(selector))
+                .debug_selector(move || debug_selector.to_string())
+                .xsmall()
+                .ghost()
+                .icon(
+                    Icon::new(IconName::ChevronRight)
+                        .size_3p5()
+                        .when(!folded, |icon| icon.rotate(percentage(90. / 360.))),
+                )
+                .tooltip(if folded {
+                    format!("Expand {label}")
+                } else {
+                    format!("Collapse {label}")
+                })
+                .on_click(move |event, window, cx| {
+                    cx.stop_propagation();
+                    on_toggle(event, window, cx);
+                });
+            div()
+                .flex_none()
+                .when(!folded, |this| {
+                    this.opacity(0.)
+                        .group_hover(group.clone(), |style| style.opacity(1.))
+                })
+                .child(button)
+        });
+        let summary = (folded && !self.summary.is_empty())
+            .then(|| super::status_counts(&self.summary, cx).font_normal());
 
         let heading = h_flex()
             .id(self.heading_selector)
@@ -560,10 +619,19 @@ impl SidebarItem for CondrSidebarSection {
             .when(self.active, |this| {
                 this.text_color(cx.theme().sidebar_foreground)
             })
+            .group(group.clone())
             .child(
-                div()
-                    .debug_selector(move || heading_debug_selector.to_string())
-                    .child(self.label),
+                h_flex()
+                    .min_w_0()
+                    .items_center()
+                    .gap_1()
+                    .children(chevron)
+                    .child(
+                        div()
+                            .debug_selector(move || heading_debug_selector.to_string())
+                            .child(self.label),
+                    )
+                    .children(summary),
             )
             .child((self.action)(window, cx))
             .when_some(self.on_click, |this, handler| {
