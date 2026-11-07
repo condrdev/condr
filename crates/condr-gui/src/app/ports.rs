@@ -133,8 +133,8 @@ impl Condr {
         cx: &mut Context<Self>,
     ) {
         if self.ports_form.is_none() {
-            let port = cx.new(|cx| InputState::new(window, cx).placeholder("Port"));
-            let local = cx.new(|cx| InputState::new(window, cx).placeholder("Local (same)"));
+            let port = cx.new(|cx| InputState::new(window, cx).placeholder("e.g. 3000"));
+            let local = cx.new(|cx| InputState::new(window, cx).placeholder("Same"));
             for input in [&port, &local] {
                 cx.subscribe(input, |this, _, event: &InputEvent, cx| {
                     if matches!(event, InputEvent::Change)
@@ -185,7 +185,7 @@ impl Condr {
 
     pub(super) fn submit_forward(
         &mut self,
-        scope: PortsScope,
+        key: ConnectionKey,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -195,10 +195,6 @@ impl Condr {
         if form.pending {
             return;
         }
-        let key = match scope {
-            PortsScope::Device(key) => Some(key),
-            PortsScope::All => form.device,
-        };
         let port_text = form.port.read(cx).value().trim().to_owned();
         let local_text = form.local.read(cx).value().trim().to_owned();
         let parse = |text: &str| text.parse::<u16>().ok().filter(|port| *port != 0);
@@ -207,9 +203,6 @@ impl Condr {
                 form.error = Some(error);
             }
             cx.notify();
-        };
-        let Some(key) = key else {
-            return refuse(self, "Choose a Device".into(), cx);
         };
         let Some(remote) = parse(&port_text) else {
             return refuse(self, "Enter a port from 1 to 65535".into(), cx);
@@ -407,7 +400,14 @@ impl Condr {
             .min_w_0()
             .gap_3()
             .p_4()
-            .child(self.render_ports_form(scope, &devices, cx));
+            .child(self.render_ports_form(scope, &devices, cx))
+            .child(
+                div()
+                    .pt_3()
+                    .text_sm()
+                    .font_medium()
+                    .child("Forwarded Ports"),
+            );
         let mut any = false;
         for key in &shown {
             let Some(connection) = self.connection(*key) else {
@@ -493,68 +493,109 @@ impl Condr {
             return div().into_any_element();
         };
         let muted = cx.theme().muted_foreground;
-        let mut choice = h_flex().gap_1().flex_wrap();
-        if scope == PortsScope::All {
-            let chosen = form.device.or_else(|| devices.first().copied());
-            for key in devices {
-                let Some(connection) = self.connection(*key) else {
-                    continue;
-                };
-                let key = *key;
-                let owner = cx.weak_entity();
-                let button = Button::new(("ports-device", key))
-                    .small()
-                    .label(connection.label.clone())
-                    .on_click(move |_, _, cx| {
-                        let _ = owner.update(cx, |this, cx| {
-                            if let Some(form) = this.ports_form.as_mut() {
-                                form.device = Some(key);
-                            }
-                            cx.notify();
-                        });
-                    });
-                choice = choice.child(if chosen == Some(key) {
-                    button.primary()
-                } else {
-                    button.ghost()
-                });
-            }
-        }
-        let submit_scope = match scope {
+        let heading =
+            v_flex()
+                .gap_0p5()
+                .child(div().text_sm().font_medium().child("Forward a Port"))
+                .child(div().text_sm().text_color(muted).child(
+                    "Reach a service running on a remote Device at localhost on this machine.",
+                ));
+        let device = match scope {
+            PortsScope::Device(key) => Some(key),
+            // A choice since removed falls back, to a Device that can forward now first.
             PortsScope::All => form
                 .device
-                .or_else(|| devices.first().copied())
-                .map_or(PortsScope::All, PortsScope::Device),
-            device => device,
+                .filter(|key| devices.contains(key))
+                .or_else(|| {
+                    devices.iter().copied().find(|key| {
+                        self.connection(*key).is_some_and(|connection| {
+                            connection.status == ConnectionStatus::Connected
+                        })
+                    })
+                })
+                .or_else(|| devices.first().copied()),
         };
-        let owner = cx.weak_entity();
-        v_flex()
-            .gap_2()
-            .when(scope == PortsScope::All && devices.is_empty(), |form| {
-                form.child(
+        let Some((key, device_label)) =
+            device.and_then(|key| Some((key, self.connection(key)?.label.clone())))
+        else {
+            return v_flex()
+                .gap_3()
+                .child(heading)
+                .child(
                     div()
                         .text_sm()
                         .text_color(muted)
                         .child("Connect a remote Device to forward its ports."),
                 )
-            })
-            .when(scope == PortsScope::All && !devices.is_empty(), |column| {
-                column.child(choice)
-            })
+                .into_any_element();
+        };
+        let field = |label: String, control: AnyElement| {
+            v_flex()
+                .gap_1()
+                .child(div().text_sm().text_color(muted).child(label))
+                .child(control)
+        };
+        // One remote Device needs no choosing: the port's label names it.
+        let chooser = (scope == PortsScope::All && devices.len() > 1).then(|| {
+            let options: Vec<(ConnectionKey, String)> = devices
+                .iter()
+                .filter_map(|key| Some((*key, self.connection(*key)?.label.clone())))
+                .collect();
+            let owner = cx.weak_entity();
+            let button = Button::new("ports-device")
+                .debug_selector(|| "ports-device".into())
+                .small()
+                .label(device_label.clone())
+                .dropdown_caret(true)
+                .dropdown_menu(move |menu, _, _| {
+                    options.iter().fold(menu, |menu, (option, name)| {
+                        let (owner, option) = (owner.clone(), *option);
+                        menu.item(
+                            PopupMenuItem::new(name.clone())
+                                .checked(option == key)
+                                .on_click(move |_, _, cx| {
+                                    let _ = owner.update(cx, |this, cx| {
+                                        if let Some(form) = this.ports_form.as_mut() {
+                                            form.device = Some(option);
+                                        }
+                                        cx.notify();
+                                    });
+                                }),
+                        )
+                    })
+                });
+            field("Device".into(), button.into_any_element())
+        });
+        let owner = cx.weak_entity();
+        v_flex()
+            .gap_3()
+            .child(heading)
             .child(
                 h_flex()
                     .gap_2()
-                    .items_center()
-                    .child(
+                    .items_end()
+                    .children(chooser)
+                    .child(field(
+                        format!("Port on {device_label}"),
                         div()
                             .w(PORT_FIELD_WIDTH)
-                            .child(Input::new(&form.port).small()),
-                    )
+                            .child(Input::new(&form.port).small())
+                            .into_any_element(),
+                    ))
+                    // The direction a forward runs: the Device's port opens here.
                     .child(
+                        h_flex()
+                            .h_6()
+                            .items_center()
+                            .child(Icon::new(IconName::ArrowRight).size_4().text_color(muted)),
+                    )
+                    .child(field(
+                        "Port on this machine".into(),
                         div()
                             .w(PORT_FIELD_WIDTH)
-                            .child(Input::new(&form.local).small()),
-                    )
+                            .child(Input::new(&form.local).small())
+                            .into_any_element(),
+                    ))
                     .child(
                         Button::new("forward-port")
                             .debug_selector(|| "forward-port".into())
@@ -563,9 +604,8 @@ impl Condr {
                             .label("Forward")
                             .loading(form.pending)
                             .on_click(move |_, window, cx| {
-                                let _ = owner.update(cx, |this, cx| {
-                                    this.submit_forward(submit_scope, window, cx)
-                                });
+                                let _ = owner
+                                    .update(cx, |this, cx| this.submit_forward(key, window, cx));
                             }),
                     ),
             )

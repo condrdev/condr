@@ -58,6 +58,8 @@ fn the_ports_page_forwards_a_devices_port_and_stops_it() {
     window.update(|window, cx| _ = window.draw(cx));
     assert!(window.debug_bounds("ports-page").is_some());
     assert!(window.debug_bounds("condr-right-sidebar").is_none());
+    // The only remote Device needs no choosing.
+    assert!(window.debug_bounds("ports-device").is_none());
     window.read(|app| {
         let view = view.read(app);
         assert!(
@@ -140,11 +142,7 @@ fn a_forward_survives_a_reconnect_and_disconnect_ends_it() {
             this.fill_ports_form(&remote.to_string(), "", window, cx);
         })
     });
-    window.update(|window, cx| {
-        view.update(cx, |this, cx| {
-            this.submit_forward(PortsScope::Device(1), window, cx)
-        })
-    });
+    window.update(|window, cx| view.update(cx, |this, cx| this.submit_forward(1, window, cx)));
     assert!(wait_until(window, |window| {
         window.read(|app| !view.read(app).forward_local_ports(1).is_empty())
     }));

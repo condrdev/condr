@@ -130,7 +130,7 @@ pub(crate) fn run(directory: PathBuf) {
             this.fill_ports_form(&port, "", window, cx);
         });
         update(&mut cx, window, &view, |this, window, cx| {
-            this.submit_forward(PortsScope::Device(1), window, cx)
+            this.submit_forward(1, window, cx)
         });
         wait(&mut cx, "the forward started", |app| {
             view.read(app).forward_local_ports(1).len() == expected
