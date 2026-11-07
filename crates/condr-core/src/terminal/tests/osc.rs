@@ -107,6 +107,66 @@ fn agent_events_and_program_reports_are_queued_and_the_query_answered_first() {
     );
 }
 
+/// `condr agent-hook` writes to the terminal the agent draws on, so its event can land
+/// between the bytes of one of the agent's characters or inside one of its escape
+/// sequences, however the PTY reader then cuts the stream; the agent's output must show
+/// as if the event had not been there (ADR 0051).
+#[test]
+fn a_hook_event_inside_the_agents_output_leaves_that_output_whole() {
+    let started = AgentEvent::new(AgentKind::Claude, AgentEventKind::SessionStart, None, None);
+    let asked = AgentEvent::new(AgentKind::Claude, AgentEventKind::QuestionAsked, None, None);
+    // "─" cut after its second byte, then a cursor move `ESC [ 3 C` cut before its `C`.
+    let mut stream = b"\xe2\x94".to_vec();
+    stream.extend(started.encode());
+    stream.extend_from_slice(b"\x80\x1b[3");
+    stream.extend(asked.encode());
+    stream.extend_from_slice(b"Cx");
+    let size = TerminalSize::new(4, 20);
+    for cut in 0..=stream.len() {
+        let mut vt = Vt::new(size).unwrap();
+        let notices = SharedTerminalNotices::default();
+        let reported = Mutex::new(ReportedCwd::default());
+        for read in [&stream[..cut], &stream[cut..]] {
+            apply_terminal_events(vt.write(read), &notices, &reported);
+        }
+        assert_eq!(vt.visible_text(size), "─   x", "read cut at byte {cut}");
+        assert_eq!(
+            notices.lock().unwrap().agent_events,
+            [
+                AgentNotice::Hook(started.clone()),
+                AgentNotice::Hook(asked.clone())
+            ],
+            "read cut at byte {cut}"
+        );
+    }
+}
+
+/// Only a whole event of the hook's is cut out; anything else stays the library's, so
+/// output is never held back longer than an event can be.
+#[test]
+fn only_a_whole_hook_event_is_cut_out() {
+    let opener = format!("\x1b]{AGENT_EVENT_OSC_PREFIX}");
+    let event = format!("x{opener}{{}}\x1b\\y");
+    assert_eq!(
+        next_hook_cut(event.as_bytes()),
+        Some(HookCut::Event {
+            start: 1,
+            body: opener.len() + 1..opener.len() + 3,
+            end: event.len() - 1,
+        })
+    );
+    assert_eq!(
+        next_hook_cut(format!("x{opener}{{").as_bytes()),
+        Some(HookCut::Open(1))
+    );
+    assert_eq!(next_hook_cut(b"x\x1b]77"), Some(HookCut::Open(1)));
+    // Longer than any event the hook writes, or ended by another escape: not one.
+    let long = format!("{opener}{}", "a".repeat(MAX_AGENT_EVENT_BYTES));
+    assert_eq!(next_hook_cut(long.as_bytes()), None);
+    assert_eq!(next_hook_cut(format!("{opener}{{\x1b[m").as_bytes()), None);
+    assert_eq!(next_hook_cut(b"\x1b]777;notify;elsewhere;{}\x07"), None);
+}
+
 #[test]
 fn prompt_starts_and_resets_only_reach_an_agent_that_reports_program_status() {
     let (_, notices, _) = applied(b"\x1b]0;title\x07\x1b]133;A;cl=m\x07\x1bc");

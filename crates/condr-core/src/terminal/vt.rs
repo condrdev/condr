@@ -70,6 +70,67 @@ pub(super) struct Vt {
     pub(super) held_since: Option<Instant>,
     /// The library's activity token at the last idle check.
     compression_seen: Option<u64>,
+    /// The start of a hook event that the last read ended inside, kept for the next.
+    hook_held: Vec<u8>,
+}
+
+/// Where the next event `condr agent-hook` wrote is in `bytes`.
+#[derive(Debug, PartialEq)]
+pub(super) enum HookCut {
+    /// `ESC ] 777;notify;condr://agent; body` ending in BEL or ST, its body at `body`.
+    Event {
+        start: usize,
+        body: std::ops::Range<usize>,
+        end: usize,
+    },
+    /// `bytes[start..]` may begin one; the next read tells.
+    Open(usize),
+}
+
+/// The hook writes to the terminal the agent draws on, from another process, so its
+/// event can land between the bytes of one of the agent's characters or inside one of
+/// its escape sequences. Cut out ahead of the library, the agent's bytes join again.
+pub(super) fn next_hook_cut(bytes: &[u8]) -> Option<HookCut> {
+    let opener = || b"\x1b]".iter().chain(AGENT_EVENT_OSC_PREFIX.as_bytes());
+    let opener_len = 2 + AGENT_EVENT_OSC_PREFIX.len();
+    let mut from = 0;
+    while let Some(offset) = bytes[from..].iter().position(|byte| *byte == 0x1b) {
+        let start = from + offset;
+        from = start + 1;
+        let rest = &bytes[start..];
+        if !rest
+            .iter()
+            .zip(opener())
+            .all(|(byte, expected)| byte == expected)
+        {
+            continue;
+        }
+        if rest.len() < opener_len {
+            return Some(HookCut::Open(start));
+        }
+        // An event is never longer than this; a longer sequence is someone else's.
+        let window = &rest[opener_len..rest.len().min(MAX_AGENT_EVENT_BYTES)];
+        let Some(at) = window.iter().position(|byte| matches!(byte, 0x07 | 0x1b)) else {
+            if rest.len() < MAX_AGENT_EVENT_BYTES {
+                return Some(HookCut::Open(start));
+            }
+            continue;
+        };
+        let at = start + opener_len + at;
+        let end = match (bytes[at], bytes.get(at + 1)) {
+            (0x07, _) => at + 1,
+            (_, Some(b'\\')) => at + 2,
+            (_, None) => return Some(HookCut::Open(start)),
+            // An escape inside it ends it unfinished: the library drops it, as before.
+            (_, Some(_)) => continue,
+        };
+        return Some(HookCut::Event {
+            start,
+            body: start + opener_len..at,
+            end,
+        });
+    }
+    None
 }
 
 fn vt_colors(colors: &TerminalColors) -> ghostty::Colors {
@@ -110,13 +171,56 @@ impl Vt {
             mouse,
             held_since: None,
             compression_seen: None,
+            hook_held: Vec::new(),
         })
     }
 
     /// Parses program output and returns what the program reported meanwhile, a
-    /// synchronized update's start and end kept here.
+    /// synchronized update's start and end kept here. Condr's own hook events are cut
+    /// out first (see [`next_hook_cut`]) and reported where they stood.
     pub(super) fn write(&mut self, bytes: &[u8]) -> Vec<Event> {
-        let events = self.terminal.write(bytes);
+        let joined;
+        let mut rest = if self.hook_held.is_empty() {
+            bytes
+        } else {
+            let mut held = std::mem::take(&mut self.hook_held);
+            held.extend_from_slice(bytes);
+            joined = held;
+            &joined
+        };
+        let mut events = Vec::new();
+        let parse = |terminal: &mut ghostty::Terminal, output: &[u8]| {
+            if output.is_empty() {
+                Vec::new()
+            } else {
+                terminal.write(output)
+            }
+        };
+        loop {
+            match next_hook_cut(rest) {
+                None => {
+                    events.extend(parse(&mut self.terminal, rest));
+                    break;
+                }
+                Some(HookCut::Open(start)) => {
+                    events.extend(parse(&mut self.terminal, &rest[..start]));
+                    self.hook_held = rest[start..].to_vec();
+                    break;
+                }
+                Some(HookCut::Event { start, body, end }) => {
+                    events.extend(parse(&mut self.terminal, &rest[..start]));
+                    // As the library reports any OSC 777, which notices.rs reads it from.
+                    let title = AGENT_EVENT_OSC_PREFIX
+                        .trim_start_matches("777;notify;")
+                        .trim_end_matches(';');
+                    events.push(Event::Notification {
+                        title: title.to_owned(),
+                        body: String::from_utf8_lossy(&rest[body]).into_owned(),
+                    });
+                    rest = &rest[end..];
+                }
+            }
+        }
         self.keep_holds(events)
     }
 

@@ -30,7 +30,7 @@ use std::time::{Duration, Instant};
 pub(crate) use detector::AGENT_POLL_INTERVAL;
 pub use detector::{AgentDetector, AgentPublish, ProcessProbeResult};
 #[cfg(feature = "runtime")]
-pub(crate) use event::AGENT_EVENT_OSC_PREFIX;
+pub(crate) use event::{AGENT_EVENT_OSC_PREFIX, MAX_AGENT_EVENT_BYTES};
 pub use event::{AgentEvent, AgentEventKind};
 #[cfg(feature = "runtime")]
 pub(crate) use process::is_shell;

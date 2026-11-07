@@ -18,10 +18,12 @@ pub(super) use super::shell::shell_command;
 pub(super) use super::view::blank_cell;
 pub(super) use super::view::publish_view;
 pub(super) use super::view_source::TerminalDamageBaseline;
+#[cfg(test)]
+pub(super) use super::vt::{HookCut, next_hook_cut};
 pub(super) use super::vt::{MAX_MOUSE_WHEEL_STEPS, TermMode, Vt};
 pub(super) use crate::agent::{
     AGENT_EVENT_OSC_PREFIX, AGENT_POLL_INTERVAL, AgentDetector, AgentEvent, AgentPublish,
-    ProcessInfo, ProcessProbeResult, ProgramStatus, identify_agent_process,
+    MAX_AGENT_EVENT_BYTES, ProcessInfo, ProcessProbeResult, ProgramStatus, identify_agent_process,
 };
 pub(super) use crate::{AgentKind, AgentSnapshot, PaneId};
 #[cfg(unix)]
