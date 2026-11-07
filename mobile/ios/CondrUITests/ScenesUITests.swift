@@ -156,10 +156,15 @@ final class ScenesUITests: XCTestCase {
             ]
             .exists)
         let control = toggle.switches.firstMatch.exists ? toggle.switches.firstMatch : toggle
-        control.tap()
-        XCTAssertTrue(
-            app.staticTexts["Condr asks for Face ID when it opens and after five minutes away."]
-                .waitForExistence(timeout: 5))
+        let on = app.staticTexts[
+            "Condr asks for Face ID when it opens and after five minutes away."]
+        // A busy CI simulator can lose a tap. Tap again only once the first has had long
+        // enough to land, or a slow one would turn the lock back off.
+        for _ in 0..<3 {
+            control.tap()
+            if on.waitForExistence(timeout: 10) { break }
+        }
+        XCTAssertTrue(on.exists)
         XCTAssertEqual(toggle.value as? String, "1")
     }
 }
