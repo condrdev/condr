@@ -31,6 +31,18 @@ fn workspace_suffix(
         .into_any_element()
 }
 
+/// How a Pane's agent shows in the sidebar, the bell over its state while it wants a
+/// person; `None` when the Pane runs no agent.
+fn pane_sidebar_status(model: &SessionModel, pane_id: PaneId) -> Option<SidebarStatusVisual> {
+    model.agents.get(&pane_id)?;
+    let state = model.agent_display_state(pane_id)?;
+    Some(if model.attention.contains(&pane_id) {
+        BELL_SIDEBAR_STATUS
+    } else {
+        agent_sidebar_status(state)
+    })
+}
+
 /// Agents counted by state, `✓2 ◐1`: a folded Workspace's or a folded Device's.
 fn status_counts(summary: &[(SidebarStatusVisual, usize)], cx: &App) -> Div {
     h_flex()
@@ -210,14 +222,8 @@ impl Condr {
                                     .filter_map(|pane| {
                                         let pane_id = pane.id();
                                         let agent = connection.model.agents.get(&pane_id)?;
-                                        let state =
-                                            connection.model.agent_display_state(pane_id)?;
                                         let status =
-                                            if connection.model.attention.contains(&pane_id) {
-                                                BELL_SIDEBAR_STATUS
-                                            } else {
-                                                agent_sidebar_status(state)
-                                            };
+                                            pane_sidebar_status(&connection.model, pane_id)?;
                                         statuses.push(status);
                                         let agent_label = agent.kind.label();
                                         // The Pane's title is what the agent is doing; the
@@ -354,6 +360,7 @@ impl Condr {
                                     let remove_name = workspace_name.clone();
                                     let menu = menu.item(
                                         PopupMenuItem::new("Rename Workspace")
+                                            .icon(Glyph::Pencil)
                                             .disabled(!connected)
                                             .on_click(move |_, window, cx| {
                                                 let name = rename_name.clone();
@@ -373,6 +380,7 @@ impl Condr {
                                             menu.separator()
                                         .item(
                                             PopupMenuItem::new("Create Worktree")
+.icon(Glyph::GitBranchPlus)
                                                 .disabled(!connected)
                                                 .on_click(move |_, window, cx| {
                                                     let name = create_name.clone();
@@ -389,6 +397,7 @@ impl Condr {
                                         )
                                         .item(
                                             PopupMenuItem::new("Open Existing Worktree")
+.icon(Glyph::FolderGit2)
                                                 .disabled(!connected)
                                                 .on_click(move |_, window, cx| {
                                                     let name = open_name.clone();
@@ -409,6 +418,7 @@ impl Condr {
                                     let menu = if managed_worktree {
                                         menu.separator().item(
                                             PopupMenuItem::new("Remove Worktree")
+                                                .icon(Glyph::GitBranchMinus)
                                                 .disabled(!connected)
                                                 .on_click(move |_, window, cx| {
                                                     let name = remove_name.clone();
@@ -426,20 +436,23 @@ impl Condr {
                                     } else {
                                         menu
                                     };
-                                    menu.item(PopupMenuItem::new("Open in New Window").on_click(
-                                        move |_, window, cx| {
-                                            let _ = detach_owner.update(cx, |this, cx| {
-                                                this.open_in_new_window(
-                                                    WindowScope::Workspace(key, workspace_id),
-                                                    window,
-                                                    cx,
-                                                )
-                                            });
-                                        },
-                                    ))
+                                    menu.item(
+                                        PopupMenuItem::new("Open in New Window")
+                                            .icon(Glyph::AppWindow)
+                                            .on_click(move |_, window, cx| {
+                                                let _ = detach_owner.update(cx, |this, cx| {
+                                                    this.open_in_new_window(
+                                                        WindowScope::Workspace(key, workspace_id),
+                                                        window,
+                                                        cx,
+                                                    )
+                                                });
+                                            }),
+                                    )
                                     .separator()
                                     .item(
                                         PopupMenuItem::new("Close Workspace")
+                                            .icon(IconName::Close)
                                             .disabled(!connected)
                                             .on_click(move |_, window, cx| {
                                                 let _ = close_owner.update(cx, |this, cx| {
@@ -491,16 +504,7 @@ impl Condr {
                         .filter(|workspace| scope.lists_workspace(key, workspace.id()))
                         .flat_map(|workspace| workspace.tabs())
                         .flat_map(|tab| tab.panes())
-                        .filter_map(|pane| {
-                            let pane_id = pane.id();
-                            connection.model.agents.get(&pane_id)?;
-                            let state = connection.model.agent_display_state(pane_id)?;
-                            Some(if connection.model.attention.contains(&pane_id) {
-                                BELL_SIDEBAR_STATUS
-                            } else {
-                                agent_sidebar_status(state)
-                            })
-                        })
+                        .filter_map(|pane| pane_sidebar_status(&connection.model, pane.id()))
                         .collect::<Vec<_>>();
                     agent_status_summary(statuses)
                 } else {
@@ -644,24 +648,28 @@ impl Condr {
                     let delete_owner = server_menu_owner.clone();
                     let detach_owner = server_menu_owner.clone();
                     let delete_name = server_name.clone();
-                    let (connection_label, connection_disabled) = match status {
-                        ConnectionStatus::Connected => ("Disconnect", false),
-                        ConnectionStatus::Disconnected => ("Connect", false),
-                        ConnectionStatus::Connecting => ("Connecting…", true),
+                    let (connection_label, connection_icon, connection_disabled) = match status {
+                        ConnectionStatus::Connected => ("Disconnect", Glyph::Unplug, false),
+                        ConnectionStatus::Disconnected => ("Connect", Glyph::Plug, false),
+                        ConnectionStatus::Connecting => ("Connecting…", Glyph::Plug, true),
                     };
                     // The Local Server is this machine's own: nothing to edit, nothing to
                     // delete, only its connection to toggle.
                     let menu = if is_local {
                         menu
                     } else {
-                        menu.item(PopupMenuItem::new("Edit").on_click(move |_, window, cx| {
-                            let _ = edit_owner
-                                .update(cx, |this, cx| this.prompt_edit_server_on(key, window, cx));
-                        }))
+                        menu.item(PopupMenuItem::new("Edit").icon(Glyph::Pencil).on_click(
+                            move |_, window, cx| {
+                                let _ = edit_owner.update(cx, |this, cx| {
+                                    this.prompt_edit_server_on(key, window, cx)
+                                });
+                            },
+                        ))
                     };
                     let menu = menu
                         .item(
                             PopupMenuItem::new(connection_label)
+                                .icon(connection_icon)
                                 .disabled(connection_disabled)
                                 .on_click(move |_, window, cx| {
                                     let _ = connection_owner.update(cx, |this, cx| {
@@ -683,24 +691,32 @@ impl Condr {
                                     });
                                 }),
                         )
-                        .item(PopupMenuItem::new("Open in New Window").on_click(
-                            move |_, window, cx| {
-                                let _ = detach_owner.update(cx, |this, cx| {
-                                    this.open_in_new_window(WindowScope::Device(key), window, cx)
-                                });
-                            },
-                        ));
+                        .item(
+                            PopupMenuItem::new("Open in New Window")
+                                .icon(Glyph::AppWindow)
+                                .on_click(move |_, window, cx| {
+                                    let _ = detach_owner.update(cx, |this, cx| {
+                                        this.open_in_new_window(
+                                            WindowScope::Device(key),
+                                            window,
+                                            cx,
+                                        )
+                                    });
+                                }),
+                        );
                     if is_local {
                         menu
                     } else {
-                        menu.separator().item(PopupMenuItem::new("Delete").on_click(
-                            move |_, window, cx| {
-                                let name = delete_name.clone();
-                                let _ = delete_owner.update(cx, |this, cx| {
-                                    this.confirm_delete_server_on(key, name, window, cx)
-                                });
-                            },
-                        ))
+                        menu.separator().item(
+                            PopupMenuItem::new("Delete").icon(Glyph::Trash).on_click(
+                                move |_, window, cx| {
+                                    let name = delete_name.clone();
+                                    let _ = delete_owner.update(cx, |this, cx| {
+                                        this.confirm_delete_server_on(key, name, window, cx)
+                                    });
+                                },
+                            ),
+                        )
                     }
                 })
                 .on_click(move |_, window, cx| {

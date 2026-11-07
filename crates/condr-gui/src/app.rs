@@ -84,6 +84,7 @@ use dock::*;
 use file_edits::*;
 use file_entries::*;
 use files::*;
+use gpui_kit::assets::IconName as Glyph;
 use gpui_kit::component::badge::Badge;
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::dialog::{Cancel, Confirm, DialogFooter};

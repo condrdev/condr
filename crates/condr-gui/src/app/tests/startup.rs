@@ -51,6 +51,25 @@ fn condr_assets_include_custom_and_kit_icons() {
         "icons/qwen.svg",
         "icons/info.svg",
         "icons/settings.svg",
+        // A menu item's icon outside Kit's default set draws as an empty slot.
+        "icons/pencil.svg",
+        "icons/git-branch-plus.svg",
+        "icons/git-branch-minus.svg",
+        "icons/folder-git-2.svg",
+        "icons/app-window.svg",
+        "icons/plug.svg",
+        "icons/unplug.svg",
+        "icons/trash.svg",
+        "icons/download.svg",
+        "icons/upload.svg",
+        "icons/copy-slash.svg",
+        "icons/file-plus.svg",
+        "icons/folder-plus.svg",
+        "icons/file-text.svg",
+        "icons/copy.svg",
+        "icons/folder-open.svg",
+        "icons/square-terminal.svg",
+        "icons/external-link.svg",
     ]
     .into_iter()
     .chain(marks.iter().map(String::as_str))

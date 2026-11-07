@@ -28,7 +28,7 @@ pub(super) enum OpenTargetIcon {
 }
 
 impl OpenTargetIcon {
-    fn icon(self) -> Icon {
+    pub(super) fn icon(self) -> Icon {
         match self {
             Self::Zed => Icon::new(CondrIconName::Zed),
             Self::VsCode => Icon::new(CondrIconName::VsCode),

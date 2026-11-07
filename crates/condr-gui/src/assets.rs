@@ -57,7 +57,28 @@ const CONDR_ICON_PATHS: [&str; 29] = [
 ];
 
 // Lucide icons Kit bundles but does not load by default.
-gpui_kit::assets::icon_assets!(KitIcons, [Rows2, Columns2, Link, SquareArrowDownLeft]);
+gpui_kit::assets::icon_assets!(
+    KitIcons,
+    [
+        Rows2,
+        Columns2,
+        Link,
+        SquareArrowDownLeft,
+        // The sidebars' right-click menus.
+        Pencil,
+        GitBranchPlus,
+        GitBranchMinus,
+        FolderGit2,
+        AppWindow,
+        Plug,
+        Unplug,
+        Trash,
+        Download,
+        Upload,
+        CopySlash,
+        FilePlus,
+    ]
+);
 
 pub(super) struct CondrAssets {
     pub(super) base: Assets,

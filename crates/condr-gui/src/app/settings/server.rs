@@ -935,7 +935,6 @@ fn pairing_card(
             .on_click(move |_, _, cx| request_invite(&settings, cx))
             .into_any_element()
     };
-    use gpui_kit::assets::IconName as Glyph;
     let (code, title, body, detail, actions): (
         AnyElement,
         SharedString,

@@ -644,6 +644,7 @@ impl Condr {
             Some((
                 target.id.clone(),
                 target.label.clone(),
+                target.icon,
                 is_local && openable,
             ))
         });
@@ -662,13 +663,16 @@ impl Condr {
             let menu = menu.when_some(show_file, |menu, enabled| {
                 let show_owner = owner.clone();
                 let show_path = show_path.clone();
-                menu.item(PopupMenuItem::new("Show File").disabled(!enabled).on_click(
-                    move |_, window, cx| {
-                        let _ = show_owner.update(cx, |this, cx| {
-                            this.show_file_on(key, workspace_id, show_path.clone(), window, cx);
-                        });
-                    },
-                ))
+                menu.item(
+                    PopupMenuItem::new("Show File")
+                        .icon(Glyph::FileText)
+                        .disabled(!enabled)
+                        .on_click(move |_, window, cx| {
+                            let _ = show_owner.update(cx, |this, cx| {
+                                this.show_file_on(key, workspace_id, show_path.clone(), window, cx);
+                            });
+                        }),
+                )
                 .separator()
             });
             let menu = path_copy_items(menu, relative.clone(), absolute.clone()).separator();
@@ -676,19 +680,23 @@ impl Condr {
             let download_owner = owner.clone();
             let download_path = show_path.clone();
             let menu = menu
-                .item(PopupMenuItem::new("Download…").disabled(!exists).on_click(
-                    move |_, _, cx| {
-                        let _ = download_owner.update(cx, |this, cx| {
-                            this.download_file(key, workspace_id, download_path.clone(), cx)
-                        });
-                    },
-                ))
+                .item(
+                    PopupMenuItem::new("Download…")
+                        .icon(Glyph::Download)
+                        .disabled(!exists)
+                        .on_click(move |_, _, cx| {
+                            let _ = download_owner.update(cx, |this, cx| {
+                                this.download_file(key, workspace_id, download_path.clone(), cx)
+                            });
+                        }),
+                )
                 .separator();
             let menu = match &editor {
-                Some((target_id, label, enabled)) => {
+                Some((target_id, label, icon, enabled)) => {
                     let target_id = target_id.clone();
                     menu.item(
                         PopupMenuItem::new(format!("Open in {label}"))
+                            .icon(icon.icon())
                             .disabled(!enabled || open_absolute.is_none())
                             .on_click(move |_, _, cx| {
                                 let Some(absolute) = open_absolute.clone() else {
@@ -700,10 +708,15 @@ impl Condr {
                             }),
                     )
                 }
-                None => menu.item(PopupMenuItem::new("Open in Editor").disabled(true)),
+                None => menu.item(
+                    PopupMenuItem::new("Open in Editor")
+                        .icon(Glyph::ExternalLink)
+                        .disabled(true),
+                ),
             };
             let menu = menu.item(
                 PopupMenuItem::new("Insert Path into Terminal")
+                    .icon(Glyph::SquareTerminal)
                     .disabled(target_pane.is_none())
                     .on_click(move |_, window, cx| {
                         let Some((tab_id, pane_id)) = target_pane else {
@@ -1511,12 +1524,15 @@ impl Condr {
 fn path_copy_items(menu: PopupMenu, relative: String, absolute: Option<PathBuf>) -> PopupMenu {
     let copy_absolute = absolute.clone();
     menu.item(
-        PopupMenuItem::new("Copy Relative Path").on_click(move |_, _, cx| {
-            cx.write_to_clipboard(ClipboardItem::new_string(relative.clone()));
-        }),
+        PopupMenuItem::new("Copy Relative Path")
+            .icon(Glyph::Copy)
+            .on_click(move |_, _, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(relative.clone()));
+            }),
     )
     .item(
         PopupMenuItem::new("Copy Path")
+            .icon(Glyph::CopySlash)
             .disabled(absolute.is_none())
             .on_click(move |_, _, cx| {
                 if let Some(absolute) = &copy_absolute {
@@ -1540,6 +1556,7 @@ fn reveal_item(
     };
     menu.item(
         PopupMenuItem::new(reveal_label())
+            .icon(Glyph::FolderOpen)
             .disabled(!enabled)
             .on_click(move |_, _, cx| {
                 let path = absolute.clone();
@@ -1584,11 +1601,13 @@ fn upload_item(
     owner: WeakEntity<Condr>,
 ) -> PopupMenu {
     menu.item(
-        PopupMenuItem::new("Upload Files…").on_click(move |_, window, cx| {
-            let _ = owner.update(cx, |this, cx| {
-                this.pick_uploads(key, workspace_id, directory.clone(), window, cx)
-            });
-        }),
+        PopupMenuItem::new("Upload Files…")
+            .icon(Glyph::Upload)
+            .on_click(move |_, window, cx| {
+                let _ = owner.update(cx, |this, cx| {
+                    this.pick_uploads(key, workspace_id, directory.clone(), window, cx)
+                });
+            }),
     )
 }
 
