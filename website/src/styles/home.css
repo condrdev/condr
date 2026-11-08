@@ -98,6 +98,44 @@ code { font-family: var(--mono); font-size: .875em; }
 .features h3 { margin-bottom: 8px; font-size: 1.25rem; font-weight: 700; letter-spacing: -.02em; }
 .features p { max-width: 30em; color: var(--grey); }
 
+/* Showcases: a feature in words beside the app showing it, alternating sides. Every screenshot is the
+   app's own, framed by a hairline drawn over its edge so it takes no room. */
+.showcase { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: var(--gap); align-items: start; margin-top: 96px; }
+.showcase-text { grid-column: 1 / 5; grid-row: 1; padding-top: 16px; border-top: 2px solid var(--ink); }
+.showcase .shots { grid-column: 6 / 13; grid-row: 1; }
+.showcase-flip .showcase-text { grid-column: 10 / 13; }
+.showcase-flip .shots { grid-column: 1 / 9; }
+.showcase h3 { margin-bottom: 12px; font-size: 1.5rem; font-weight: 700; line-height: 1.2; letter-spacing: -.02em; text-wrap: balance; }
+.showcase p { color: var(--grey); text-wrap: pretty; }
+.showcase strong { color: var(--ink); font-weight: 600; }
+/* Screenshots side by side at one height: each figure grows by its image's width over its height,
+   times 100, since growth adding up to less than 1 leaves the rest of the row empty. */
+.shots { display: flex; gap: var(--gap); align-items: flex-start; }
+.shots figure { flex: 1 1 0; min-width: 0; }
+.shots img, .review-shot img { display: block; width: 100%; height: auto; border-radius: 8px; outline: 1px solid var(--line); outline-offset: -1px; }
+.shots figcaption { margin-top: 12px; color: var(--grey); font-size: .9375rem; }
+
+/* Review: three views listed on the left and the chosen one's screenshot on the right, only the chosen
+   one's words showing. Pure CSS, through :has(); without it every screenshot shows. */
+.review { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: var(--gap); align-items: start; margin-top: 72px; }
+.review-list { grid-column: 1 / 5; grid-row: 1; }
+.review-list label { position: relative; display: block; cursor: pointer; }
+.review-list input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
+.review-list span { display: block; padding: 17px 0 20px; border-top: 1px solid var(--line); color: var(--grey); text-wrap: pretty; }
+.review-list b { display: block; font-size: 1.25rem; font-weight: 700; letter-spacing: -.02em; }
+.review-list label:hover b { color: var(--ink); }
+.review-list input:not(:checked) + span { font-size: 0; }
+.review-list input:not(:checked) + span b { font-size: 1.25rem; }
+.review-list input:checked + span { padding-top: 16px; border-top: 2px solid var(--ink); }
+.review-list input:checked + span b { margin-bottom: 8px; color: var(--ink); }
+.review-list input:focus-visible + span b { outline: 2px solid var(--accent); outline-offset: 2px; }
+.review-shot { grid-column: 5 / 13; }
+.review:has(#review-diff:not(:checked)) .review-shot-diff,
+.review:has(#review-preview:not(:checked)) .review-shot-preview,
+.review:has(#review-history:not(:checked)) .review-shot-history { display: none; }
+
+.remote-shots { grid-column: 1 / -1; margin-top: 72px; }
+
 .methods { grid-column: 1 / -1; margin-top: 72px; border-bottom: 1px solid var(--line); }
 .methods > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: var(--gap); padding: 20px 0; border-top: 1px solid var(--line); }
 .methods > div:first-child { border-top: 2px solid var(--ink); }
@@ -181,6 +219,13 @@ code { font-family: var(--mono); font-size: .875em; }
   .hero-shot-mobile img { border-radius: 12px; scroll-snap-align: start; }
   .row { padding-top: 88px; }
   .row-copy, .agents, .features, .methods { margin-top: 32px; }
+  .showcase, .review { display: block; margin-top: 64px; }
+  .showcase .shots, .review-shot { margin-top: 24px; }
+  .shots { gap: 12px; }
+  .features { margin-top: 64px; }
+  /* Too narrow for the remote pair at one height: the file list goes under the Ports page, smaller. */
+  .remote-shots { display: block; margin-top: 40px; }
+  .remote-shots figure + figure { width: 60%; margin-top: 32px; }
   .agents, .features, .methods > div { grid-template-columns: minmax(0, 1fr); }
   .agents { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 16px; }
   .agents li:nth-child(3) { border-top: 0; }

@@ -31,6 +31,6 @@ pnpm preview
 - `src/pages/download.astro`：下载页 `/download/`。链接指向最新已发布的 release 的文件（见上），所以 `main` 上先改版本号不会让页面指向还不存在的文件。
 - `src/styles/home.css`：首页和下载页样式。
 - `src/content/docs/docs/`：英文文档，对应 `/docs/`，按侧栏分组放在 `start/`、`using/`、`reference/`、`help/` 四个子目录里，URL 带上子目录，例如 `/docs/using/workspaces/`。`src/content/docs/zh-cn/docs/` 是同样结构的中文版，对应 `/zh-cn/docs/`，改英文文档时同步改中文；缺中文版的页面由 Starlight 显示英文原文并提示未翻译。官网首页和下载页只有英文，`/zh-cn/` 重定向到 `/zh-cn/docs/`，文档页左上角的标题也链到各自语言的 `/docs/`，由 `src/routeData.ts` 设置。
-- `public/`：只放网站自己的静态文件（目前只有 `_headers`）。`install.sh` / `install.ps1`、`condr.svg`、`agents/*.svg` 由 `prebuild` 从仓库根的 `script/` 和 `assets/` 拷入，已 gitignore；要改就改原件。首页截图从 `../assets/screenshots/hero.png` import，由 Astro 优化输出。
+- `public/`：只放网站自己的静态文件（目前只有 `_headers`）。`install.sh` / `install.ps1`、`condr.svg`、`agents/*.svg` 由 `prebuild` 从仓库根的 `script/` 和 `assets/` 拷入，已 gitignore；要改就改原件。首页截图从 `../assets/screenshots/` import，由 Astro 优化输出。其中 `hero*.png` 和 `phone-*.png` 是手动截的；`needs-you`、`panes`、`diff`、`preview`、`history`、`ports`、`transfers` 由 GUI 离屏渲染生成，在 macOS 上于仓库根目录运行 `CONDR_GUI_WEBSITE_SCREENSHOTS=assets/screenshots cargo run -p condr-gui --features test-support` 重新生成（需要装好 Claude Code、Codex 和 lazygit，前两者要信任本仓库；场景见 `crates/condr-gui/src/app/screenshots/website.rs`）。
 
 产品文案和资源以仓库根目录的 README 为准。
