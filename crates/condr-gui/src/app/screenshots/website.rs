@@ -9,7 +9,9 @@
 //! Claude Code, Codex and lazygit run in its Panes, so all three must be installed and the
 //! first two must trust this repository. Two more Servers on loopback stand in for remote
 //! Devices; the Agents listed on them and the transfers in flight are staged. Each picture
-//! is a crop of the 1280 by 800 window, at the display's scale.
+//! is a crop of the 1280 by 800 window, at the display's scale. The hero is the whole window
+//! grown to 1600 by 1000, with the buttons macOS would draw painted in; the README's picture
+//! puts the Companion's `phone-agents.png` in front of it.
 
 use super::super::changes::SidebarView;
 use super::super::history::DiffCommit;
@@ -26,6 +28,8 @@ use std::process::Command;
 
 /// The left sidebar's width, wide enough for an Agent's task and what it waits for.
 const SIDEBAR: f32 = 300.;
+/// The hero's window, in points.
+const HERO: (f32, f32) = (1600., 1000.);
 
 /// The commit whose change the worktree holds uncommitted: a small one to the Ports page.
 const DEMO: &str = "bd89134";
@@ -78,7 +82,7 @@ pub(crate) fn run(directory: PathBuf) {
 
     // This machine: the worktree, with three programs side by side in its first Tab.
     let mut admin = local.admin();
-    let (condr, claude, _) = workspace(&mut admin, &worktree);
+    let (condr, claude, condr_tab) = workspace(&mut admin, &worktree);
     let codex = split(&mut admin, claude, SplitDirection::Horizontal);
     let lazygit = split(&mut admin, codex, SplitDirection::Vertical);
     // Run from inside Claude Code, the Panes inherit its session, which Claude Code there
@@ -144,57 +148,8 @@ pub(crate) fn run(directory: PathBuf) {
         ),
     ];
 
-    let mut config = config::LoadedConfig::read(None);
-    config.appearance = Appearance::Dark;
-    let initial = ClientConnection::connect(&local.endpoint, "condr-screenshots");
-    let holder: Rc<RefCell<Option<Entity<Condr>>>> = Rc::default();
-    let window = {
-        let holder = Rc::clone(&holder);
-        let endpoint = local.endpoint.clone();
-        cx.open_offscreen_window(size(px(1280.), px(800.)), move |window, cx| {
-            let view = cx.new(|cx| {
-                Condr::new(
-                    endpoint,
-                    Some(initial.map_err(|error| error.to_string())),
-                    config,
-                    gui_state::LoadedState {
-                        state: gui_state::GuiState {
-                            sidebar_width: Some(SIDEBAR),
-                            ..Default::default()
-                        },
-                        ..Default::default()
-                    },
-                    window,
-                    cx,
-                )
-            });
-            holder.borrow_mut().replace(view.clone());
-            cx.new(|cx| Root::new(view, window, cx))
-        })
-        .expect("an offscreen window opens")
-    };
-    let window: AnyWindowHandle = window.into();
-    let view = holder.borrow_mut().take().expect("Condr was built");
-    update(&mut cx, window, &view, |this, _, _| {
-        for (name, server) in [("build-box", &build_box), ("gpu-box", &gpu_box)] {
-            let key = this.next_connection_key;
-            this.next_connection_key += 1;
-            this.connections.push(ServerConnection::new(
-                key,
-                name.into(),
-                server.endpoint.clone(),
-            ));
-            this.start_connect(key);
-        }
-    });
-    wait(&mut cx, "every Device synchronized", |app| {
-        (1..=3).all(|key| {
-            view.read(app)
-                .connection(key)
-                .and_then(ServerConnection::session)
-                .is_some_and(|session| !session.workspaces().is_empty())
-        })
-    });
+    let devices = [&local, &build_box, &gpu_box];
+    let (window, view) = open(&mut cx, (1280., 800.), devices);
     update(&mut cx, window, &view, |this, window, cx| {
         this.select_workspace(1, condr, window, cx)
     });
@@ -204,7 +159,8 @@ pub(crate) fn run(directory: PathBuf) {
 
     stage(&mut cx, window, &view, &staged);
     let image = capture(&mut cx, window);
-    save(&image, &directory, "needs-you", (0., 0., SIDEBAR, 800.));
+    // Down to the end of build-box: Needs you and the Devices it names, not the whole column.
+    save(&image, &directory, "needs-you", (0., 0., SIDEBAR, 578.));
     save(
         &image,
         &directory,
@@ -284,6 +240,7 @@ pub(crate) fn run(directory: PathBuf) {
     });
     let image = capture(&mut cx, window);
     save(&image, &directory, "history", review);
+
     update(&mut cx, window, &view, |this, window, cx| {
         this.toggle_sidebar(window, cx)
     });
@@ -387,6 +344,30 @@ pub(crate) fn run(directory: PathBuf) {
         "transfers",
         (1280. - 320., 36., 320., 764.),
     );
+
+    // The hero: the whole window, larger so the Panes between the sidebars have room. It is a
+    // window of its own, opened once this one is gone: a Server sizes a terminal for one client.
+    let _ = cx.update_window(window, |_, window, _| window.remove_window());
+    let (window, view) = open(&mut cx, HERO, devices);
+    update(&mut cx, window, &view, |this, window, cx| {
+        this.select_workspace(1, condr, window, cx);
+        this.show_view(1, condr, Some(condr_tab));
+        this.toggle_changes_sidebar(cx);
+        this.files_view
+            .sidebar_views
+            .insert((1, condr), SidebarView::Files);
+        this.rebuild_dock(window, cx);
+    });
+    settle(&mut cx);
+    stage(&mut cx, window, &view, &staged);
+    let mut hero = capture(&mut cx, window);
+    let scale = hero.width() as f32 / HERO.0;
+    traffic_lights(&mut hero, scale);
+    save_whole(&hero, &directory, "hero");
+    let phone = image::open(repository.join("assets/screenshots/phone-agents.png"))
+        .expect("the Companion's Agents page is in assets/screenshots")
+        .to_rgba8();
+    save_whole(&with_phone(&hero, &phone), &directory, "hero-with-phone");
 
     let _ = cx.update_window(window, |_, window, _| window.remove_window());
     for server in [local, build_box, gpu_box] {
@@ -541,6 +522,184 @@ fn stage(
             cx.notify();
         });
     }
+}
+
+/// An offscreen window of `(width, height)` points showing Condr connected to this machine's
+/// Server and to the two standing in for remote Devices, once all three are synchronized.
+fn open(
+    cx: &mut VisualTestAppContext,
+    (width, height): (f32, f32),
+    [local, build_box, gpu_box]: [&Running; 3],
+) -> (AnyWindowHandle, Entity<Condr>) {
+    let mut config = config::LoadedConfig::read(None);
+    config.appearance = Appearance::Dark;
+    let initial = ClientConnection::connect(&local.endpoint, "condr-screenshots");
+    let holder: Rc<RefCell<Option<Entity<Condr>>>> = Rc::default();
+    let window = {
+        let holder = Rc::clone(&holder);
+        let endpoint = local.endpoint.clone();
+        cx.open_offscreen_window(size(px(width), px(height)), move |window, cx| {
+            let view = cx.new(|cx| {
+                Condr::new(
+                    endpoint,
+                    Some(initial.map_err(|error| error.to_string())),
+                    config,
+                    gui_state::LoadedState {
+                        state: gui_state::GuiState {
+                            sidebar_width: Some(SIDEBAR),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    },
+                    window,
+                    cx,
+                )
+            });
+            holder.borrow_mut().replace(view.clone());
+            cx.new(|cx| Root::new(view, window, cx))
+        })
+        .expect("an offscreen window opens")
+    };
+    let window: AnyWindowHandle = window.into();
+    let view = holder.borrow_mut().take().expect("Condr was built");
+    update(cx, window, &view, |this, _, _| {
+        for (name, server) in [("build-box", build_box), ("gpu-box", gpu_box)] {
+            let key = this.next_connection_key;
+            this.next_connection_key += 1;
+            this.connections.push(ServerConnection::new(
+                key,
+                name.into(),
+                server.endpoint.clone(),
+            ));
+            this.start_connect(key);
+        }
+    });
+    wait(cx, "every Device synchronized", |app| {
+        (1..=3).all(|key| {
+            view.read(app)
+                .connection(key)
+                .and_then(ServerConnection::session)
+                .is_some_and(|session| !session.workspaces().is_empty())
+        })
+    });
+    (window, view)
+}
+
+/// Gives the programs in the Panes time to redraw at the size the window gave them.
+fn settle(cx: &mut VisualTestAppContext) {
+    let until = Instant::now() + Duration::from_millis(1500);
+    while Instant::now() < until {
+        cx.run_until_parked();
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// macOS draws a window's close, minimize and zoom buttons itself, so an offscreen window has
+/// none. Paints them where Kit's title bar leaves room for them: 12 points across, 20 apart,
+/// centred on its 34-point height. `scale` is pixels per point.
+fn traffic_lights(image: &mut RgbaImage, scale: f32) {
+    let radius = 6. * scale;
+    for (i, color) in [[255., 95., 87.], [254., 188., 46.], [40., 200., 64.]]
+        .into_iter()
+        .enumerate()
+    {
+        let (cx, cy) = ((15. + 20. * i as f32) * scale, 17. * scale);
+        for y in (cy - radius - 1.) as u32..=(cy + radius + 1.) as u32 {
+            for x in (cx - radius - 1.) as u32..=(cx + radius + 1.) as u32 {
+                let distance = (x as f32 + 0.5 - cx).hypot(y as f32 + 0.5 - cy);
+                // Coverage of the pixel by the disc, for an antialiased edge.
+                let cover = (radius + 0.5 - distance).clamp(0., 1.);
+                let pixel = image.get_pixel_mut(x, y);
+                for c in 0..3 {
+                    pixel[c] =
+                        (f32::from(pixel[c]) * (1. - cover) + color[c] * cover).round() as u8;
+                }
+            }
+        }
+    }
+}
+
+/// The README's picture: the hero window, 1820 pixels across, with the Companion on a phone
+/// standing in front of its lower right corner, on transparency.
+fn with_phone(hero: &RgbaImage, phone: &RgbaImage) -> RgbaImage {
+    use image::imageops::{FilterType, resize};
+    let (width, height) = (1820, 1820 * hero.height() / hero.width());
+    let window = resize(hero, width, height, FilterType::Lanczos3);
+    // The phone three quarters of the window's height; its screen keeps the screenshot's shape.
+    let bezel = 18.;
+    let screen_height = (0.74 * height as f32 - 2. * bezel).round();
+    let screen_width = (screen_height * phone.width() as f32 / phone.height() as f32).round();
+    let screen = resize(
+        phone,
+        screen_width as u32,
+        screen_height as u32,
+        FilterType::Lanczos3,
+    );
+    let mut out = RgbaImage::new(width + 100, height + 120);
+    let body = (
+        out.width() as f32 - screen_width - 2. * bezel,
+        out.height() as f32 - screen_height - 2. * bezel,
+        screen_width + 2. * bezel,
+        screen_height + 2. * bezel,
+    );
+    let glass = (body.0 + bezel, body.1 + bezel, screen_width, screen_height);
+    let frame = (0., 0., width as f32, height as f32);
+    for (x, y, pixel) in out.enumerate_pixels_mut() {
+        let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+        let mut color = [0.; 4];
+        let shown = covered(px, py, frame, 14.);
+        if let Some(p) = window.get_pixel_checked(x, y) {
+            over(&mut color, p, shown);
+        }
+        // A hairline round the window, as macOS draws one on a dark window.
+        let rim = shown - covered(px, py, inset(frame, 1.), 13.);
+        over(&mut color, &image::Rgba([255, 255, 255, 36]), rim);
+        let case = covered(px, py, body, 62.);
+        over(&mut color, &image::Rgba([11, 11, 12, 255]), case);
+        let edge = case - covered(px, py, inset(body, 2.), 60.);
+        over(&mut color, &image::Rgba([72, 72, 76, 255]), edge);
+        let lit = covered(px, py, glass, 46.);
+        if let Some(p) =
+            screen.get_pixel_checked((px - glass.0).max(0.) as u32, (py - glass.1).max(0.) as u32)
+        {
+            over(&mut color, p, lit);
+        }
+        *pixel = image::Rgba(color.map(|channel| channel.round() as u8));
+    }
+    out
+}
+
+/// How much of the pixel centred at `(px, py)` the rounded rectangle `(x, y, width, height)`
+/// with corner `radius` covers, from its signed distance, for an antialiased edge.
+fn covered(px: f32, py: f32, (x, y, width, height): (f32, f32, f32, f32), radius: f32) -> f32 {
+    let dx = (px - x - width / 2.).abs() - (width / 2. - radius);
+    let dy = (py - y - height / 2.).abs() - (height / 2. - radius);
+    let distance = dx.max(0.).hypot(dy.max(0.)) + dx.max(dy).min(0.) - radius;
+    (0.5 - distance).clamp(0., 1.)
+}
+
+fn inset((x, y, width, height): (f32, f32, f32, f32), by: f32) -> (f32, f32, f32, f32) {
+    (x + by, y + by, width - 2. * by, height - 2. * by)
+}
+
+/// Lays `source`, `cover` of it, over the straight-alpha `color`.
+fn over(color: &mut [f32; 4], source: &image::Rgba<u8>, cover: f32) {
+    let alpha = cover * f32::from(source[3]) / 255.;
+    if alpha <= 0. {
+        return;
+    }
+    let below = color[3] / 255. * (1. - alpha);
+    let total = alpha + below;
+    for c in 0..3 {
+        color[c] = (f32::from(source[c]) * alpha + color[c] * below) / total;
+    }
+    color[3] = total * 255.;
+}
+
+fn save_whole(image: &RgbaImage, directory: &Path, name: &str) {
+    let path = directory.join(format!("{name}.png"));
+    image.save(&path).expect("the screenshot is written");
+    eprintln!("{}", path.display());
 }
 
 /// Saves the part of the window at `(x, y, width, height)`, in the window's points.
