@@ -9,13 +9,19 @@
 //!
 //! It starts a TCP Server with one Workspace, opens Condr against it, and saves one PNG
 //! per state: the Workspace, the Ports page empty, with forwards, for one Device, and the
-//! right sidebar's transfer strip, and the left sidebar with its Device folded.
+//! right sidebar's transfer strip, and the left sidebar with its Device folded. The
+//! website's screenshots come from the same window, in `website`.
+
+mod website;
+
+pub(crate) use website::run as website;
 
 use super::ports::PortsScope;
 use super::*;
 use crate::assets::CondrAssets;
 use condr_core::protocol::{LayoutCommand, LayoutResult, RelativePathBuf};
 use condr_server::{BoundServer, ServerConfig};
+use image::RgbaImage;
 use std::cell::RefCell;
 use std::io::{Read as _, Write as _};
 use std::rc::Rc;
@@ -275,16 +281,20 @@ fn shot(
     directory: &std::path::Path,
     name: &str,
 ) {
+    let path = directory.join(format!("{name}.png"));
+    capture(cx, window)
+        .save(&path)
+        .expect("the screenshot is written");
+    eprintln!("{}", path.display());
+}
+
+fn capture(cx: &mut VisualTestAppContext, window: AnyWindowHandle) -> RgbaImage {
     // Let the repaint the change asked for land, and a frame or two of layout settle.
     for _ in 0..3 {
         cx.run_until_parked();
         cx.advance_clock(Duration::from_millis(120));
         std::thread::sleep(Duration::from_millis(30));
     }
-    let image = cx
-        .capture_screenshot(window)
-        .expect("the window renders offscreen");
-    let path = directory.join(format!("{name}.png"));
-    image.save(&path).expect("the screenshot is written");
-    eprintln!("{}", path.display());
+    cx.capture_screenshot(window)
+        .expect("the window renders offscreen")
 }

@@ -25,5 +25,10 @@ fn main() {
         app::screenshots::run(directory.into());
         return;
     }
+    #[cfg(all(feature = "test-support", target_os = "macos"))]
+    if let Some(directory) = std::env::var_os("CONDR_GUI_WEBSITE_SCREENSHOTS") {
+        app::screenshots::website(directory.into());
+        return;
+    }
     app::run();
 }
