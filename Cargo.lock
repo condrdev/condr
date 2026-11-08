@@ -1385,7 +1385,7 @@ dependencies = [
 
 [[package]]
 name = "condr-client"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "base64 0.22.1",
  "condr-core",
@@ -1404,7 +1404,7 @@ dependencies = [
 
 [[package]]
 name = "condr-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "atomicwrites",
  "base64 0.22.1",
@@ -1433,7 +1433,7 @@ dependencies = [
 
 [[package]]
 name = "condr-ghostty-vt"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "dirs 6.0.0",
  "sha2 0.10.9",
@@ -1443,7 +1443,7 @@ dependencies = [
 
 [[package]]
 name = "condr-gui"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "async-channel",
  "condr-client",
@@ -1477,7 +1477,7 @@ dependencies = [
 
 [[package]]
 name = "condr-mobile"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "condr-client",
  "condr-core",
@@ -1489,7 +1489,7 @@ dependencies = [
 
 [[package]]
 name = "condr-server"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "atomicwrites",
  "clap",
