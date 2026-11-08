@@ -27,6 +27,9 @@ const features = [
   { title: 'Smooth', copy: 'Native from end to end, written in Rust with no Electron. Small and responsive, even while agents are busy.' },
 ];
 
+// The Companion's Agents page down to the end of Needs you, in its pixels.
+const phoneAgentsCrop = 1740;
+
 const reviews = [
   { id: 'diff', name: 'Diff', copy: 'Every file an agent touched, side by side or in one column, against HEAD or against everything the branch changed since it forked.', src: diff, alt: 'The Diff Tab showing ports.rs side by side, with the Changes list of six modified files and their added and removed lines' },
   { id: 'preview', name: 'Preview', copy: 'Any file, highlighted, with the lines it changed marked beside their numbers. Edit and save it there, on a remote Device too.', src: preview, alt: 'The Preview Tab showing ports.rs with its changed lines marked beside the line numbers and on the scrollbar, next to the Files tree' },
@@ -70,7 +73,7 @@ const methods = [
       <label><input type="radio" name="shot" id="shot-mobile" /><span>Mobile <small class="badge">Early preview</small></span></label>
     </div>
     <figure class="hero-shot hero-shot-desktop">
-      <Image src={hero} alt="Condr connected to local and remote Servers, with Claude Code and Codex running side by side in each Workspace" loading="eager" widths={[640, 960, 1280, hero.width]} sizes="(max-width: 1280px) 100vw, 1280px" />
+      <Image src={hero} alt="Condr with one local and two remote Devices: Needs you lists two agents waiting on build-box and gpu-box, Claude Code, Codex and lazygit share a Tab, and Files shows the project tree" loading="eager" widths={[640, 960, 1280, 1920, 2560, hero.width]} sizes="(max-width: 1280px) 100vw, 1280px" />
     </figure>
     <figure class="hero-shot hero-shot-mobile">
       {phones.map((phone) => <Image src={phone.src} alt={phone.alt} loading="lazy" widths={[400, 800, phone.src.width]} sizes="(max-width: 760px) 72vw, 340px" />)}
@@ -95,10 +98,10 @@ const methods = [
       </div>
       <div class="shots">
         <figure style={`flex-grow: ${(100 * needsYou.width) / needsYou.height}`}>
-          <Image src={needsYou} alt="The left sidebar: Needs you lists a Claude Code agent on build-box waiting to run pnpm test and one on gpu-box stopped on an API error, above the Workspaces and agents of three Devices" widths={[300, needsYou.width]} sizes="(max-width: 760px) 40vw, 320px" />
+          <Image src={needsYou} alt="The left sidebar: Needs you lists a Claude Code agent on build-box waiting to run pnpm test and one on gpu-box stopped on an API error, above the Workspaces and agents of this machine and build-box" widths={[300, needsYou.width]} sizes="(max-width: 760px) 40vw, 320px" />
         </figure>
-        <figure style={`flex-grow: ${(100 * phoneAgents.width) / phoneAgents.height}`}>
-          <Image src={phoneAgents} alt="The Companion's Agents page: what each agent needs you for, has finished or is working on" widths={[400, 800]} sizes="(max-width: 760px) 50vw, 400px" />
+        <figure class="crop" style={`flex-grow: ${(100 * phoneAgents.width) / phoneAgentsCrop}; aspect-ratio: ${phoneAgents.width} / ${phoneAgentsCrop}`}>
+          <Image src={phoneAgents} alt="The Companion's Agents page: the two agents that need you, one waiting to run cargo test and one asking which chart library to use" widths={[400, 800]} sizes="(max-width: 760px) 50vw, 420px" />
         </figure>
       </div>
     </article>
@@ -128,15 +131,17 @@ const methods = [
         {reviews.map((review, i) => (
           <label>
             <input type="radio" name="review" id={`review-${review.id}`} checked={i === 0} />
-            <span><b>{review.name}</b>{review.copy}</span>
+            <span class="review-item"><b>{review.name}</b><span class="review-copy"><span>{review.copy}</span></span></span>
           </label>
         ))}
       </div>
-      {reviews.map((review) => (
-        <figure class={`review-shot review-shot-${review.id}`}>
-          <Image src={review.src} alt={review.alt} widths={[640, 960, 1280, 1700, review.src.width]} sizes="(max-width: 760px) 100vw, 850px" />
-        </figure>
-      ))}
+      <div class="review-shots">
+        {reviews.map((review) => (
+          <figure class={`review-shot review-shot-${review.id}`}>
+            <Image src={review.src} alt={review.alt} widths={[640, 960, 1280, 1700, review.src.width]} sizes="(max-width: 760px) 100vw, 850px" />
+          </figure>
+        ))}
+      </div>
     </div>
   </section>
 
@@ -179,6 +184,84 @@ const methods = [
   </script>
 
   <script>
+    // Scroll reveal: what scrolls into view arrives once, each kind its own way (home.css, "Scroll
+    // reveal"): big headings set in line by line, the rules of the grid draw from the left with their
+    // words following, screenshots resolve out of the logo's dot matrix. What enters together arrives
+    // in reading order. Content stays visible without this script, what is on screen when it runs
+    // stays put, and reduced motion skips it all.
+    if (!matchMedia("(prefers-reduced-motion: reduce)").matches && "IntersectionObserver" in window) {
+      const kinds: [string, string][] = [
+        [".row:not(.closing) > h2", "type"],
+        [".row-copy, .agents li, .review-list label", "rise"],
+        [".row-title, .showcase-text, .features article, .methods > div, .closing", "rule"],
+        [".hero-shot, .shots figure, .review-shots", "dots"],
+      ];
+      for (const [selector, kind] of kinds)
+        for (const el of document.querySelectorAll<HTMLElement>(selector))
+          // The hidden hero screenshot is left alone: it would wait unseen for a reveal that never comes.
+          if (el.offsetParent) el.dataset.reveal = kind;
+      const targets = [...document.querySelectorAll<HTMLElement>("[data-reveal]")];
+      const line = innerHeight * 0.88;
+      // Back to plain markup once the longest arrival is over, so nothing lingers on the page.
+      const settle = (el: HTMLElement, delay: number) =>
+        setTimeout(() => {
+          el.classList.remove("in");
+          delete el.dataset.reveal;
+          el.style.removeProperty("--delay");
+        }, delay + 1400);
+      const observer = new IntersectionObserver(
+        (entries) => {
+          const arriving = entries
+            .filter((entry) => entry.isIntersecting)
+            .map((entry) => entry.target as HTMLElement)
+            .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top || a.getBoundingClientRect().left - b.getBoundingClientRect().left);
+          // A step of 70ms, shortened so a long list still lands within half a second.
+          const step = Math.min(70, 480 / Math.max(arriving.length - 1, 1));
+          arriving.forEach((el, i) => {
+            observer.unobserve(el);
+            el.style.setProperty("--delay", `${Math.round(i * step)}ms`);
+            el.classList.add("in");
+            settle(el, i * step);
+          });
+        },
+        { rootMargin: "0px 0px -12% 0px" },
+      );
+      for (const el of targets) {
+        // Already on screen: left as it is, since the dots would play even without a transition.
+        if (el.getBoundingClientRect().top < line) delete el.dataset.reveal;
+        else observer.observe(el);
+      }
+      // Last, so what is already on screen never takes its hidden state.
+      document.documentElement.classList.add("reveal-ready");
+    }
+
+    // Switching the hero's screenshots dissolves one into the dot matrix the logo is drawn on and
+    // resolves the other out of it (home.css, ::view-transition-*(hero-shot)). Without View
+    // Transitions, or with reduced motion, the radios switch on their own as before.
+    {
+      const hero = document.querySelector<HTMLElement>(".hero")!;
+      const images = (input: HTMLInputElement) =>
+        hero.querySelectorAll<HTMLImageElement>(input.id === "shot-mobile" ? ".hero-shot-mobile img" : ".hero-shot-desktop img");
+      // The hidden screenshots load lazily; fetch them as soon as the visitor reaches for the switch.
+      const fetchAll = () => hero.querySelectorAll<HTMLImageElement>(".hero-shot img").forEach((img) => (img.loading = "eager"));
+      const tabs = hero.querySelector<HTMLElement>(".hero-switch")!;
+      tabs.addEventListener("pointerenter", fetchAll, { once: true });
+      tabs.addEventListener("focusin", fetchAll, { once: true });
+      let current = tabs.querySelector<HTMLInputElement>("input:checked")!;
+      tabs.addEventListener("change", (event) => {
+        const next = event.target as HTMLInputElement;
+        const previous = current;
+        current = next;
+        if (!document.startViewTransition || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+        // The snapshot of the old state is taken after this handler, so show that state once more.
+        previous.checked = true;
+        document.startViewTransition(async () => {
+          next.checked = true;
+          await Promise.all([...images(next)].map((img) => img.decode().catch(() => {})));
+        });
+      });
+    }
+
     // The logo on a dot matrix. On load the C's dots light up along its stroke and merge once into the
     // three bars of assets/brand/condr.svg. The lit C then rests while stray dots twinkle around it, and
     // every 10 seconds plays the next of a few transitions. Dots near the pointer light up in the accent

@@ -7,6 +7,8 @@
   --line: rgba(255, 255, 255, .14);
   --accent: #86adff;
   --gap: 24px;
+  /* Motion arrives fast and settles; feedback takes 150ms, a state change 200 to 300ms. */
+  --ease-out: cubic-bezier(.16, 1, .3, 1);
   --sans: "Archivo", "Helvetica Neue", Helvetica, Arial, sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
@@ -31,12 +33,15 @@ code { font-family: var(--mono); font-size: .875em; }
 .brand { display: inline-flex; align-items: center; gap: 10px; font-size: 1.25rem; font-weight: 700; letter-spacing: -.03em; text-decoration: none; }
 .brand img { width: 28px; height: 28px; }
 .site-header nav { display: flex; align-items: center; gap: 28px; font-size: .9375rem; font-weight: 500; }
-.site-header nav a { text-decoration: none; }
+.site-header nav a { text-decoration: none; transition: color 150ms var(--ease-out); }
 .site-header nav a:hover { color: var(--accent); }
 
 /* Buttons and links */
 .button { display: inline-flex; align-items: center; height: 44px; padding: 0 20px; background: var(--ink); color: var(--paper); font-size: .9375rem; font-weight: 600; text-decoration: none; }
 .button:hover { background: var(--accent); color: var(--paper); }
+.button, .download-button, .download-stores a, .download-command button { transition: background-color 150ms var(--ease-out), color 150ms var(--ease-out), box-shadow 150ms var(--ease-out); }
+.button:active, .download-button:active, .download-stores a:active { transform: translateY(1px); }
+.text-link, .download a:not([class]), .methods a, .download-link, .site-footer nav a { transition: color 150ms var(--ease-out); }
 .text-link, .download a:not([class]), .methods a { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
 .text-link:hover, .download a:not([class]):hover, .methods a:hover { color: var(--accent); }
 .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; background: var(--accent); color: var(--paper); font-size: .6875rem; font-weight: 600; letter-spacing: 0; line-height: 1.4; white-space: nowrap; }
@@ -59,7 +64,7 @@ code { font-family: var(--mono); font-size: .875em; }
 .hero-switch label { position: relative; cursor: pointer; }
 .hero-switch input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
 /* Quiet tabs: grey words, and a pill with a hairline around the chosen one. */
-.hero-switch span { display: block; padding: 8px 28px; border: 1px solid transparent; border-radius: 999px; color: var(--grey); font-size: 1.0625rem; }
+.hero-switch span { display: block; padding: 8px 28px; border: 1px solid transparent; border-radius: 999px; color: var(--grey); font-size: 1.0625rem; transition: color 200ms var(--ease-out), background-color 200ms var(--ease-out), border-color 200ms var(--ease-out); }
 .hero-switch label:hover span { color: var(--ink); }
 .hero-switch input:checked + span { background: rgba(255, 255, 255, .07); border-color: rgba(255, 255, 255, .3); color: var(--ink); }
 .hero-switch .badge { display: none; position: absolute; top: -9px; right: -4px; }
@@ -67,6 +72,8 @@ code { font-family: var(--mono); font-size: .875em; }
 .hero-switch input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
 .hero-shot { grid-column: 1 / -1; margin-top: 24px; }
 .hero-shot img { display: block; width: 100%; height: auto; }
+/* The window edge to edge, rounded as macOS draws it. */
+.hero-shot-desktop img { border-radius: 12px; outline: 1px solid var(--line); outline-offset: -1px; }
 .hero-shot-mobile { grid-column: 2 / 12; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: var(--gap); }
 .hero-shot-mobile img { border: 1px solid var(--line); border-radius: 16px; }
 .hero:has(#shot-mobile:checked) .hero-shot-desktop, .hero:has(#shot-desktop:checked) .hero-shot-mobile { display: none; }
@@ -113,26 +120,36 @@ code { font-family: var(--mono); font-size: .875em; }
 .shots { display: flex; gap: var(--gap); align-items: flex-start; }
 .shots figure { flex: 1 1 0; min-width: 0; }
 .shots img, .review-shot img { display: block; width: 100%; height: auto; border-radius: 8px; outline: 1px solid var(--line); outline-offset: -1px; }
+/* A screenshot shown only down to where its point ends. */
+.shots .crop img { height: 100%; object-fit: cover; object-position: top; }
 .shots figcaption { margin-top: 12px; color: var(--grey); font-size: .9375rem; }
 
-/* Review: three views listed on the left and the chosen one's screenshot on the right, only the chosen
-   one's words showing. Pure CSS, through :has(); without it every screenshot shows. */
+/* Review: three views listed on the left and the chosen one's screenshot on the right. Choosing one
+   draws its rule from the left and unfolds its words; its screenshot fades in over the last one, which
+   stays solid underneath until then, so the shared window never dims. Pure CSS, through :has();
+   without it the last screenshot shows. */
 .review { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: var(--gap); align-items: start; margin-top: 72px; }
 .review-list { grid-column: 1 / 5; grid-row: 1; }
 .review-list label { position: relative; display: block; cursor: pointer; }
 .review-list input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
-.review-list span { display: block; padding: 17px 0 20px; border-top: 1px solid var(--line); color: var(--grey); text-wrap: pretty; }
-.review-list b { display: block; font-size: 1.25rem; font-weight: 700; letter-spacing: -.02em; }
-.review-list label:hover b { color: var(--ink); }
-.review-list input:not(:checked) + span { font-size: 0; }
-.review-list input:not(:checked) + span b { font-size: 1.25rem; }
-.review-list input:checked + span { padding-top: 16px; border-top: 2px solid var(--ink); }
-.review-list input:checked + span b { margin-bottom: 8px; color: var(--ink); }
-.review-list input:focus-visible + span b { outline: 2px solid var(--accent); outline-offset: 2px; }
-.review-shot { grid-column: 5 / 13; }
+.review-item { position: relative; display: block; padding: 17px 0 20px; border-top: 1px solid var(--line); color: var(--grey); }
+.review-item::before { content: ""; position: absolute; inset: -1px 0 auto; height: 2px; background: var(--ink); transform: scaleX(0); transform-origin: left; transition: transform 300ms var(--ease-out); }
+.review-list b { display: block; font-size: 1.25rem; font-weight: 700; letter-spacing: -.02em; transition: color 150ms var(--ease-out); }
+.review-list label:hover b, .review-list input:checked + .review-item b { color: var(--ink); }
+.review-copy { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows 300ms var(--ease-out), opacity 200ms var(--ease-out); }
+.review-copy > span { min-height: 0; overflow: hidden; text-wrap: pretty; }
+.review-copy > span::before { content: ""; display: block; height: 8px; }
+.review-list input:checked + .review-item::before { transform: scaleX(1); }
+.review-list input:checked + .review-item .review-copy { grid-template-rows: 1fr; opacity: 1; }
+.review-list input:focus-visible + .review-item b { outline: 2px solid var(--accent); outline-offset: 2px; }
+.review-shots { grid-column: 5 / 13; display: grid; }
+.review-shot { grid-area: 1 / 1; transition: opacity 240ms var(--ease-out); }
+.review:has(#review-diff:checked) .review-shot-diff,
+.review:has(#review-preview:checked) .review-shot-preview,
+.review:has(#review-history:checked) .review-shot-history { z-index: 1; }
 .review:has(#review-diff:not(:checked)) .review-shot-diff,
 .review:has(#review-preview:not(:checked)) .review-shot-preview,
-.review:has(#review-history:not(:checked)) .review-shot-history { display: none; }
+.review:has(#review-history:not(:checked)) .review-shot-history { opacity: 0; visibility: hidden; transition: opacity 0s 240ms, visibility 0s 240ms; }
 
 .remote-shots { grid-column: 1 / -1; margin-top: 72px; }
 
@@ -215,12 +232,12 @@ code { font-family: var(--mono); font-size: .875em; }
   .hero-side { margin-top: 40px; }
   .hero-switch { margin-top: 40px; }
   /* The phones bleed to the screen's edges and snap one at a time. */
-  .hero-shot-mobile { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 72%; margin-inline: -16px; padding-inline: 16px; overflow-x: auto; scroll-snap-type: x mandatory; scroll-padding-inline: 16px; scrollbar-width: none; }
+  .hero-shot-mobile { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 72%; margin-inline: -16px; padding-inline: 16px; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x mandatory; scroll-padding-inline: 16px; scrollbar-width: none; }
   .hero-shot-mobile img { border-radius: 12px; scroll-snap-align: start; }
   .row { padding-top: 88px; }
   .row-copy, .agents, .features, .methods { margin-top: 32px; }
   .showcase, .review { display: block; margin-top: 64px; }
-  .showcase .shots, .review-shot { margin-top: 24px; }
+  .showcase .shots, .review-shots { margin-top: 24px; }
   .shots { gap: 12px; }
   .features { margin-top: 64px; }
   /* Too narrow for the remote pair at one height: the file list goes under the Ports page, smaller. */
@@ -237,4 +254,65 @@ code { font-family: var(--mono); font-size: .875em; }
   .site-footer .shell { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px 24px; }
   .download { padding-top: 40px; }
   .download-main { margin-top: 40px; }
+}
+
+/* Motion */
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+}
+/* Switching the hero's screenshots (index.astro): the old one shrinks into the logo's dot matrix and
+   out while the frame takes the new one's size, then the new one grows out of the dots until they
+   merge, as the C does on load; the two never share the frame. A dot every 8px; at 6px a dot covers
+   its cell, corners included. */
+@property --dot { syntax: "<length>"; inherits: false; initial-value: 0px; }
+.hero-shot { view-transition-name: hero-shot; }
+/* Only the screenshots take part: the rest of the page takes its new place at once rather than
+   crossfading as a whole. */
+::view-transition-old(root) { display: none; }
+::view-transition-new(root) { animation: none; }
+::view-transition-group(hero-shot) { animation-duration: 520ms; animation-timing-function: var(--ease-out); }
+::view-transition-old(hero-shot), ::view-transition-new(hero-shot) { mask-image: radial-gradient(circle, #000 var(--dot), transparent calc(var(--dot) + .5px)); mask-size: 8px 8px; mask-position: center; }
+::view-transition-old(hero-shot) { animation: dots-out 200ms cubic-bezier(.65, 0, .35, 1) both; }
+/* Not the usual ease-out: the dots must stay dots long enough to be seen before they merge. */
+::view-transition-new(hero-shot) { animation: dots-in 440ms cubic-bezier(.4, 0, .2, 1) 180ms both; }
+@keyframes dots-out { from { --dot: 6px; } to { --dot: 0px; } }
+@keyframes dots-in { from { --dot: 0px; } to { --dot: 6px; } }
+/* Swiping the phones on a phone: the one in view is full size and bright, its neighbours a step back. */
+@supports (animation-timeline: view()) {
+  @media (max-width: 760px) and (prefers-reduced-motion: no-preference) {
+    /* Longhands: the build's minifier drops the shorthand next to animation-timeline. */
+    .hero-shot-mobile img { animation-name: phone-focus; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: view(inline); }
+    @keyframes phone-focus {
+      entry 0% { opacity: .45; scale: .94; }
+      entry 100%, exit 0% { opacity: 1; scale: 1; }
+      exit 100% { opacity: .45; scale: .94; }
+    }
+  }
+}
+/* Scroll reveal (index.astro). Until a target scrolls in it waits in its starting state, with no
+   transition so leaving its resting state is instant; arriving runs after its --delay. :root raises
+   these over the rules they restyle, such as .methods > div:first-child. */
+:root.reveal-ready [data-reveal]:not(.in), :root.reveal-ready [data-reveal]:not(.in) > * { transition: none; }
+/* Words and list items float up into place. */
+:root.reveal-ready [data-reveal="rise"]:not(.in) { opacity: 0; translate: 0 16px; }
+:root.reveal-ready [data-reveal="rise"].in { transition: opacity 700ms var(--ease-out) var(--delay), translate 900ms var(--ease-out) var(--delay); }
+/* Big headings set in line by line: uncovered from the top down, in reading order, while they lift into
+   place. The clip reaches past the box so descenders and overhangs survive at rest. */
+:root.reveal-ready [data-reveal="type"]:not(.in) { clip-path: inset(-20% -5% 100% -5%); translate: 0 .3em; }
+:root.reveal-ready [data-reveal="type"].in { clip-path: inset(-20% -5% -25% -5%); transition: clip-path 1000ms var(--ease-out) var(--delay), translate 1000ms var(--ease-out) var(--delay); }
+/* A rule draws itself from the left, standing in for the border it hides, and what it heads follows. */
+[data-reveal] { --delay: 0ms; }
+[data-reveal="rule"] { --rule: var(--ink); --rule-width: 2px; }
+.methods > div + div { --rule: var(--line); --rule-width: 1px; }
+:root.reveal-ready [data-reveal="rule"] { border-top-color: transparent; background: linear-gradient(var(--rule), var(--rule)) 0 0 / 0 var(--rule-width) no-repeat border-box; }
+:root.reveal-ready [data-reveal="rule"].in { background-size: 100% var(--rule-width); transition: background-size 900ms var(--ease-out) var(--delay); }
+:root.reveal-ready [data-reveal="rule"]:not(.in) > * { opacity: 0; translate: 0 12px; }
+:root.reveal-ready [data-reveal="rule"].in > * { transition: opacity 600ms var(--ease-out) calc(var(--delay) + 150ms), translate 800ms var(--ease-out) calc(var(--delay) + 150ms); }
+/* Screenshots resolve out of the dot matrix, as the hero's do when switched. */
+:root.reveal-ready [data-reveal="dots"] img { mask-image: radial-gradient(circle, #000 var(--dot), transparent calc(var(--dot) + .5px)); mask-size: 8px 8px; mask-position: center; }
+:root.reveal-ready [data-reveal="dots"].in img { animation-name: dots-in; animation-duration: 800ms; animation-timing-function: cubic-bezier(.4, 0, .2, 1); animation-delay: var(--delay); animation-fill-mode: both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .review-item::before, .review-copy, .review-shot { transition: none; }
+  .button:active, .download-button:active, .download-stores a:active { transform: none; }
 }
