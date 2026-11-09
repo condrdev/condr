@@ -136,6 +136,8 @@ impl Condr {
         else {
             return false;
         };
+        // Showing a Pane shows its Workspace, which leaves the Ports page (ADR 0061).
+        self.window_view_mut(window).ports = None;
         self.show_view(key, workspace_id, Some(tab_id));
         // A Pane another window draws is shown there, and that window comes forward.
         let home = self.home_window(key, Some(workspace_id), Some(tab_id));

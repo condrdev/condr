@@ -35,7 +35,7 @@ fn echoes(local: u16) -> bool {
 
 /// The Ports page end to end (ADR 0061): the sidebar's button opens it over the content
 /// area, its form forwards a port of a TCP Device, a connection to the local port reaches
-/// the Device's loopback, Stop ends it, and choosing a Workspace leaves the page.
+/// the Device's loopback, Stop ends it, and choosing a Device or a Pane leaves the page.
 #[test]
 fn the_ports_page_forwards_a_devices_port_and_stops_it() {
     let _serial_guard = acquire_visual_test_lock();
@@ -119,6 +119,19 @@ fn the_ports_page_forwards_a_devices_port_and_stops_it() {
         view.update(cx, |this, cx| {
             this.window_view_mut(window).ports = Some(PortsScope::Device(1));
             this.select_server(1, window, cx);
+        })
+    });
+    window.read(|app| {
+        assert!(view.read(app).windows.iter().all(|v| v.ports.is_none()));
+    });
+
+    // So does choosing an Agent's Pane.
+    let root = TestDirectory::new("ports-leave-by-pane");
+    let (_, _, pane_id) = super::dock::create_workspace(window, &view, &root);
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| {
+            this.open_ports(PortsScope::All, window, cx);
+            assert!(this.select_pane(1, pane_id, window, cx));
         })
     });
     window.read(|app| {
