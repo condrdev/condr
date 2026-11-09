@@ -425,7 +425,8 @@ impl Condr {
                     .action(move |_, _, _| {
                         let destination = destination.clone();
                         Button::new("reveal-download")
-                            .label(super::file_entries::reveal_label())
+                            .icon(IconName::FolderOpen)
+                            .tooltip(super::file_entries::reveal_label())
                             .small()
                             .ghost()
                             .on_click(move |_, _, _| {
