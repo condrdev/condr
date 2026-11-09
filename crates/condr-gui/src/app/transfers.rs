@@ -412,7 +412,7 @@ impl Condr {
     }
 
     /// A finished download's toast, with the reveal action of ADR 0045.
-    fn report_downloaded(&self, name: &str, destination: PathBuf, cx: &mut App) {
+    pub(super) fn report_downloaded(&self, name: &str, destination: PathBuf, cx: &mut App) {
         struct DownloadToast;
         let message: SharedString = format!("Downloaded {name}").into();
         let handle = self.active_view().handle;

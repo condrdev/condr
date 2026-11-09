@@ -8,9 +8,9 @@
 //! ```
 //!
 //! It starts a TCP Server with one Workspace, opens Condr against it, and saves one PNG
-//! per state: the Workspace, the Ports page empty, with forwards, for one Device, and the
-//! right sidebar's transfer strip, and the left sidebar with its Device folded. The
-//! website's screenshots come from the same window, in `website`.
+//! per state: the Workspace, the Ports page empty, with forwards, for one Device, the right
+//! sidebar's transfer strip, the left sidebar with its Device folded, and a finished
+//! download's toast. The website's screenshots come from the same window, in `website`.
 
 mod website;
 
@@ -237,6 +237,16 @@ pub(crate) fn run(directory: PathBuf) {
         this.open_ports(PortsScope::All, window, cx);
     });
     shot(&mut cx, window, &directory, "08-ports-device-lost");
+
+    // A finished download's toast, with its reveal action.
+    let downloaded = local_path(&root, "notes.txt");
+    update(&mut cx, window, &view, move |this, _, cx| {
+        this.report_downloaded("biome.json", downloaded, cx)
+    });
+    // The toast fades in from its first frame on the wall clock: draw it once, then let it land.
+    let _ = capture(&mut cx, window);
+    std::thread::sleep(Duration::from_millis(500));
+    shot(&mut cx, window, &directory, "09-download-toast");
 
     drop(browser);
     let _ = cx.update_window(window, |_, window, _| window.remove_window());
