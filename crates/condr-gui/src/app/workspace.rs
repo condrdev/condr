@@ -192,10 +192,28 @@ impl Condr {
         let tab_count = tab_ids.len();
         let separator_color = cx.theme().border;
         let transparent = cx.theme().transparent;
+        let muted = cx.theme().muted_foreground;
+        // An unnamed terminal Tab shows its focused Pane's title after its number.
+        let pane_titles = workspace
+            .tabs()
+            .iter()
+            .map(|tab| {
+                let pane = tab
+                    .name()
+                    .is_empty()
+                    .then(|| tab.focused_pane())
+                    .flatten()?;
+                self.connection(key)?.pane_title(pane.id())
+            })
+            .collect::<Vec<_>>();
         let tab_buttons = workspace.tabs().iter().enumerate().map(|(tab_index, tab)| {
             let tab_id = tab.id();
             let tab_name = tab.name().to_owned();
-            let tab_label = tab_label(tab_index, &tab_name);
+            let pane_title = pane_titles[tab_index].clone();
+            let tab_label = match &pane_title {
+                Some(title) => format!("{}  {title}", tab_index + 1),
+                None => tab_label(tab_index, &tab_name),
+            };
             // A Preview Tab's file can be downloaded from its menu (ADR 0061).
             let preview_file = tab.file().map(|file| file.path().to_relative_path_buf());
             let activate_owner = cx.weak_entity();
@@ -309,7 +327,18 @@ impl Condr {
                         .min_w(TAB_MIN_WIDTH)
                         .max_w(TAB_MAX_WIDTH)
                         .selected(tab_id == active_tab)
-                        .label(tab_label.clone())
+                        .map(|button| match pane_title {
+                            Some(title) => button.child(
+                                h_flex()
+                                    .min_w_0()
+                                    .gap_2()
+                                    .child(
+                                        div().text_color(muted).child(format!("{}", tab_index + 1)),
+                                    )
+                                    .child(div().min_w_0().truncate().child(title)),
+                            ),
+                            None => button.label(tab_label.clone()),
+                        })
                         .tooltip_with_action(
                             tab_label,
                             &ActivateTab { index: tab_index },
