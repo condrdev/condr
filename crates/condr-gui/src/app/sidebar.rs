@@ -33,7 +33,10 @@ fn workspace_suffix(
 
 /// How a Pane's agent shows in the sidebar, the bell over its state while it wants a
 /// person; `None` when the Pane runs no agent.
-fn pane_sidebar_status(model: &SessionModel, pane_id: PaneId) -> Option<SidebarStatusVisual> {
+pub(super) fn pane_sidebar_status(
+    model: &SessionModel,
+    pane_id: PaneId,
+) -> Option<SidebarStatusVisual> {
     model.agents.get(&pane_id)?;
     let state = model.agent_display_state(pane_id)?;
     Some(if model.attention.contains(&pane_id) {

@@ -126,6 +126,7 @@ impl Render for TerminalPanel {
             runtime_epoch,
             pane_title,
             agent_kind,
+            agent_status,
             attention,
             zoomed,
             pasting,
@@ -165,6 +166,9 @@ impl Render for TerminalPanel {
                     connection
                         .and_then(|connection| connection.model.agents.get(&self.pane_id))
                         .map(|agent| agent.kind),
+                    connection
+                        .and_then(|connection| connection.model.agent_display_state(self.pane_id))
+                        .map(super::sidebar::agent_sidebar_status),
                     connection.is_some_and(|connection| {
                         connection.model.attention.contains(&self.pane_id)
                     }),
@@ -191,6 +195,7 @@ impl Render for TerminalPanel {
                 None,
                 None,
                 SharedString::from("Terminal"),
+                None,
                 None,
                 false,
                 false,
@@ -436,6 +441,31 @@ impl Render for TerminalPanel {
                             .flex()
                             .items_center()
                             .gap_1()
+                            // The Agent's state leads the header, as it leads the Tab; the
+                            // bell says it instead while it rings.
+                            .when_some(agent_status.filter(|_| !attention), |header, status| {
+                                header.children(super::sidebar::status_badge(status, cx).map(
+                                    |badge| {
+                                        div()
+                                            .id(format!(
+                                                "terminal-pane-status-{key}-{}",
+                                                pane_id.as_u64()
+                                            ))
+                                            .debug_selector(move || {
+                                                format!("terminal-pane-status-{}", pane_id.as_u64())
+                                            })
+                                            .size_4()
+                                            .flex_shrink_0()
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .tooltip(move |window, cx| {
+                                                Tooltip::new(status.label).build(window, cx)
+                                            })
+                                            .child(badge)
+                                    },
+                                ))
+                            })
                             .when(attention, |header| {
                                 header.child(
                                     div()

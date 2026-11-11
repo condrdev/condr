@@ -362,6 +362,27 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
     let agent_status = window.debug_bounds(agent_status_selector).unwrap();
     let agent_label = window.debug_bounds(agent_label_selector).unwrap();
     assert!(agent_status.right() <= agent_label.left());
+    // The Pane's header and its Tab lead with the same state.
+    let tab_id = window.read(|app| {
+        let session = view.read(app).active_session().unwrap();
+        session
+            .workspaces()
+            .first()
+            .unwrap()
+            .tabs()
+            .first()
+            .unwrap()
+            .id()
+    });
+    for selector in [
+        format!("terminal-pane-status-{}", pane_id.as_u64()),
+        format!("tab-status-{}", tab_id.as_u64()),
+    ] {
+        assert!(
+            window.debug_bounds(leaked_selector(selector)).is_some(),
+            "an Agent's state should show on its Pane and its Tab"
+        );
+    }
 
     let selection_before = window.read(|app| {
         let condr = view.read(app);

@@ -206,10 +206,36 @@ impl Condr {
                 self.connection(key)?.pane_title(pane.id())
             })
             .collect::<Vec<_>>();
+        // A Tab leads with the state of its Pane that most wants a person, as the sidebar
+        // ranks them.
+        let tab_statuses = workspace
+            .tabs()
+            .iter()
+            .map(|tab| {
+                let model = &self.connection(key)?.model;
+                let statuses = tab
+                    .panes()
+                    .iter()
+                    .filter_map(|pane| super::sidebar::pane_sidebar_status(model, pane.id()))
+                    // Unknown says nothing, here as on the Pane; the sidebar counts it idle.
+                    .filter(|status| status.key != "unknown");
+                let (status, _) = *super::sidebar::agent_status_summary(statuses).first()?;
+                let badge = super::sidebar::status_badge(status, cx)?;
+                let tab_id = tab.id();
+                Some(
+                    div()
+                        .debug_selector(move || format!("tab-status-{}", tab_id.as_u64()))
+                        .flex_shrink_0()
+                        .child(badge),
+                )
+            })
+            .collect::<Vec<_>>();
+        let mut tab_statuses = tab_statuses.into_iter();
         let tab_buttons = workspace.tabs().iter().enumerate().map(|(tab_index, tab)| {
             let tab_id = tab.id();
             let tab_name = tab.name().to_owned();
             let pane_title = pane_titles[tab_index].clone();
+            let tab_status = tab_statuses.next().flatten();
             let tab_label = match &pane_title {
                 Some(title) => format!("{}  {title}", tab_index + 1),
                 None => tab_label(tab_index, &tab_name),
@@ -327,18 +353,18 @@ impl Condr {
                         .min_w(TAB_MIN_WIDTH)
                         .max_w(TAB_MAX_WIDTH)
                         .selected(tab_id == active_tab)
-                        .map(|button| match pane_title {
-                            Some(title) => button.child(
-                                h_flex()
-                                    .min_w_0()
-                                    .gap_2()
+                        .child(h_flex().min_w_0().gap_2().children(tab_status).map(|row| {
+                            match pane_title {
+                                Some(title) => row
                                     .child(
                                         div().text_color(muted).child(format!("{}", tab_index + 1)),
                                     )
                                     .child(div().min_w_0().truncate().child(title)),
-                            ),
-                            None => button.label(tab_label.clone()),
-                        })
+                                None => {
+                                    row.child(div().min_w_0().truncate().child(tab_label.clone()))
+                                }
+                            }
+                        }))
                         .tooltip_with_action(
                             tab_label,
                             &ActivateTab { index: tab_index },
