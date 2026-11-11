@@ -22,7 +22,7 @@ The Settings window configures one Device at a time. Use the picker at the top t
 | Page | Applies to | Description |
 | :--- | :--- | :--- |
 | **General** | Device | **Status**: version, uptime, session metrics (Workspace and Pane counts) and recent errors. **Terminal**: default shell for new Panes (defaults to the system environment if left blank) and the **Shell integration** switch. **Restart Condr** below them |
-| **Appearance** | This machine | Theme (follow system, light or dark), terminal fonts and colors, syntax highlighting and font sizes for Preview and Diff |
+| **Appearance** | This machine | Theme (follow system, light or dark), terminal fonts, the terminal colors for dark and for light mode, which the whole interface takes its colors from, and syntax highlighting and font sizes for Preview and Diff |
 | **Notifications** | This machine | System notification toggle and test notification button |
 | **Power** | This machine | Keep display awake (mirrors the coffee cup icon in the sidebar footer) |
 | **Shortcuts** | This machine | Keyboard shortcuts reference (read-only) |
@@ -77,14 +77,16 @@ fps_monitor = false
 [client.terminal]
 font_family = "JetBrains Mono"
 font_size = 13
-color_scheme = "Dracula"
+dark_color_scheme = "Dracula"
+light_color_scheme = "Catppuccin Latte"
 ```
 
 | Key | Type / values | Default | Description |
 | --- | --- | --- | --- |
 | `font_family` | string | The interface theme's monospace font | The font terminals render with. Empty uses the interface's built-in default font |
 | `font_size` | 6 ~ 72 | The interface's base monospace size | In pixels. Fractions are rounded, and out-of-range values are clamped to the nearest bound |
-| `color_scheme` | string | Empty | A built-in iTerm2 scheme name, matching the **Appearance** dropdown exactly. Empty or unrecognized names use the default palette. Programs that ask the terminal for its colours (OSC 10/11, or whether it is dark or light) get this scheme; with several desktops on one Device, the last to connect or change its scheme decides |
+| `dark_color_scheme` | string | Empty | The terminal colours in dark mode: a built-in iTerm2 scheme name, matching the **Dark colors** dropdown exactly. The whole interface takes its colours from it while dark mode shows. Empty, unrecognized or light schemes use the default dark palette. Programs that ask the terminal for its colours (OSC 10/11, or whether it is dark or light) get the scheme of the mode showing; with several desktops on one Device, the last to connect, change its scheme or switch modes decides |
+| `light_color_scheme` | string | Empty | The same for light mode, from the **Light colors** dropdown. Empty, unrecognized or dark schemes use GitHub Light Default |
 
 ### `[client.code]` code views (Preview / Diff)
 

@@ -376,7 +376,7 @@ impl Render for TerminalPanel {
             .overflow_hidden()
             .when(!solo, |this| {
                 this.border_2().border_color(if active {
-                    rgb(ACTIVE_PANE_BORDER_RGB).into()
+                    cx.theme().primary
                 } else {
                     cx.theme().border
                 })

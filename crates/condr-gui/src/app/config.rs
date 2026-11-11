@@ -3,6 +3,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use gpui_kit::component::theme::ThemeMode;
 use gpui_kit::{AppContext as _, Context, SharedString};
 use serde::Deserialize;
 
@@ -32,7 +33,9 @@ const WORKSPACE_EDITORS_KEY: &str = "workspace_editors";
 const TERMINAL_TABLE: [&str; 2] = ["client", "terminal"];
 const FONT_FAMILY_KEY: &str = "font_family";
 const FONT_SIZE_KEY: &str = "font_size";
-const COLOR_SCHEME_KEY: &str = "color_scheme";
+// Each mode's terminal colour scheme, which the interface takes its colours from (ADR 0062).
+const DARK_COLOR_SCHEME_KEY: &str = "dark_color_scheme";
+const LIGHT_COLOR_SCHEME_KEY: &str = "light_color_scheme";
 // The Preview Tab's bat theme (ADR 0032).
 const CODE_TABLE: [&str; 2] = ["client", "code"];
 const CODE_THEME_KEY: &str = "theme";
@@ -57,7 +60,8 @@ pub(super) struct LoadedConfig {
     pub auto_check_updates: bool,
     pub update_channel: UpdateChannel,
     pub terminal_font: TerminalFont,
-    pub terminal_color_scheme: SharedString,
+    pub dark_color_scheme: SharedString,
+    pub light_color_scheme: SharedString,
     pub code_theme: SharedString,
     pub code_font_size: f32,
     pub default_editor: Option<String>,
@@ -179,10 +183,16 @@ impl LoadedConfig {
                 .and_then(toml::Value::as_str)
                 .map_or_else(UpdateChannel::of_this_build, UpdateChannel::from_str),
             terminal_font,
-            terminal_color_scheme: nonempty_string(terminal.and_then(|v| v.get(COLOR_SCHEME_KEY)))
+            dark_color_scheme: nonempty_string(terminal.and_then(|v| v.get(DARK_COLOR_SCHEME_KEY)))
                 .unwrap_or_default()
                 .to_owned()
                 .into(),
+            light_color_scheme: nonempty_string(
+                terminal.and_then(|v| v.get(LIGHT_COLOR_SCHEME_KEY)),
+            )
+            .unwrap_or_default()
+            .to_owned()
+            .into(),
             code_theme: nonempty_string(code.and_then(|v| v.get(CODE_THEME_KEY)))
                 .unwrap_or_default()
                 .to_owned()
@@ -349,15 +359,14 @@ impl Condr {
         });
     }
 
-    pub(super) fn save_terminal_color_scheme(&mut self, cx: &mut Context<Self>) {
-        let name = self.terminal_color_scheme.clone();
+    pub(super) fn save_color_scheme(&mut self, mode: ThemeMode, cx: &mut Context<Self>) {
+        let (key, name) = if mode.is_dark() {
+            (DARK_COLOR_SCHEME_KEY, self.dark_color_scheme.clone())
+        } else {
+            (LIGHT_COLOR_SCHEME_KEY, self.light_color_scheme.clone())
+        };
         self.save_config(cx, move |path| {
-            write_value(
-                path,
-                &TERMINAL_TABLE,
-                COLOR_SCHEME_KEY,
-                toml_edit::value(name.as_ref()),
-            )
+            write_value(path, &TERMINAL_TABLE, key, toml_edit::value(name.as_ref()))
         });
     }
 
@@ -647,7 +656,7 @@ mod tests {
     }
 
     #[test]
-    fn terminal_color_scheme_round_trips_and_defaults_to_empty() {
+    fn color_schemes_round_trip_and_default_to_empty() {
         let directory = std::env::temp_dir().join(format!(
             "condr-client-color-scheme-{}-{:?}",
             std::process::id(),
@@ -656,15 +665,25 @@ mod tests {
         let path = directory.join("config.toml");
         fs::create_dir_all(&directory).unwrap();
 
-        assert_eq!(read_config(&path).terminal_color_scheme, "");
+        assert_eq!(read_config(&path).dark_color_scheme, "");
+        assert_eq!(read_config(&path).light_color_scheme, "");
         write_value(
             &path,
             &TERMINAL_TABLE,
-            COLOR_SCHEME_KEY,
+            DARK_COLOR_SCHEME_KEY,
             "Gruvbox Dark".into(),
         )
         .unwrap();
-        assert_eq!(read_config(&path).terminal_color_scheme, "Gruvbox Dark");
+        write_value(
+            &path,
+            &TERMINAL_TABLE,
+            LIGHT_COLOR_SCHEME_KEY,
+            "Gruvbox Light".into(),
+        )
+        .unwrap();
+        let config = read_config(&path);
+        assert_eq!(config.dark_color_scheme, "Gruvbox Dark");
+        assert_eq!(config.light_color_scheme, "Gruvbox Light");
         fs::remove_dir_all(directory).unwrap();
     }
 

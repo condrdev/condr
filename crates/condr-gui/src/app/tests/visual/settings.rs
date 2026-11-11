@@ -1,4 +1,5 @@
 use super::*;
+use gpui_kit::component::theme::ThemeMode;
 
 #[test]
 fn a_settings_draft_survives_failed_send_and_saved_feedback_stays_on_its_device() {
@@ -139,13 +140,13 @@ fn settings_pages_follow_the_device_and_the_proxy_reaches_only_this_machines_cli
         1
     );
     assert!(
-        settings.debug_bounds("terminal-color-scheme").is_none(),
+        settings.debug_bounds("dark-color-scheme").is_none(),
         "this machine opens on General"
     );
     settings.update(|_, cx| select_settings_page(&settings_view, 1, cx));
     settings.update(|window, cx| _ = window.draw(cx));
     assert!(
-        settings.debug_bounds("terminal-color-scheme").is_some(),
+        settings.debug_bounds("dark-color-scheme").is_some(),
         "Appearance comes next"
     );
 
@@ -156,7 +157,7 @@ fn settings_pages_follow_the_device_and_the_proxy_reaches_only_this_machines_cli
     });
     settings.update(|window, cx| _ = window.draw(cx));
     assert!(settings.debug_bounds("agent-hooks-claude-state").is_some());
-    assert!(settings.debug_bounds("terminal-color-scheme").is_none());
+    assert!(settings.debug_bounds("dark-color-scheme").is_none());
     settings.update(|_, cx| {
         view.update(cx, |this, _| {
             this.connection_mut(2).unwrap().status = ConnectionStatus::Disconnected;
@@ -396,50 +397,71 @@ fn the_terminal_settings_controls_drive_the_preferences_and_reset() {
             .and_then(|view| view.upgrade())
             .expect("the Settings window view is recorded")
     });
-    // Appearance, after this machine's General.
+    // Appearance, after this machine's General, tall enough to show the whole page.
+    settings.simulate_resize(size(px(864.), px(900.)));
     settings.update(|_, cx| select_settings_page(&settings_view, 1, cx));
     settings.update(|window, cx| _ = window.draw(cx));
-    let select_state = settings.read(|app| settings_view.read(app).color_scheme.clone());
+    let select_state = settings.read(|app| settings_view.read(app).dark_color_scheme.clone());
+    let palette = |window: &mut VisualTestContext| {
+        window.read(|app| app.global::<TerminalPalette>().background)
+    };
+    let set_mode = |window: &mut VisualTestContext, mode: &str| {
+        window.update(|_, cx| select_appearance(&owner, mode, cx));
+        window.run_until_parked();
+    };
+    set_mode(window, "dark");
 
-    // Colors: the real Select, opened by click, filtered by typing, confirmed by Enter.
+    // Dark colors: the real Select, opened by click, filtered by typing, confirmed by Enter.
     let select = settings
-        .debug_bounds("terminal-color-scheme")
-        .expect("the Colors select should render");
+        .debug_bounds("dark-color-scheme")
+        .expect("the Dark colors select should render");
     settings.simulate_click(select.center(), Modifiers::default());
     settings.run_until_parked();
     settings.simulate_input("Kanagawa Dragon");
     settings.simulate_keystrokes("enter");
     settings.run_until_parked();
     assert_eq!(
-        window.read(|app| view.read(app).terminal_color_scheme.clone()),
+        window.read(|app| view.read(app).dark_color_scheme.clone()),
         "Kanagawa Dragon",
         "confirming a scheme in the select must store it"
     );
     let expected = crate::color_scheme::palette("Kanagawa Dragon").unwrap();
     assert_eq!(
-        window.read(|app| app.global::<TerminalPalette>().background),
+        palette(window),
         expected.background,
         "the chosen scheme must reach the terminal palette"
     );
-    assert!(window.read(|app| color_scheme_is_dirty(&owner, app)));
+    assert_eq!(
+        window.read(|app| crate::terminal_element::rgb_value(app.theme().background)),
+        crate::terminal_element::rgb_value(expected.background),
+        "the interface must take its colours from the scheme"
+    );
+    assert!(window.read(|app| color_scheme_is_dirty(&owner, ThemeMode::Dark, app)));
+    assert!(!window.read(|app| color_scheme_is_dirty(&owner, ThemeMode::Light, app)));
 
-    // Reset All for Colors: preference and widget both return to Default.
-    settings.update(|window, cx| reset_color_scheme(&owner, &select_state, window, cx));
+    // Light mode shows the light scheme, its default here.
+    set_mode(window, "light");
+    let light_default = crate::color_scheme::palette("GitHub Light Default").unwrap();
+    assert_eq!(palette(window), light_default.background);
+
+    // Reset All for Dark colors: preference and widget both return to Default.
+    settings.update(|window, cx| {
+        reset_color_scheme(&owner, ThemeMode::Dark, &select_state, window, cx)
+    });
     settings.run_until_parked();
     assert_eq!(
-        window.read(|app| view.read(app).terminal_color_scheme.clone()),
+        window.read(|app| view.read(app).dark_color_scheme.clone()),
         ""
     );
-    assert!(!window.read(|app| color_scheme_is_dirty(&owner, app)));
+    assert!(!window.read(|app| color_scheme_is_dirty(&owner, ThemeMode::Dark, app)));
     assert_eq!(
         window.read(|app| select_state.read(app).selected_value().cloned()),
         Some("Default".into()),
         "the select must show Default after a reset"
     );
-    assert_eq!(
-        window.read(|app| app.global::<TerminalPalette>().background),
-        TerminalPalette::default().background
-    );
+    set_mode(window, "dark");
+    assert_eq!(palette(window), TerminalPalette::default().background);
+    set_mode(window, "system");
 
     // The Preview and Diff Colors: a Select of the same kind, reset back to Default.
     let code_select = settings.read(|app| settings_view.read(app).code_theme.clone());

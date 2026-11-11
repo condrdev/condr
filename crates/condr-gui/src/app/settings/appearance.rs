@@ -1,5 +1,7 @@
 use super::*;
 use crate::app::syntax::{self, CodeTheme};
+use crate::interface_colors;
+use std::rc::Rc;
 
 /// How long after the last font change the config file is written, so a run of
 /// stepper clicks rewrites it once.
@@ -97,10 +99,51 @@ pub(in crate::app) fn apply_terminal_font(font: &TerminalFont, cx: &mut App) {
     cx.refresh_windows();
 }
 
-/// Terminal color scheme names come from the built-in collection; an empty or
-/// unknown name selects the built-in default palette.
-pub(in crate::app) fn apply_terminal_color_scheme(name: &str, cx: &mut App) {
-    cx.set_global(crate::color_scheme::palette(name).unwrap_or_default());
+/// What a light interface shows when no light scheme is chosen: the light half of the
+/// built-in default.
+const DEFAULT_LIGHT_COLOR_SCHEME: &str = "GitHub Light Default";
+
+/// The terminal colour schemes for each mode. The interface shows the one for its mode
+/// and takes its own colours from it (ADR 0062).
+pub(in crate::app) struct ColorSchemes {
+    dark: TerminalPalette,
+    light: TerminalPalette,
+}
+
+impl Global for ColorSchemes {}
+
+/// Installs the interface themes derived from the `dark` and `light` schemes, then shows
+/// the pair's half for the current mode. Names come from the built-in collection; an
+/// empty or unknown name, or one of the other lightness, selects that half's default.
+pub(in crate::app) fn apply_color_schemes(dark: &str, light: &str, cx: &mut App) {
+    let dark = crate::color_scheme::palette(dark)
+        .filter(|palette| !interface_colors::is_light(palette))
+        .unwrap_or_default();
+    let light = crate::color_scheme::palette(light)
+        .filter(interface_colors::is_light)
+        .or_else(|| crate::color_scheme::palette(DEFAULT_LIGHT_COLOR_SCHEME))
+        .expect("the default light scheme is built in");
+    let theme = Theme::global_mut(cx);
+    theme.dark_theme = Rc::new(interface_colors::theme_config("Condr Dark", &dark));
+    theme.light_theme = Rc::new(interface_colors::theme_config("Condr Light", &light));
+    cx.set_global(ColorSchemes { dark, light });
+    // Reloading the mode puts the new pair's colours over the old ones.
+    Theme::change(cx.theme().mode, None, cx);
+    sync_terminal_palette(cx);
+    syntax::apply_code_theme(cx);
+}
+
+/// Points the terminals at the scheme for the mode the interface now shows.
+fn sync_terminal_palette(cx: &mut App) {
+    let Some(schemes) = cx.try_global::<ColorSchemes>() else {
+        return;
+    };
+    let palette = if cx.theme().is_dark() {
+        schemes.dark.clone()
+    } else {
+        schemes.light.clone()
+    };
+    cx.set_global(palette);
     cx.refresh_windows();
 }
 
@@ -128,12 +171,14 @@ pub(in crate::app) fn apply_appearance(
             Theme::change(ThemeMode::Dark, window, cx);
         }
     }
+    sync_terminal_palette(cx);
     syntax::apply_code_theme(cx);
 }
 
 /// Re-resolves `System` after the operating system changed its appearance.
 pub(in crate::app) fn sync_theme_with_system(window: &mut Window, cx: &mut App) {
     Theme::sync_system_appearance(Some(window), cx);
+    sync_terminal_palette(cx);
     syntax::apply_code_theme(cx);
 }
 
@@ -219,23 +264,28 @@ pub(in crate::app) fn step_terminal_font_size(
     });
 }
 
-/// Whether Reset All has anything to do for Colors.
-pub(in crate::app) fn color_scheme_is_dirty(owner: &WeakEntity<Condr>, cx: &App) -> bool {
+/// Whether Reset All has anything to do for `mode`'s colors.
+pub(in crate::app) fn color_scheme_is_dirty(
+    owner: &WeakEntity<Condr>,
+    mode: ThemeMode,
+    cx: &App,
+) -> bool {
     owner
         .upgrade()
-        .is_some_and(|owner| !owner.read(cx).terminal_color_scheme.is_empty())
+        .is_some_and(|owner| !owner.read(cx).color_scheme(mode).is_empty())
 }
 
-/// What Reset All does for Colors: back to the built-in palette, in both the
-/// preference and the select widget.
+/// What Reset All does for `mode`'s colors: back to its default, in both the preference
+/// and the select widget.
 pub(in crate::app) fn reset_color_scheme(
     owner: &WeakEntity<Condr>,
+    mode: ThemeMode,
     select: &Entity<ColorSchemeSelect>,
     window: &mut Window,
     cx: &mut App,
 ) {
     let _ = owner.update(cx, |this, cx| {
-        this.set_terminal_color_scheme(SharedString::default(), cx)
+        this.set_color_scheme(mode, SharedString::default(), cx)
     });
     select.update(cx, |select, cx| {
         select.set_selected_value(&DEFAULT_COLOR_SCHEME_LABEL.into(), window, cx);
@@ -246,12 +296,10 @@ pub(in crate::app) fn reset_color_scheme(
 pub(super) fn appearance_page(
     owner: &WeakEntity<Condr>,
     settings: &Entity<SettingsWindow>,
-    color_scheme: &Entity<ColorSchemeSelect>,
+    dark_color_scheme: &Entity<ColorSchemeSelect>,
+    light_color_scheme: &Entity<ColorSchemeSelect>,
     code_theme: &Entity<ColorSchemeSelect>,
 ) -> SettingPage {
-    let reset_select = color_scheme.clone();
-    let dirty_owner = owner.clone();
-    let reset_owner = owner.clone();
     let selected_owner = owner.clone();
     let select_owner = owner.clone();
     let options = Appearance::ALL
@@ -262,7 +310,6 @@ pub(super) fn appearance_page(
     let size_set = settings.clone();
     let size_dirty = settings.clone();
     let default_size = default_font.size;
-    let scheme_select = color_scheme.clone();
     SettingPage::new("Appearance")
         .icon(IconName::Palette)
         .group(
@@ -315,21 +362,12 @@ pub(super) fn appearance_page(
                     )
                     .description("In pixels."),
                 )
-                .item(
-                    SettingItem::new(
-                        "Colors",
-                        SettingField::render(move |_, _, _| {
-                            scheme_select_field("terminal-color-scheme", &scheme_select)
-                        })
-                        .on_reset(
-                            move |cx| color_scheme_is_dirty(&dirty_owner, cx),
-                            move |window, cx| {
-                                reset_color_scheme(&reset_owner, &reset_select, window, cx)
-                            },
-                        ),
-                    )
-                    .description("Terminal color schemes."),
-                ),
+                .item(color_scheme_item(owner, ThemeMode::Dark, dark_color_scheme))
+                .item(color_scheme_item(
+                    owner,
+                    ThemeMode::Light,
+                    light_color_scheme,
+                )),
         )
         .group(
             SettingGroup::new()
@@ -455,6 +493,7 @@ impl Condr {
         self.appearance = appearance;
         self.save_appearance(cx);
         let handle = self.main_window();
+        let owner = cx.weak_entity();
         // Resolving System reads the Window's own appearance, which Linux reports more
         // reliably than the app-global one. GPUI takes the Window out of its table for
         // the duration of an update, so it is unreachable from here — this runs inside
@@ -465,6 +504,8 @@ impl Condr {
             let _ = handle.update(cx, |_, window, cx| {
                 apply_appearance(appearance, Some(window), cx)
             });
+            // The other mode has its own scheme, which programs asking hear about.
+            let _ = owner.update(cx, |this, cx| this.send_terminal_colors(None, cx));
             // The Settings window shows the new mode too.
             cx.refresh_windows();
         });
@@ -490,17 +531,31 @@ impl Condr {
         }));
     }
 
-    pub(in crate::app) fn set_terminal_color_scheme(
+    /// `mode`'s scheme, empty for its default.
+    pub(in crate::app) fn color_scheme(&self, mode: ThemeMode) -> &SharedString {
+        if mode.is_dark() {
+            &self.dark_color_scheme
+        } else {
+            &self.light_color_scheme
+        }
+    }
+
+    pub(in crate::app) fn set_color_scheme(
         &mut self,
+        mode: ThemeMode,
         name: SharedString,
         cx: &mut Context<Self>,
     ) {
-        if self.terminal_color_scheme == name {
+        if *self.color_scheme(mode) == name {
             return;
         }
-        self.terminal_color_scheme = name;
-        self.save_terminal_color_scheme(cx);
-        apply_terminal_color_scheme(&self.terminal_color_scheme, cx);
+        if mode.is_dark() {
+            self.dark_color_scheme = name;
+        } else {
+            self.light_color_scheme = name;
+        }
+        self.save_color_scheme(mode, cx);
+        apply_color_schemes(&self.dark_color_scheme, &self.light_color_scheme, cx);
         self.send_terminal_colors(None, cx);
     }
 
@@ -549,6 +604,40 @@ impl Condr {
         syntax::set_code_theme(name, cx);
         self.save_code_theme(cx);
     }
+}
+
+/// One mode's terminal colour scheme, which the whole interface takes its colours from
+/// while that mode shows (ADR 0062).
+fn color_scheme_item(
+    owner: &WeakEntity<Condr>,
+    mode: ThemeMode,
+    select: &Entity<ColorSchemeSelect>,
+) -> SettingItem {
+    let shown = select.clone();
+    let reset_select = select.clone();
+    let dirty_owner = owner.clone();
+    let reset_owner = owner.clone();
+    let (label, selector, description) = if mode.is_dark() {
+        (
+            "Dark colors",
+            "dark-color-scheme",
+            "Terminal colors in dark mode. The interface takes its colors from them.",
+        )
+    } else {
+        (
+            "Light colors",
+            "light-color-scheme",
+            "Terminal colors in light mode. The interface takes its colors from them.",
+        )
+    };
+    SettingItem::new(
+        label,
+        SettingField::render(move |_, _, _| scheme_select_field(selector, &shown)).on_reset(
+            move |cx| color_scheme_is_dirty(&dirty_owner, mode, cx),
+            move |window, cx| reset_color_scheme(&reset_owner, mode, &reset_select, window, cx),
+        ),
+    )
+    .description(description)
 }
 
 /// A searchable Select, as a scheme list needs filtering, which opens scrolled to the

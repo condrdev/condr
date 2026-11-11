@@ -26,17 +26,12 @@ impl Global for TerminalPalette {}
 impl TerminalPalette {
     /// What a Server answers colour queries with (ADR 0054).
     pub(crate) fn colors(&self) -> TerminalColors {
-        let rgb = |color: Hsla| {
-            let color = color.to_rgb();
-            let channel = |value: f32| (value.clamp(0.0, 1.0) * 255.0).round() as u32;
-            channel(color.r) << 16 | channel(color.g) << 8 | channel(color.b)
-        };
         TerminalColors {
-            foreground: rgb(self.foreground),
-            background: rgb(self.background),
-            cursor: rgb(self.cursor),
+            foreground: rgb_value(self.foreground),
+            background: rgb_value(self.background),
+            cursor: rgb_value(self.cursor),
             ansi: std::array::from_fn(|index| {
-                rgb(if index < 8 {
+                rgb_value(if index < 8 {
                     self.normal[index]
                 } else {
                     self.bright[index - 8]
@@ -44,6 +39,13 @@ impl TerminalPalette {
             }),
         }
     }
+}
+
+/// `0xrrggbb`, alpha dropped.
+pub(crate) fn rgb_value(color: Hsla) -> u32 {
+    let color = color.to_rgb();
+    let channel = |value: f32| (value.clamp(0.0, 1.0) * 255.0).round() as u32;
+    channel(color.r) << 16 | channel(color.g) << 8 | channel(color.b)
 }
 
 impl Default for TerminalPalette {

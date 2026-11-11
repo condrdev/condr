@@ -10,8 +10,18 @@ mod built_in {
     include!(concat!(env!("OUT_DIR"), "/color_schemes.rs"));
 }
 
+#[cfg(test)]
 pub(crate) fn names() -> impl Iterator<Item = &'static str> {
     built_in::BUILT_IN.iter().map(|(name, _)| *name)
+}
+
+/// The light schemes, or the dark ones: each mode offers only its own (ADR 0062).
+pub(crate) fn names_of(light: bool) -> impl Iterator<Item = &'static str> {
+    built_in::BUILT_IN.iter().filter_map(move |(name, toml)| {
+        parse(toml)
+            .is_ok_and(|palette| crate::interface_colors::is_light(&palette) == light)
+            .then_some(*name)
+    })
 }
 
 /// The palette for a built-in scheme name, or `None` when no scheme has that name.
@@ -126,6 +136,15 @@ mod tests {
         for (name, toml) in built_in::BUILT_IN {
             parse(toml).unwrap_or_else(|error| panic!("{name}: {error}"));
         }
+    }
+
+    #[test]
+    fn every_scheme_is_offered_in_exactly_one_mode() {
+        let dark = names_of(false).collect::<Vec<_>>();
+        let light = names_of(true).collect::<Vec<_>>();
+        assert_eq!(dark.len() + light.len(), names().count());
+        assert!(dark.contains(&"Gruvbox Dark") && !light.contains(&"Gruvbox Dark"));
+        assert!(light.contains(&"GitHub Light Default"));
     }
 
     #[test]

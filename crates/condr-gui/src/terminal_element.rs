@@ -43,7 +43,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 pub(crate) use cache::TerminalRenderCache;
-pub(crate) use colors::TerminalPalette;
+pub(crate) use colors::{TerminalPalette, rgb_value};
 pub(crate) use input::link_at;
 
 pub(crate) struct TerminalElement {

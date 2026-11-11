@@ -22,7 +22,7 @@ Condr 采用分层配置架构：
 | 页面 | 作用于 | 说明 |
 | :--- | :--- | :--- |
 | **General** | 设备 | **Status**：版本、运行时间、会话指标（Workspace 和 Pane 数量）以及最近错误日志。**Terminal**：新 Pane 启动的默认 Shell（留空则继承系统环境）和 **Shell integration** 开关。最下方是 **Restart Condr** |
-| **Appearance** | 本机 | 外观主题（跟随系统、浅色、深色）、终端字体与配色，以及 Preview 和 Diff 的语法高亮与字号 |
+| **Appearance** | 本机 | 外观主题（跟随系统、浅色、深色）、终端字体、深色与浅色模式各自的终端配色（整个界面的颜色都从它推导），以及 Preview 和 Diff 的语法高亮与字号 |
 | **Notifications** | 本机 | 系统通知总开关及测试通知按钮 |
 | **Power** | 本机 | 保持屏幕常亮（与侧边栏底部的咖啡杯图标联动） |
 | **Shortcuts** | 本机 | 快捷键列表（只读） |
@@ -77,14 +77,16 @@ fps_monitor = false
 [client.terminal]
 font_family = "JetBrains Mono"
 font_size = 13
-color_scheme = "Dracula"
+dark_color_scheme = "Dracula"
+light_color_scheme = "Catppuccin Latte"
 ```
 
 | 键 | 类型 / 可选值 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `font_family` | string | 界面主题等宽字体 | 终端渲染字体。留空时使用界面内置默认字体 |
 | `font_size` | 6 ~ 72 | 界面等宽基准字号 | 像素单位。浮点数自动四舍五入，溢出范围截断至边界值 |
-| `color_scheme` | string | 空 | 内置 iTerm2 主题标识，需与 **Appearance** 下拉项严格一致。缺省或无法识别时使用默认调色板。程序向终端查询颜色（OSC 10/11，或问终端是深色还是浅色）时，得到的就是这个配色；多台桌面端连同一个 Device 时，以最后连上或最后改配色的那台为准 |
+| `dark_color_scheme` | string | 空 | 深色模式下的终端配色：内置 iTerm2 主题标识，需与 **Dark colors** 下拉项严格一致。深色模式下整个界面的颜色都从它推导。缺省、无法识别或是浅色配色时，使用默认深色调色板。程序向终端查询颜色（OSC 10/11，或问终端是深色还是浅色）时，得到的是当前模式的配色；多台桌面端连同一个 Device 时，以最后连上、最后改配色或最后切换模式的那台为准 |
+| `light_color_scheme` | string | 空 | 浅色模式下的终端配色，对应 **Light colors** 下拉项。缺省、无法识别或是深色配色时，使用 GitHub Light Default |
 
 ### `[client.code]` 代码视图（Preview / Diff）
 

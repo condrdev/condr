@@ -120,7 +120,8 @@ impl Condr {
 pub(super) struct SettingsWindow {
     owner: WeakEntity<Condr>,
     focus_handle: FocusHandle,
-    pub(super) color_scheme: Entity<ColorSchemeSelect>,
+    pub(super) dark_color_scheme: Entity<ColorSchemeSelect>,
+    pub(super) light_color_scheme: Entity<ColorSchemeSelect>,
     /// The Preview Tab's theme, the same kind of Select.
     pub(super) code_theme: Entity<ColorSchemeSelect>,
     /// The font as last committed from this window. `Condr` only ever holds the
@@ -215,27 +216,32 @@ const LICENSES: &str = include_str!("../../assets/licenses.md");
 
 impl SettingsWindow {
     fn new(owner: WeakEntity<Condr>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let current = owner
-            .upgrade()
-            .map(|owner| owner.read(cx).terminal_color_scheme.clone())
-            .unwrap_or_default();
         let open_on_update = owner
             .upgrade()
             .is_some_and(|owner| owner.read(cx).updates.pending());
-        let color_scheme = scheme_select(crate::color_scheme::names(), &current, window, cx);
-        cx.subscribe(
-            &color_scheme,
-            |this, _, event: &SelectEvent<SearchableVec<SharedString>>, cx| {
-                let SelectEvent::Confirm(Some(label)) = event else {
-                    return;
-                };
-                let name = color_scheme_name(label);
-                let _ = this
-                    .owner
-                    .update(cx, |owner, cx| owner.set_terminal_color_scheme(name, cx));
-            },
-        )
-        .detach();
+        let [dark_color_scheme, light_color_scheme] =
+            [ThemeMode::Dark, ThemeMode::Light].map(|mode| {
+                let current = owner
+                    .upgrade()
+                    .map(|owner| owner.read(cx).color_scheme(mode).clone())
+                    .unwrap_or_default();
+                let names = crate::color_scheme::names_of(!mode.is_dark());
+                let select = scheme_select(names, &current, window, cx);
+                cx.subscribe(
+                    &select,
+                    move |this, _, event: &SelectEvent<SearchableVec<SharedString>>, cx| {
+                        let SelectEvent::Confirm(Some(label)) = event else {
+                            return;
+                        };
+                        let name = color_scheme_name(label);
+                        let _ = this
+                            .owner
+                            .update(cx, |owner, cx| owner.set_color_scheme(mode, name, cx));
+                    },
+                )
+                .detach();
+                select
+            });
         let current = selected_code_theme(cx);
         let code_theme = scheme_select(crate::app::syntax::theme_names(), &current, window, cx);
         cx.subscribe(
@@ -354,7 +360,8 @@ impl SettingsWindow {
         Self {
             owner,
             focus_handle: cx.focus_handle(),
-            color_scheme,
+            dark_color_scheme,
+            light_color_scheme,
             code_theme,
             font_draft,
             selected_server,
@@ -539,7 +546,13 @@ impl Render for SettingsWindow {
         }
         if local {
             pages.extend([
-                appearance_page(&self.owner, &settings, &self.color_scheme, &self.code_theme),
+                appearance_page(
+                    &self.owner,
+                    &settings,
+                    &self.dark_color_scheme,
+                    &self.light_color_scheme,
+                    &self.code_theme,
+                ),
                 notifications_page(&self.owner),
                 power_page(&self.owner),
                 shortcuts_page(),
