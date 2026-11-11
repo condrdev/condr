@@ -476,8 +476,7 @@ impl CondrSidebarSection {
         }
     }
 
-    /// A chevron before the label folds the items away; it shows while the heading is
-    /// hovered, and always once folded, so a folded section reads as one.
+    /// A chevron before the label, always shown, folds the items away.
     pub(in crate::app) fn foldable(
         mut self,
         folded: bool,
@@ -560,7 +559,6 @@ impl SidebarItem for CondrSidebarSection {
         let heading_row_debug_selector =
             SharedString::from(format!("{}-row", self.heading_selector));
         let heading_debug_selector = self.heading_selector.clone();
-        let group = self.heading_selector.clone();
         let folded = self.fold.as_ref().is_some_and(|(folded, ..)| *folded);
         let rendered_items = if folded {
             Vec::new()
@@ -591,13 +589,7 @@ impl SidebarItem for CondrSidebarSection {
                     cx.stop_propagation();
                     on_toggle(event, window, cx);
                 });
-            div()
-                .flex_none()
-                .when(!folded, |this| {
-                    this.opacity(0.)
-                        .group_hover(group.clone(), |style| style.opacity(1.))
-                })
-                .child(button)
+            div().flex_none().child(button)
         });
         let summary = (folded && !self.summary.is_empty())
             .then(|| super::status_counts(&self.summary, cx).font_normal());
@@ -619,7 +611,6 @@ impl SidebarItem for CondrSidebarSection {
             .when(self.active, |this| {
                 this.text_color(cx.theme().sidebar_foreground)
             })
-            .group(group.clone())
             .child(
                 h_flex()
                     .min_w_0()
