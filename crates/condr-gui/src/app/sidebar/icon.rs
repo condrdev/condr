@@ -1,4 +1,5 @@
 use super::*;
+use std::time::Duration;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::app) enum SidebarIconTone {
@@ -132,31 +133,50 @@ pub(in crate::app) const BELL_SIDEBAR_STATUS: SidebarStatusVisual = SidebarStatu
 };
 
 /// A state at badge size: a glyph is a smudge here, so it is a plain dot in the tone's
-/// color. Only the bell keeps its glyph, which a dot could not say, and an unknown
-/// state shows nothing.
-pub(in crate::app) fn status_badge(
-    glyph: SidebarGlyph,
-    tone: SidebarIconTone,
-    cx: &App,
-) -> Option<AnyElement> {
-    match glyph {
+/// color, fading in and out while working. Only the bell keeps its glyph, which a dot
+/// could not say, and an unknown state shows nothing.
+pub(in crate::app) fn status_badge(status: SidebarStatusVisual, cx: &App) -> Option<AnyElement> {
+    match status.glyph {
         SidebarGlyph::Info => None,
         SidebarGlyph::Bell => Some(
-            glyph
+            status
+                .glyph
                 .icon()
                 .size_2()
-                .text_color(tone.color(cx))
+                .text_color(status.tone.color(cx))
                 .into_any_element(),
         ),
         _ => Some(
             div()
                 .size(px(6.))
                 .rounded_full()
-                .bg(tone.color(cx))
-                .into_any_element(),
+                .bg(status.tone.color(cx))
+                .map(|dot| {
+                    if status.key == "working" {
+                        // Between full and a third on a slow cosine, every dot in step.
+                        dot.with_animation(
+                            "working-fade",
+                            Animation::new(WORKING_FADE)
+                                .repeat_synced()
+                                .with_max_fps(WORKING_FADE_FPS),
+                            |dot, turn| {
+                                dot.opacity(0.65 + 0.35 * (turn * std::f32::consts::TAU).cos())
+                            },
+                        )
+                        .into_any_element()
+                    } else {
+                        dot.into_any_element()
+                    }
+                }),
         ),
     }
 }
+
+/// How long a working dot takes to fade out and back in.
+const WORKING_FADE: Duration = Duration::from_millis(2000);
+/// A fade this slow looks smooth at this rate, and a window with an Agent working for
+/// hours does not repaint at the display's.
+const WORKING_FADE_FPS: f32 = 30.;
 
 /// A Workspace's agents rolled up by state, ordered by how urgently each wants a person.
 /// An agent with nothing to report still counts, as idle: folded, the row is the only
@@ -269,8 +289,7 @@ enum SidebarIconGraphic {
     /// agents reads by agent first and by state second.
     Agent {
         kind: AgentKind,
-        glyph: SidebarGlyph,
-        tone: SidebarIconTone,
+        status: SidebarStatusVisual,
     },
 }
 
@@ -303,8 +322,7 @@ impl CondrSidebarIcon {
         Self {
             graphic: SidebarIconGraphic::Agent {
                 kind,
-                glyph: visual.glyph,
-                tone: visual.tone,
+                status: visual,
             },
             selector: selector.into(),
             tooltip: Some(tooltip.into()),
@@ -330,14 +348,14 @@ impl CondrSidebarIcon {
                 .text_color(gpui_kit::white())
                 .child(initial)
                 .into_any_element(),
-            SidebarIconGraphic::Agent { kind, glyph, tone } => {
+            SidebarIconGraphic::Agent { kind, status } => {
                 // Past the mark's corner, on a disc of the sidebar's own color so it
                 // reads over any mark.
                 div()
                     .relative()
                     .size_4()
                     .child(agent_mark(kind, cx.theme().sidebar_foreground).size_4())
-                    .when_some(status_badge(glyph, tone, cx), |this, badge| {
+                    .when_some(status_badge(status, cx), |this, badge| {
                         this.child(
                             div()
                                 .absolute()

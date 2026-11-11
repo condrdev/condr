@@ -54,7 +54,7 @@ fn status_counts(summary: &[(SidebarStatusVisual, usize)], cx: &App) -> Div {
             h_flex()
                 .items_center()
                 .gap_x_0p5()
-                .children(status_badge(status.glyph, status.tone, cx))
+                .children(status_badge(*status, cx))
                 .child(count.to_string())
         }))
 }
