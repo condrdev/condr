@@ -29,16 +29,26 @@ pub(super) struct DraggedPane {
     pub(super) pane_id: PaneId,
 }
 
+/// The space around and between the Panes' cards, in the colour of the bars around them.
+/// The Kit's split handles overlay the seam rather than take room, so the area and each
+/// Pane's slot both keep half of it.
+const PANE_GAP: Pixels = px(8.);
+const HALF_GAP: Pixels = px(4.);
+/// A Pane card's corner radius.
+pub(super) const PANE_RADIUS: Pixels = px(8.);
+
 pub(super) struct CondrDockRenderer;
 
 impl DockAreaRenderer for CondrDockRenderer {
-    fn frame(&self, _: &mut Window, _: &mut App) -> Stateful<Div> {
+    fn frame(&self, _: &mut Window, cx: &mut App) -> Stateful<Div> {
         div()
             .id("condr-dock-area")
             .size_full()
             .overflow_hidden()
             .flex()
             .flex_row()
+            .p(HALF_GAP)
+            .bg(cx.theme().sidebar)
     }
 
     fn center_frame(&self, _: &mut Window, _: &mut App) -> Stateful<Div> {
@@ -70,22 +80,31 @@ impl DockAreaRenderer for CondrDockRenderer {
             .overflow_hidden()
     }
 
-    /// The Panes draw their own borders; the Kit's one-pixel divider sits on the seam
-    /// and paints over one pixel of them, so it only shows while a drag is under way.
+    /// The handle spans the gap between two Pane cards; a line down its middle shows while
+    /// a drag is under way.
     fn render_split_handle(
         &self,
         handle: &gpui_kit::base::ResizeHandleContext,
         _: &mut Window,
         cx: &mut App,
     ) -> Option<AnyElement> {
+        let horizontal = handle.axis() == Axis::Horizontal;
         Some(
             div()
                 .flex_none()
-                .map(|this| match handle.axis() {
-                    Axis::Horizontal => this.h_full().w(px(1.)),
-                    Axis::Vertical => this.w_full().h(px(1.)),
+                .flex()
+                .items_center()
+                .justify_center()
+                .map(|this| match horizontal {
+                    true => this.h_full().w(PANE_GAP),
+                    false => this.w_full().h(PANE_GAP),
                 })
-                .when(handle.is_active(), |this| this.bg(cx.theme().primary))
+                .when(handle.is_active(), |this| {
+                    this.child(div().bg(cx.theme().primary).map(|line| match horizontal {
+                        true => line.h_full().w(px(2.)),
+                        false => line.w_full().h(px(2.)),
+                    }))
+                })
                 .into_any_element(),
         )
     }
@@ -106,6 +125,7 @@ impl TabGroupRenderer for CondrTabGroupRenderer {
     ) -> Stateful<Div> {
         div()
             .id("condr-tab-group")
+            .p(HALF_GAP)
             .size_full()
             .flex()
             .flex_col()

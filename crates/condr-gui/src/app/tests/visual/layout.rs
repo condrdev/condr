@@ -105,7 +105,8 @@ fn cold_split_workspace_uses_the_real_dock_size_before_first_paint() {
     let pane_width = first.size.width + second.size.width;
     assert!((first.size.width / pane_width - 0.3).abs() < 0.03);
     assert!(first.right() <= second.left());
-    assert!(second.left() - first.right() <= px(8.));
+    // Between them only the gap between two Pane cards and the cards' borders.
+    assert!(second.left() - first.right() <= px(10.));
     window.run_until_parked();
     assert_eq!(
         window.read(|app| view.read(app).dock_rebuild_count),
