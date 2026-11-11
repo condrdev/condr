@@ -415,6 +415,17 @@ fn the_terminal_settings_controls_drive_the_preferences_and_reset() {
     let select = settings
         .debug_bounds("dark-color-scheme")
         .expect("the Dark colors select should render");
+    // Both Selects stay inside the page, ending where the Font size stepper does.
+    let stepper = settings
+        .debug_bounds("terminal-font-size-increase")
+        .unwrap();
+    for selector in ["dark-color-scheme", "light-color-scheme"] {
+        let field = settings.debug_bounds(selector).unwrap();
+        assert!(
+            field.right() <= stepper.right() + px(1.),
+            "{selector} overflows the page: {field:?} past {stepper:?}"
+        );
+    }
     settings.simulate_click(select.center(), Modifiers::default());
     settings.run_until_parked();
     settings.simulate_input("Kanagawa Dragon");

@@ -617,17 +617,19 @@ fn color_scheme_item(
     let reset_select = select.clone();
     let dirty_owner = owner.clone();
     let reset_owner = owner.clone();
+    // Short enough to keep the Select inside the page: Kit's label column never narrows
+    // below its text's width.
     let (label, selector, description) = if mode.is_dark() {
         (
             "Dark colors",
             "dark-color-scheme",
-            "Terminal colors in dark mode. The interface takes its colors from them.",
+            "Terminals and window in dark mode.",
         )
     } else {
         (
             "Light colors",
             "light-color-scheme",
-            "Terminal colors in light mode. The interface takes its colors from them.",
+            "Terminals and window in light mode.",
         )
     };
     SettingItem::new(
