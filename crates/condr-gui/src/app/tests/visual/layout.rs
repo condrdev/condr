@@ -949,7 +949,8 @@ fn a_blocked_agent_is_listed_under_needs_you_with_what_it_waits_for() {
 }
 
 /// Twelve Tabs are wider than the title bar: the strip scrolls them, keeps "Open in" in
-/// place, and shows the newest, active Tab rather than the first.
+/// place, and shows the newest, active Tab rather than the first, even as each Tab widens
+/// once its shell titles it.
 #[test]
 fn a_tab_strip_wider_than_its_slot_scrolls_and_keeps_open_in_in_place() {
     let _serial_guard = acquire_visual_test_lock();
@@ -980,6 +981,29 @@ fn a_tab_strip_wider_than_its_slot_scrolls_and_keeps_open_in_in_place() {
         })
     }));
     for expected in 2..=12 {
+        // Each Pane titled the way a Windows shell titles itself, so its Tab widens after
+        // the row scrolled to it, as it does there.
+        window.update(|_, cx| {
+            view.update(cx, |this, _| {
+                let connection = this.connection_mut(1).unwrap();
+                let panes: Vec<_> = connection
+                    .session()
+                    .map(|session| {
+                        session.workspaces()[0]
+                            .tabs()
+                            .iter()
+                            .flat_map(|tab| tab.panes().iter().map(|pane| pane.id()))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                for pane in panes {
+                    connection.model.terminal_titles.insert(
+                        pane,
+                        r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe".into(),
+                    );
+                }
+            });
+        });
         window.update(|window, cx| _ = window.draw(cx));
         let new_tab = window.debug_bounds("new-tab").expect("New Tab is rendered");
         let strip = window.debug_bounds("workspace-tabs").unwrap();

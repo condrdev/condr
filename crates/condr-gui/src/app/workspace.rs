@@ -179,6 +179,7 @@ impl Condr {
         // row's children alternate Tab and separator, so Tab `i` is child `2i`. For the
         // last Tab, scroll to "New Tab" right behind it, so a just-created Tab does not
         // leave the button it came from half hidden.
+        let strip = &view.tab_strip_scroll;
         if view.last_scrolled_tab.replace(Some(active_tab)) != Some(active_tab)
             && let Some(index) = active_index
         {
@@ -187,7 +188,18 @@ impl Condr {
             } else {
                 2 * index
             };
-            view.tab_strip_scroll.scroll_to_item(item);
+            strip.scroll_to_item(item);
+        } else {
+            // A row that showed "New Tab" keeps showing it as its Tabs widen: a shell
+            // titling a new Tab's Pane must not push the button back out. A row scrolled
+            // away from it is left where it is.
+            let new_tab = 2 * tab_ids.len().saturating_sub(1) + 1;
+            let shown = strip.bounds_for_item(new_tab).is_some_and(|item| {
+                item.right() + strip.offset().x <= strip.bounds().right() + px(1.)
+            });
+            if shown {
+                strip.scroll_to_item(new_tab);
+            }
         }
         let tab_count = tab_ids.len();
         let separator_color = cx.theme().border;
