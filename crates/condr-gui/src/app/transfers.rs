@@ -562,7 +562,8 @@ impl Condr {
                                 .debug_selector(|| "transfer-clear".into())
                                 .ghost()
                                 .xsmall()
-                                .label("Clear")
+                                .icon(Glyph::BrushCleaning)
+                                .tooltip("Clear")
                                 .on_click(move |_, _, cx| {
                                     cx.stop_propagation();
                                     let _ = clear_owner.update(cx, |this, cx| {

@@ -77,6 +77,8 @@ gpui_kit::assets::icon_assets!(
         Upload,
         CopySlash,
         FilePlus,
+        // The transfer strip's Clear.
+        BrushCleaning,
     ]
 );
 
