@@ -74,48 +74,55 @@ fn device_status(
     }
 }
 
-/// What hovering a Device's name says when there is something to act on: another build's
-/// versions with Dismiss (ADR 0027), or why the last connection failed with Connect.
-fn device_card(
+/// A mark at the Device heading's right end when there is something to act on: an amber
+/// triangle for another build (ADR 0027) that hides on click, or a red alert for a failed
+/// connection that connects on click. Hovering either says why.
+fn device_mark(
     key: ConnectionKey,
     status: ConnectionStatus,
     build_notice: Option<String>,
     failure: Option<String>,
     owner: WeakEntity<Condr>,
-) -> Option<SidebarHoverCard> {
-    let (text, action): (String, &'static str) = match status {
-        ConnectionStatus::Connected => (build_notice?, "Dismiss"),
-        ConnectionStatus::Disconnected => (format!("Not connected: {}", failure?), "Connect"),
+    cx: &App,
+) -> Option<AnyElement> {
+    let (id, glyph, color, tooltip) = match status {
+        ConnectionStatus::Connected => (
+            "build-notice",
+            Glyph::TriangleAlert,
+            cx.theme().warning,
+            format!("{}\nClick to dismiss.", build_notice?),
+        ),
+        ConnectionStatus::Disconnected => (
+            "connect-indicator",
+            Glyph::CircleAlert,
+            cx.theme().danger,
+            format!("Not connected: {}\nClick to connect.", failure?),
+        ),
         ConnectionStatus::Connecting => return None,
     };
-    Some(Rc::new(move |_, _| {
-        let owner = owner.clone();
-        v_flex()
-            .debug_selector(move || format!("device-card-{key}"))
-            .max_w(rems(20.))
-            .gap_2()
-            .text_sm()
-            .child(text.clone())
-            .child(
-                Button::new(("device-card-action", key))
-                    .debug_selector(move || format!("device-card-action-{key}"))
-                    .small()
-                    .label(action)
-                    .on_click(move |_, window, cx| {
-                        let _ = owner.update(cx, |this, cx| {
-                            if action == "Dismiss" {
-                                if let Some(connection) = this.connection_mut(key) {
-                                    connection.build_notice_dismissed = true;
-                                }
-                                cx.notify();
-                            } else {
-                                this.connect_server(key, window, cx);
-                            }
-                        });
-                    }),
-            )
-            .into_any_element()
-    }))
+    Some(
+        Button::new((id, key))
+            .debug_selector(move || format!("{id}-{key}"))
+            .ghost()
+            .xsmall()
+            .compact()
+            .icon(Icon::new(glyph).text_color(color))
+            .tooltip(tooltip)
+            .on_click(move |_, window, cx| {
+                cx.stop_propagation();
+                let _ = owner.update(cx, |this, cx| {
+                    if status == ConnectionStatus::Connected {
+                        if let Some(connection) = this.connection_mut(key) {
+                            connection.build_notice_dismissed = true;
+                        }
+                        cx.notify();
+                    } else {
+                        this.connect_server(key, window, cx);
+                    }
+                });
+            })
+            .into_any_element(),
+    )
 }
 
 impl Condr {
@@ -599,12 +606,20 @@ impl Condr {
                 CondrSidebarSection::new(
                     connection.label.clone(),
                     format!("server-heading-{key}"),
-                    move |_, _| {
+                    move |_, cx| {
                         let owner = new_workspace_owner.clone();
                         let tooltip = format!("New Workspace on {new_workspace_label}");
                         h_flex()
                             .gap_1()
                             .items_center()
+                            .children(device_mark(
+                                key,
+                                status,
+                                build_notice.clone(),
+                                connect_reason.clone(),
+                                owner.clone(),
+                                cx,
+                            ))
                             // Forwarding needs a remote Device; this one's ports are here.
                             .when(!is_local, |row| {
                                 row.child(super::ports::device_ports_button(
@@ -636,13 +651,6 @@ impl Condr {
                     let _ = fold_owner.update(cx, |this, cx| this.toggle_device_fold(key, cx));
                 })
                 .status(move |_, cx| device_status(key, status, build_notice_shown, failed, cx))
-                .hover_card(device_card(
-                    key,
-                    status,
-                    build_notice.clone(),
-                    connect_reason.clone(),
-                    owner.clone(),
-                ))
                 .summary(device_summary)
                 // Selected as a Workspace row is: lit while it holds the shown Workspace.
                 .active(active_server)
@@ -963,31 +971,36 @@ impl Condr {
 }
 
 #[cfg(test)]
-mod device_card_tests {
+mod device_mark_tests {
     // Not `use super::*`: it would glob in `gpui_kit::test` and shadow the built-in attribute.
-    use super::{ConnectionStatus, device_card};
+    use super::{ConnectionStatus, device_mark};
     use gpui_kit::WeakEntity;
 
-    #[test]
-    fn a_device_card_opens_only_with_something_to_act_on() {
-        let card = |status, notice: Option<&str>, failure: Option<&str>| {
-            device_card(
-                1,
-                status,
-                notice.map(str::to_owned),
-                failure.map(str::to_owned),
-                WeakEntity::new_invalid(),
-            )
-            .is_some()
-        };
-        assert!(card(
-            ConnectionStatus::Connected,
-            Some("another build"),
-            None
-        ));
-        assert!(card(ConnectionStatus::Disconnected, None, Some("refused")));
-        assert!(!card(ConnectionStatus::Connected, None, None));
-        assert!(!card(ConnectionStatus::Disconnected, None, None));
-        assert!(!card(ConnectionStatus::Connecting, None, Some("refused")));
+    #[cfg(feature = "test-support")]
+    #[gpui_kit::test]
+    fn a_device_marks_only_something_to_act_on(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            let mark = |status, notice: Option<&str>, failure: Option<&str>| {
+                device_mark(
+                    1,
+                    status,
+                    notice.map(str::to_owned),
+                    failure.map(str::to_owned),
+                    WeakEntity::new_invalid(),
+                    cx,
+                )
+                .is_some()
+            };
+            assert!(mark(
+                ConnectionStatus::Connected,
+                Some("another build"),
+                None
+            ));
+            assert!(mark(ConnectionStatus::Disconnected, None, Some("refused")));
+            assert!(!mark(ConnectionStatus::Connected, None, None));
+            assert!(!mark(ConnectionStatus::Disconnected, None, None));
+            assert!(!mark(ConnectionStatus::Connecting, None, Some("refused")));
+        });
     }
 }

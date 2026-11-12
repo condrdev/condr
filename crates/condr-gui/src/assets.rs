@@ -72,6 +72,8 @@ gpui_kit::assets::icon_assets!(
         Plug,
         PlugZap,
         Unplug,
+        // A Device whose last connection failed.
+        CircleAlert,
         Trash,
         Download,
         Upload,
