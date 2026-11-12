@@ -870,7 +870,8 @@ fn dragging_workspaces_and_tabs_reorders_them_without_changing_focus() {
         })
     }));
 
-    window.update(|window, cx| _ = window.draw(cx));
+    // Each Tab widens for its shell's title, which would move the drop target.
+    title_every_pane(window, &view, "runner@ci-host: ~/projects/condr");
     let tab = window
         .debug_bounds(tab_selector(first_tab))
         .expect("the non-active Tab should render");

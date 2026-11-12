@@ -559,25 +559,8 @@ fn server_workspace_button_and_only_tab_close_round_trip() {
     assert!(window.update(|window, cx| window.has_active_dialog(cx)));
     window.update(|window, cx| window.close_dialog(cx));
     window.run_until_parked();
-    // A shell titles its Pane at its first prompt (bash does on Ubuntu), and the Tab widens
-    // to show it, moving the close button. Title it now, past the Tab's widest, so a title
-    // that lands later cannot move the button between measuring and clicking it.
-    window.update(|_, cx| {
-        view.update(cx, |this, _| {
-            let connection = this.connection_mut(1).unwrap();
-            let pane = connection.session().and_then(|session| {
-                let tab = session.workspaces().first()?.tabs().first()?;
-                tab.focused_pane().map(|pane| pane.id())
-            });
-            if let Some(pane) = pane {
-                connection
-                    .model
-                    .terminal_titles
-                    .insert(pane, "runner@ci-host: ~/projects/condr".into());
-            }
-        });
-    });
-    window.update(|window, cx| _ = window.draw(cx));
+    // The close button moves when the Tab widens for its shell's title.
+    title_every_pane(window, &view, "runner@ci-host: ~/projects/condr");
     let tab = window
         .debug_bounds(tab_selector(tab_id))
         .expect("the only Tab should be rendered");
@@ -1011,30 +994,13 @@ fn a_tab_strip_wider_than_its_slot_scrolls_and_keeps_open_in_in_place() {
         })
     }));
     for expected in 2..=12 {
-        // Each Pane titled the way a Windows shell titles itself, so its Tab widens after
-        // the row scrolled to it, as it does there.
-        window.update(|_, cx| {
-            view.update(cx, |this, _| {
-                let connection = this.connection_mut(1).unwrap();
-                let panes: Vec<_> = connection
-                    .session()
-                    .map(|session| {
-                        session.workspaces()[0]
-                            .tabs()
-                            .iter()
-                            .flat_map(|tab| tab.panes().iter().map(|pane| pane.id()))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                for pane in panes {
-                    connection.model.terminal_titles.insert(
-                        pane,
-                        r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe".into(),
-                    );
-                }
-            });
-        });
-        window.update(|window, cx| _ = window.draw(cx));
+        // Each new Tab widens after the row scrolled to it, as a Windows shell's title makes
+        // it do there.
+        title_every_pane(
+            window,
+            &view,
+            r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+        );
         let new_tab = window.debug_bounds("new-tab").expect("New Tab is rendered");
         let strip = window.debug_bounds("workspace-tabs").unwrap();
         assert!(
