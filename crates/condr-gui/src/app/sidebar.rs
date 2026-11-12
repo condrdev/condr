@@ -46,6 +46,88 @@ pub(super) fn pane_sidebar_status(
     })
 }
 
+/// A Device's connection, before its name: plugged in green, amber with a spark while its
+/// Server runs another build (ADR 0027), amber and fading while it connects, unplugged
+/// grey, or red when the last try failed.
+fn device_status(
+    key: ConnectionKey,
+    status: ConnectionStatus,
+    other_build: bool,
+    failed: bool,
+    cx: &App,
+) -> AnyElement {
+    let theme = cx.theme();
+    let (glyph, color) = match status {
+        ConnectionStatus::Connected if other_build => (Glyph::PlugZap, theme.warning),
+        ConnectionStatus::Connected => (Glyph::Plug, theme.success),
+        ConnectionStatus::Connecting => (Glyph::Plug, theme.warning),
+        ConnectionStatus::Disconnected if failed => (Glyph::Unplug, theme.danger),
+        ConnectionStatus::Disconnected => (Glyph::Unplug, theme.muted_foreground),
+    };
+    let icon = div()
+        .debug_selector(move || format!("device-status-{key}"))
+        .child(Icon::new(glyph).size_3p5().text_color(color));
+    if status == ConnectionStatus::Connecting {
+        fading(icon)
+    } else {
+        icon.into_any_element()
+    }
+}
+
+/// What hovering a Device's name says when there is something to act on: another build's
+/// versions with Dismiss (ADR 0027), or why the last connection failed with Connect.
+fn device_card(
+    key: ConnectionKey,
+    status: ConnectionStatus,
+    build_notice: Option<String>,
+    failure: Option<String>,
+    owner: WeakEntity<Condr>,
+) -> Option<SidebarHoverCard> {
+    let (text, action): (String, &'static str) = match status {
+        ConnectionStatus::Connected => (build_notice?, "Dismiss"),
+        ConnectionStatus::Disconnected => (format!("Not connected: {}", failure?), "Connect"),
+        ConnectionStatus::Connecting => return None,
+    };
+    Some(Rc::new(move |_, _| {
+        let owner = owner.clone();
+        v_flex()
+            .debug_selector(move || format!("device-card-{key}"))
+            .max_w(rems(20.))
+            .gap_2()
+            .text_sm()
+            .child(text.clone())
+            .child(
+                Button::new(("device-card-action", key))
+                    .debug_selector(move || format!("device-card-action-{key}"))
+                    .small()
+                    .label(action)
+                    .on_click(move |_, window, cx| {
+                        let _ = owner.update(cx, |this, cx| {
+                            if action == "Dismiss" {
+                                if let Some(connection) = this.connection_mut(key) {
+                                    connection.build_notice_dismissed = true;
+                                }
+                                cx.notify();
+                            } else {
+                                this.connect_server(key, window, cx);
+                            }
+                        });
+                    }),
+            )
+            .into_any_element()
+    }))
+}
+
+impl Condr {
+    fn toggle_device_fold(&mut self, key: ConnectionKey, cx: &mut Context<Self>) {
+        if !self.sidebar_folded_devices.remove(&key) {
+            self.sidebar_folded_devices.insert(key);
+        }
+        self.schedule_state_save(cx);
+        cx.notify();
+    }
+}
+
 /// Agents counted by state, `✓2 ◐1`: a folded Workspace's or a folded Device's.
 fn status_counts(summary: &[(SidebarStatusVisual, usize)], cx: &App) -> Div {
     h_flex()
@@ -495,8 +577,8 @@ impl Condr {
                 let ports_count = connection.forwards.count();
                 let ports_owner = owner.clone();
                 let new_workspace_label = connection.label.clone();
-                let descendant_selected =
-                    workspaces.iter().any(CondrSidebarTreeItem::subtree_active);
+                let build_notice_shown = build_notice.is_some();
+                let failed = connect_reason.is_some();
                 let folded = self.sidebar_folded_devices.contains(&key);
                 // Folded, the heading counts what its Workspaces' rows would show.
                 let device_summary = if folded {
@@ -517,74 +599,12 @@ impl Condr {
                 CondrSidebarSection::new(
                     connection.label.clone(),
                     format!("server-heading-{key}"),
-                    move |_, cx| {
+                    move |_, _| {
                         let owner = new_workspace_owner.clone();
                         let tooltip = format!("New Workspace on {new_workspace_label}");
-                        // A device that is not connected says so in its heading: red when
-                        // something failed, grey when the user disconnected, as on its page.
-                        // The mark tells why on hover and connects on click.
-                        let indicator = match status {
-                            // A connected Server of another build gets a mark that says which
-                            // side to update (ADR 0027); clicking it puts it away.
-                            ConnectionStatus::Connected => build_notice.clone().map(|notice| {
-                                let dismiss_owner = owner.clone();
-                                Button::new(("build-notice", key))
-                                    .debug_selector(move || format!("build-notice-{key}"))
-                                    .ghost()
-                                    .xsmall()
-                                    .compact()
-                                    .icon(
-                                        Icon::new(IconName::TriangleAlert)
-                                            .text_color(cx.theme().warning),
-                                    )
-                                    .tooltip(format!("{notice}\nClick to dismiss."))
-                                    .on_click(move |_, _, cx| {
-                                        let _ = dismiss_owner.update(cx, |this, cx| {
-                                            if let Some(connection) = this.connection_mut(key) {
-                                                connection.build_notice_dismissed = true;
-                                            }
-                                            cx.notify();
-                                        });
-                                    })
-                                    .into_any_element()
-                            }),
-                            ConnectionStatus::Connecting => {
-                                Some(Spinner::new().xsmall().into_any_element())
-                            }
-                            ConnectionStatus::Disconnected => {
-                                let connect_owner = owner.clone();
-                                let mark = match &connect_reason {
-                                    Some(_) => Icon::new(CondrIconName::CircleAlert)
-                                        .text_color(cx.theme().danger),
-                                    None => Icon::new(CondrIconName::Circle)
-                                        .text_color(cx.theme().muted_foreground),
-                                };
-                                let why = connect_reason.clone().map_or(
-                                    "Not connected. Click to connect.".to_owned(),
-                                    |reason| format!("Not connected: {reason}\nClick to connect."),
-                                );
-                                Some(
-                                    Button::new(("connect-indicator", key))
-                                        .debug_selector(move || format!("connect-indicator-{key}"))
-                                        .ghost()
-                                        .xsmall()
-                                        .compact()
-                                        .icon(mark)
-                                        .tooltip(why)
-                                        .on_click(move |_, window, cx| {
-                                            cx.stop_propagation();
-                                            let _ = connect_owner.update(cx, |this, cx| {
-                                                this.connect_server(key, window, cx)
-                                            });
-                                        })
-                                        .into_any_element(),
-                                )
-                            }
-                        };
                         h_flex()
                             .gap_1()
                             .items_center()
-                            .children(indicator)
                             // Forwarding needs a remote Device; this one's ports are here.
                             .when(!is_local, |row| {
                                 row.child(super::ports::device_ports_button(
@@ -613,17 +633,19 @@ impl Condr {
                     workspaces,
                 )
                 .foldable(folded, format!("device-fold-{key}"), move |_, _, cx| {
-                    let _ = fold_owner.update(cx, |this, cx| {
-                        if !this.sidebar_folded_devices.remove(&key) {
-                            this.sidebar_folded_devices.insert(key);
-                        }
-                        this.schedule_state_save(cx);
-                        cx.notify();
-                    });
+                    let _ = fold_owner.update(cx, |this, cx| this.toggle_device_fold(key, cx));
                 })
+                .status(move |_, cx| device_status(key, status, build_notice_shown, failed, cx))
+                .hover_card(device_card(
+                    key,
+                    status,
+                    build_notice.clone(),
+                    connect_reason.clone(),
+                    owner.clone(),
+                ))
                 .summary(device_summary)
-                // Folded, the heading is the only sign that the shown Workspace is here.
-                .active(active_server && (folded || !descendant_selected))
+                // Selected as a Workspace row is: lit while it holds the shown Workspace.
+                .active(active_server)
                 .draggable(DraggedServer {
                     key,
                     name: connection.label.clone().into(),
@@ -724,8 +746,16 @@ impl Condr {
                         )
                     }
                 })
+                // A click on the selected Device folds it, as on a selected Workspace; on any
+                // other it only selects, so switching never folds.
                 .on_click(move |_, window, cx| {
-                    let _ = select_owner.update(cx, |this, cx| this.select_server(key, window, cx));
+                    let _ = select_owner.update(cx, |this, cx| {
+                        if active_server {
+                            this.toggle_device_fold(key, cx);
+                        } else {
+                            this.select_server(key, window, cx);
+                        }
+                    });
                 })
             });
 
@@ -929,5 +959,35 @@ impl Condr {
             .border_color(cx.theme().sidebar_border)
             .children(avatars)
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod device_card_tests {
+    // Not `use super::*`: it would glob in `gpui_kit::test` and shadow the built-in attribute.
+    use super::{ConnectionStatus, device_card};
+    use gpui_kit::WeakEntity;
+
+    #[test]
+    fn a_device_card_opens_only_with_something_to_act_on() {
+        let card = |status, notice: Option<&str>, failure: Option<&str>| {
+            device_card(
+                1,
+                status,
+                notice.map(str::to_owned),
+                failure.map(str::to_owned),
+                WeakEntity::new_invalid(),
+            )
+            .is_some()
+        };
+        assert!(card(
+            ConnectionStatus::Connected,
+            Some("another build"),
+            None
+        ));
+        assert!(card(ConnectionStatus::Disconnected, None, Some("refused")));
+        assert!(!card(ConnectionStatus::Connected, None, None));
+        assert!(!card(ConnectionStatus::Disconnected, None, None));
+        assert!(!card(ConnectionStatus::Connecting, None, Some("refused")));
     }
 }

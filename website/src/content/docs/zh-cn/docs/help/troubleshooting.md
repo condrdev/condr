@@ -76,7 +76,7 @@ Condr's own server could not start on this device. Connect tries again.
 
 ## 两端版本不一致
 
-* **构建版本差量**：界面中设备标签旁将显示黄色警示三角。将光标悬停其上可对比两端具体版本号并获取更新建议。点击警示三角可暂时收起提示，该状态保持至该设备版本再次变动。
+* **构建版本差量**：设备名称前的插头图标会变为带闪电的黄色。将光标悬停在设备名称上可对比两端具体版本号并获取更新建议。点击卡片中的 **Dismiss** 可暂时收起提示，该状态保持至该设备版本再次变动。
 * **本机 Server 滞后于窗口**：完成 Condr 升级后，窗口客户端将弹出提示询问是否重启本机 Server。执行重启将销毁所有终端运行进程，随后重新载入当前的 Workspace 拓扑与 Agent 对话状态。
 * **协议底层不兼容**：连接将被远端阻断，连接面板呈现 `Condr there and here speak different protocol versions`，CLI 端同步抛出 `protocol_mismatch` 错误代码。该状态不可通过重试恢复，必须将两端程序版本升级至匹配状态。
 

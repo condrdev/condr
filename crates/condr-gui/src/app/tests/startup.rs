@@ -44,7 +44,6 @@ fn condr_assets_include_custom_and_kit_icons() {
     for path in [
         "icons/circle.svg",
         "icons/circle-filled.svg",
-        "icons/circle-alert.svg",
         "icons/server-plus.svg",
         "icons/kilo.svg",
         "icons/qoder.svg",
@@ -94,11 +93,6 @@ fn condr_assets_include_custom_and_kit_icons() {
         listed
             .iter()
             .any(|path| path.as_ref() == "icons/circle.svg")
-    );
-    assert!(
-        listed
-            .iter()
-            .any(|path| path.as_ref() == "icons/circle-alert.svg")
     );
 }
 

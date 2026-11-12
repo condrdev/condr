@@ -76,7 +76,7 @@ If you run `condr server stop` while the window is open, the window notices the 
 
 ## The two sides run different versions
 
-* **Different builds**: an amber warning triangle appears next to the Device heading. Hover over it to compare the two versions and see which side to update. Clicking the triangle hides the notice until that Device's version changes again.
+* **Different builds**: the plug before the Device's name turns amber with a spark. Hover over the Device's name to compare the two versions and see which side to update. **Dismiss** in that card hides the notice until that Device's version changes again.
 * **The local Server is older than the window**: after you update Condr, the window asks whether to restart the local Server. Restarting ends every process running in its terminals, then reopens the current Workspaces and Agent conversations.
 * **Incompatible protocols**: the connection is refused, the connection page shows `Condr there and here speak different protocol versions`, and the CLI returns the error code `protocol_mismatch`. Retrying does not help; both sides must be updated to matching versions.
 

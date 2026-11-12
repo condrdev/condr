@@ -1,5 +1,6 @@
 use super::*;
 use crate::app::change_tree::row_highlight;
+use gpui_kit::component::hover_card::HoverCard;
 
 pub(super) type SidebarClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
@@ -450,7 +451,13 @@ pub(in crate::app) struct CondrSidebarSection {
     pub(super) fold: Option<(bool, SharedString, SidebarClickHandler)>,
     /// Shown beside the label while folded: the hidden agents counted by state.
     pub(super) summary: Vec<(SidebarStatusVisual, usize)>,
+    /// Shown before the label, where hovering the heading reveals the fold chevron.
+    pub(super) status: Option<SidebarSuffixBuilder>,
+    /// A card hovering the label opens, for something to read and act on.
+    pub(super) hover_card: Option<SidebarHoverCard>,
 }
+
+pub(in crate::app) type SidebarHoverCard = Rc<dyn Fn(&mut Window, &mut App) -> AnyElement>;
 
 impl CondrSidebarSection {
     pub(in crate::app) fn new(
@@ -474,10 +481,13 @@ impl CondrSidebarSection {
             on_drop_move: None,
             fold: None,
             summary: Vec::new(),
+            status: None,
+            hover_card: None,
         }
     }
 
-    /// A chevron before the label, always shown, folds the items away.
+    /// A chevron before the label folds the items away. With a status it shows while the
+    /// heading is hovered, in the status's place, as a Workspace row's does over its icon.
     pub(in crate::app) fn foldable(
         mut self,
         folded: bool,
@@ -485,6 +495,19 @@ impl CondrSidebarSection {
         on_toggle: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
         self.fold = Some((folded, selector.into(), Rc::new(on_toggle)));
+        self
+    }
+
+    pub(in crate::app) fn status(
+        mut self,
+        status: impl Fn(&mut Window, &mut App) -> AnyElement + 'static,
+    ) -> Self {
+        self.status = Some(Rc::new(status));
+        self
+    }
+
+    pub(in crate::app) fn hover_card(mut self, content: Option<SidebarHoverCard>) -> Self {
+        self.hover_card = content;
         self
     }
 
@@ -572,7 +595,7 @@ impl SidebarItem for CondrSidebarSection {
         let label = self.label.clone();
         let chevron = self.fold.map(|(folded, selector, on_toggle)| {
             let debug_selector = selector.clone();
-            let button = Button::new(ElementId::Name(selector))
+            Button::new(ElementId::Name(selector))
                 .debug_selector(move || debug_selector.to_string())
                 .xsmall()
                 .ghost()
@@ -589,9 +612,53 @@ impl SidebarItem for CondrSidebarSection {
                 .on_click(move |event, window, cx| {
                     cx.stop_propagation();
                     on_toggle(event, window, cx);
-                });
-            div().flex_none().child(button)
+                })
         });
+        let group = self.heading_selector.clone();
+        // The status and the chevron share one slot; hovering the heading swaps them.
+        let slot = match (self.status.map(|status| status(window, cx)), chevron) {
+            (Some(status), Some(chevron)) => Some(
+                div()
+                    .relative()
+                    .flex_none()
+                    .size_5()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        div()
+                            .group_hover(group.clone(), |style| style.opacity(0.))
+                            .child(status),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .opacity(0.)
+                            .group_hover(group.clone(), |style| style.opacity(1.))
+                            .child(chevron),
+                    )
+                    .into_any_element(),
+            ),
+            (status, chevron) => status.or(chevron.map(IntoElement::into_any_element)),
+        };
+        let label_selector = self.heading_selector.clone();
+        let label = div()
+            .min_w_0()
+            .truncate()
+            .debug_selector(move || heading_debug_selector.to_string())
+            .child(self.label);
+        let label = match self.hover_card {
+            Some(content) => HoverCard::new(format!("{label_selector}-card"))
+                .anchor(Anchor::TopLeft)
+                .trigger(label)
+                .content(move |_, window, cx| content(window, cx))
+                .into_any_element(),
+            None => label.into_any_element(),
+        };
         let summary = (folded && !self.summary.is_empty())
             .then(|| super::status_counts(&self.summary, cx).font_normal());
 
@@ -603,26 +670,23 @@ impl SidebarItem for CondrSidebarSection {
             .flex_shrink_0()
             .items_center()
             .justify_between()
-            .pl_1()
+            .px_1()
+            .rounded(cx.theme().radius)
             // A Device heading stands apart from the Workspace rows' detail lines, which
             // share its size, by weight alone.
             .text_xs()
             .font_semibold()
             .text_color(cx.theme().sidebar_foreground.opacity(0.7))
-            .when(self.active, |this| {
-                this.text_color(cx.theme().sidebar_foreground)
-            })
+            // Selected and hovered as a Workspace row is.
+            .map(|this| row_highlight(this, self.active, cx))
+            .group(group)
             .child(
                 h_flex()
                     .min_w_0()
                     .items_center()
                     .gap_1()
-                    .children(chevron)
-                    .child(
-                        div()
-                            .debug_selector(move || heading_debug_selector.to_string())
-                            .child(self.label),
-                    )
+                    .children(slot)
+                    .child(label)
                     .children(summary),
             )
             .child((self.action)(window, cx))

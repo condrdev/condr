@@ -135,7 +135,7 @@ By default, Condr checks its channel for updates in the background every 5 hours
 
 ## Upgrading
 
-> **Compatibility note**: the client and Server versions need to match. If the two sides differ in version but the protocol is compatible, the sidebar shows a yellow warning icon; if the protocol is incompatible, the connection is refused.
+> **Compatibility note**: the client and Server versions need to match. If the two sides differ in version but the protocol is compatible, the Device's plug icon in the sidebar turns amber with a spark; if the protocol is incompatible, the connection is refused.
 
 ### Upgrading the desktop app
 

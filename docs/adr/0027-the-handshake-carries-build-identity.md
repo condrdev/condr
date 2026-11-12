@@ -13,3 +13,5 @@ Not decided here: no check against published releases, so Condr makes no network
 Tests: the wire snapshot of `Hello` and `Welcome`; the three-step comparison; a refused protocol arriving as `Refusal::IncompatibleProtocol` over a socket and over the SSH bridge; the Server reporting its identity in `Welcome`, `Status` and `install --json`; the package checks comparing `condr --version` to `BUILD-COMMIT`.
 
 > ADR 0041 keeps the build mark to the desktop GUI. The Companion, whose store builds rarely match a Server's, shows only a protocol refusal and features a Server is too old for.
+
+> 2026-11-12: the mark is the Device's status icon before its name, a plug with a spark in amber. Hovering the name opens a card with both identities and Dismiss, which puts it away as the click did.

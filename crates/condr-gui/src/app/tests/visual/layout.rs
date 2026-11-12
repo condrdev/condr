@@ -265,9 +265,11 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
         heading.right() <= new_workspace.left(),
         "New Workspace should sit to the right of the Server name"
     );
+    // The heading is padded as a Workspace row is, so its last button lines up with the
+    // rows' trailing counts.
     assert!(
-        (heading_row.right() - new_workspace.right()).abs() <= px(1.),
-        "New Workspace should align with the heading's right edge"
+        (heading_row.right() - px(4.) - new_workspace.right()).abs() <= px(1.),
+        "New Workspace should align with the heading's right padding"
     );
     window
         .debug_bounds("add-server")
@@ -1192,8 +1194,8 @@ fn closing_a_pane_with_a_running_agent_asks_first() {
     );
 }
 
-/// A Device's heading folds its Workspaces away from the chevron before its name, which
-/// stays to unfold it, and the GUI state remembers the fold.
+/// A Device's heading folds its Workspaces away from the chevron that hovering swaps in for
+/// its status, or from a click on the selected Device, and the GUI state remembers the fold.
 #[test]
 fn a_device_folds_its_workspaces_away_and_remembers_it() {
     let _serial_guard = acquire_visual_test_lock();
@@ -1228,6 +1230,10 @@ fn a_device_folds_its_workspaces_away_and_remembers_it() {
     };
     window.update(|window, cx| _ = window.draw(cx));
     assert!(window.debug_bounds(row).is_some());
+    assert!(
+        window.debug_bounds("device-status-1").is_some(),
+        "the Device's status leads its heading"
+    );
 
     fold(window);
     assert!(
@@ -1241,7 +1247,11 @@ fn a_device_folds_its_workspaces_away_and_remembers_it() {
         assert!(state.servers.values().all(|server| server.folded));
     });
 
-    fold(window);
+    // The Device is the selected one, so a click on its name unfolds it, as on a Workspace.
+    let name = window.debug_bounds("server-heading-1").unwrap();
+    window.simulate_click(name.center(), Modifiers::default());
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
     assert!(
         window.debug_bounds(row).is_some(),
         "unfolded, they are back"

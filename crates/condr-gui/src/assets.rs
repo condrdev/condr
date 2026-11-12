@@ -24,11 +24,10 @@ pub(crate) fn window_options() -> gpui_kit::WindowOptions {
 /// see its NOTICE), then the marks of the editors "Open in" launches
 /// (assets/icons/NOTICE-EDITOR-ICONS). The file-type icons under `icons/jetbrains/` are
 /// served from `app::file_icons` instead (assets/icons/NOTICE-FILE-ICONS).
-const CONDR_ICON_PATHS: [&str; 29] = [
+const CONDR_ICON_PATHS: [&str; 28] = [
     "icons/qr-code.svg",
     "icons/circle.svg",
     "icons/circle-filled.svg",
-    "icons/circle-alert.svg",
     "icons/server-plus.svg",
     "icons/folder-plus.svg",
     "icons/git-branch.svg",
@@ -71,6 +70,7 @@ gpui_kit::assets::icon_assets!(
         FolderGit2,
         AppWindow,
         Plug,
+        PlugZap,
         Unplug,
         Trash,
         Download,
@@ -107,9 +107,6 @@ impl AssetSource for CondrAssets {
             )))),
             "icons/circle-filled.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
                 "../assets/icons/circle-filled.svg"
-            )))),
-            "icons/circle-alert.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
-                "../assets/icons/circle-alert.svg"
             )))),
             "icons/server-plus.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
                 "../assets/icons/server-plus.svg"

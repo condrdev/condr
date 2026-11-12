@@ -25,7 +25,6 @@ pub(in crate::app) enum CondrIconName {
     Circle,
     /// Lucide `circle` with a `currentColor` fill.
     CircleFilled,
-    CircleAlert,
     /// Lucide's `server` with a plus in the corner; Lucide itself has no server-plus.
     ServerPlus,
     /// Lucide `folder-plus`: create a Workspace from a directory.
@@ -72,7 +71,6 @@ impl IconNamed for CondrIconName {
         match self {
             Self::Circle => "icons/circle.svg",
             Self::CircleFilled => "icons/circle-filled.svg",
-            Self::CircleAlert => "icons/circle-alert.svg",
             Self::ServerPlus => "icons/server-plus.svg",
             Self::FolderPlus => "icons/folder-plus.svg",
             Self::ArrowLeftRight => "icons/arrow-left-right.svg",
@@ -153,23 +151,27 @@ pub(in crate::app) fn status_badge(status: SidebarStatusVisual, cx: &App) -> Opt
                 .bg(status.tone.color(cx))
                 .map(|dot| {
                     if status.key == "working" {
-                        // Between full and a third on a slow cosine, every dot in step.
-                        dot.with_animation(
-                            "working-fade",
-                            Animation::new(WORKING_FADE)
-                                .repeat_synced()
-                                .with_max_fps(WORKING_FADE_FPS),
-                            |dot, turn| {
-                                dot.opacity(0.65 + 0.35 * (turn * std::f32::consts::TAU).cos())
-                            },
-                        )
-                        .into_any_element()
+                        fading(dot)
                     } else {
                         dot.into_any_element()
                     }
                 }),
         ),
     }
+}
+
+/// Something under way, a working Agent or a connecting Device: it fades between full and
+/// a third on a slow cosine, every one in step.
+pub(in crate::app) fn fading(element: Div) -> AnyElement {
+    element
+        .with_animation(
+            "working-fade",
+            Animation::new(WORKING_FADE)
+                .repeat_synced()
+                .with_max_fps(WORKING_FADE_FPS),
+            |element, turn| element.opacity(0.65 + 0.35 * (turn * std::f32::consts::TAU).cos()),
+        )
+        .into_any_element()
 }
 
 /// How long a working dot takes to fade out and back in.
