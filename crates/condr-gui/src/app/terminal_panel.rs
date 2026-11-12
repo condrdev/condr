@@ -376,11 +376,9 @@ impl Render for TerminalPanel {
                 });
             });
         let title_tooltip = pane_title.clone();
-        let hover_group: SharedString = format!("terminal-pane-{key}-{}", pane_id.as_u64()).into();
 
         // A card in the Tab's gaps; the focused one of several is outlined in the accent.
         v_flex()
-            .group(hover_group.clone())
             .size_full()
             .overflow_hidden()
             .rounded(super::dock::PANE_RADIUS)
@@ -534,19 +532,8 @@ impl Render for TerminalPanel {
                                         .child("Pasting image…"),
                                 )
                             })
-                            // The Pane's buttons show on the focused or zoomed Pane, and on
-                            // any Pane under the pointer.
-                            .child(
-                                h_flex()
-                                    .items_center()
-                                    .gap_1()
-                                    .when(!active && !zoomed, |this| {
-                                        this.opacity(0.)
-                                            .group_hover(hover_group, |style| style.opacity(1.))
-                                    })
-                                    .child(pane_zoom)
-                                    .child(pane_menu),
-                            ),
+                            .child(pane_zoom)
+                            .child(pane_menu),
                     ),
             )
             .child(body)
