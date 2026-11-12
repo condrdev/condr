@@ -47,8 +47,6 @@ fn the_ports_page_forwards_a_devices_port_and_stops_it() {
     let (view, window, _server) = connected_condr_with(&mut cx, server, endpoint);
     window.update(|window, cx| _ = window.draw(cx));
     assert!(window.debug_bounds("ports-page").is_none());
-    // A remote Device's header carries its own button.
-    assert!(window.debug_bounds("device-ports-1").is_some());
 
     let open = window
         .debug_bounds("open-ports")

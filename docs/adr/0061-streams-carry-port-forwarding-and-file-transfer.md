@@ -110,3 +110,5 @@ Delivery, each step merged on its own:
 4. File transfer's core and CLI: the Server's reading and writing, `condr-client`, `condr file` with its Ctrl+C handler, and the echo-latency benchmark.
 5. The GUI's entries in Files, Changes and the Preview Tab, the upload queue and the transfer strip.
 6. Finishing: the Windows acceptance above; `condr --skill`, which tells an Agent that `port forward` keeps running and is started in the background or another Pane, its first JSON line meaning ready, that file paths are Workspace-relative, and that an existing target needs `--replace`; the Stream and Forward entries in CONTEXT.md; the website, whose `using/remote.md` gains a section on forwarding ports and whose `reference/cli.md` gains `port forward` and `file`, in English and in `zh-cn`; SECURITY.md's paragraph; and the roadmap's section marked done.
+
+> 2026-11-12: the remote Device header's **⇄** is gone; **⇄ N** at the bottom of the left sidebar is the one entry, and the page's left column narrows it to one Device.

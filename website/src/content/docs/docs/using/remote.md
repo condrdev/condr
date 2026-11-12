@@ -94,7 +94,7 @@ For servers with a fixed IP address, or ones directly reachable on an internal L
 
 An Agent on a remote device often starts a dev server. To open it in this computer's browser, forward its port:
 
-1. Click **⇄** on the device's header in the sidebar, or **⇄** at the bottom of the sidebar for every device.
+1. Click **⇄** at the bottom of the sidebar. The **Ports** page lists every device; choose one on its left to see only that device's forwards.
 2. On the **Ports** page, choose the **Device** when several are connected, enter the device's port, and optionally the port to use here, then click **Forward**.
 3. Click the address on its card, or **Open in Browser**.
 

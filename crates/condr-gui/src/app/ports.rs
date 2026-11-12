@@ -750,32 +750,6 @@ impl Condr {
     }
 }
 
-/// A remote Device header's button: that Device's forwards. Free of `self`, since the
-/// header is drawn from a closure the sidebar calls again on every frame.
-pub(super) fn device_ports_button(
-    key: ConnectionKey,
-    count: usize,
-    owner: WeakEntity<Condr>,
-) -> AnyElement {
-    let button = Button::new(("device-ports", key))
-        .debug_selector(move || format!("device-ports-{key}"))
-        .ghost()
-        .small()
-        .icon(Icon::new(CondrIconName::ArrowLeftRight))
-        .tooltip("Ports on this Device")
-        .on_click(move |_, window, cx| {
-            cx.stop_propagation();
-            let _ = owner.update(cx, |this, cx| {
-                this.open_ports(PortsScope::Device(key), window, cx)
-            });
-        });
-    if count == 0 {
-        button.into_any_element()
-    } else {
-        button.label(count.to_string()).into_any_element()
-    }
-}
-
 /// One number per forward for element ids: the Device in the high bits, the port below.
 fn forward_id(key: ConnectionKey, remote: u16) -> u64 {
     key << 16 | u64::from(remote)
