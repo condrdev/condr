@@ -147,10 +147,7 @@ pub(super) fn server_general_page(
                             },
                         ),
                     )
-                    .description(
-                        "Jump between prompts, and hear when a long command finishes. \
-                         zsh, bash and fish, in new terminals.",
-                    )
+                    .description("Prompt jumps and long-command alerts.")
                     .keywords(["prompt", "osc 133", "zsh", "bash", "fish"]),
                 ),
         )
@@ -215,13 +212,7 @@ fn autostart_item(
             },
         ),
     )
-    .description(if cfg!(target_os = "linux") {
-        "Condr runs from the moment this computer boots, so your other devices and your \
-         phone reach it after a restart. No window opens."
-    } else {
-        "Condr runs from the moment you log in, so your other devices and your phone reach \
-         it after a restart. No window opens."
-    })
+    .description("Reachable after a restart. No window opens.")
     .keywords([
         "autostart",
         "login",
