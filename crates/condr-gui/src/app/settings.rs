@@ -1052,14 +1052,16 @@ mod tests {
         }
     }
 
-    /// A listed action without a binding would render an empty row.
+    /// Every default reaches the keymap, so a row that has one shows it.
     #[cfg(feature = "test-support")]
     #[gpui_kit::test]
-    fn every_listed_shortcut_has_a_binding_on_this_platform(cx: &mut gpui_kit::TestAppContext) {
+    fn every_default_shortcut_has_a_binding_on_this_platform(cx: &mut gpui_kit::TestAppContext) {
         cx.update(super::super::startup::bind_keys);
         let window = cx.add_empty_window();
         window.update(|window, _| {
-            for shortcut in crate::app::keymap::all() {
+            for shortcut in
+                crate::app::keymap::all().filter(|shortcut| !shortcut.defaults.is_empty())
+            {
                 assert!(
                     gpui_kit::component::kbd::Kbd::binding_for_action(
                         shortcut.action,

@@ -1,15 +1,38 @@
 //! The window shortcuts (ADR 0063): each action's keys on this platform, what
 //! `[client.keybindings]` changes about them, and the keymap that results.
 
+use super::command_palette::{self, OpenCommandPalette, Page};
 use super::*;
 
-/// One window action a person can rebind, by the name `[client.keybindings]` knows it by.
+/// One window action, by the name `[client.keybindings]` knows it by.
 pub(super) struct Shortcut {
     pub name: &'static str,
     pub label: &'static str,
     pub action: &'static dyn Action,
+    /// What it acts on, for the Command Palette to grey it out without (ADR 0064).
+    pub needs: Needs,
     /// Its keys on this platform while nothing overrides them; tooltips show the first.
+    /// Some actions have none until someone gives them one.
     pub defaults: &'static [&'static str],
+}
+
+/// What a window action needs to do anything. Its handler checks for itself; this only
+/// lets the Command Palette say so beforehand (ADR 0064).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Needs {
+    Nothing,
+    /// A Pane the window's actions apply to, on a connection that can change the Session.
+    Pane,
+    /// A Tab the window presents.
+    Tab,
+    /// A presented Tab on a connection that can change the Session.
+    Change,
+    /// A presented connection that can change the Session.
+    Device,
+    /// A Workspace on any Device.
+    Workspaces,
+    /// A presented Workspace whose right sidebar this window draws.
+    Changes,
 }
 
 const MAC: bool = cfg!(target_os = "macos");
@@ -40,18 +63,21 @@ const fn shortcut(
     name: &'static str,
     label: &'static str,
     action: &'static dyn Action,
+    needs: Needs,
     defaults: &'static [&'static str],
 ) -> Shortcut {
     Shortcut {
         name,
         label,
         action,
+        needs,
         defaults,
     }
 }
 
-/// Every window shortcut, grouped as the Shortcuts page shows them. The order is also
-/// the precedence when two entries of `[client.keybindings]` name the same key.
+/// Every window action, grouped as the Shortcuts page and the Command Palette show them.
+/// The order is also the precedence when two entries of `[client.keybindings]` name the
+/// same key.
 pub(super) const GROUPS: &[(&str, &[Shortcut])] = &[
     (
         "Application",
@@ -60,6 +86,7 @@ pub(super) const GROUPS: &[(&str, &[Shortcut])] = &[
                 "open-settings",
                 "Open Settings",
                 &OpenSettings,
+                Needs::Nothing,
                 on(&["cmd-,"], &["ctrl-,"]),
             ),
             // VS Code's primary and secondary sidebar chords; elsewhere Ctrl+B is the tmux
@@ -68,31 +95,93 @@ pub(super) const GROUPS: &[(&str, &[Shortcut])] = &[
                 "toggle-sidebar",
                 "Toggle sidebar",
                 &ToggleSidebar,
+                Needs::Nothing,
                 on(&["cmd-b"], &["ctrl-shift-b"]),
             ),
             shortcut(
                 "toggle-changes",
                 "Toggle Changes & Files",
                 &ToggleChanges,
+                Needs::Changes,
                 on(&["cmd-alt-b"], &["ctrl-alt-b"]),
+            ),
+            // VS Code's Command Palette and Go to File; Ctrl+P stays the terminal's, and
+            // herdr-app takes Ctrl+Shift+K for its Go to.
+            shortcut(
+                "command-palette",
+                "Command Palette: Actions",
+                &OpenCommandPalette {
+                    page: Page::Actions,
+                },
+                Needs::Nothing,
+                on(&["cmd-shift-p"], &["ctrl-shift-p"]),
+            ),
+            shortcut(
+                "go-to",
+                "Command Palette: Go to",
+                &OpenCommandPalette { page: Page::GoTo },
+                Needs::Nothing,
+                on(&["cmd-p"], &["ctrl-shift-k"]),
+            ),
+        ],
+    ),
+    (
+        "Devices",
+        &[
+            shortcut(
+                "connect-remote-device",
+                "Connect remote device",
+                &AddServer,
+                Needs::Nothing,
+                &[],
+            ),
+            shortcut(
+                "reconnect-device",
+                "Reconnect device",
+                &ReconnectServer,
+                Needs::Nothing,
+                &[],
             ),
         ],
     ),
     (
         "Workspaces",
-        // Workspaces stack vertically in the sidebar, so Up and Down walk them.
         &[
+            // Workspaces stack vertically in the sidebar, so Up and Down walk them.
             shortcut(
                 "next-workspace",
                 "Next workspace",
                 &NextWorkspace,
+                Needs::Workspaces,
                 on(&["cmd-shift-down"], &["ctrl-shift-down"]),
             ),
             shortcut(
                 "previous-workspace",
                 "Previous workspace",
                 &PreviousWorkspace,
+                Needs::Workspaces,
                 on(&["cmd-shift-up"], &["ctrl-shift-up"]),
+            ),
+            shortcut(
+                "new-workspace",
+                "New workspace",
+                &NewWorkspace,
+                Needs::Device,
+                &[],
+            ),
+            shortcut(
+                "rename-workspace",
+                "Rename workspace",
+                &RenameWorkspace,
+                Needs::Change,
+                &[],
+            ),
+            shortcut(
+                "close-workspace",
+                "Close workspace",
+                &CloseWorkspace,
+                Needs::Change,
+                &[],
             ),
         ],
     ),
@@ -103,72 +192,86 @@ pub(super) const GROUPS: &[(&str, &[Shortcut])] = &[
                 "new-tab",
                 "New tab",
                 &NewTab,
+                Needs::Change,
                 on(&["cmd-t"], &["ctrl-shift-t"]),
             ),
             shortcut(
                 "next-tab",
                 "Next tab",
                 &NextTab,
+                Needs::Tab,
                 on(&["cmd-}", "ctrl-tab"], &["ctrl-tab"]),
             ),
             shortcut(
                 "previous-tab",
                 "Previous tab",
                 &PreviousTab,
+                Needs::Tab,
                 on(&["cmd-{", "ctrl-shift-tab"], &["ctrl-shift-tab"]),
             ),
+            shortcut("rename-tab", "Rename tab", &RenameTab, Needs::Change, &[]),
+            shortcut("close-tab", "Close tab", &CloseTab, Needs::Change, &[]),
             shortcut(
                 "go-to-tab-1",
                 "Go to tab 1",
                 &ActivateTab { index: 0 },
+                Needs::Tab,
                 on(&["cmd-1"], &["alt-1"]),
             ),
             shortcut(
                 "go-to-tab-2",
                 "Go to tab 2",
                 &ActivateTab { index: 1 },
+                Needs::Tab,
                 on(&["cmd-2"], &["alt-2"]),
             ),
             shortcut(
                 "go-to-tab-3",
                 "Go to tab 3",
                 &ActivateTab { index: 2 },
+                Needs::Tab,
                 on(&["cmd-3"], &["alt-3"]),
             ),
             shortcut(
                 "go-to-tab-4",
                 "Go to tab 4",
                 &ActivateTab { index: 3 },
+                Needs::Tab,
                 on(&["cmd-4"], &["alt-4"]),
             ),
             shortcut(
                 "go-to-tab-5",
                 "Go to tab 5",
                 &ActivateTab { index: 4 },
+                Needs::Tab,
                 on(&["cmd-5"], &["alt-5"]),
             ),
             shortcut(
                 "go-to-tab-6",
                 "Go to tab 6",
                 &ActivateTab { index: 5 },
+                Needs::Tab,
                 on(&["cmd-6"], &["alt-6"]),
             ),
             shortcut(
                 "go-to-tab-7",
                 "Go to tab 7",
                 &ActivateTab { index: 6 },
+                Needs::Tab,
                 on(&["cmd-7"], &["alt-7"]),
             ),
             shortcut(
                 "go-to-tab-8",
                 "Go to tab 8",
                 &ActivateTab { index: 7 },
+                Needs::Tab,
                 on(&["cmd-8"], &["alt-8"]),
             ),
             shortcut(
                 "go-to-tab-9",
                 "Go to tab 9",
                 &ActivateTab { index: 8 },
+                Needs::Tab,
                 on(&["cmd-9"], &["alt-9"]),
             ),
         ],
@@ -180,74 +283,90 @@ pub(super) const GROUPS: &[(&str, &[Shortcut])] = &[
                 "split-right",
                 "Split right",
                 &SplitRight,
+                Needs::Pane,
                 on(&["cmd-d"], &["alt-shift-="]),
             ),
             shortcut(
                 "split-down",
                 "Split down",
                 &SplitDown,
+                Needs::Pane,
                 on(&["cmd-shift-d"], &["alt-shift--"]),
             ),
             shortcut(
                 "close-pane",
                 "Close pane",
                 &ClosePane,
+                Needs::Pane,
                 on(&["cmd-w"], &["ctrl-shift-w"]),
             ),
             shortcut(
                 "toggle-zoom",
                 "Toggle zoom",
                 &ToggleZoom,
+                Needs::Pane,
                 on(&["cmd-shift-enter"], &["alt-shift-enter"]),
             ),
             shortcut(
                 "focus-left",
                 "Focus left",
                 &FocusLeft,
+                Needs::Pane,
                 on(&["cmd-alt-left"], &["alt-left"]),
             ),
             shortcut(
                 "focus-right",
                 "Focus right",
                 &FocusRight,
+                Needs::Pane,
                 on(&["cmd-alt-right"], &["alt-right"]),
             ),
             shortcut(
                 "focus-up",
                 "Focus up",
                 &FocusUp,
+                Needs::Pane,
                 on(&["cmd-alt-up"], &["alt-up"]),
             ),
             shortcut(
                 "focus-down",
                 "Focus down",
                 &FocusDown,
+                Needs::Pane,
                 on(&["cmd-alt-down"], &["alt-down"]),
             ),
             shortcut(
                 "resize-left",
                 "Resize left",
                 &ResizeLeft,
+                Needs::Pane,
                 on(&["cmd-ctrl-left"], &["alt-shift-left"]),
             ),
             shortcut(
                 "resize-right",
                 "Resize right",
                 &ResizeRight,
+                Needs::Pane,
                 on(&["cmd-ctrl-right"], &["alt-shift-right"]),
             ),
             shortcut(
                 "resize-up",
                 "Resize up",
                 &ResizeUp,
+                Needs::Pane,
                 on(&["cmd-ctrl-up"], &["alt-shift-up"]),
             ),
             shortcut(
                 "resize-down",
                 "Resize down",
                 &ResizeDown,
+                Needs::Pane,
                 on(&["cmd-ctrl-down"], &["alt-shift-down"]),
             ),
+            shortcut("swap-left", "Swap left", &SwapLeft, Needs::Pane, &[]),
+            shortcut("swap-right", "Swap right", &SwapRight, Needs::Pane, &[]),
+            shortcut("swap-up", "Swap up", &SwapUp, Needs::Pane, &[]),
+            shortcut("swap-down", "Swap down", &SwapDown, Needs::Pane, &[]),
         ],
     ),
 ];
@@ -459,9 +578,12 @@ const WINDOW_BINDING: KeyBindingMetaIndex = KeyBindingMetaIndex(u32::MAX);
 
 /// Makes `keymap` the window shortcuts every window answers, and the app menu's.
 pub(super) fn install(keymap: &Keymap, cx: &mut App) {
-    let context = Some(Rc::new(
-        KeyBindingContextPredicate::parse(SHORTCUT_CONTEXT).expect("a valid key context"),
-    ));
+    let context = |name| {
+        Some(Rc::new(
+            KeyBindingContextPredicate::parse(name).expect("a valid key context"),
+        ))
+    };
+    let (window, palette) = (context(SHORTCUT_CONTEXT), context(command_palette::CONTEXT));
     // The last binding added for an action is the one tooltips and the menu show.
     let window_bindings = all()
         .zip(&keymap.keys)
@@ -471,8 +593,17 @@ pub(super) fn install(keymap: &Keymap, cx: &mut App) {
                 .iter()
                 .map(|(key, action)| ((*key).to_owned(), *action)),
         )
-        .map(|(key, action)| {
-            KeyBinding::load(&key, action.boxed_clone(), context.clone(), false, None, cx)
+        // The open Command Palette sits outside the window's context, and its own keys
+        // close it there (ADR 0064).
+        .flat_map(|(key, action)| {
+            let in_palette = action.as_any().is::<OpenCommandPalette>();
+            [Some(window.clone()), in_palette.then(|| palette.clone())]
+                .into_iter()
+                .flatten()
+                .map(move |context| (key.clone(), action, context))
+        })
+        .map(|(key, action, context)| {
+            KeyBinding::load(&key, action.boxed_clone(), context, false, None, cx)
                 .expect("a key parsed once parses again")
                 .with_meta(WINDOW_BINDING)
         })
@@ -607,11 +738,6 @@ mod tests {
     fn every_default_is_a_distinct_shortcut_key_and_names_are_unique() {
         let mut seen: Vec<Keystroke> = Vec::new();
         for shortcut in all() {
-            assert!(
-                !shortcut.defaults.is_empty(),
-                "{} has no default",
-                shortcut.name
-            );
             for source in shortcut.defaults {
                 let key = parse(source).unwrap_or_else(|| panic!("{source} must parse"));
                 assert_eq!(refusal(&key), None, "{source}");

@@ -39,6 +39,7 @@ command = ["code-insiders", "--reuse-window"]
 
 | 动作 | macOS | Windows / Linux |
 | --- | --- | --- |
+| 命令面板 | 连按两次 Shift | 连按两次 Shift |
 | 打开设置 | Cmd+, | Ctrl+, |
 | 开关左侧栏 | Cmd+B | Ctrl+Shift+B |
 | 开关右侧改动面板 | Cmd+Option+B | Ctrl+Alt+B |

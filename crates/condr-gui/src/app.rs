@@ -2,6 +2,7 @@ mod actions;
 mod change_marks;
 mod change_tree;
 mod changes;
+mod command_palette;
 mod config;
 mod connection;
 mod connection_status;
@@ -319,6 +320,9 @@ pub(crate) struct Condr {
     /// `[client.keybindings]` as last read or written; `keymap` is what it comes to.
     keybindings: toml::Table,
     keymap: keymap::Keymap,
+    /// The window actions last chosen in the Command Palette, latest first, by their place
+    /// in `keymap::all()`; kept until the GUI quits (ADR 0064).
+    recent_actions: Vec<usize>,
     option_as_meta: OptionAsMeta,
     /// Each mode's terminal colour scheme, empty for its default (ADR 0062).
     dark_color_scheme: SharedString,
@@ -534,6 +538,7 @@ impl Condr {
             terminal_font,
             keybindings,
             keymap: keymap::Keymap::default(),
+            recent_actions: Vec::new(),
             option_as_meta,
             dark_color_scheme,
             light_color_scheme,

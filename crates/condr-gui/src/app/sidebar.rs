@@ -49,7 +49,7 @@ pub(super) fn pane_sidebar_status(
 /// A Device's connection, before its name: plugged in green, amber with a spark while its
 /// Server runs another build (ADR 0027), amber and fading while it connects, unplugged
 /// grey, or red when the last try failed.
-fn device_status(
+pub(super) fn device_status(
     key: ConnectionKey,
     status: ConnectionStatus,
     other_build: bool,
@@ -760,6 +760,7 @@ impl Condr {
         let add_owner = cx.weak_entity();
         let settings_owner = cx.weak_entity();
         let keep_awake_owner = cx.weak_entity();
+        let palette_owner = cx.weak_entity();
         Sidebar::new("condr-sidebar")
             .collapsible(SidebarCollapsible::None)
             .w_full()
@@ -787,6 +788,27 @@ impl Condr {
                         cx,
                     ))
                     .child(div().flex_1())
+                    .child(
+                        Button::new("command-palette")
+                            .debug_selector(|| "command-palette-button".into())
+                            .ghost()
+                            .small()
+                            .icon(IconName::Search)
+                            .tooltip(if cfg!(target_os = "macos") {
+                                "Command Palette  ⇧⇧"
+                            } else {
+                                "Command Palette  Shift Shift"
+                            })
+                            .accessibility_label("Command Palette")
+                            .on_click(move |_, window, cx| {
+                                let _ = palette_owner.update(cx, |this, cx| {
+                                    let all = command_palette::OpenCommandPalette {
+                                        page: command_palette::Page::All,
+                                    };
+                                    this.action_open_command_palette(&all, window, cx)
+                                });
+                            }),
+                    )
                     .child(self.render_ports_button(view, cx))
                     .child(
                         Button::new("add-server")

@@ -137,6 +137,10 @@ _Avoid_: Finished, Completed (as states)
 The list of every `Blocked` or `Error` Agent on every connected Device, with its `detail`, at the top of the GUI's sidebar and on the Companion's first screen (ADR 0024, ADR 0044). Each Client builds it from state it already holds; it is not a Server feature, and choosing a row opens the Pane without answering anything.
 _Avoid_: inbox, queue
 
+**Command Palette**:
+The GUI's one overlay for running a window action or going to a place by typing part of its name, opened by pressing Shift twice (ADR 0064). Its pages are All, Actions and Go to: Actions lists every window action with its current key, greyed where it cannot run in that window; Go to lists every connected Device and its Workspaces, Tabs and Agents, the most urgent Agents first. It searches names, never terminal output or file contents, and is the Client's own: nothing is sent until a choice is made.
+_Avoid_: Search Everywhere, quick open, palette (alone, that word is the Color Scheme's)
+
 **Agent Conversation**:
 A conversation owned and stored by a native Agent CLI, identified by that CLI’s session ID. A Pane retains a reference to its running Agent Conversation so a replacement Server can reopen it.
 _Avoid_: Session, process snapshot

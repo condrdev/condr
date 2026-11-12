@@ -45,6 +45,8 @@ gpui-pre-http-client-tls = "0.3"
 # The Preview Tab's line diff for its change marks (ADR 0050); Kit already builds it into
 # the GUI for its `Diff`, so this adds no code. Keep it on Kit's version.
 similar = "2.7"
+# The Command Palette's fuzzy matching and its highlights (ADR 0064).
+nucleo-matcher = { version = "0.3", default-features = false, features = ["unicode-normalization", "unicode-casefold"] }
 # Which Option key is held, for Option as Meta on one side only (ADR 0063): GPUI's
 # modifiers do not tell left from right. Kit already builds it for GPUI's macOS backend;
 # keep it on Kit's version.

@@ -1,4 +1,5 @@
 mod changes;
+mod command_palette;
 mod connection;
 mod connection_lifecycle;
 mod dock;

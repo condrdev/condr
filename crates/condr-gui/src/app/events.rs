@@ -213,18 +213,7 @@ impl Condr {
                     } => {
                         // Someone (the CLI, an agent) asked every viewer to look here; the
                         // window drawing it comes forward among this Client's windows.
-                        let changed = self.show_view(key, workspace_id, tab_id);
-                        let shown_tab = tab_id.or_else(|| {
-                            let connection = self.connection(key)?;
-                            connection.viewed_tab_id(connection.session()?, workspace_id)
-                        });
-                        let home = self.home_window(key, Some(workspace_id), shown_tab);
-                        // The window that shows it leaves its Ports page (ADR 0061).
-                        if let Some(view) = self.windows.iter_mut().find(|view| view.handle == home)
-                        {
-                            view.ports = None;
-                        }
-                        self.activate_window(home, cx);
+                        let changed = self.show_and_bring_forward(key, workspace_id, tab_id, cx);
                         return IncomingEffect {
                             rebuild: false,
                             rebuild_active: changed,

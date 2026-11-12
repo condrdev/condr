@@ -24,6 +24,22 @@ Every key combination not declared on this page passes through to the child proc
 
 ---
 
+## Command Palette
+
+| Action | macOS | Windows / Linux |
+| :--- | :--- | :--- |
+| Open the Command Palette | `Shift` twice | `Shift` twice |
+| Open it on Actions | `Cmd + Shift + P` | `Ctrl + Shift + P` |
+| Open it on Go to | `Cmd + P` | `Ctrl + Shift + K` |
+| Next / previous page | `Tab` / `Shift + Tab` | `Tab` / `Shift + Tab` |
+| Run the highlighted row | `Enter` | `Enter` |
+| Close | `Esc` or the key that opened it | `Esc` or the key that opened it |
+
+* **Pages**: **All** shows up to five places and five actions that match; **Actions** lists every window action with its key, greyed where it cannot run in this window; **Go to** lists every connected Device and its Workspaces, Tabs and Agents, the Agents that need you first.
+* **Matching**: type letters of a name in order, not necessarily together; separate words must all match. It finds names, not terminal output or file contents.
+* **`Shift` twice**: press and release `Shift` twice within a second, with no other key between. It cannot be changed; the other two can.
+* The magnifier at the bottom of the left sidebar opens it too.
+
 ## Workspaces
 
 | Action | macOS | Windows / Linux |
@@ -131,7 +147,7 @@ Every key combination not declared on this page passes through to the child proc
 
 ## Change a shortcut
 
-Every shortcut in the Window, Workspace, Tab and Pane tables above can be rebound or removed. The terminal's own keys (copy and paste, image paste, prompt jumps and the mouse) stay as they are.
+Every shortcut in the Window, Command Palette, Workspace, Tab and Pane tables above can be rebound or removed, except `Shift` twice. The actions without a default key, such as Close tab, Rename workspace or the Pane swaps, can be given one. The terminal's own keys (copy and paste, image paste, prompt jumps and the mouse) stay as they are.
 
 * **In Settings**: open **Shortcuts**. Click **+** beside an action and press the new key, or `Esc` to cancel. **×** removes a key, and the reset button brings back the defaults. A change applies at once.
 * **In `config.toml`**: [`[client.keybindings]`](/docs/reference/configuration/#clientkeybindings-window-shortcuts) lists each action's name. Restart Condr after a hand edit.

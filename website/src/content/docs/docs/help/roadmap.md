@@ -9,10 +9,6 @@ Condr 0.1 is in Public Preview. This page lists what comes next; the order is th
 
 ## Next
 
-### Command palette and Go to
-
-Find any window action by name in a command palette that also shows its shortcut, and jump to any Device, Workspace, Tab or Agent by typing part of its name, with the Agents that need you first.
-
 ### Images in the terminal
 
 Programs that draw images with the kitty graphics protocol, such as yazi, show them in their Pane instead of falling back to text, on remote Devices too.

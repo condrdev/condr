@@ -186,8 +186,7 @@ const WORKING_FADE_FPS: f32 = 30.;
 pub(in crate::app) fn agent_status_summary(
     statuses: impl IntoIterator<Item = SidebarStatusVisual>,
 ) -> Vec<(SidebarStatusVisual, usize)> {
-    const ORDER: [&str; 6] = ["bell", "blocked", "error", "done", "working", "idle"];
-    let rank = |status: &SidebarStatusVisual| ORDER.iter().position(|key| *key == status.key);
+    let rank = |status: &SidebarStatusVisual| URGENCY.iter().position(|key| *key == status.key);
     let mut summary: Vec<(SidebarStatusVisual, usize)> = Vec::new();
     let statuses = statuses.into_iter().map(|status| {
         if status.key == "unknown" {
@@ -204,6 +203,17 @@ pub(in crate::app) fn agent_status_summary(
     }
     summary.sort_by_key(|(status, _)| rank(status));
     summary
+}
+
+/// How urgently each state wants a person, most first.
+const URGENCY: [&str; 6] = ["bell", "blocked", "error", "done", "working", "idle"];
+
+/// Where a state ranks by `URGENCY`, an unknown one with the idle.
+pub(in crate::app) fn urgency(status: SidebarStatusVisual) -> usize {
+    URGENCY
+        .iter()
+        .position(|key| *key == status.key)
+        .unwrap_or(URGENCY.len() - 1)
 }
 
 pub(in crate::app) fn agent_sidebar_status(state: AgentDisplayState) -> SidebarStatusVisual {

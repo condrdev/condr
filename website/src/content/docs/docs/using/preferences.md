@@ -40,6 +40,7 @@ command = ["code-insiders", "--reuse-window"]
 
 | Action | macOS | Windows / Linux |
 | --- | --- | --- |
+| Command Palette | Shift twice | Shift twice |
 | Open Settings | Cmd+, | Ctrl+, |
 | Toggle the left sidebar | Cmd+B | Ctrl+Shift+B |
 | Toggle the right Changes sidebar | Cmd+Option+B | Ctrl+Alt+B |

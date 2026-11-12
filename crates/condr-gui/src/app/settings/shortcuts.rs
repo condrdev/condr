@@ -67,6 +67,10 @@ pub(super) fn shortcuts_page(
             group = group.item(shortcut_row(index, shortcut, owner, settings));
             index += 1;
         }
+        if *title == "Application" {
+            // No key `[client.keybindings]` can write, so it only shows (ADR 0064).
+            group = group.item(fixed_row("Command Palette", &["shift", "shift"]));
+        }
         page = page.group(group);
     }
     page.group(terminal_group())
@@ -285,15 +289,20 @@ fn terminal_group() -> SettingGroup {
     ];
     rows.into_iter().fold(
         SettingGroup::new().title("Terminal"),
-        |group, (label, keys)| {
-            group.item(SettingItem::new(
-                label,
-                SettingField::render(move |_, _, _| {
-                    h_flex().gap_1().children(keys.iter().map(|key| {
-                        Kbd::new(Keystroke::parse(key).expect("a valid keystroke")).outline()
-                    }))
+        |group, (label, keys)| group.item(fixed_row(label, keys)),
+    )
+}
+
+/// A row whose keys stay as they are, which the page only shows.
+fn fixed_row(label: &'static str, keys: &'static [&'static str]) -> SettingItem {
+    SettingItem::new(
+        label,
+        SettingField::render(move |_, _, _| {
+            h_flex().gap_1().children(
+                keys.iter().map(|key| {
+                    Kbd::new(Keystroke::parse(key).expect("a valid keystroke")).outline()
                 }),
-            ))
-        },
+            )
+        }),
     )
 }

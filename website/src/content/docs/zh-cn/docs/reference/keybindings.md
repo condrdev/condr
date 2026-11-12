@@ -24,6 +24,24 @@ Condr 的快捷键分为两层逻辑：
 
 ---
 
+## 命令面板
+
+| 操作 | macOS | Windows / Linux |
+| :--- | :--- | :--- |
+| 打开命令面板 | 连按两次 `Shift` | 连按两次 `Shift` |
+| 打开到 Actions 页 | `Cmd + Shift + P` | `Ctrl + Shift + P` |
+| 打开到 Go to 页 | `Cmd + P` | `Ctrl + Shift + K` |
+| 下一页 / 上一页 | `Tab` / `Shift + Tab` | `Tab` / `Shift + Tab` |
+| 执行选中的行 | `Enter` | `Enter` |
+| 关闭 | `Esc` 或打开它的按键 | `Esc` 或打开它的按键 |
+
+* **三页**：**All** 列出匹配的地点和动作，各最多五条；**Actions** 列出全部窗口动作及其快捷键，在当前窗口无法执行的显示为灰色；**Go to** 列出每个已连接的设备及其 Workspace、Tab 和 Agent，需要你处理的 Agent 排在最前。
+* **匹配**：按顺序输入名字里的字母即可，不必连续；用空格分开的几个词都要匹配。只搜名字，不搜终端输出和文件内容。
+* **连按两次 `Shift`**：一秒内按下并松开 `Shift` 两次，中间不按别的键。它不能修改，另外两个可以。
+* 左侧栏底部的放大镜按钮也能打开它。
+
+---
+
 ## Workspace
 
 | 操作 | macOS | Windows / Linux |
@@ -131,7 +149,7 @@ Condr 的快捷键分为两层逻辑：
 
 ## 修改快捷键
 
-上面 Window、Workspace、Tab 与 Pane 各表中的快捷键都可以改绑或删除。终端自身的按键（复制粘贴、图片投递、跳转 prompt 与鼠标）保持不变。
+上面 Window、命令面板、Workspace、Tab 与 Pane 各表中的快捷键都可以改绑或删除，连按两次 `Shift` 除外。没有默认按键的动作，如关闭 Tab、重命名 Workspace 或交换 Pane，也可以绑定按键。终端自身的按键（复制粘贴、图片投递、跳转 prompt 与鼠标）保持不变。
 
 * **在 Settings 中**：打开 **Shortcuts**，点击动作旁的 **+** 后按下新按键，按 `Esc` 取消。**×** 删除一个按键，重置按钮恢复默认。修改立即生效。
 * **在 `config.toml` 中**：[`[client.keybindings]`](/zh-cn/docs/reference/configuration/#clientkeybindings-窗口快捷键) 列出了每个动作的名称。手动编辑后需重启 Condr。

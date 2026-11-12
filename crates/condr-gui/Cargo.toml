@@ -23,6 +23,7 @@ gpui-pre-reqwest.workspace = true
 gpui-pre-http-client-tls.workspace = true
 futures-lite.workspace = true
 similar.workspace = true
+nucleo-matcher.workspace = true
 image = { workspace = true, features = ["gif", "webp"] }
 condr-core = { path = "../condr-core" }
 condr-client = { path = "../condr-client" }

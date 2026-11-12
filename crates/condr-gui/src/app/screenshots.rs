@@ -8,7 +8,7 @@
 //! ```
 //!
 //! It starts a TCP Server with one Workspace, opens Condr against it, and saves one PNG
-//! per state: the Workspace, the Ports page empty, with forwards, for one Device, the right
+//! per state: the Workspace, the Command Palette's pages, the Ports page empty, with forwards, for one Device, the right
 //! sidebar's transfer strip, the left sidebar with its Device folded, and a finished
 //! download's toast. The website's screenshots come from the same window, in `website`.
 
@@ -125,6 +125,27 @@ pub(crate) fn run(directory: PathBuf) {
         this.sidebar_folded_devices.remove(&1);
         cx.notify();
     });
+
+    // The Command Palette (ADR 0064): each page as it opens, and All with a query.
+    use super::command_palette::{OpenCommandPalette, Page};
+    for (page, name, query) in [
+        (Page::All, "01c-palette-all", None),
+        (Page::All, "01d-palette-query", Some("split")),
+        (Page::Actions, "01e-palette-actions", None),
+        (Page::GoTo, "01f-palette-go-to", None),
+    ] {
+        update(&mut cx, window, &view, |this, window, cx| {
+            this.action_open_command_palette(&OpenCommandPalette { page }, window, cx)
+        });
+        if let Some(query) = query {
+            cx.simulate_input(window, query);
+        }
+        shot(&mut cx, window, &directory, name);
+        update(&mut cx, window, &view, |_, window, cx| {
+            window.close_dialog(cx)
+        });
+        settle(&mut cx, window);
+    }
 
     update(&mut cx, window, &view, |this, window, cx| {
         this.open_ports(PortsScope::All, window, cx)
@@ -243,9 +264,7 @@ pub(crate) fn run(directory: PathBuf) {
     update(&mut cx, window, &view, move |this, _, cx| {
         this.report_downloaded("biome.json", downloaded, cx)
     });
-    // The toast fades in from its first frame on the wall clock: draw it once, then let it land.
-    let _ = capture(&mut cx, window);
-    std::thread::sleep(Duration::from_millis(500));
+    settle(&mut cx, window);
     shot(&mut cx, window, &directory, "09-download-toast");
 
     drop(browser);
@@ -296,6 +315,12 @@ fn shot(
         .save(&path)
         .expect("the screenshot is written");
     eprintln!("{}", path.display());
+}
+
+/// A toast fades in from its first frame on the wall clock: draw it once, then let it land.
+fn settle(cx: &mut VisualTestAppContext, window: AnyWindowHandle) {
+    let _ = capture(cx, window);
+    std::thread::sleep(Duration::from_millis(500));
 }
 
 fn capture(cx: &mut VisualTestAppContext, window: AnyWindowHandle) -> RgbaImage {

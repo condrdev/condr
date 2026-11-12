@@ -120,10 +120,13 @@ toggle-zoom = []
 
 | 分组 | 名称 |
 | --- | --- |
-| Application | `open-settings`、`toggle-sidebar`、`toggle-changes` |
-| Workspaces | `next-workspace`、`previous-workspace` |
-| Tabs | `new-tab`、`next-tab`、`previous-tab`、`go-to-tab-1` … `go-to-tab-9` |
-| Panes | `split-right`、`split-down`、`close-pane`、`toggle-zoom`、`focus-left`、`focus-right`、`focus-up`、`focus-down`、`resize-left`、`resize-right`、`resize-up`、`resize-down` |
+| Application | `open-settings`、`toggle-sidebar`、`toggle-changes`、`command-palette`、`go-to` |
+| Devices | `connect-remote-device`、`reconnect-device` |
+| Workspaces | `next-workspace`、`previous-workspace`、`new-workspace`、`rename-workspace`、`close-workspace` |
+| Tabs | `new-tab`、`next-tab`、`previous-tab`、`rename-tab`、`close-tab`、`go-to-tab-1` … `go-to-tab-9` |
+| Panes | `split-right`、`split-down`、`close-pane`、`toggle-zoom`、`focus-left`、`focus-right`、`focus-up`、`focus-down`、`resize-left`、`resize-right`、`resize-up`、`resize-down`、`swap-left`、`swap-right`、`swap-up`、`swap-down` |
+
+Devices 组、Workspace 与 Tab 的重命名和关闭、New workspace 以及 Pane 的交换默认没有按键，需要时自己绑定。打开[命令面板](/zh-cn/docs/reference/keybindings/#命令面板)的双击 `Shift` 不在这张表里，不能修改。
 
 ### `[client.updates]` 软件更新
 

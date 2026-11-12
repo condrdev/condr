@@ -25,6 +25,7 @@ pub(super) fn bind_keys(cx: &mut App) {
     ]);
     cx.bind_keys(super::directory_browser::key_bindings());
     cx.bind_keys(super::new_workspace::key_bindings());
+    cx.bind_keys(super::command_palette::key_bindings());
     super::keymap::install(&super::keymap::Keymap::default(), cx);
 }
 

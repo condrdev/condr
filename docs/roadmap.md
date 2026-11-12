@@ -27,7 +27,7 @@ Condr 要守住的差异是原生 GUI 而非 TUI、Windows 一等公民、Server
 | 领域 | 现状 |
 | --- | --- |
 | 运行时 | 一机一 Server（ADR 0013）；GUI 断开不影响 PTY 和 Agent；重连先取权威 Bootstrap 再订阅事件；Server 重启按 Session Snapshot 恢复结构并 resume 原生会话；可在登录时（Linux 为开机时）自启（ADR 0057），崩溃后由 Supervisor 重新拉起（ADR 0058）；当前 Workspace 和 Tab 是每个客户端自己的视图（ADR 0021），GUI 重启后恢复窗口、侧栏与视图（ADR 0023）；Windows 上每个 Terminal 的进程归属由 Job Object 决定（ADR 0030），Server 与 GUI 以桌面 shell 给的进程状态运行（ADR 0031） |
-| 终端 | libghostty-vt（Ghostty 的终端内核，ADR 0051）+ 自绘 GPUI 元素；颜色查询回答所选配色，程序的进度条与桌面通知（ADR 0054）；深色、浅色模式各一套终端配色，整个界面的颜色从当前模式的配色推导（ADR 0062）；zsh/bash/fish 的 Shell 集成：提示符跳转与长命令通知（ADR 0055）；合并视觉流（ADR 0004）；kitty keyboard、OSC 7/52/777、图片粘贴（含远程，ADR 0012）；Server 侧选区（ADR 0008）；窗口快捷键可在 Settings 或 `[client.keybindings]` 里改绑和删除，macOS 的 Option 可分左右作 Meta（ADR 0063） |
+| 终端 | libghostty-vt（Ghostty 的终端内核，ADR 0051）+ 自绘 GPUI 元素；颜色查询回答所选配色，程序的进度条与桌面通知（ADR 0054）；深色、浅色模式各一套终端配色，整个界面的颜色从当前模式的配色推导（ADR 0062）；zsh/bash/fish 的 Shell 集成：提示符跳转与长命令通知（ADR 0055）；合并视觉流（ADR 0004）；kitty keyboard、OSC 7/52/777、图片粘贴（含远程，ADR 0012）；Server 侧选区（ADR 0008）；窗口快捷键可在 Settings 或 `[client.keybindings]` 里改绑和删除，macOS 的 Option 可分左右作 Meta（ADR 0063）；双击 Shift 打开命令面板，按名字模糊搜索全部窗口动作和各 Device 的 Workspace、Tab、Agent（ADR 0064） |
 | Agent | 每种 CLI 一个规格模块，9 种完整支持，Kimi 仅识别（ADR 0035）；状态只来自 CLI 自己：会说 Program Status Protocol 的经 OSC 7501 上报（ADR 0044），否则靠 hooks 经 OSC 777 回写（ADR 0014）；`Blocked` 和 `Error` 带 `detail`，sidebar、OS 通知、CLI JSON 和左侧栏顶部跨 Device 的「Needs you」列表都显示它（ADR 0024）；完成、失败或需输入时发 OS 通知 |
 | Agent 驱动 | `condr workspace|tab|pane|agent` 全部 JSON 输出；内嵌 Skill（`condr --skill`）；`agent start|prompt|wait` 可跨 Pane 编排；`--device <name>` 直连保存的远程 Device，`device list` 与 `workspace list --all-devices` 汇总多机（ADR 0022） |
 | Git | gix 只读查询 + Managed Worktree；右侧栏 Changes 和 Files、Diff Tab、Preview Tab（ADR 0017/0018）；Changes 与 Diff Tab 可在对 HEAD 和对 base 分支之间切换，Condr 新建的 worktree 记下分叉时父 Workspace 的分支（ADR 0034）；Preview Tab 用 syntect 高亮，主题和字号在 Settings 里选（ADR 0032），渲染 Markdown、SVG 和常见图片，动图始终播放（ADR 0037），并能编辑保存；Files 能新建、重命名、删除条目并在系统文件管理器中显示（ADR 0045）；Diff Tab 可并排或单栏显示并折叠未改动的行，右侧栏的 History 列出提交并在 Diff Tab 打开其文件（ADR 0046）；Preview Tab 的 Source 在 gutter 和滚动条上标出改动的行（ADR 0050） |
@@ -55,20 +55,6 @@ Condr 要守住的差异是原生 GUI 而非 TUI、Windows 一等公民、Server
 ## 近期方向
 
 按优先级排列。每项写清为什么、做到哪、什么时候停。
-
-### 命令面板与 Go to
-
-**为什么**：窗口里的动作只能靠记快捷键或找按钮。Device、Workspace、Tab 和 Agent 一多，要去哪就得在侧栏里一行行找。herdr-app 的命令面板（列出每个命令和它的快捷键）和 Go to（输入名字跳到 space、tab 或 agent）正是它的常用入口（2026-11-11 对 herdr-app 0.1.15 的对比调查）。
-
-**做到哪**（落地前先写 ADR）：
-
-1. 一张动作表：每个窗口动作有稳定的名字、显示名和当前快捷键。自定义快捷键已按 `condr-gui/src/app/keymap.rs` 里的名字绑定（ADR 0063），命令面板从同一张表读，并显示改过的键。
-2. 命令面板：按名字模糊搜索动作，列出各自的快捷键，回车执行；不可用的动作照列，但标成不可用。
-3. Go to：在同一个弹层里搜 Device、Workspace、Tab 和 Agent，Agent 带着状态（Blocked、Error 排前），回车切过去。
-
-纯 GUI，不改协议。
-
-**停在哪**：不搜终端输出（见“终端内搜索”），不搜文件内容，不做文件快速打开，没有插件提供的命令。
 
 ### 终端里的图片（kitty 图形协议）
 
