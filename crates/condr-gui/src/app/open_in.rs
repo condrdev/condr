@@ -592,7 +592,7 @@ impl Condr {
                             let id = id.clone();
                             menu.item(
                                 PopupMenuItem::new(label.clone())
-                                    .icon(icon.icon())
+                                    .icon(menu_icon(icon.icon()))
                                     .checked(*id == checked)
                                     .on_click(move |_, _, cx| {
                                         let _ = owner.update(cx, |this, cx| {

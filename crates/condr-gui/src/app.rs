@@ -235,6 +235,12 @@ const SIDEBAR_RESIZE_HANDLE_WIDTH: Pixels = px(6.);
 /// rather than the Kit's default; the Tabs keep the same room above and below.
 const WORKSPACE_TITLE_BAR_HEIGHT: Pixels = px(36.);
 
+/// A menu item's icon. The Kit centres it on the label's cap height, which leaves it a
+/// pixel above the lowercase most labels are made of; it moves down to meet them.
+fn menu_icon(icon: impl Into<Icon>) -> Icon {
+    icon.into().relative().top(px(1.))
+}
+
 /// The drag payload of the sidebar resize handle; the shell tracks its moves.
 #[derive(Clone)]
 struct DraggedSidebar;

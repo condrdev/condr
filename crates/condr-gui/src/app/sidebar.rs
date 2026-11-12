@@ -363,7 +363,7 @@ impl Condr {
                                     let remove_name = workspace_name.clone();
                                     let menu = menu.item(
                                         PopupMenuItem::new("Rename Workspace")
-                                            .icon(Glyph::Pencil)
+                                            .icon(menu_icon(Glyph::Pencil))
                                             .disabled(!connected)
                                             .on_click(move |_, window, cx| {
                                                 let name = rename_name.clone();
@@ -383,7 +383,7 @@ impl Condr {
                                             menu.separator()
                                         .item(
                                             PopupMenuItem::new("Create Worktree")
-.icon(Glyph::GitBranchPlus)
+.icon(menu_icon(Glyph::GitBranchPlus))
                                                 .disabled(!connected)
                                                 .on_click(move |_, window, cx| {
                                                     let name = create_name.clone();
@@ -400,7 +400,7 @@ impl Condr {
                                         )
                                         .item(
                                             PopupMenuItem::new("Open Existing Worktree")
-.icon(Glyph::FolderGit2)
+.icon(menu_icon(Glyph::FolderGit2))
                                                 .disabled(!connected)
                                                 .on_click(move |_, window, cx| {
                                                     let name = open_name.clone();
@@ -421,7 +421,7 @@ impl Condr {
                                     let menu = if managed_worktree {
                                         menu.separator().item(
                                             PopupMenuItem::new("Remove Worktree")
-                                                .icon(Glyph::GitBranchMinus)
+                                                .icon(menu_icon(Glyph::GitBranchMinus))
                                                 .disabled(!connected)
                                                 .on_click(move |_, window, cx| {
                                                     let name = remove_name.clone();
@@ -441,7 +441,7 @@ impl Condr {
                                     };
                                     menu.item(
                                         PopupMenuItem::new("Open in New Window")
-                                            .icon(Glyph::AppWindow)
+                                            .icon(menu_icon(Glyph::AppWindow))
                                             .on_click(move |_, window, cx| {
                                                 let _ = detach_owner.update(cx, |this, cx| {
                                                     this.open_in_new_window(
@@ -455,7 +455,7 @@ impl Condr {
                                     .separator()
                                     .item(
                                         PopupMenuItem::new("Close Workspace")
-                                            .icon(IconName::Close)
+                                            .icon(menu_icon(IconName::Close))
                                             .disabled(!connected)
                                             .on_click(move |_, window, cx| {
                                                 let _ = close_owner.update(cx, |this, cx| {
@@ -661,18 +661,20 @@ impl Condr {
                     let menu = if is_local {
                         menu
                     } else {
-                        menu.item(PopupMenuItem::new("Edit").icon(Glyph::Pencil).on_click(
-                            move |_, window, cx| {
-                                let _ = edit_owner.update(cx, |this, cx| {
-                                    this.prompt_edit_server_on(key, window, cx)
-                                });
-                            },
-                        ))
+                        menu.item(
+                            PopupMenuItem::new("Edit")
+                                .icon(menu_icon(Glyph::Pencil))
+                                .on_click(move |_, window, cx| {
+                                    let _ = edit_owner.update(cx, |this, cx| {
+                                        this.prompt_edit_server_on(key, window, cx)
+                                    });
+                                }),
+                        )
                     };
                     let menu = menu
                         .item(
                             PopupMenuItem::new(connection_label)
-                                .icon(connection_icon)
+                                .icon(menu_icon(connection_icon))
                                 .disabled(connection_disabled)
                                 .on_click(move |_, window, cx| {
                                     let _ = connection_owner.update(cx, |this, cx| {
@@ -696,7 +698,7 @@ impl Condr {
                         )
                         .item(
                             PopupMenuItem::new("Open in New Window")
-                                .icon(Glyph::AppWindow)
+                                .icon(menu_icon(Glyph::AppWindow))
                                 .on_click(move |_, window, cx| {
                                     let _ = detach_owner.update(cx, |this, cx| {
                                         this.open_in_new_window(
@@ -711,14 +713,14 @@ impl Condr {
                         menu
                     } else {
                         menu.separator().item(
-                            PopupMenuItem::new("Delete").icon(Glyph::Trash).on_click(
-                                move |_, window, cx| {
+                            PopupMenuItem::new("Delete")
+                                .icon(menu_icon(Glyph::Trash))
+                                .on_click(move |_, window, cx| {
                                     let name = delete_name.clone();
                                     let _ = delete_owner.update(cx, |this, cx| {
                                         this.confirm_delete_server_on(key, name, window, cx)
                                     });
-                                },
-                            ),
+                                }),
                         )
                     }
                 })

@@ -665,7 +665,7 @@ impl Condr {
                 let show_path = show_path.clone();
                 menu.item(
                     PopupMenuItem::new("Show File")
-                        .icon(Glyph::FileText)
+                        .icon(menu_icon(Glyph::FileText))
                         .disabled(!enabled)
                         .on_click(move |_, window, cx| {
                             let _ = show_owner.update(cx, |this, cx| {
@@ -682,7 +682,7 @@ impl Condr {
             let menu = menu
                 .item(
                     PopupMenuItem::new("Download…")
-                        .icon(Glyph::Download)
+                        .icon(menu_icon(Glyph::Download))
                         .disabled(!exists)
                         .on_click(move |_, _, cx| {
                             let _ = download_owner.update(cx, |this, cx| {
@@ -696,7 +696,7 @@ impl Condr {
                     let target_id = target_id.clone();
                     menu.item(
                         PopupMenuItem::new(format!("Open in {label}"))
-                            .icon(icon.icon())
+                            .icon(menu_icon(icon.icon()))
                             .disabled(!enabled || open_absolute.is_none())
                             .on_click(move |_, _, cx| {
                                 let Some(absolute) = open_absolute.clone() else {
@@ -710,13 +710,13 @@ impl Condr {
                 }
                 None => menu.item(
                     PopupMenuItem::new("Open in Editor")
-                        .icon(Glyph::ExternalLink)
+                        .icon(menu_icon(Glyph::ExternalLink))
                         .disabled(true),
                 ),
             };
             let menu = menu.item(
                 PopupMenuItem::new("Insert Path into Terminal")
-                    .icon(Glyph::SquareTerminal)
+                    .icon(menu_icon(Glyph::SquareTerminal))
                     .disabled(target_pane.is_none())
                     .on_click(move |_, window, cx| {
                         let Some((tab_id, pane_id)) = target_pane else {
@@ -1525,14 +1525,14 @@ fn path_copy_items(menu: PopupMenu, relative: String, absolute: Option<PathBuf>)
     let copy_absolute = absolute.clone();
     menu.item(
         PopupMenuItem::new("Copy Relative Path")
-            .icon(Glyph::Copy)
+            .icon(menu_icon(Glyph::Copy))
             .on_click(move |_, _, cx| {
                 cx.write_to_clipboard(ClipboardItem::new_string(relative.clone()));
             }),
     )
     .item(
         PopupMenuItem::new("Copy Path")
-            .icon(Glyph::CopySlash)
+            .icon(menu_icon(Glyph::CopySlash))
             .disabled(absolute.is_none())
             .on_click(move |_, _, cx| {
                 if let Some(absolute) = &copy_absolute {
@@ -1556,7 +1556,7 @@ fn reveal_item(
     };
     menu.item(
         PopupMenuItem::new(reveal_label())
-            .icon(Glyph::FolderOpen)
+            .icon(menu_icon(Glyph::FolderOpen))
             .disabled(!enabled)
             .on_click(move |_, _, cx| {
                 let path = absolute.clone();
@@ -1602,7 +1602,7 @@ fn upload_item(
 ) -> PopupMenu {
     menu.item(
         PopupMenuItem::new("Upload Files…")
-            .icon(Glyph::Upload)
+            .icon(menu_icon(Glyph::Upload))
             .on_click(move |_, window, cx| {
                 let _ = owner.update(cx, |this, cx| {
                     this.pick_uploads(key, workspace_id, directory.clone(), window, cx)
