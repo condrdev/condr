@@ -1458,6 +1458,7 @@ dependencies = [
  "gpui-pre-reqwest-client",
  "image",
  "keepawake",
+ "objc2-core-graphics",
  "prost",
  "qrcode",
  "relative-path",

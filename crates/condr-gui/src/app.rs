@@ -16,6 +16,7 @@ mod files;
 mod gui_state;
 mod history;
 mod ime;
+mod keymap;
 #[cfg(unix)]
 mod login_environment;
 mod navigation;
@@ -113,12 +114,15 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use ime::TerminalComposition;
+use keymap::SHORTCUT_CONTEXT;
+#[cfg(test)]
+use keymap::TAB_MODIFIER;
 use new_workspace::{NewWorkspaceDialog, NewWorkspaceWay};
 use relative_path::{RelativePath, RelativePathBuf};
 use server_connection::*;
 use settings::{
-    Appearance, SHORTCUT_CONTEXT, SettingsWindow, TerminalFont, apply_appearance,
-    apply_color_schemes, apply_terminal_font, sync_theme_with_system,
+    Appearance, SettingsWindow, TerminalFont, apply_appearance, apply_color_schemes,
+    apply_terminal_font, sync_theme_with_system,
 };
 #[cfg(all(test, feature = "test-support"))]
 use settings::{
@@ -131,9 +135,9 @@ use settings::{
 };
 #[cfg(test)]
 use sidebar::*;
+use startup::connect_to_server;
 #[cfg(test)]
-use startup::{TAB_MODIFIER, connect_to_server_with, lock_exclusively, single_instance_lock_path};
-use startup::{connect_to_server, fixed_shortcut};
+use startup::{connect_to_server_with, lock_exclusively, single_instance_lock_path};
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Range;
@@ -142,7 +146,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
-use terminal_input::{PendingSize, TerminalGeometry};
+use terminal_input::{OptionAsMeta, PendingSize, TerminalGeometry};
 #[cfg(test)]
 use terminal_input::{
     TerminalClipboardShortcut, should_defer_to_character_input, terminal_clipboard_shortcut,
@@ -312,6 +316,10 @@ pub(crate) struct Condr {
     /// Devices folded in the left sidebar, their Workspaces hidden under the heading.
     sidebar_folded_devices: HashSet<ConnectionKey>,
     terminal_font: TerminalFont,
+    /// `[client.keybindings]` as last read or written; `keymap` is what it comes to.
+    keybindings: toml::Table,
+    keymap: keymap::Keymap,
+    option_as_meta: OptionAsMeta,
     /// Each mode's terminal colour scheme, empty for its default (ADR 0062).
     dark_color_scheme: SharedString,
     light_color_scheme: SharedString,
@@ -419,6 +427,8 @@ impl Condr {
             default_editor,
             custom_editors,
             workspace_editors,
+            keybindings,
+            option_as_meta,
         } = config;
         let mut connections = vec![connection];
         for (index, (name, endpoint)) in saved_servers.into_iter().enumerate() {
@@ -522,6 +532,9 @@ impl Condr {
             sidebar_workspace_open: HashMap::new(),
             sidebar_folded_devices: HashSet::new(),
             terminal_font,
+            keybindings,
+            keymap: keymap::Keymap::default(),
+            option_as_meta,
             dark_color_scheme,
             light_color_scheme,
             code_font_size,
@@ -557,6 +570,15 @@ impl Condr {
         this.connections[0].subscribe();
         if let Some(error) = config_error {
             this.report_error(error, cx);
+        }
+        this.apply_keymap(cx);
+        for (shortcut, errors) in keymap::all().zip(&this.keymap.errors) {
+            for error in errors {
+                tracing::warn!("[client.keybindings] {}: {error}", shortcut.name);
+            }
+        }
+        for name in &this.keymap.unknown {
+            tracing::warn!("[client.keybindings] names no shortcut {name}");
         }
         this.apply_keep_awake(cx);
         this.scan_open_targets(cx);

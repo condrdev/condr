@@ -45,6 +45,10 @@ gpui-pre-http-client-tls = "0.3"
 # The Preview Tab's line diff for its change marks (ADR 0050); Kit already builds it into
 # the GUI for its `Diff`, so this adds no code. Keep it on Kit's version.
 similar = "2.7"
+# Which Option key is held, for Option as Meta on one side only (ADR 0063): GPUI's
+# modifiers do not tell left from right. Kit already builds it for GPUI's macOS backend;
+# keep it on Kit's version.
+objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["std", "CGEventSource", "CGEventTypes"] }
 # Reads GPUI's `AsyncBody`, a `futures::AsyncRead`; already built for GPUI.
 futures-lite = "2"
 gpui-fps = "0.6"

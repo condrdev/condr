@@ -13,10 +13,6 @@ Condr 0.1 is in Public Preview. This page lists what comes next; the order is th
 
 Find any window action by name in a command palette that also shows its shortcut, and jump to any Device, Workspace, Tab or Agent by typing part of its name, with the Agents that need you first.
 
-### Custom keyboard shortcuts
-
-Rebind or remove any window shortcut by its action name, in Settings or in `config.toml`. On macOS, Option can act as Meta, set separately for the left and right keys.
-
 ### Images in the terminal
 
 Programs that draw images with the kitty graphics protocol, such as yazi, show them in their Pane instead of falling back to text, on remote Devices too.

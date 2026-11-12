@@ -1,15 +1,15 @@
 ---
 title: 快捷键速查
-description: Condr 在 macOS、Windows 与 Linux 平台的全量按键映射，以及终端复制粘贴、滚动与鼠标交互行为规范。
+description: Condr 在 macOS、Windows 与 Linux 平台的全量按键映射，如何修改窗口级快捷键、让 Option 作为 Meta，以及终端复制粘贴、滚动与鼠标交互行为规范。
 ---
 
 Condr 的快捷键分为两层逻辑：
-* **窗口级快捷键**：用于调度 Window、Workspace、Tab 与 Pane。由客户端直接拦截消费，不向终端前台进程透传。
+* **窗口级快捷键**：用于调度 Window、Workspace、Tab 与 Pane。由客户端直接拦截消费，不向终端前台进程透传。下表列出的是默认按键，可以[自行修改](#修改快捷键)。
 * **终端级快捷键**：覆盖文本/媒体剪贴板、缓冲区滚动及鼠标交互，仅在当前终端 Pane 处于聚焦状态时生效。
 
 未在本页声明的按键组合将全部透传至当前 Pane 内运行的子进程。
 
-> **macOS 平台说明**：macOS 环境下 `Option` 键产生特殊字符（如 `Option + S` 输出 `ß`），不映射为终端 `Meta` 键。因此 Shell 中基于单词步进的快捷键（如 `Option + B`、`Option + F`）不生效。
+> **macOS 平台说明**：默认情况下 `Option` 键输入特殊字符（如 `Option + S` 输出 `ß`），与 Terminal.app、iTerm2 一致。要在 Shell 中按单词移动（如 `Option + B`、`Option + F`），请开启 [Option 作为 Meta](#option-作为-meta)。
 
 ---
 
@@ -126,6 +126,30 @@ Condr 的快捷键分为两层逻辑：
 | :--- | :--- | :--- |
 | 访问 URL 链接 | `Cmd + 点击` | `Ctrl + 点击` |
 | 强制选择文本（程序接管鼠标时） | `Shift + 拖动` | `Shift + 拖动` |
+
+---
+
+## 修改快捷键
+
+上面 Window、Workspace、Tab 与 Pane 各表中的快捷键都可以改绑或删除。终端自身的按键（复制粘贴、图片投递、跳转 prompt 与鼠标）保持不变。
+
+* **在 Settings 中**：打开 **Shortcuts**，点击动作旁的 **+** 后按下新按键，按 `Esc` 取消。**×** 删除一个按键，重置按钮恢复默认。修改立即生效。
+* **在 `config.toml` 中**：[`[client.keybindings]`](/zh-cn/docs/reference/configuration/#clientkeybindings-窗口快捷键) 列出了每个动作的名称。手动编辑后需重启 Condr。
+* **规则**：
+  * 快捷键必须带 `Cmd`、`Ctrl` 或 `Option`（Windows 和 Linux 上为 `Ctrl` 或 `Alt`），F 键除外：其余按键都留给打字。
+  * 一个按键只属于一个动作。把它分给另一个动作时，会从原动作上拿走。
+  * macOS 上 `Cmd + Q`、`Cmd + H`、`Cmd + Option + H`、`Cmd + M` 与 `Cmd + Ctrl + F` 属于系统，不能占用。
+  * 每个快捷键只能是一个按键组合，不支持 tmux 前缀键那样的按键序列。
+  * 快捷键会先于终端被 Condr 拦截，即使是程序需要的按键（如 `Ctrl + C`）也一样。
+  * Condr 无法使用的按键会被忽略，原因显示在 Shortcuts 页对应动作的下方。
+
+---
+
+## Option 作为 Meta
+
+**仅限 macOS。** 在 **Settings > Shortcuts > Option as Meta** 中，选择哪个 `Option` 键向终端发送 Meta（`Esc` 后跟该键），而不是输入字符：**Left Option**、**Right Option** 或 **Both**。只设置一侧时，按这一侧的 `Option + B` 可以在 Shell 中后退一个单词，另一侧的 `Option` 仍然输入 `å`、`é`，或某些键盘布局放在那里的 `@`。作为 Meta 的 `Option` 也不会再触发 `Option + E` 这类重音组合。对应配置项是 [`[client.terminal]`](/zh-cn/docs/reference/configuration/#clientterminal-终端显示) 中的 `macos_option_as_meta`。
+
+Windows 与 Linux 上，`Alt` 始终就是 Meta。
 
 ---
 

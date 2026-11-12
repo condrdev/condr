@@ -872,7 +872,7 @@ impl Render for Condr {
             .child(body)
             .into_any_element();
         div()
-            .key_context("Condr")
+            .key_context(SHORTCUT_CONTEXT)
             .relative()
             .track_focus(&view.focus_handle)
             .on_key_down(cx.listener(Self::key_down))

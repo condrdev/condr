@@ -1,8 +1,8 @@
 use super::*;
 
 #[test]
-fn terminal_shortcut_fallback_maps_only_fixed_chords() {
-    let action = |keys: &str| fixed_shortcut(&keystroke(keys));
+fn terminal_shortcut_fallback_maps_only_the_default_chords() {
+    let action = |keys: &str| default_shortcut(&keystroke(keys));
 
     assert!(action("ctrl-tab").unwrap().as_any().is::<NextTab>());
     assert!(
@@ -90,7 +90,7 @@ fn terminal_shortcut_fallback_maps_only_fixed_chords() {
 #[test]
 fn numbered_tab_shortcuts_reserve_only_the_platforms_digit_chords() {
     for number in 1..=9 {
-        let action = fixed_shortcut(&keystroke(&format!("{TAB_MODIFIER}-{number}")))
+        let action = default_shortcut(&keystroke(&format!("{TAB_MODIFIER}-{number}")))
             .expect("each numbered Tab has a shortcut");
         assert_eq!(
             action.as_any().downcast_ref::<ActivateTab>(),
@@ -110,7 +110,7 @@ fn numbered_tab_shortcuts_reserve_only_the_platforms_digit_chords() {
         }
         .into(),
     ] {
-        assert!(fixed_shortcut(&keystroke(&chord)).is_none(), "{chord}");
+        assert!(default_shortcut(&keystroke(&chord)).is_none(), "{chord}");
     }
 }
 
@@ -162,7 +162,7 @@ fn terminal_clipboard_shortcuts_preserve_terminal_control_keys() {
 
 #[test]
 fn terminal_keys_follow_platform_keystroke_semantics() {
-    let key = |keys: &str| terminal_key_for(&keystroke(keys));
+    let key = |keys: &str| terminal_key_for(&keystroke(keys), false);
     let character = |text: &str| Some(TerminalKey::Character(text.into()));
 
     // Plain text and shifted text arrive through the input handler, not as keys.
@@ -192,6 +192,31 @@ fn terminal_keys_follow_platform_keystroke_semantics() {
         assert_eq!(key("alt-shift-s->S"), character("S"));
         assert_eq!(key("alt-s->s"), character("s"));
     }
+
+    // Option as Meta sends the key Option was held with, never the text it composes,
+    // dead keys included.
+    let meta = |keys: &str| terminal_key_for(&keystroke(keys), true);
+    assert_eq!(meta("alt-b->∫"), character("b"));
+    assert_eq!(meta("alt-shift-b->ı"), character("B"));
+    assert_eq!(meta("alt-e->´"), character("e"));
+    assert_eq!(meta("alt-left"), Some(TerminalKey::Left));
+}
+
+#[test]
+fn option_as_meta_reads_its_setting_and_needs_option() {
+    assert_eq!(OptionAsMeta::from_str("right"), OptionAsMeta::Right);
+    assert_eq!(OptionAsMeta::from_str("nonsense"), OptionAsMeta::Off);
+    for option in OptionAsMeta::ALL {
+        assert_eq!(OptionAsMeta::from_str(option.as_str()), option);
+    }
+    let alt = gpui_kit::Modifiers {
+        alt: true,
+        ..Default::default()
+    };
+    assert!(!OptionAsMeta::Off.applies(alt));
+    assert!(!OptionAsMeta::Both.applies(gpui_kit::Modifiers::default()));
+    // Only macOS composes text with Option; Alt elsewhere is always Meta.
+    assert_eq!(OptionAsMeta::Both.applies(alt), cfg!(target_os = "macos"));
 }
 
 #[test]

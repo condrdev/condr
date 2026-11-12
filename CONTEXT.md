@@ -92,7 +92,7 @@ _Avoid_: Active Workspace, active Tab, selection
 **Tab**:
 A Workspace's view, optionally named by the user: either a terminal layout that owns an arrangement of Panes and its current focus, or a viewer with no Panes at all (the Diff Tab, ADR 0017, and the Preview Tab, ADR 0018; at most one of each per Workspace). The GUI numbers open Tabs from 1 in their current Workspace order, recalculating after reordering or closing. An unnamed Tab displays only its centered number; a named Tab displays the number followed by its user-provided name. The number is derived presentation, not a stable identity or a persisted name.
 
-`Alt+1` through `Alt+9` (`Cmd+1` through `Cmd+9` on macOS) activate the corresponding displayed Tab number in the current Workspace. A missing number does nothing, and 9 means the ninth Tab, not the last. These GUI shortcuts are consumed before terminal input and do not switch Tabs while a modal dialog is open.
+`Alt+1` through `Alt+9` (`Cmd+1` through `Cmd+9` on macOS) activate the corresponding displayed Tab number in the current Workspace, unless `[client.keybindings]` gives `go-to-tab-1` through `go-to-tab-9` other keys (ADR 0063). A missing number does nothing, and 9 means the ninth Tab, not the last. These GUI shortcuts are consumed before terminal input and do not switch Tabs while a modal dialog is open.
 
 **Pane**:
 A terminal location and layout leaf within a terminal Tab. It may show a shell or an Agent running inside that shell.

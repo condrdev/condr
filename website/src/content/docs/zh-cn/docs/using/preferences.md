@@ -9,7 +9,7 @@ description: 常用键盘快捷键、自定义外部编辑器联动及终端偏�
 
 - **快捷键入口**：在 macOS 上按下 `Cmd + ,`，在 Windows / Linux 上按下 `Ctrl + ,` 打开设置窗口。
 - **设置页签功能**：
-  - **Application**：客户端全局设置（包含外观主题、终端字号、系统通知开关及快捷键列表）。
+  - **Application**：客户端全局设置（包含外观主题、终端字号、系统通知开关及快捷键）。
   - **Device**：服务端与设备设置（包含默认 Shell 路径、连接状态及 Agent 集成控制）。
 
 ## 自定义外部编辑器 (Open in Editor)
@@ -63,7 +63,7 @@ command = ["code-insiders", "--reuse-window"]
 | 程序开启鼠标模式时选择文本 | Shift+拖动 | Shift+拖动 |
 | 打开终端里的链接 | Cmd+点击 | Ctrl+点击 |
 
-完整列表见[快捷键速查](/zh-cn/docs/reference/keybindings/)。
+以上是默认按键。要修改快捷键，或在 macOS 上让 `Option` 作为 Meta，请打开 **Settings > Shortcuts**；完整列表与规则见[快捷键速查](/zh-cn/docs/reference/keybindings/#修改快捷键)。
 
 ## 设置终端默认 Shell
 

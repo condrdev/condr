@@ -1584,3 +1584,137 @@ fn closing_settings_leaves_the_terminal_taking_server_output() {
         "the terminal stopped taking Server output once Settings closed"
     );
 }
+
+/// A key recorded on the Shortcuts page drives the main window at once and lands in
+/// `[client.keybindings]`; a key without a modifier is refused, Escape cancels without
+/// closing Settings, removing a key drops it, and reset brings the defaults back (ADR 0063).
+#[test]
+fn a_recorded_shortcut_drives_the_main_window_and_is_saved() {
+    let _serial_guard = acquire_visual_test_lock();
+    let directory = TestDirectory::new("recorded-shortcut");
+    let config_path = directory.0.join("config.toml");
+    let mut cx = TestAppContext::single();
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        super::super::super::startup::bind_keys(cx);
+    });
+    let (view, window, _server) = connected_condr(&mut cx);
+    let main_window = window.update(|window, _| window.window_handle());
+    let (old_key, new_key) = if cfg!(target_os = "macos") {
+        ("cmd-b", "cmd-k")
+    } else {
+        ("ctrl-shift-b", "ctrl-k")
+    };
+    let index = crate::app::keymap::all()
+        .position(|shortcut| shortcut.name == "toggle-sidebar")
+        .unwrap();
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| {
+            this.client_config_path = Some(config_path.clone());
+            this.open_settings(window, cx);
+        });
+    });
+    window.run_until_parked();
+    let settings_handle = window
+        .windows()
+        .into_iter()
+        .find(|handle| *handle != main_window)
+        .unwrap();
+    let settings = VisualTestContext::from_window(settings_handle, window).into_mut();
+    let settings_view = settings.read(|app| {
+        view.read(app)
+            .settings_view
+            .as_ref()
+            .and_then(|view| view.upgrade())
+            .unwrap()
+    });
+    // General, Appearance, Notifications, Power, then Shortcuts.
+    settings.update(|_, cx| select_settings_page(&settings_view, 4, cx));
+    settings.update(|window, cx| _ = window.draw(cx));
+    let add = settings
+        .debug_bounds("shortcut-toggle-sidebar-add")
+        .expect("the Shortcuts page lists Toggle sidebar");
+    settings.simulate_click(add.center(), Modifiers::default());
+    assert_eq!(
+        settings.read(|app| settings_view.read(app).recording),
+        Some(index)
+    );
+
+    // Tapping a modifier alone is not a key: the row keeps waiting, with nothing to say.
+    settings.simulate_modifiers_change(Modifiers {
+        control: true,
+        ..Modifiers::default()
+    });
+    settings.simulate_modifiers_change(Modifiers::default());
+    assert_eq!(
+        settings.read(|app| settings_view.read(app).recording),
+        Some(index)
+    );
+    assert!(settings.read(|app| settings_view.read(app).refusal.is_none()));
+
+    settings.simulate_keystrokes("k");
+    let refused = settings.read(|app| settings_view.read(app).refusal.clone());
+    assert!(
+        refused.is_some_and(|(row, why)| row == index && why.starts_with("k needs")),
+        "a bare letter is refused under its row"
+    );
+    assert_eq!(
+        settings.read(|app| settings_view.read(app).recording),
+        Some(index),
+        "the row keeps waiting"
+    );
+    settings.simulate_keystrokes("escape");
+    assert_eq!(settings.read(|app| settings_view.read(app).recording), None);
+    assert_eq!(window.windows().len(), 2, "Escape cancels, not closes");
+
+    settings.update(|window, cx| _ = window.draw(cx));
+    settings.simulate_click(add.center(), Modifiers::default());
+    settings.simulate_keystrokes(new_key);
+    assert_eq!(settings.read(|app| settings_view.read(app).recording), None);
+    let collapsed = |window: &mut VisualTestContext| {
+        window.read(|app| view.read(app).main_view().sidebar_collapsed)
+    };
+    assert!(!collapsed(window));
+    // As a Pane would be, something under the window's key context has focus.
+    window.update(|window, cx| {
+        let focus = view.read(cx).main_view().focus_handle.clone();
+        focus.focus(window, cx);
+    });
+    window.simulate_keystrokes(new_key);
+    assert!(collapsed(window), "the recorded key toggles the sidebar");
+    window.simulate_keystrokes(old_key);
+    assert!(
+        !collapsed(window),
+        "the default key still does: the new one was added"
+    );
+    assert!(wait_until(window, |_| {
+        std::fs::read_to_string(&config_path).is_ok_and(|config| {
+            config.contains(&format!("toggle-sidebar = [\"{old_key}\", \"{new_key}\"]"))
+        })
+    }));
+
+    // The default key's chip comes first; removing it leaves only the recorded key.
+    settings.update(|window, cx| _ = window.draw(cx));
+    let remove = settings
+        .debug_bounds("shortcut-toggle-sidebar-remove-0")
+        .expect("each key has a remove button");
+    settings.simulate_click(remove.center(), Modifiers::default());
+    window.simulate_keystrokes(old_key);
+    assert!(!collapsed(window), "a removed key does nothing");
+    assert!(wait_until(window, |_| {
+        std::fs::read_to_string(&config_path)
+            .is_ok_and(|config| config.contains(&format!("toggle-sidebar = [\"{new_key}\"]")))
+    }));
+
+    window.update(|_, cx| view.update(cx, |this, cx| this.reset_shortcut(index, cx)));
+    window.simulate_keystrokes(new_key);
+    assert!(!collapsed(window), "reset drops the recorded key");
+    window.simulate_keystrokes(old_key);
+    assert!(collapsed(window), "and gives the default back");
+    assert!(wait_until(window, |_| {
+        std::fs::read_to_string(&config_path).is_ok_and(|config| !config.contains("toggle-sidebar"))
+    }));
+
+    settings.update(|window, _| window.remove_window());
+    window.run_until_parked();
+}

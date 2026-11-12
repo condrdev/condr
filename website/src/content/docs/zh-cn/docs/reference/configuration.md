@@ -25,7 +25,7 @@ Condr 采用分层配置架构：
 | **Appearance** | 本机 | 外观主题（跟随系统、浅色、深色）、终端字体、深色与浅色模式各自的终端配色（整个界面的颜色都从它推导），以及 Preview 和 Diff 的语法高亮与字号 |
 | **Notifications** | 本机 | 系统通知总开关及测试通知按钮 |
 | **Power** | 本机 | 保持屏幕常亮（与侧边栏底部的咖啡杯图标联动） |
-| **Shortcuts** | 本机 | 快捷键列表（只读） |
+| **Shortcuts** | 本机 | 改绑或删除窗口级快捷键，macOS 上选择 **Option as Meta**，并列出终端自身的按键（只读） |
 | **Network** | 设备 | 该设备用于 Peer-to-peer 连接和检查更新的代理：**System**、**None**，或选择 **Manual** 并填写 URL |
 | **Paired devices** | 设备 | **Pair**：点击 **Show pairing code** 显示一次性配对码，用手机上的 Condr 扫描；另一台电脑可点击 **Copy link** 复制链接。配对码 10 分钟后过期，设备配对成功后卡片会显示它的名字。同时开启 Peer-to-peer 和 TCP 时，可选择配对码使用哪一种；TCP 配对码使用这台电脑提供的地址，可从输入框的列表中选择，也可以自行输入。**Devices**：已配对设备，在线设备排在前面，每行都有 **Revoke**。**Connections**：**Peer-to-peer** 和 **TCP** 两个开关，以及 TCP 的监听地址；有修改等待重启时会出现 **Restart Condr** |
 | **Agent integrations** | 设备 | 查看各 Agent 的 Hook 状态，支持一键安装、更新或卸载 |
@@ -79,6 +79,7 @@ font_family = "JetBrains Mono"
 font_size = 13
 dark_color_scheme = "Dracula"
 light_color_scheme = "Catppuccin Latte"
+macos_option_as_meta = "left"
 ```
 
 | 键 | 类型 / 可选值 | 默认值 | 说明 |
@@ -87,6 +88,7 @@ light_color_scheme = "Catppuccin Latte"
 | `font_size` | 6 ~ 72 | 界面等宽基准字号 | 像素单位。浮点数自动四舍五入，溢出范围截断至边界值 |
 | `dark_color_scheme` | string | 空 | 深色模式下的终端配色：内置 iTerm2 主题标识，需与 **Dark colors** 下拉项严格一致。深色模式下整个界面的颜色都从它推导。缺省、无法识别或是浅色配色时，使用默认深色调色板。程序向终端查询颜色（OSC 10/11，或问终端是深色还是浅色）时，得到的是当前模式的配色；多台桌面端连同一个 Device 时，以最后连上、最后改配色或最后切换模式的那台为准 |
 | `light_color_scheme` | string | 空 | 浅色模式下的终端配色，对应 **Light colors** 下拉项。缺省、无法识别或是深色配色时，使用 GitHub Light Default |
+| `macos_option_as_meta` | `off` / `left` / `right` / `both` | `off` | 仅 macOS：哪个 `Option` 键发送 Meta（`Esc` 加该键），而不是输入字符。非法值按 `off` 处理。见 [Option 作为 Meta](/zh-cn/docs/reference/keybindings/#option-作为-meta) |
 
 ### `[client.code]` 代码视图（Preview / Diff）
 
@@ -100,6 +102,28 @@ font_size = 14
 | --- | --- | --- | --- |
 | `theme` | string | 空 | 语法高亮主题，需匹配 **Appearance › Syntax** 选项。缺省或无法识别时，浅色界面使用 GitHub Light，深色界面使用 GitHub Dark |
 | `font_size` | 6 ~ 72 | 界面等宽基准字号 | 代码视图字号，边界与取整逻辑同终端配置 |
+
+### `[client.keybindings]` 窗口快捷键
+
+```toml
+[client.keybindings]
+split-right = ["cmd-d", "cmd-\\"]
+toggle-zoom = []
+```
+
+每一项整体替换一个动作在本平台的默认按键；`[]` 表示不留任何按键；没有写的动作保持默认。**Settings › Shortcuts** 也写在这里，并且只写与默认不同的部分。
+
+* **按键写法**：`cmd`、`ctrl`、`alt`、`shift` 用 `-` 连接一个键，例如 `cmd-shift-d`、`alt-shift-=` 或 `f6`。Windows 和 Linux 上 `cmd` 指 Windows 键或 Super 键。
+* **抢占按键**：一项写到的按键会从任何动作的默认按键中拿走。两项写了同一个键时，在下表中排在前面的动作保留它。
+* **被忽略的按键**：无法解析的、既不带 `cmd`、`ctrl`、`alt` 也不是 F 键的，以及 macOS 自身占用的（`cmd-q`、`cmd-h`、`cmd-alt-h`、`cmd-m`、`cmd-ctrl-f`）。同一项里的其余按键照常生效，Shortcuts 页会在该动作下方说明原因。值不是列表时保持默认。
+* 手动编辑此表后需重启客户端。
+
+| 分组 | 名称 |
+| --- | --- |
+| Application | `open-settings`、`toggle-sidebar`、`toggle-changes` |
+| Workspaces | `next-workspace`、`previous-workspace` |
+| Tabs | `new-tab`、`next-tab`、`previous-tab`、`go-to-tab-1` … `go-to-tab-9` |
+| Panes | `split-right`、`split-down`、`close-pane`、`toggle-zoom`、`focus-left`、`focus-right`、`focus-up`、`focus-down`、`resize-left`、`resize-right`、`resize-up`、`resize-down` |
 
 ### `[client.updates]` 软件更新
 

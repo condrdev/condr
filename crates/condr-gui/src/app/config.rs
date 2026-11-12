@@ -11,7 +11,7 @@ use condr_server::{DeviceKey, SavedServer, load_saved_servers, save_saved_server
 
 use super::open_in::CustomEditor;
 use super::syntax::CodeTheme;
-use super::{Appearance, Condr, Endpoint, TerminalFont, UpdateChannel};
+use super::{Appearance, Condr, Endpoint, OptionAsMeta, TerminalFont, UpdateChannel};
 use std::collections::BTreeMap;
 
 const APPEARANCE_KEY: &str = "appearance";
@@ -33,6 +33,10 @@ const WORKSPACE_EDITORS_KEY: &str = "workspace_editors";
 const TERMINAL_TABLE: [&str; 2] = ["client", "terminal"];
 const FONT_FAMILY_KEY: &str = "font_family";
 const FONT_SIZE_KEY: &str = "font_size";
+/// Which Option keys type Meta on macOS (ADR 0063).
+const OPTION_AS_META_KEY: &str = "macos_option_as_meta";
+/// `[client.keybindings]`: the window shortcuts that differ from the defaults (ADR 0063).
+const KEYBINDINGS_TABLE: [&str; 2] = ["client", "keybindings"];
 // Each mode's terminal colour scheme, which the interface takes its colours from (ADR 0062).
 const DARK_COLOR_SCHEME_KEY: &str = "dark_color_scheme";
 const LIGHT_COLOR_SCHEME_KEY: &str = "light_color_scheme";
@@ -67,6 +71,8 @@ pub(super) struct LoadedConfig {
     pub default_editor: Option<String>,
     pub custom_editors: Vec<CustomEditor>,
     pub workspace_editors: BTreeMap<PathBuf, String>,
+    pub keybindings: toml::Table,
+    pub option_as_meta: OptionAsMeta,
 }
 
 impl LoadedConfig {
@@ -155,6 +161,16 @@ impl LoadedConfig {
             terminal_font.family = family.to_owned().into();
         }
         terminal_font.size = font_size(terminal.and_then(|v| v.get(FONT_SIZE_KEY)));
+        let keybindings = match value("keybindings") {
+            None => toml::Table::new(),
+            Some(toml::Value::Table(table)) => table.clone(),
+            Some(_) => {
+                tracing::warn!(
+                    "[client] keybindings is not a table, so every shortcut keeps its default"
+                );
+                toml::Table::new()
+            }
+        };
         let workspace_editors = decode_list::<SavedWorkspaceEditor>(value(WORKSPACE_EDITORS_KEY))
             .unwrap_or_default()
             .into_iter()
@@ -198,6 +214,12 @@ impl LoadedConfig {
                 .to_owned()
                 .into(),
             code_font_size: font_size(code.and_then(|v| v.get(FONT_SIZE_KEY))),
+            keybindings,
+            option_as_meta: terminal
+                .and_then(|v| v.get(OPTION_AS_META_KEY))
+                .and_then(toml::Value::as_str)
+                .map(OptionAsMeta::from_str)
+                .unwrap_or_default(),
             default_editor: nonempty_string(value(EDITOR_KEY)).map(str::to_owned),
             custom_editors,
             workspace_editors,
@@ -367,6 +389,38 @@ impl Condr {
         };
         self.save_config(cx, move |path| {
             write_value(path, &TERMINAL_TABLE, key, toml_edit::value(name.as_ref()))
+        });
+    }
+
+    pub(super) fn save_option_as_meta(&mut self, cx: &mut Context<Self>) {
+        let option = self.option_as_meta;
+        self.save_config(cx, move |path| {
+            write_value(
+                path,
+                &TERMINAL_TABLE,
+                OPTION_AS_META_KEY,
+                toml_edit::value(option.as_str()),
+            )
+        });
+    }
+
+    /// Each named shortcut's keys, or `None` to drop its entry for the defaults.
+    pub(super) fn save_keybindings(
+        &mut self,
+        entries: Vec<(&'static str, Option<Vec<String>>)>,
+        cx: &mut Context<Self>,
+    ) {
+        self.save_config(cx, move |path| {
+            condr_core::update_config_values(
+                path,
+                &KEYBINDINGS_TABLE,
+                entries.into_iter().map(|(name, keys)| {
+                    (
+                        name,
+                        keys.map(|keys| toml_edit::value(toml_edit::Array::from_iter(keys))),
+                    )
+                }),
+            )
         });
     }
 
@@ -593,6 +647,65 @@ mod tests {
         assert!(!read_config(&path).fps_monitor);
         write_client_value(&path, FPS_MONITOR_KEY, toml_edit::value(true)).unwrap();
         assert!(read_config(&path).fps_monitor);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn keybindings_and_option_as_meta_round_trip_and_default() {
+        let directory = std::env::temp_dir().join(format!(
+            "condr-client-keybindings-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let path = directory.join("config.toml");
+        fs::create_dir_all(&directory).unwrap();
+
+        let config = read_config(&path);
+        assert!(config.keybindings.is_empty());
+        assert_eq!(config.option_as_meta, OptionAsMeta::Off);
+
+        let keys = toml_edit::value(toml_edit::Array::from_iter(["cmd-k", "ctrl-alt-k"]));
+        condr_core::update_config_values(
+            &path,
+            &KEYBINDINGS_TABLE,
+            [
+                ("split-right", Some(keys)),
+                (
+                    "toggle-zoom",
+                    Some(toml_edit::value(toml_edit::Array::new())),
+                ),
+            ],
+        )
+        .unwrap();
+        write_value(
+            &path,
+            &TERMINAL_TABLE,
+            OPTION_AS_META_KEY,
+            toml_edit::value("left"),
+        )
+        .unwrap();
+        let config = read_config(&path);
+        assert_eq!(
+            config.keybindings.get("split-right"),
+            Some(&toml::Value::Array(vec![
+                "cmd-k".into(),
+                "ctrl-alt-k".into()
+            ]))
+        );
+        assert_eq!(
+            config.keybindings.get("toggle-zoom"),
+            Some(&toml::Value::Array(Vec::new()))
+        );
+        assert_eq!(config.option_as_meta, OptionAsMeta::Left);
+
+        // Dropping an entry gives the shortcut its defaults back.
+        condr_core::update_config_values(&path, &KEYBINDINGS_TABLE, [("split-right", None)])
+            .unwrap();
+        assert!(!read_config(&path).keybindings.contains_key("split-right"));
+
+        // A keybindings that is not a table keeps every default rather than failing.
+        write_client_value(&path, "keybindings", toml_edit::value("cmd-k")).unwrap();
+        assert!(read_config(&path).keybindings.is_empty());
         fs::remove_dir_all(directory).unwrap();
     }
 

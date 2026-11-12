@@ -10,7 +10,6 @@ use shortcuts::shortcuts_page;
 
 pub(super) use appearance::*;
 pub(super) use server::*;
-pub(super) use shortcuts::SHORTCUT_CONTEXT;
 pub(super) use text_field::*;
 
 // Sized in rems so the window zooms with the base font, resolved against the main
@@ -174,6 +173,12 @@ pub(super) struct SettingsWindow {
     /// Re-asks the selected Server for its `Status` while this window is open, so uptime
     /// and recent errors on the General page stay current. Dropped with the window.
     _status_refresh: Task<()>,
+    /// The shortcut whose row waits for a key to add (ADR 0063).
+    pub(super) recording: Option<usize>,
+    /// Why the last key pressed for that row was refused, shown under it.
+    pub(super) refusal: Option<(usize, SharedString)>,
+    /// Takes keys before any binding while a row records.
+    _recorder: Subscription,
 }
 
 /// How often the General page's health figures are refreshed while Settings is open.
@@ -385,6 +390,9 @@ impl SettingsWindow {
             server_labels,
             licenses,
             autostart: server::autostart_registered(),
+            recording: None,
+            refusal: None,
+            _recorder: shortcuts::key_recorder(window, cx),
             _status_refresh: cx.spawn(async move |this, cx| {
                 loop {
                     // Every second while a code shows: its countdown ticks, and a device
@@ -555,7 +563,7 @@ impl Render for SettingsWindow {
                 ),
                 notifications_page(&self.owner),
                 power_page(&self.owner),
-                shortcuts_page(),
+                shortcuts_page(&self.owner, &settings, cx),
             ]);
         }
         if connected {
@@ -1051,18 +1059,17 @@ mod tests {
         cx.update(super::super::startup::bind_keys);
         let window = cx.add_empty_window();
         window.update(|window, _| {
-            for (_, rows) in super::shortcuts::SHORTCUTS {
-                for (label, action) in *rows {
-                    assert!(
-                        gpui_kit::component::kbd::Kbd::binding_for_action(
-                            *action,
-                            Some(super::shortcuts::SHORTCUT_CONTEXT),
-                            window
-                        )
-                        .is_some(),
-                        "{label} has no binding"
-                    );
-                }
+            for shortcut in crate::app::keymap::all() {
+                assert!(
+                    gpui_kit::component::kbd::Kbd::binding_for_action(
+                        shortcut.action,
+                        Some(crate::app::keymap::SHORTCUT_CONTEXT),
+                        window
+                    )
+                    .is_some(),
+                    "{} has no binding",
+                    shortcut.label
+                );
             }
         });
     }
