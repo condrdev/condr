@@ -550,7 +550,28 @@ fn server_workspace_button_and_only_tab_close_round_trip() {
     assert!(window.update(|window, cx| window.has_active_dialog(cx)));
     window.update(|window, cx| window.close_dialog(cx));
     window.run_until_parked();
+    // A shell titles its Pane at its first prompt (bash does on Ubuntu), and the Tab widens
+    // to show it, moving the close button. Title it now, past the Tab's widest, so a title
+    // that lands later cannot move the button between measuring and clicking it.
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            let connection = this.connection_mut(1).unwrap();
+            let pane = connection.session().and_then(|session| {
+                let tab = session.workspaces().first()?.tabs().first()?;
+                tab.focused_pane().map(|pane| pane.id())
+            });
+            if let Some(pane) = pane {
+                connection
+                    .model
+                    .terminal_titles
+                    .insert(pane, "runner@ci-host: ~/projects/condr".into());
+            }
+        });
+    });
     window.update(|window, cx| _ = window.draw(cx));
+    let tab = window
+        .debug_bounds(tab_selector(tab_id))
+        .expect("the only Tab should be rendered");
 
     // Hovering the Tab reveals its close button; closing the only Tab asks first, since
     // it takes the Workspace with it.
