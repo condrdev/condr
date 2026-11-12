@@ -1686,6 +1686,83 @@ fn cmd_up_and_down_reach_the_server_for_prompt_jumps() {
     );
 }
 
+/// A focus shortcut moves the keyboard with the Session's focus: the Pane it lands on
+/// takes the keys only a focused terminal answers, Ctrl+U among them, and not just text.
+#[test]
+fn a_focus_shortcut_moves_the_keyboard_to_the_pane_it_lands_on() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        super::super::super::startup::bind_keys(cx);
+    });
+    let (view, window, _server) = connected_condr(&mut cx);
+    let first = focused_pane(&view, window);
+    let default_key = |name: &str| {
+        let index = crate::app::keymap::all()
+            .position(|shortcut| shortcut.name == name)
+            .unwrap();
+        crate::app::keymap::written(&crate::app::keymap::Keymap::default().keys[index][0])
+    };
+    let panel_focused = |window: &mut VisualTestContext, pane_id: PaneId| {
+        let focus = window.read(|app| {
+            view.read(app)
+                .panels
+                .get(&(1, pane_id))
+                .map(|panel| panel.read(app).focus_handle.clone())
+        });
+        focus.is_some_and(|focus| window.update(|window, _| focus.is_focused(window)))
+    };
+
+    window.simulate_keystrokes(&default_key("split-right"));
+    assert!(
+        wait_until(window, |window| {
+            let second = window.read(|app| {
+                let tab = view
+                    .read(app)
+                    .active_session()?
+                    .workspaces()
+                    .first()?
+                    .tabs()
+                    .first()?;
+                let focused = tab.focused_pane()?.id();
+                (tab.panes().len() == 2 && focused != first).then_some(focused)
+            });
+            second.is_some_and(|second| panel_focused(window, second))
+        }),
+        "the new Pane takes the keyboard"
+    );
+
+    window.simulate_keystrokes(&default_key("focus-left"));
+    assert!(
+        wait_until(window, |window| panel_focused(window, first)),
+        "the Pane focus-left lands on takes the keyboard"
+    );
+    let (outgoing, receiver) = std::sync::mpsc::channel();
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.connection_mut(1)
+                .unwrap()
+                .io
+                .as_mut()
+                .unwrap()
+                .outgoing = outgoing;
+        });
+    });
+    window.simulate_keystrokes("ctrl-u");
+    assert!(
+        receiver.try_iter().any(|message| matches!(
+            message,
+            ClientMessage::Terminal {
+                pane_id,
+                command: TerminalCommand::Key { .. },
+                ..
+            } if pane_id == first
+        )),
+        "Ctrl+U reaches the Pane focus-left landed on"
+    );
+}
+
 fn focused_pane(view: &Entity<Condr>, window: &mut VisualTestContext) -> PaneId {
     window.update(|_, cx| {
         view.update(cx, |this, _| {

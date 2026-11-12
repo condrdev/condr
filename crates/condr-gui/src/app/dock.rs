@@ -17,6 +17,9 @@ pub(super) struct DockSurface {
     pub(super) programmatic_layout_events: usize,
     pub(super) pending_projection_request: Option<u64>,
     pub(super) pending_projection_applied_sequence: Option<u64>,
+    /// The Pane this surface last gave the keyboard to. `terminal_input.target` already
+    /// names the new Pane by the time the Dock syncs, so it cannot tell that focus moved.
+    pub(super) keyboard_pane: Option<PaneId>,
     #[cfg(feature = "test-support")]
     pub(super) layout_size: Option<Size<Pixels>>,
 }
@@ -385,6 +388,7 @@ impl Condr {
                 programmatic_layout_events: 0,
                 pending_projection_request: None,
                 pending_projection_applied_sequence: None,
+                keyboard_pane: None,
                 #[cfg(feature = "test-support")]
                 layout_size: None,
             }
@@ -411,7 +415,8 @@ impl Condr {
 
         // Focus follows the presented Pane, not every rebuild: one for a Git refresh must
         // leave an open context menu or a sidebar field holding the keyboard.
-        let retargeted = (input_window && self.terminal_input.target != Some((key, focused)))
+        let retargeted = (input_window
+            && self.dock_surfaces[&surface_key].keyboard_pane != Some(focused))
             || shown_surface != Some(surface_key);
         if input_window {
             self.terminal_input.target = Some((key, focused));
@@ -454,6 +459,10 @@ impl Condr {
             }
         }
         if retargeted || needs_rebuild {
+            self.dock_surfaces
+                .get_mut(&surface_key)
+                .expect("Dock surface was installed")
+                .keyboard_pane = Some(focused);
             self.focus_pane_panel(surface_key, focused, window, cx);
         }
     }
