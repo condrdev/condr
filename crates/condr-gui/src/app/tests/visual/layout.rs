@@ -107,6 +107,13 @@ fn cold_split_workspace_uses_the_real_dock_size_before_first_paint() {
     assert!(first.right() <= second.left());
     // Between them only the gap between two Pane cards and the cards' borders.
     assert!(second.left() - first.right() <= px(10.));
+    // The split handle sits in the middle of that gap, not against either card.
+    let handle = window.debug_bounds("pane-split-handle").unwrap();
+    let middle = (first.right() + second.left()) / 2.;
+    assert!(
+        (handle.center().x - middle).abs() <= px(1.),
+        "the split handle at {handle:?} should sit midway between {first:?} and {second:?}"
+    );
     window.run_until_parked();
     assert_eq!(
         window.read(|app| view.read(app).dock_rebuild_count),

@@ -29,10 +29,9 @@ pub(super) struct DraggedPane {
     pub(super) pane_id: PaneId,
 }
 
-/// The space around and between the Panes' cards, in the colour of the bars around them.
-/// The Kit's split handles overlay the seam rather than take room, so the area and each
-/// Pane's slot both keep half of it.
-const PANE_GAP: Pixels = px(8.);
+/// Half the 8px gap around and between the Panes' cards, in the colour of the bars around
+/// them. The Kit's split handles overlay the seam rather than take room, so the area and
+/// each Pane's slot both keep half of it.
 const HALF_GAP: Pixels = px(4.);
 /// A Pane card's corner radius.
 pub(super) const PANE_RADIUS: Pixels = px(8.);
@@ -80,31 +79,24 @@ impl DockAreaRenderer for CondrDockRenderer {
             .overflow_hidden()
     }
 
-    /// The handle spans the gap between two Pane cards; a line down its middle shows while
-    /// a drag is under way.
+    /// The Kit straddles the handle on the seam between two slots, the middle of the gap
+    /// between their cards, and gives what is drawn here a one-pixel slot there: a line
+    /// that shows only while a drag is under way.
     fn render_split_handle(
         &self,
         handle: &gpui_kit::base::ResizeHandleContext,
         _: &mut Window,
         cx: &mut App,
     ) -> Option<AnyElement> {
-        let horizontal = handle.axis() == Axis::Horizontal;
         Some(
             div()
+                .debug_selector(|| "pane-split-handle".into())
                 .flex_none()
-                .flex()
-                .items_center()
-                .justify_center()
-                .map(|this| match horizontal {
-                    true => this.h_full().w(PANE_GAP),
-                    false => this.w_full().h(PANE_GAP),
+                .map(|this| match handle.axis() {
+                    Axis::Horizontal => this.h_full().w(px(1.)),
+                    Axis::Vertical => this.w_full().h(px(1.)),
                 })
-                .when(handle.is_active(), |this| {
-                    this.child(div().bg(cx.theme().primary).map(|line| match horizontal {
-                        true => line.h_full().w(px(2.)),
-                        false => line.w_full().h(px(2.)),
-                    }))
-                })
+                .when(handle.is_active(), |this| this.bg(cx.theme().primary))
                 .into_any_element(),
         )
     }
