@@ -168,11 +168,29 @@ pub(in crate::app) struct DraggedServer {
 pub(in crate::app) struct DragPreview {
     pub(in crate::app) icon: Option<IconName>,
     pub(in crate::app) name: SharedString,
+    /// Where the drag started inside its source, as GPUI hands it to `on_drag`.
+    pub(in crate::app) offset: Point<Pixels>,
 }
+
+/// How far below and right of the pointer the chip sits, clear of the arrow.
+const DRAG_PREVIEW_GAP: Pixels = px(10.);
 
 impl Render for DragPreview {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // GPUI places the preview where its source was grabbed, which leaves a small chip
+        // far from the pointer when the source is wide, such as a Pane's header. Padding
+        // by that offset brings the chip to the pointer.
+        div()
+            .pl(self.offset.x + DRAG_PREVIEW_GAP)
+            .pt(self.offset.y + DRAG_PREVIEW_GAP)
+            .child(self.chip(cx))
+    }
+}
+
+impl DragPreview {
+    fn chip(&self, cx: &App) -> impl IntoElement {
         h_flex()
+            .debug_selector(|| "drag-preview".into())
             .px_2()
             .py_1()
             .gap_x_2()

@@ -382,11 +382,12 @@ impl CondrSidebarTreeItem {
             })
             .when_some(drag, |this, drag| {
                 let name = drag.name.clone();
-                this.on_drag(drag, move |_, _, _, cx| {
+                this.on_drag(drag, move |_, offset, _, cx| {
                     cx.stop_propagation();
                     cx.new(|_| DragPreview {
                         icon: Some(IconName::Folder),
                         name: name.clone(),
+                        offset,
                     })
                 })
             })
@@ -630,11 +631,12 @@ impl SidebarItem for CondrSidebarSection {
             })
             .when_some(self.drag, |this, drag| {
                 let name = drag.name.clone();
-                this.on_drag(drag, move |_, _, _, cx| {
+                this.on_drag(drag, move |_, offset, _, cx| {
                     cx.stop_propagation();
                     cx.new(|_| DragPreview {
                         icon: None,
                         name: name.clone(),
+                        offset,
                     })
                 })
             });

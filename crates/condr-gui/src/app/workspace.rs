@@ -313,10 +313,14 @@ impl Condr {
                             tab_id,
                             name: tab_label.clone().into(),
                         },
-                        move |drag, _, _, cx| {
+                        move |drag, offset, _, cx| {
                             cx.stop_propagation();
                             let name = drag.name.clone();
-                            cx.new(|_| DragPreview { icon: None, name })
+                            cx.new(|_| DragPreview {
+                                icon: None,
+                                name,
+                                offset,
+                            })
                         },
                     )
                     .on_drop(move |dragged: &DraggedTab, _, cx| {

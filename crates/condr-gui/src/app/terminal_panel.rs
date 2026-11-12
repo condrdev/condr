@@ -425,10 +425,14 @@ impl Render for TerminalPanel {
                         let name = pane_title.clone();
                         this.on_drag(
                             AnyDrag::new(super::dock::DraggedPane { key, pane_id }),
-                            move |_, _, _, cx| {
+                            move |_, offset, _, cx| {
                                 cx.stop_propagation();
                                 let name = name.clone();
-                                cx.new(|_| super::sidebar::DragPreview { icon: None, name })
+                                cx.new(|_| super::sidebar::DragPreview {
+                                    icon: None,
+                                    name,
+                                    offset,
+                                })
                             },
                         )
                     })
