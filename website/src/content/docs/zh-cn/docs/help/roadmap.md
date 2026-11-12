@@ -9,6 +9,18 @@ Condr 0.1 正处于公开预览阶段。本页列出后续准备开发的功能�
 
 ## 接下来
 
+### 命令面板与 Go to
+
+在命令面板里按名字找到任意窗口操作，并看到它的快捷键；输入名字的一部分，就能跳到任意设备、Workspace、Tab 或 Agent，需要你处理的 Agent 排在最前。
+
+### 自定义快捷键
+
+在 Settings 或 `config.toml` 中按操作名重新绑定或取消任意窗口快捷键。macOS 上 Option 可以当作 Meta 使用，左右两个 Option 可分别设置。
+
+### 终端里的图片
+
+用 kitty 图形协议画图的程序（例如 yazi）会在 Pane 里直接显示图片，不再退回文字，远程设备上也一样。
+
 ### 手机端（iOS 与 Android）
 
 **两端均为早期预览**。iPhone 版通过 TestFlight 公开测试，Android 版以签名 APK 形式在 GitHub 上单独发布，详见[手机端](/zh-cn/docs/using/mobile/)。两端都能查看各设备上的 Agent 与 Needs you 列表，打开 Pane 进行阅读和回复。

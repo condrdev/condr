@@ -56,6 +56,41 @@ Condr 要守住的差异是原生 GUI 而非 TUI、Windows 一等公民、Server
 
 按优先级排列。每项写清为什么、做到哪、什么时候停。
 
+### 命令面板与 Go to
+
+**为什么**：窗口里的动作只能靠记快捷键或找按钮，快捷键参考页只是一张只读表。Device、Workspace、Tab 和 Agent 一多，要去哪就得在侧栏里一行行找。herdr-app 的命令面板（列出每个命令和它的快捷键）和 Go to（输入名字跳到 space、tab 或 agent）正是它的常用入口（2026-11-11 对 herdr-app 0.1.15 的对比调查）。
+
+**做到哪**（落地前先写 ADR）：
+
+1. 一张动作表：每个窗口动作有稳定的名字、显示名和当前快捷键。命令面板和快捷键参考页都从它读，下一节的自定义快捷键也按这些名字绑定。
+2. 命令面板：按名字模糊搜索动作，列出各自的快捷键，回车执行；不可用的动作照列，但标成不可用。
+3. Go to：在同一个弹层里搜 Device、Workspace、Tab 和 Agent，Agent 带着状态（Blocked、Error 排前），回车切过去。
+
+纯 GUI，不改协议。
+
+**停在哪**：不搜终端输出（见“终端内搜索”），不搜文件内容，不做文件快速打开，没有插件提供的命令。
+
+### 自定义快捷键
+
+**为什么**：窗口快捷键在终端之前处理，而且写死在代码里，和终端程序或用户的习惯冲突时只能改源码。macOS 上 Option 不能当 Meta 用，shell 的 `Option + B/F` 和 Claude Code 的 `meta+p` 都按不出来，快捷键参考里写明了这一点。
+
+**做到哪**：`config.toml` 的 `[client]` 下按命令面板的动作名重绑或解绑快捷键，Settings 里可以改；快捷键参考页列出全部动作名和当前的键，命令面板显示改过的键。macOS 增加“Option 作为 Meta”的开关，左右 Option 可以分开设。
+
+**停在哪**：不做 `when` 条件表达式和多键序列。不改终端里程序自己的按键。
+
+### 终端里的图片（kitty 图形协议）
+
+**为什么**：ADR 0051 让 kitty 图形保持关闭，程序探测不到支持，只能退回文字，或者画出一排占位方块。当初排在后面，是因为“主流 Agent CLI 会不会输出 kitty 图形”没有确认（`docs/research/libghostty-vt-migration-view.md`）。herdr-app 0.1.10 的更新说明写到 Claude Code、yazi 等程序会用 kitty 占位符画图，这算是一条外部证据；落地前要在 Condr 里实测哪些 Agent 和常用工具真的会画。
+
+**做到哪**（落地前先写 ADR，修订 ADR 0051 中“Kitty graphics stay off”那一句）：
+
+1. Server：设图片存储上限、注册进程全局的 PNG 解码回调，从 render state 读出图片和摆放位置。只开直接传输，不开 file、temp-file 和 shm：这三种会让 Server 去读本机文件或共享内存。
+2. 协议：图片以 generation 为键去重，像素只发一次，视觉帧里只带摆放（位置、尺寸、z 序、裁剪）；Bootstrap 补发仍在屏上的图片。远程连接（TCP、Peer-to-peer、手机）的带宽要先量。
+3. GUI：像素做成 `RenderImage`，按 cell 的像素尺寸画进终端，按 z 序画在文字上面或下面，跟着滚动和缩放走；支持 Unicode 占位符。
+4. 回答 kitty 图形的探测查询，让程序知道可以用。
+
+**停在哪**：不做 Sixel 和 iTerm2 的图片协议；动画先只画当前帧；Companion 先不画图片；Server 重启后图片不保留（ADR 0005）。
+
 ### 移动端 Companion（iOS 与 Android）
 
 **状态**：1–7 步已在 iOS 完成，推送随桌面 0.1.14 与 TestFlight 0.1 (4) 发布。Android（第 8 步）已按 ADR 0048 实现：配对、Agents / Devices / Settings、自绘终端、锁与推送都在模拟器上走通，APK 随 Companion 自己的版本发布（ADR 0049）。剩下的是 Android 真机验证和 FCM：Firebase 项目建好之前，发布的 APK 收不到推送。
@@ -100,7 +135,7 @@ Condr 要守住的差异是原生 GUI 而非 TUI、Windows 一等公民、Server
 
 **做到哪**：回滚内容只在 Server 的 VT 里，所以搜索是一个协议请求，由 Server 在 VT 上查找并返回匹配的位置，GUI 高亮并滚动过去。CLI 可以用同一个请求。
 
-**停在哪**：只在当前 Pane 里搜索，不做跨 Pane 或跨 Workspace 的搜索。命令面板和文件快速打开不做。
+**停在哪**：只在当前 Pane 里搜索，不做跨 Pane 或跨 Workspace 的搜索，不做文件快速打开。命令面板见上文。
 
 ### 转发与文件传输
 
@@ -168,14 +203,6 @@ ADR 要回答三个问题：
 **做到哪**（落地前先写 ADR）：沿用 ADR 0015 的 bridge，Client 执行 `wsl.exe -d <distro> -- condr server bridge`，经 stdin/stdout 跑同一套协议，得到一个 `wsl://<distro>` Device。Server 跑在发行版里，Agent 检测、hooks 和 Git 都在 Linux 一侧照常工作。Connect Remote Device 列出本机已装的发行版；发行版里还没有 `condr` 时，给出安装命令。`condr --device` 同样可以直连。
 
 **停在哪**：只做 WSL 2。不自动在发行版里安装 `condr`，和 SSH 一样留给以后的远端安装。不做 Windows 与 WSL 之间的路径翻译。
-
-### 自定义快捷键
-
-**为什么**：窗口快捷键在终端之前处理，而且写死在代码里，和终端程序或用户的习惯冲突时只能改源码。macOS 上 Option 不能当 Meta 用，shell 的 `Option + B/F` 和 Claude Code 的 `meta+p` 都按不出来，快捷键参考里写明了这一点。
-
-**做到哪**：`config.toml` 的 `[client]` 下按动作名重绑或解绑快捷键，Settings 里可以改，快捷键参考页列出全部动作名。macOS 增加“Option 作为 Meta”的开关，左右 Option 可以分开设。
-
-**停在哪**：不做 `when` 条件表达式和多键序列。不改终端里程序自己的按键。
 
 ### 多仓库 Workspace 的 Changes
 
