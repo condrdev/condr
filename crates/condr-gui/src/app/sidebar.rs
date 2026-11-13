@@ -274,20 +274,11 @@ impl Condr {
                     .presented_session()
                     .map(|session| {
                         let active_workspace = self.presented_workspace_id(key, session);
-                        // Drop handlers need the source index of the dragged Workspace.
-                        let workspace_ids = Rc::new(
-                            session
-                                .workspaces()
-                                .iter()
-                                .map(|workspace| workspace.id())
-                                .collect::<Vec<_>>(),
-                        );
                         session
                             .workspaces()
                             .iter()
-                            .enumerate()
-                            .filter(|(_, workspace)| scope.lists_workspace(key, workspace.id()))
-                            .map(|(workspace_index, workspace)| {
+                            .filter(|workspace| scope.lists_workspace(key, workspace.id()))
+                            .map(|workspace| {
                                 let workspace_id = workspace.id();
                                 let workspace_name = workspace.name().to_owned();
                                 let git = connection.model.workspace_git.get(&workspace_id);
@@ -391,14 +382,12 @@ impl Condr {
                                 .children(agents)
                                 .disable(!connected)
                                 .when(connected, |item| {
-                                    let drop_owner = owner.clone();
                                     let move_owner = owner.clone();
                                     let target = DropTarget::Workspace {
                                         key,
                                         workspace_id,
                                         after: false,
                                     };
-                                    let workspace_ids = workspace_ids.clone();
                                     item.draggable(DraggedWorkspace {
                                         key,
                                         workspace_id,
@@ -409,33 +398,6 @@ impl Condr {
                                         move |half, cx| {
                                             let _ = move_owner.update(cx, |this, cx| {
                                                 this.set_drop_target(target, half, cx)
-                                            });
-                                        },
-                                    )
-                                    .on_drop(
-                                        move |dragged, _, cx| {
-                                            let _ = drop_owner.update(cx, |this, _| {
-                                                let after = this.take_drop_after(target);
-                                                if dragged.key != key {
-                                                    return;
-                                                }
-                                                let Some(source) = workspace_ids
-                                                    .iter()
-                                                    .position(|id| *id == dragged.workspace_id)
-                                                else {
-                                                    return;
-                                                };
-                                                if let Some(index) =
-                                                    drop_index(source, workspace_index, after)
-                                                {
-                                                    this.send_layout_to(
-                                                        key,
-                                                        LayoutCommand::MoveWorkspace {
-                                                            workspace_id: dragged.workspace_id,
-                                                            target_index: index as u32,
-                                                        },
-                                                    );
-                                                }
                                             });
                                         },
                                     )
@@ -664,6 +626,12 @@ impl Condr {
                             this.move_server(dragged.key, key, after, cx);
                             cx.notify();
                         });
+                    }
+                })
+                .on_workspace_drop({
+                    let drop_owner = owner.clone();
+                    move |dragged, _, cx| {
+                        let _ = drop_owner.update(cx, |this, _| this.drop_workspace(dragged));
                     }
                 })
                 .context_menu(move |menu, _, _| {

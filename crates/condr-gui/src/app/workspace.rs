@@ -54,6 +54,36 @@ pub(super) fn tab_label(tab_index: usize, name: &str) -> String {
 }
 
 impl Condr {
+    /// Moves `dragged` to the slot the insertion line shows in the strip of `key`'s
+    /// Workspace `workspace_id`, whose Tabs are `tab_ids`.
+    fn drop_tab(
+        &mut self,
+        dragged: &DraggedTab,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        tab_ids: &[TabId],
+    ) {
+        let Some(DropTarget::Tab { tab_id, after, .. }) = self.drop_target.take() else {
+            return;
+        };
+        if dragged.key != key || dragged.workspace_id != workspace_id {
+            return;
+        }
+        let place = |id| tab_ids.iter().position(|tab| *tab == id);
+        let (Some(source), Some(target)) = (place(dragged.tab_id), place(tab_id)) else {
+            return;
+        };
+        if let Some(index) = drop_index(source, target, after) {
+            self.send_layout_to(
+                key,
+                LayoutCommand::MoveTab {
+                    tab_id: dragged.tab_id,
+                    target_index: index as u32,
+                },
+            );
+        }
+    }
+
     /// The active Workspace as two pieces: its Tab strip, which the title bar hosts so
     /// the Panes get the full body height, and the body under it. No strip without a
     /// Workspace.
@@ -243,6 +273,8 @@ impl Condr {
             })
             .collect::<Vec<_>>();
         let mut tab_statuses = tab_statuses.into_iter();
+        // Between two Tabs: the strip's gap, the separator, and the gap again.
+        let tab_gap = rems(0.5).to_pixels(cx.theme().font_size) + px(1.);
         let tab_buttons = workspace.tabs().iter().enumerate().map(|(tab_index, tab)| {
             let tab_id = tab.id();
             let tab_name = tab.name().to_owned();
@@ -304,8 +336,6 @@ impl Condr {
                 // the Tab's own drag needs it.
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .when(can_mutate, |this| {
-                    let drop_owner = cx.weak_entity();
-                    let tab_ids = tab_ids.clone();
                     this.on_drag(
                         DraggedTab {
                             key,
@@ -323,33 +353,13 @@ impl Condr {
                             })
                         },
                     )
-                    .on_drop(move |dragged: &DraggedTab, _, cx| {
-                        let _ = drop_owner.update(cx, |this, _| {
-                            let after = this.take_drop_after(target);
-                            if dragged.key != key || dragged.workspace_id != workspace_id {
-                                return;
-                            }
-                            let Some(source) = tab_ids.iter().position(|id| *id == dragged.tab_id)
-                            else {
-                                return;
-                            };
-                            if let Some(index) = drop_index(source, tab_index, after) {
-                                this.send_layout_to(
-                                    key,
-                                    LayoutCommand::MoveTab {
-                                        tab_id: dragged.tab_id,
-                                        target_index: index as u32,
-                                    },
-                                );
-                            }
-                        });
-                    })
                 });
             let move_owner = cx.weak_entity();
             let tab_row = if can_mutate {
                 attach_drop_target::<DraggedTab, _>(
                     tab_row,
                     true,
+                    tab_gap,
                     self.drop_indicator_for(target, cx),
                     move |half, cx| {
                         let _ = move_owner
@@ -506,6 +516,16 @@ impl Condr {
                             .overflow_x_scroll()
                             .lock_scroll_axis()
                             .track_scroll(&view.tab_strip_scroll)
+                            // A Tab let go anywhere over the strip, gaps included, lands
+                            // where the insertion line shows.
+                            .when(can_mutate, |this| {
+                                let drop_owner = cx.weak_entity();
+                                this.on_drop(move |dragged: &DraggedTab, _, cx| {
+                                    let _ = drop_owner.update(cx, |this, _| {
+                                        this.drop_tab(dragged, key, workspace_id, &tab_ids)
+                                    });
+                                })
+                            })
                             // Chrome's cue between two idle Tabs: a hairline in the gap.
                             // Beside the active Tab it is drawn transparent rather than
                             // left out, so the child indices `scroll_to_item` counts on
