@@ -103,8 +103,8 @@ impl TerminalImages {
         evicted
     }
 
-    /// Whether the image is decoded and ready to draw.
-    #[cfg(feature = "test-support")]
+    /// Whether the image is decoded and ready to draw, for the offscreen screenshots.
+    #[cfg(all(feature = "test-support", target_os = "macos"))]
     pub(crate) fn ready(&self, key: &TerminalImageKey) -> bool {
         matches!(self.entries.get(key), Some(Entry::Ready { .. }))
     }
