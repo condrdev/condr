@@ -151,6 +151,92 @@ pub struct TerminalScreen {
     /// Part of the screen is the Pane's selection, shared with every viewer (ADR 0008);
     /// its cells come in the selection's colours.
     pub has_selection: bool,
+    /// The kitty graphics images on the screen, in the order to draw them (ADR 0065).
+    pub images: Vec<ScreenImage>,
+}
+
+/// Which pass of the screen an image is drawn in (ADR 0065).
+#[derive(Clone, Copy, Debug, PartialEq, uniffi::Enum)]
+pub enum ScreenImageLayer {
+    BelowBackground,
+    BelowText,
+    AboveText,
+}
+
+/// One kitty graphics image on the screen (ADR 0065), measured in this screen's cells so
+/// the phone draws it at its own; [`crate::Companion::terminal_image`] gives its PNG once
+/// fetched, and a `Terminal` change says when.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct ScreenImage {
+    /// The image's hex SHA-256, what `terminal_image` takes.
+    pub key: String,
+    pub layer: ScreenImageLayer,
+    pub column: f64,
+    pub row: f64,
+    pub width: f64,
+    pub height: f64,
+    /// The part of the image drawn, as fractions of its width and height.
+    pub source_x: f64,
+    pub source_y: f64,
+    pub source_width: f64,
+    pub source_height: f64,
+}
+
+pub(crate) fn image_key(key: &condr_core::TerminalImageKey) -> String {
+    key.0.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+pub(crate) fn parse_image_key(key: &str) -> Option<condr_core::TerminalImageKey> {
+    let bytes = key.as_bytes();
+    if bytes.len() != 64 {
+        return None;
+    }
+    let mut out = [0; 32];
+    for (index, pair) in bytes.as_chunks::<2>().0.iter().enumerate() {
+        out[index] = u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok()?;
+    }
+    Some(condr_core::TerminalImageKey(out))
+}
+
+/// The view's images in cells, from the pixels of the VT's cells.
+fn screen_images(view: &TerminalView) -> Vec<ScreenImage> {
+    let (cell_width, cell_height) = (
+        f64::from(view.size.cell_width),
+        f64::from(view.size.cell_height),
+    );
+    if cell_width == 0. || cell_height == 0. {
+        return Vec::new();
+    }
+    view.images
+        .iter()
+        .filter(|image| {
+            image.image_width > 0
+                && image.image_height > 0
+                && image.source_width > 0
+                && image.source_height > 0
+        })
+        .map(|image| {
+            let (width, height) = (f64::from(image.image_width), f64::from(image.image_height));
+            ScreenImage {
+                key: image_key(&image.image),
+                layer: match image.layer {
+                    condr_core::TerminalImageLayer::BelowBackground => {
+                        ScreenImageLayer::BelowBackground
+                    }
+                    condr_core::TerminalImageLayer::BelowText => ScreenImageLayer::BelowText,
+                    condr_core::TerminalImageLayer::AboveText => ScreenImageLayer::AboveText,
+                },
+                column: f64::from(image.column) + f64::from(image.offset_x) / cell_width,
+                row: f64::from(image.row) + f64::from(image.offset_y) / cell_height,
+                width: f64::from(image.width) / cell_width,
+                height: f64::from(image.height) / cell_height,
+                source_x: f64::from(image.source_x) / width,
+                source_y: f64::from(image.source_y) / height,
+                source_width: f64::from(image.source_width) / width,
+                source_height: f64::from(image.source_height) / height,
+            }
+        })
+        .collect()
 }
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
@@ -250,6 +336,7 @@ pub(crate) fn screen(view: &TerminalView) -> TerminalScreen {
         background: DEFAULT_BACKGROUND_COLOR,
         mouse_tracking: view.mouse_tracking != condr_core::TerminalMouseTracking::None,
         has_selection: view.selection.is_some(),
+        images: screen_images(view),
     }
 }
 

@@ -75,7 +75,7 @@ fn a_burst_of_frames_costs_one_changed_until_the_app_takes_it() {
         companion.devices()[0].status == DeviceStatus::Connected
     });
     // Only the Pane on screen gets frames (ADR 0041).
-    companion.show_pane(Some(address.clone()), pane, 0, 0);
+    companion.show_pane(Some(address.clone()), pane, 0, 0, 0, 0);
     wait_until("the Pane's terminal", || {
         companion.terminal(address.clone(), pane).is_some()
     });
@@ -321,7 +321,7 @@ fn scrolling_up_shows_in_the_screen_and_bottom_brings_it_back() {
     wait_until("the connection", || {
         companion.devices()[0].status == DeviceStatus::Connected
     });
-    companion.show_pane(Some(address.clone()), pane, 12, 40);
+    companion.show_pane(Some(address.clone()), pane, 12, 40, 16, 32);
     wait_until("the Pane's terminal at the phone's size", || {
         companion
             .terminal(address.clone(), pane)
@@ -460,7 +460,7 @@ impl Shown {
             companion.devices()[0].status == DeviceStatus::Connected
         });
         let pane = pane_id.as_u64();
-        companion.show_pane(Some(address.clone()), pane, rows, columns);
+        companion.show_pane(Some(address.clone()), pane, rows, columns, 16, 32);
         wait_until("the Pane at the phone's size", || {
             companion
                 .terminal(address.clone(), pane)
@@ -685,7 +685,7 @@ fn suspend_gives_the_size_back_and_resume_takes_it_again() {
 
     shown.companion.resume();
     wait_until("the phone's size again", || {
-        shown.server_size() == Some(TerminalSize::new(12, 60))
+        shown.server_size() == Some(TerminalSize::new(12, 60).with_cell_size(16, 32))
     });
     wait_until("what happened while away", || {
         shown.screen().is_some_and(|screen| {
@@ -699,7 +699,7 @@ fn suspend_gives_the_size_back_and_resume_takes_it_again() {
         shown.status() == DeviceStatus::Connected
     });
     wait_until("the phone's size again", || {
-        shown.server_size() == Some(TerminalSize::new(12, 60))
+        shown.server_size() == Some(TerminalSize::new(12, 60).with_cell_size(16, 32))
     });
     std::thread::sleep(Duration::from_millis(300));
     assert_eq!(
@@ -723,11 +723,11 @@ fn an_inactive_app_gives_the_size_back_until_it_is_active_again() {
     });
     shown
         .companion
-        .show_pane(Some(shown.address.clone()), shown.pane, 14, 60);
+        .show_pane(Some(shown.address.clone()), shown.pane, 14, 60, 16, 32);
 
     shown.companion.set_active(true);
     wait_until("the phone's size again", || {
-        shown.server_size() == Some(TerminalSize::new(14, 60))
+        shown.server_size() == Some(TerminalSize::new(14, 60).with_cell_size(16, 32))
     });
     shown.stop();
 }
@@ -777,4 +777,90 @@ fn suspend_breaks_off_a_dial_in_progress() {
         "no failure turns up later"
     );
     companion.shutdown();
+}
+
+/// ADR 0065: an image a program in the shown Pane draws reaches the phone as a placement
+/// in its cells, and its PNG arrives over the Device's Stream connection.
+#[test]
+fn an_image_in_the_shown_pane_is_placed_and_fetched() {
+    let server =
+        BoundServer::bind(ServerConfig::ephemeral_tcp("127.0.0.1:0".parse().unwrap()).unwrap())
+            .unwrap();
+    let handle = server.handle();
+    let endpoint = server.endpoint().clone();
+    let Endpoint::Tcp(tcp) = &endpoint else {
+        panic!("an ephemeral TCP Server answers over TCP");
+    };
+    let address = format!("tcp://{}@{}", tcp.server_key, tcp.authority());
+    let seed = tcp.client_key.seed().to_vec();
+    let server_thread = std::thread::spawn(move || server.run());
+
+    let mut desktop = ClientConnection::connect_overview(&endpoint, "desktop").unwrap();
+    let Ok(LayoutResult::WorkspaceCreated { pane_id, .. }) = desktop
+        .layout(LayoutCommand::CreateWorkspace {
+            root_directory: std::env::temp_dir(),
+            name: None,
+        })
+        .unwrap()
+    else {
+        panic!("the Workspace is created");
+    };
+    let pane = pane_id.as_u64();
+    let companion = Companion::new(
+        seed,
+        "phone".into(),
+        vec![SavedDevice {
+            address: address.clone(),
+            label: "desk".into(),
+        }],
+        Arc::new(Counter::default()),
+    )
+    .unwrap();
+    companion.resume();
+    wait_until("the connection", || {
+        companion.devices()[0].status == DeviceStatus::Connected
+    });
+    companion.show_pane(Some(address.clone()), pane, 12, 40, 16, 32);
+    wait_until("the phone's cells to size the Pane", || {
+        companion
+            .terminal(address.clone(), pane)
+            .is_some_and(|screen| screen.rows == 12)
+    });
+    // A red 48×64 RGBA image, three cells wide and two tall at the phone's 16×32 cells:
+    // three pixels are twelve bytes, sixteen characters of base64. Typed out, the line
+    // editor would echo all of it; `cat` prints it at once.
+    let pixels = "/wAA//8AAP//AAD/".repeat(48 * 64 / 3);
+    let sequence = std::env::temp_dir().join(format!("condr-image-{}.txt", std::process::id()));
+    std::fs::write(
+        &sequence,
+        format!("\x1b_Ga=T,q=2,f=32,s=48,v=64,i=9;{pixels}\x1b\\"),
+    )
+    .unwrap();
+    desktop
+        .terminal(
+            pane_id,
+            TerminalCommand::Text(format!("cat '{}'; echo\r", sequence.display())),
+        )
+        .unwrap();
+    let mut placed = None;
+    wait_until("the image to be placed and fetched", || {
+        let Some(screen) = companion.terminal(address.clone(), pane) else {
+            return false;
+        };
+        placed = screen.images.first().cloned();
+        placed
+            .as_ref()
+            .is_some_and(|image| companion.terminal_image(image.key.clone()).is_some())
+    });
+    let image = placed.unwrap();
+    assert_eq!((image.width, image.height), (3., 2.));
+    assert_eq!((image.source_width, image.source_height), (1., 1.));
+    let png = companion.terminal_image(image.key).unwrap();
+    assert!(png.starts_with(b"\x89PNG"));
+    let _ = std::fs::remove_file(sequence);
+
+    companion.shutdown();
+    drop(desktop);
+    handle.stop();
+    server_thread.join().unwrap().unwrap();
 }

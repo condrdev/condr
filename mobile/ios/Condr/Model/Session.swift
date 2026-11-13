@@ -254,21 +254,31 @@ final class Session {
 
     /// The Pane now on screen, at the grid its font and visible area give: the phone
     /// reports focus and sizes the terminal like a window. Opening it marks it seen.
-    func show(_ ref: PaneRef, rows: UInt16, columns: UInt16) {
+    func show(
+        _ ref: PaneRef, rows: UInt16, columns: UInt16, cellWidth: UInt16, cellHeight: UInt16
+    ) {
         if shown != ref {
             shown = ref
             screen = client.terminal(address: ref.address, pane: ref.pane)
             alerts.dismissBanner(for: ref)
         }
-        client.showPane(address: ref.address, pane: ref.pane, rows: rows, columns: columns)
+        client.showPane(
+            address: ref.address, pane: ref.pane, rows: rows, columns: columns,
+            cellWidth: cellWidth, cellHeight: cellHeight)
     }
 
     /// The Pane left the screen or the app went inactive: focus and sizing go back.
     func hide(_ ref: PaneRef) {
         guard shown == ref else { return }
-        client.showPane(address: nil, pane: ref.pane, rows: 0, columns: 0)
+        client.showPane(
+            address: nil, pane: ref.pane, rows: 0, columns: 0, cellWidth: 0, cellHeight: 0)
         shown = nil
         screen = nil
+    }
+
+    /// A terminal image's PNG once the library fetched it (ADR 0065).
+    func terminalImage(_ key: String) -> Data? {
+        client.terminalImage(key: key).map { Data($0) }
     }
 
     func send(text: String) {

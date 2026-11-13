@@ -255,7 +255,9 @@ struct PushedPaneTests {
         #expect(session.presents(PushedPane(["device": "box-id", "pane": "3"])!))
         #expect(session.presents(PushedPane(["device": "forgotten", "pane": "3"])!))
 
-        session.show(PaneRef(address: "p2p://box", pane: 3), rows: 10, columns: 40)
+        session.show(
+            PaneRef(address: "p2p://box", pane: 3), rows: 10, columns: 40, cellWidth: 0,
+            cellHeight: 0)
         #expect(
             !session.presents(PushedPane(["device": "box-id", "pane": "3"])!),
             "the Pane on screen gets none")

@@ -127,7 +127,12 @@ nonisolated final class FakeClient: CompanionProtocol {
         state.withLock { $0.screens[PaneRef(address: address, pane: pane)] }
     }
 
-    func showPane(address: String?, pane: UInt64, rows: UInt16, columns: UInt16) {
+    func terminalImage(key: String) -> Data? { nil }
+
+    func showPane(
+        address: String?, pane: UInt64, rows: UInt16, columns: UInt16, cellWidth: UInt16,
+        cellHeight: UInt16
+    ) {
         state.withLock {
             $0.shows.append(Shown(address: address, pane: pane, rows: rows, columns: columns))
         }

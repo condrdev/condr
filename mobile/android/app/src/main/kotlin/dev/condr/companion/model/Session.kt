@@ -272,19 +272,22 @@ class Session(
    * The Pane now on screen, at the grid its font and visible area give: the phone reports focus and
    * sizes the terminal like a window. Opening it marks it seen.
    */
-  fun show(ref: PaneRef, rows: UShort, columns: UShort) {
+  fun show(ref: PaneRef, rows: UShort, columns: UShort, cellWidth: UShort, cellHeight: UShort) {
     if (shown != ref) {
       shown = ref
       screen = client.terminal(ref.address, ref.pane)
       alerts.dismissBanner(ref)
     }
-    client.showPane(ref.address, ref.pane, rows, columns)
+    client.showPane(ref.address, ref.pane, rows, columns, cellWidth, cellHeight)
   }
+
+  /** A terminal image's PNG once the library fetched it (ADR 0065). */
+  fun terminalImage(key: String): ByteArray? = client.terminalImage(key)
 
   /** The Pane left the screen or the app went inactive: focus and sizing go back. */
   fun hide(ref: PaneRef) {
     if (shown != ref) return
-    client.showPane(null, ref.pane, 0u, 0u)
+    client.showPane(null, ref.pane, 0u, 0u, 0u, 0u)
     shown = null
     screen = null
   }

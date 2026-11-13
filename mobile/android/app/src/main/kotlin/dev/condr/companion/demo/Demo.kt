@@ -410,6 +410,7 @@ object DemoScreens {
       background = BACKGROUND,
       mouseTracking = false,
       hasSelection = false,
+      images = emptyList(),
     )
   }
 }
@@ -519,7 +520,16 @@ class DemoClient(scene: DemoScene) : CompanionInterface {
     return screen.copy(cells = cells, hasSelection = true)
   }
 
-  override fun showPane(address: String?, pane: ULong, rows: UShort, columns: UShort) {}
+  override fun showPane(
+    address: String?,
+    pane: ULong,
+    rows: UShort,
+    columns: UShort,
+    cellWidth: UShort,
+    cellHeight: UShort,
+  ) {}
+
+  override fun terminalImage(key: String): ByteArray? = null
 
   override fun rename(address: String, label: String) {}
 

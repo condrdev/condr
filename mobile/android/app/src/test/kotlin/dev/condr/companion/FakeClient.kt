@@ -61,7 +61,16 @@ class FakeClient(private val onPush: (Boolean) -> Unit = {}) : CompanionInterfac
 
   override fun setPush(push: Boolean) = onPush(push)
 
-  override fun showPane(address: String?, pane: ULong, rows: UShort, columns: UShort) {}
+  override fun showPane(
+    address: String?,
+    pane: ULong,
+    rows: UShort,
+    columns: UShort,
+    cellWidth: UShort,
+    cellHeight: UShort,
+  ) {}
+
+  override fun terminalImage(key: String): ByteArray? = null
 
   override fun submit(address: String, pane: ULong, text: String) {}
 

@@ -338,7 +338,7 @@ nonisolated enum DemoScreens {
         return TerminalScreen(
             revision: 1, rows: rows, columns: columns, scrolledLines: 0, cells: cells,
             cursor: cursor,
-            background: background, mouseTracking: false, hasSelection: false)
+            background: background, mouseTracking: false, hasSelection: false, images: [])
     }
 }
 
@@ -454,7 +454,12 @@ nonisolated final class DemoClient: CompanionProtocol {
         return screen
     }
 
-    func showPane(address: String?, pane: UInt64, rows: UInt16, columns: UInt16) {}
+    func showPane(
+        address: String?, pane: UInt64, rows: UInt16, columns: UInt16, cellWidth: UInt16,
+        cellHeight: UInt16
+    ) {}
+
+    func terminalImage(key: String) -> Data? { nil }
 
     func rename(address: String, label: String) {}
     func sendText(address: String, pane: UInt64, text: String) {}

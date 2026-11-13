@@ -2,6 +2,7 @@
 //! 0039, ADR 0040). One lock guards the whole state: the app reads it on its main thread,
 //! each connection's pump writes it, and nothing slow runs under it.
 
+use crate::images::{FETCHES_PER_DEVICE, ImageLink, ImageStore, RETRY_AFTER};
 use crate::views::{
     AgentView, Change, DeviceStatus, DeviceView, Event, Key, NeedsYouItem, PaneView, SavedDevice,
     TerminalScreen, WorkspaceView, screen,
@@ -44,6 +45,8 @@ struct Shared {
     runtime: tokio::runtime::Runtime,
     state: Mutex<State>,
     wake: Condvar,
+    /// The images the Pane on screen showed (ADR 0065); taken after `state`, never before.
+    images: Mutex<ImageStore>,
 }
 
 #[derive(Default)]
@@ -80,6 +83,11 @@ struct Device {
     io: Option<ConnectionIo>,
     subscription: Subscription,
     snapshot_pending: bool,
+    /// What the last connect dialled, for the Stream connection images open.
+    endpoint: Option<RemoteEndpoint>,
+    /// Images' Stream connection, from the first fetch until the connection ends.
+    image_link: Option<Arc<ImageLink>>,
+    image_fetches: usize,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -138,6 +146,9 @@ impl Device {
             io: None,
             subscription: Subscription::None,
             snapshot_pending: false,
+            endpoint: None,
+            image_link: None,
+            image_fetches: 0,
         }
     }
 
@@ -209,6 +220,7 @@ impl Device {
         self.generation += 1;
         self.cancellation.cancel();
         self.io = None;
+        self.image_link = None;
         self.subscription = Subscription::None;
         self.snapshot_pending = false;
     }
@@ -248,6 +260,7 @@ impl Companion {
             runtime,
             state: Mutex::new(state),
             wake: Condvar::new(),
+            images: Mutex::default(),
         });
         let notifier = Arc::clone(&shared);
         thread::Builder::new()
@@ -572,13 +585,24 @@ impl Companion {
         Some(screen(&terminal.view))
     }
 
-    /// The Pane now on screen at `rows` × `columns`, or none: the phone reports focus and
-    /// sizes the terminal like a window (ADR 0041), and gives both back when it leaves.
-    /// Call it again when the soft keyboard or the orientation settles on a new size.
-    pub fn show_pane(&self, address: Option<String>, pane: u64, rows: u16, columns: u16) {
+    /// The Pane now on screen at `rows` × `columns` of cells `cell_width` × `cell_height`
+    /// device pixels, or none: the phone reports focus and sizes the terminal like a window
+    /// (ADR 0041), and gives both back when it leaves. Call it again when the soft keyboard
+    /// or the orientation settles on a new size. Without a cell size no program can size
+    /// an image for the Pane, on any screen (ADR 0065).
+    pub fn show_pane(
+        &self,
+        address: Option<String>,
+        pane: u64,
+        rows: u16,
+        columns: u16,
+        cell_width: u16,
+        cell_height: u16,
+    ) {
         let mut state = self.shared.lock();
         let next = address.map(|address| (address, PaneId::from_u64(pane)));
-        let size = (rows > 0 && columns > 0).then(|| TerminalSize::new(rows, columns));
+        let size = (rows > 0 && columns > 0)
+            .then(|| TerminalSize::new(rows, columns).with_cell_size(cell_width, cell_height));
         if state.shown != next {
             state.shown_size = None;
         }
@@ -604,8 +628,23 @@ impl Companion {
             state.mark_device(&address);
         }
         state.shown = next;
+        if let Some((address, _)) = state.shown.clone() {
+            self.shared.fetch_images(&mut state, &address);
+        }
         drop(state);
         self.shared.wake.notify_one();
+    }
+
+    /// An image's PNG by the key a [`crate::ScreenImage`] names, once fetched (ADR 0065).
+    pub fn terminal_image(&self, key: String) -> Option<Vec<u8>> {
+        let key = crate::views::parse_image_key(&key)?;
+        let png = self
+            .shared
+            .images
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .png(&key)?;
+        Some(png.as_ref().clone())
     }
 
     /// The app became active, or inactive while still on screen: under the app switcher,
@@ -831,6 +870,7 @@ impl Shared {
         };
         device.cancellation = Cancellation::default();
         device.status = DeviceStatus::Connecting;
+        device.endpoint = Some(endpoint.clone());
         // Outside a Pane the phone takes only reliable events (ADR 0041); a reconnect while
         // a Pane of this Device is on screen keeps that Pane's frames.
         let watched: HashSet<PaneId> = shown.into_iter().collect();
@@ -953,7 +993,7 @@ impl Shared {
 
     /// Applies what one connection's reader handed on, under the one lock.
     fn apply(
-        &self,
+        self: &Arc<Self>,
         address: &str,
         generation: u64,
         visual: &TerminalVisualSlot,
@@ -1035,6 +1075,9 @@ impl Shared {
         }
         if touched {
             state.mark_device(address);
+            if shown.is_some() {
+                self.fetch_images(&mut state, address);
+            }
         }
         for event in events {
             state.push_event(event);
@@ -1189,6 +1232,96 @@ impl Shared {
     }
 
     /// What this phone says in `Hello`: its name and whether it takes pushes.
+    /// Starts fetching what the Pane on screen shows and the store lacks, from `address`,
+    /// at most four at a time (ADR 0065).
+    fn fetch_images(self: &Arc<Self>, state: &mut State, address: &str) {
+        let Some(pane_id) = state
+            .shown
+            .as_ref()
+            .filter(|(shown, _)| shown == address)
+            .map(|(_, pane_id)| *pane_id)
+        else {
+            return;
+        };
+        let hello = self.hello();
+        let Some(device) = state.devices.get_mut(address) else {
+            return;
+        };
+        let Some(terminal) = device.model.terminals.get(&pane_id) else {
+            return;
+        };
+        let free = FETCHES_PER_DEVICE.saturating_sub(device.image_fetches);
+        if terminal.view.images.is_empty() || free == 0 || device.io.is_none() {
+            return;
+        }
+        let keys = self
+            .images
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .claim(terminal.view.images.iter().map(|image| image.image), free);
+        if keys.is_empty() {
+            return;
+        }
+        let link = match (&device.image_link, &device.endpoint) {
+            (Some(link), _) => Arc::clone(link),
+            (None, Some(endpoint)) => {
+                let link = ImageLink::new(&device.label, endpoint.clone(), hello);
+                device.image_link = Some(Arc::clone(&link));
+                link
+            }
+            (None, None) => return,
+        };
+        device.image_fetches += keys.len();
+        let generation = device.generation;
+        for key in keys {
+            let shared = Arc::clone(self);
+            let link = Arc::clone(&link);
+            let address = address.to_owned();
+            let spawned = thread::Builder::new()
+                .name("condr-image".into())
+                .spawn(move || {
+                    let png = link.fetch(key);
+                    let failed = png.is_none();
+                    shared
+                        .images
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .finish(key, png);
+                    if failed {
+                        thread::sleep(RETRY_AFTER);
+                    }
+                    shared.image_fetched(&address, generation);
+                });
+            if let Err(error) = spawned {
+                tracing::warn!("could not start fetching an image: {error}");
+            }
+        }
+    }
+
+    /// A fetch ended: the screen redraws with it, and what is still missing is fetched.
+    fn image_fetched(self: &Arc<Self>, address: &str, generation: u64) {
+        let mut state = self.lock();
+        let shown = state.shown.clone();
+        let Some(device) = state.devices.get_mut(address) else {
+            return;
+        };
+        if device.generation != generation {
+            return;
+        }
+        device.image_fetches = device.image_fetches.saturating_sub(1);
+        if let Some((shown_address, pane_id)) = shown
+            && shown_address == address
+        {
+            state.mark(Change::Terminal {
+                address: address.to_owned(),
+                pane: pane_id.as_u64(),
+            });
+            self.fetch_images(&mut state, address);
+        }
+        drop(state);
+        self.wake.notify_one();
+    }
+
     fn hello(&self) -> Hello {
         Hello {
             push: self.push.load(Ordering::Relaxed),
