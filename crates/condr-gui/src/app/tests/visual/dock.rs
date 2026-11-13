@@ -547,14 +547,14 @@ fn dragging_a_pane_header_moves_it_beside_or_swaps_it_with_the_target() {
         "the placeholder covers the hovered Pane's lower half: {placeholder:?} vs {target:?}"
     );
     // Grabbed in the middle of a wide header, the dragged title still follows the pointer,
-    // just below and right of it.
+    // centred under it.
     let preview = window
         .debug_bounds("drag-preview")
         .expect("a dragged Pane shows its title");
-    let reach = |from: Pixels, to: Pixels| to >= from && to - from <= px(16.);
+    let near = |a: Pixels, b: Pixels| (a - b).abs() <= px(1.);
     assert!(
-        reach(below.x, preview.left()) && reach(below.y, preview.top()),
-        "the dragged title at {preview:?} should sit beside the pointer at {below:?}"
+        near(preview.center().x, below.x) && near(preview.center().y, below.y),
+        "the dragged title at {preview:?} should centre on the pointer at {below:?}"
     );
     window.simulate_mouse_move(below, MouseButton::Left, Modifiers::default());
     window.simulate_mouse_up(below, MouseButton::Left, Modifiers::default());
