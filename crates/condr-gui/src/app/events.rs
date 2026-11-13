@@ -82,6 +82,7 @@ impl Condr {
                     self.connections[index].subscribe();
                 }
                 self.refresh_target_pane(key);
+                self.fetch_terminal_images(key, cx);
                 let target_changed = self.terminal_input.target != target_before_refresh;
                 return IncomingEffect {
                     rebuild: application.rebuild
@@ -387,6 +388,15 @@ impl Condr {
                         };
                     }
                 };
+                if pane_ids.iter().any(|pane_id| {
+                    self.connections[index]
+                        .model
+                        .terminals
+                        .get(pane_id)
+                        .is_some_and(|terminal| !terminal.view.images.is_empty())
+                }) {
+                    self.fetch_terminal_images(key, cx);
+                }
                 if let Some(selection) = &mut self.terminal_input.selection
                     && selection.connection_key == key
                     && pane_ids.contains(&selection.pane_id)

@@ -15,8 +15,9 @@ use std::sync::LazyLock;
 pub(super) const RENDER_HOLD_TIMEOUT: Duration = Duration::from_secs(1);
 /// Ghostty's default: history kept in the library's logical bytes, compressed when idle.
 const SCROLLBACK_BYTES: usize = 50_000_000;
-/// Kitty graphics storage for each screen (ADR 0065); zero keeps the protocol off.
-const IMAGE_STORAGE_BYTES: u64 = 0;
+/// Kitty graphics storage for each screen (ADR 0065): a 4K screenshot and change, where
+/// one Server holds many Panes.
+const IMAGE_STORAGE_BYTES: u64 = 64 * 1024 * 1024;
 /// Images copied out for the Server and not yet taken; past this the oldest go, as a
 /// Pane nobody takes frames from must not grow without bound.
 const MAX_FRESH_IMAGE_BYTES: usize = 64 * 1024 * 1024;
@@ -175,7 +176,9 @@ impl Vt {
             cell_width: u32::from(size.cell_width),
             cell_height: u32::from(size.cell_height),
             scrollback_bytes: SCROLLBACK_BYTES,
-            version: format!("Condr {}", env!("CARGO_PKG_VERSION")),
+            // Ghostty's core, which it is: programs that draw images decide by this name
+            // more than by the protocol's own query (ADR 0065).
+            version: format!("ghostty (Condr {})", env!("CARGO_PKG_VERSION")),
             terminfo_name: "xterm-256color".into(),
             // ConPTY keeps its own screen and does not pull history back on a resize.
             resize_pulls_scrollback: !cfg!(windows),

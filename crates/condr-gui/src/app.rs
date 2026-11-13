@@ -38,6 +38,7 @@ mod settings;
 mod sidebar;
 mod startup;
 mod syntax;
+mod terminal_images;
 mod terminal_input;
 mod terminal_panel;
 mod transfers;

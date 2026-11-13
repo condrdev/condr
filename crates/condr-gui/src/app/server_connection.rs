@@ -25,6 +25,8 @@ pub(super) struct ServerConnection {
     pub(super) forwards: super::ports::DeviceForwards,
     /// This Client's downloads and uploads to this Device (ADR 0061).
     pub(super) transfers: Vec<super::transfers::Transfer>,
+    /// Terminal images being fetched from this Device (ADR 0065).
+    pub(super) image_fetches: usize,
     /// The Server's build identity from its last `Welcome` (ADR 0027).
     pub(super) server_build: Option<String>,
     /// The machine's name the Server gave in `Welcome` (ADR 0040); empty until it
@@ -174,6 +176,7 @@ impl ServerConnection {
             status: ConnectionStatus::Disconnected,
             forwards: super::ports::DeviceForwards::default(),
             transfers: Vec::new(),
+            image_fetches: 0,
             server_build: None,
             device_name: String::new(),
             build_notice_dismissed: false,

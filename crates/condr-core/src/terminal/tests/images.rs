@@ -57,8 +57,34 @@ fn a_placed_image_reaches_the_view_named_by_its_pixels() {
 }
 
 #[test]
-fn images_stay_off_without_storage() {
+fn a_pane_says_it_runs_ghosttys_core_and_answers_the_graphics_query() {
     let mut vt = Vt::new(size()).unwrap();
+    let replies: Vec<u8> = vt
+        .write(b"\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b[>0q\x1b[c")
+        .into_iter()
+        .filter_map(|event| match event {
+            condr_ghostty_vt::Event::WritePty(bytes) => Some(bytes),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    let replies = String::from_utf8_lossy(&replies);
+    let query = replies
+        .find("\x1b_Gi=31;OK\x1b\\")
+        .expect("the query is answered");
+    let name = replies
+        .find(&format!(
+            "\x1bP>|ghostty (Condr {})",
+            env!("CARGO_PKG_VERSION")
+        ))
+        .expect("XTVERSION names Ghostty's core");
+    let da1 = replies.find("\x1b[?62;22c").expect("DA1 last");
+    assert!(query < name && name < da1, "{replies:?}");
+}
+
+#[test]
+fn images_stay_off_without_storage() {
+    let mut vt = Vt::with_image_storage(size(), 0).unwrap();
     transmit(&mut vt, "a=T,q=2,f=32,s=1,v=1,i=5", &[1, 2, 3, 255]);
     assert!(vt.view(size(), 1, None).images.is_empty());
     assert!(vt.take_images().is_empty());

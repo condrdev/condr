@@ -71,7 +71,11 @@ pub(crate) fn run(directory: PathBuf) {
     let handle = server.handle();
     let server_thread = std::thread::spawn(move || server.run());
     let mut admin = ClientConnection::connect_overview(&endpoint, "screenshots").unwrap();
-    let LayoutResult::WorkspaceCreated { workspace_id, .. } = admin
+    let LayoutResult::WorkspaceCreated {
+        workspace_id,
+        pane_id,
+        ..
+    } = admin
         .layout(LayoutCommand::CreateWorkspace {
             root_directory: workspace_root.clone(),
             name: None,
@@ -116,6 +120,36 @@ pub(crate) fn run(directory: PathBuf) {
                 .is_some_and(|session| !session.workspaces().is_empty())
     });
     shot(&mut cx, window, &directory, "01-workspace");
+
+    // A kitty graphics image the shell prints from a file (ADR 0065), fetched over the
+    // Device's Stream and drawn at the window's cells.
+    let picture = local_path(&root, "kitty.png");
+    RgbaImage::from_fn(96, 64, |x, y| {
+        image::Rgba([(x * 255 / 95) as u8, (y * 255 / 63) as u8, 200, 255])
+    })
+    .save(&picture)
+    .unwrap();
+    let command = format!(
+        "printf '\\033_Ga=T,f=100,t=f,q=2;%s\\033\\\\' \"$(printf %s '{}' | base64)\"; echo\r",
+        picture.display()
+    );
+    admin
+        .terminal(pane_id, condr_core::TerminalCommand::Text(command))
+        .unwrap();
+    wait(&mut cx, "the image drew", |app| {
+        let Some(terminal) = view
+            .read(app)
+            .connection(1)
+            .and_then(|connection| connection.model.terminals.get(&pane_id))
+        else {
+            return false;
+        };
+        terminal.view.images.first().is_some_and(|placement| {
+            app.try_global::<crate::terminal_element::TerminalImages>()
+                .is_some_and(|images| images.ready(&placement.image))
+        })
+    });
+    shot(&mut cx, window, &directory, "01g-terminal-image");
     update(&mut cx, window, &view, |this, _, cx| {
         this.sidebar_folded_devices.insert(1);
         cx.notify();

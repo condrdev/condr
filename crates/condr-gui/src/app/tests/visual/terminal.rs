@@ -2053,6 +2053,7 @@ fn underlines_and_overlines_are_drawn_apart_from_the_text_in_their_own_colour() 
             cell("c", CELL_WRAPPED, TerminalColor::Default),
         ],
         cursor: None,
+        images: Vec::new(),
     };
     let cache = Rc::new(RefCell::new(TerminalRenderCache::default()));
     let (_, prepaint) = window.draw(point(px(0.), px(0.)), size(px(200.), px(60.)), |_, cx| {
@@ -2165,6 +2166,7 @@ fn selected_block_elements_stay_visible_in_the_selection_text_color() {
         mouse_tracking: TerminalMouseTracking::None,
         cells: vec![cell("█"), cell("x")],
         cursor: None,
+        images: Vec::new(),
     };
     let selection = TerminalSelection {
         start: TerminalPosition {
@@ -2225,6 +2227,7 @@ fn selected_block_elements_stay_visible_in_the_selection_text_color() {
             ..cell("█")
         }],
         cursor: None,
+        images: Vec::new(),
     };
     window.draw(point(px(0.), px(0.)), size(px(100.), px(40.)), |_, cx| {
         TerminalElement::new(
@@ -2591,4 +2594,137 @@ fn closing_a_preedit_owner_discards_its_late_commit_before_accepting_new_input()
             }
         });
     });
+}
+
+/// ADR 0065: a Pane draws the images its view places, in their layers and at this window's
+/// cells, and nothing for one not yet fetched.
+#[test]
+fn placed_images_are_prepared_in_their_layers_at_the_windows_cells() {
+    use crate::terminal_element::TerminalImages;
+    use condr_core::{TerminalImageKey, TerminalImageLayer, TerminalImagePlacement};
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    let (fetched, missing) = (TerminalImageKey([1; 32]), TerminalImageKey([2; 32]));
+    window.update(|_, cx| {
+        let images = cx.default_global::<TerminalImages>();
+        images.claim([fetched], 1);
+        let pixels = image::RgbaImage::new(4, 4);
+        images.finish(
+            fetched,
+            Some(std::sync::Arc::new(gpui_kit::RenderImage::new([
+                image::Frame::new(pixels),
+            ]))),
+        );
+    });
+    let placement = |image, layer, column| TerminalImagePlacement {
+        image,
+        image_width: 4,
+        image_height: 4,
+        layer,
+        z: 0,
+        row: 0,
+        column,
+        offset_x: 0,
+        offset_y: 0,
+        width: 4,
+        height: 4,
+        source_x: 0,
+        source_y: 0,
+        source_width: 4,
+        source_height: 4,
+    };
+    let blank = TerminalCell {
+        text: " ".into(),
+        foreground: TerminalColor::Default,
+        background: TerminalColor::Default,
+        underline_color: TerminalColor::Default,
+        flags: 0,
+        hyperlink: None,
+    };
+    // The VT's cells are twice this window's, as a 2× sizing window reports them.
+    let terminal = TerminalView {
+        selection: None,
+        revision: 1,
+        size: TerminalSize::new(2, 4),
+        display_offset: 0,
+        mouse_tracking: TerminalMouseTracking::None,
+        cells: vec![blank; 8],
+        cursor: None,
+        images: vec![
+            placement(fetched, TerminalImageLayer::BelowText, 0),
+            placement(fetched, TerminalImageLayer::AboveText, 2),
+            placement(missing, TerminalImageLayer::AboveText, 3),
+        ],
+    };
+    let cell_width = std::cell::Cell::new(px(0.));
+    let render_cache = Rc::new(RefCell::new(TerminalRenderCache::default()));
+    let mut draw = |terminal: &TerminalView| {
+        window
+            .draw(
+                point(px(0.), px(0.)),
+                size(px(200.), px(40.)),
+                |window, cx| {
+                    let style = window.text_style();
+                    let font_size = style.font_size.to_pixels(window.rem_size());
+                    cell_width.set(
+                        window
+                            .text_system()
+                            .shape_line(
+                                "M".into(),
+                                font_size,
+                                &[gpui_kit::TextRun {
+                                    len: 1,
+                                    font: style.font(),
+                                    color: style.color,
+                                    background_color: None,
+                                    underline: None,
+                                    strikethrough: None,
+                                }],
+                                None,
+                            )
+                            .width()
+                            .max(px(1.)),
+                    );
+                    let mut terminal = terminal.clone();
+                    terminal.size.cell_width = (cell_width.get().as_f32() * 2.).round() as u16;
+                    terminal.size.cell_height = 2;
+                    TerminalElement::new(
+                        view.clone(),
+                        TerminalElementProps {
+                            focus_handle: cx.focus_handle(),
+                            connection_key: 1,
+                            pane_id: condr_core::PaneId::from_u64(1),
+                            terminal: std::sync::Arc::new(terminal),
+                            marked_text: None,
+                            selection: None,
+                            hovered_link: None,
+                            runtime_epoch: None,
+                            cursor_blink_hidden: false,
+                            render_cache: Rc::clone(&render_cache),
+                            scroll_remainder: Rc::new(RefCell::new(point(0., 0.))),
+                        },
+                    )
+                },
+            )
+            .1
+    };
+    let prepaint = draw(&terminal);
+    let layers: Vec<_> = prepaint.images.iter().map(|image| image.layer).collect();
+    assert_eq!(
+        layers,
+        [TerminalImageLayer::BelowText, TerminalImageLayer::AboveText],
+        "the unfetched image draws nothing"
+    );
+    let above = &prepaint.images[1];
+    assert_eq!(above.destination.origin.x, cell_width.get() * 2.);
+    let expected = 4. * cell_width.get().as_f32() / (cell_width.get().as_f32() * 2.).round();
+    assert!((above.destination.size.width.as_f32() - expected).abs() < 0.01);
+
+    // An animation's next frame, not fetched yet, keeps the last one on screen.
+    let mut next = terminal.clone();
+    next.images[1].image = TerminalImageKey([3; 32]);
+    let prepaint = draw(&next);
+    assert_eq!(prepaint.images.len(), 2, "the last frame stays");
 }
