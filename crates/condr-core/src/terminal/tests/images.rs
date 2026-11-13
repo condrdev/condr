@@ -162,3 +162,54 @@ fn an_animation_turns_its_frames_when_ticked() {
     );
     assert_eq!(vt.take_images().len(), 1);
 }
+
+/// With no output from the program, an animation's next frame still makes a frame of its
+/// own, and a looping animation names the same images again.
+#[test]
+fn an_animation_makes_frames_without_output_and_loops_through_the_same_keys() {
+    let size = size();
+    let mut vt = Vt::with_image_storage(size, STORAGE).unwrap();
+    transmit(
+        &mut vt,
+        "a=T,f=32,s=8,v=8,q=2,i=20",
+        &[255, 40, 40, 255].repeat(64),
+    );
+    transmit(
+        &mut vt,
+        "a=f,f=32,s=8,v=8,q=2,i=20,z=60",
+        &[40, 200, 80, 255].repeat(64),
+    );
+    // The root frame's gap, then play, looping.
+    vt.write(b"\x1b_Ga=a,q=2,i=20,r=1,z=60\x1b\\\x1b_Ga=a,q=2,i=20,s=3,v=1\x1b\\");
+    let source = TerminalViewSource {
+        terminal: Arc::new(Mutex::new(vt)),
+        size: Arc::new(Mutex::new(size)),
+        revision: Arc::new(AtomicU64::new(1)),
+        damage_baseline: Arc::new(Mutex::new(None)),
+        cursor_settle: Arc::new(Mutex::new(super::cursor_settle::CursorSettle::default())),
+    };
+    let mut shown = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while shown.len() < 4 && Instant::now() < deadline {
+        source.tick_animations();
+        if let Some(frame) = source.take_frame() {
+            let images = match frame {
+                TerminalViewFrame::Full(view) => Some(view.images),
+                TerminalViewFrame::Delta(delta) => delta.images,
+            };
+            shown.extend(images.and_then(|images| images.first().map(|image| image.image)));
+        }
+        std::thread::sleep(
+            source
+                .animation_wakeup()
+                .unwrap_or(Duration::from_millis(10)),
+        );
+    }
+    assert_eq!(shown.len(), 4, "a frame per animation frame: {shown:?}");
+    assert_ne!(shown[0], shown[1]);
+    assert_eq!(
+        (shown[0], shown[1]),
+        (shown[2], shown[3]),
+        "the loop names the same images"
+    );
+}

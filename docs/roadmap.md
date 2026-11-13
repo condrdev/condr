@@ -6,7 +6,7 @@
 
 ### 终端里的图片（kitty 图形协议）
 
-**状态**：六个切片已在 main 上完成（ADR 0065），自动测试和离屏截图通过。剩下 ADR 0065 “Tests” 里的手工验收：逐个程序实测（OpenCode、yazi、`kitten icat` 的三种传输、viu、ratatui-image、image.nvim、mpv、Claude Code）、滚动和 `clear` 后不残留、跨 DPI 拖动、本机 / TCP / Peer-to-peer 的带宽实测，以及 Windows 上的 ConPTY 表现和帧率观察。两个手机 App 在真机上的绘制也还没看过。
+**状态**：六个切片已在 main 上完成（ADR 0065），自动测试通过。2026-11-14 在 macOS 上用离屏渲染（2× 窗口）验过：direct 分块、文件、临时文件（读后删除）三种传输，Unicode 占位符，文字画在 z<0 的图上，固定图滚出视口被裁剪，`clear` 和离开备用屏后不残留，两帧动画循环，以及 yazi 26.9 识别 `ghostty` 后用占位符画出预览、退出后不残留。剩下的手工验收：其他程序实测（OpenCode、`kitten icat`、viu、ratatui-image、image.nvim、mpv、Claude Code）、跨 DPI 拖动、本机 / TCP / Peer-to-peer 的带宽实测、Windows 上的 ConPTY 表现和帧率观察，以及两个手机 App 在真机上的绘制。
 
 **为什么**：ADR 0051 让 kitty 图形保持关闭，程序探测不到支持，只能退回文字，或者画出一排占位方块。逐个读源码的结论（ADR 0065“Who draws”）：OpenCode、yazi、`kitten icat`、viu、ranger、image.nvim、mpv、ratatui-image 等程序会画；Claude Code、yazi 的占位符驱动、snacks.nvim、timg 还要看 XTVERSION 是不是 Ghostty。
 
