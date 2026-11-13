@@ -26,7 +26,7 @@ A malformed part of an entry is left out on its own and the rest kept: an unknow
 
 ### Settings
 
-Each row of the Shortcuts page shows its keys, each with a remove button, and a button that records one more: the next key pressed in the Settings window is taken before any binding or listener sees it, through GPUI's keystroke interceptor, so recording Cmd+W does not close anything and Escape cancels rather than closing the window. A row that differs from the defaults has Kit's reset button, which drops its entry.
+Each row of the Shortcuts page shows its keys and an edit button that records one key in their place: the next key pressed in the Settings window is taken before any binding or listener sees it, through GPUI's keystroke interceptor, so recording Cmd+W does not close anything and Escape cancels rather than closing the window. A row that differs from the defaults has Kit's reset button, which drops its entry.
 
 ### How it is installed
 

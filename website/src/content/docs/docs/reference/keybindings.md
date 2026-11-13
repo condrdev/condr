@@ -149,7 +149,7 @@ Every key combination not declared on this page passes through to the child proc
 
 Every shortcut in the Window, Command Palette, Workspace, Tab and Pane tables above can be rebound or removed, except `Shift` twice. The actions without a default key, such as Close tab, Rename workspace or the Pane swaps, can be given one. The terminal's own keys (copy and paste, image paste, prompt jumps and the mouse) stay as they are.
 
-* **In Settings**: open **Shortcuts**. Click **+** beside an action and press the new key, or `Esc` to cancel. **×** removes a key, and the reset button brings back the defaults. A change applies at once.
+* **In Settings**: open **Shortcuts**. Click the pencil beside an action and press the new key, or `Esc` to cancel; it replaces the action's keys. The reset button brings back the defaults. A change applies at once.
 * **In `config.toml`**: [`[client.keybindings]`](/docs/reference/configuration/#clientkeybindings-window-shortcuts) lists each action's name. Restart Condr after a hand edit.
 * **Rules**:
   * A shortcut needs `Cmd`, `Ctrl` or `Option` (`Ctrl` or `Alt` on Windows and Linux), unless it is an F-key: every other key is for typing.

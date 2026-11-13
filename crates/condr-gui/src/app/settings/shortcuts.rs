@@ -107,8 +107,8 @@ fn option_group(owner: &WeakEntity<Condr>) -> SettingGroup {
     )
 }
 
-/// One shortcut's keys, each removable, and a button that records one more; reset
-/// drops its `[client.keybindings]` entry.
+/// One shortcut's key and a button that records another in its place; reset drops its
+/// `[client.keybindings]` entry.
 fn shortcut_row(
     index: usize,
     shortcut: &'static Shortcut,
@@ -156,25 +156,8 @@ fn shortcut_keys(
     {
         errors.push(why.to_string());
     }
-    let chips = keys.into_iter().enumerate().map(|(n, key)| {
-        let owner = owner.clone();
-        let removed = key.clone();
-        h_flex().gap_0p5().child(Kbd::new(key).outline()).child(
-            Button::new(SharedString::from(format!("shortcut-{name}-remove-{n}")))
-                .debug_selector(move || format!("shortcut-{name}-remove-{n}"))
-                .icon(IconName::Close)
-                .ghost()
-                .xsmall()
-                .tooltip("Remove")
-                .on_click(move |_, _, cx| {
-                    let _ = owner.update(cx, |owner, cx| {
-                        owner.remove_shortcut_key(index, &removed, cx)
-                    });
-                }),
-        )
-    });
     let settings = settings.clone();
-    let record = if recording {
+    let field = if recording {
         Button::new(SharedString::from(format!("shortcut-{name}-recording")))
             .debug_selector(move || format!("shortcut-{name}-recording"))
             .label("Press a key…")
@@ -188,38 +171,34 @@ fn shortcut_keys(
                     cx.notify();
                 });
             })
+            .into_any_element()
     } else {
-        Button::new(SharedString::from(format!("shortcut-{name}-add")))
-            .debug_selector(move || format!("shortcut-{name}-add"))
-            .icon(IconName::Plus)
-            .ghost()
-            .xsmall()
-            .tooltip("Add a key")
-            .on_click(move |_, _, cx| {
-                settings.update(cx, |this, cx| {
-                    this.recording = Some(index);
-                    this.refusal = None;
-                    cx.notify();
-                });
-            })
+        h_flex()
+            .gap_1()
+            .children(keys.into_iter().map(|key| Kbd::new(key).outline()))
+            .child(
+                Button::new(SharedString::from(format!("shortcut-{name}-edit")))
+                    .debug_selector(move || format!("shortcut-{name}-edit"))
+                    .icon(Glyph::Pencil)
+                    .ghost()
+                    .xsmall()
+                    .tooltip("Change key")
+                    .on_click(move |_, _, cx| {
+                        settings.update(cx, |this, cx| {
+                            this.recording = Some(index);
+                            this.refusal = None;
+                            cx.notify();
+                        });
+                    }),
+            )
+            .into_any_element()
     };
     let danger = cx.theme().danger;
-    v_flex()
-        .items_end()
-        .gap_1()
-        .child(
-            h_flex()
-                .gap_1()
-                .flex_wrap()
-                .justify_end()
-                .children(chips)
-                .child(record),
-        )
-        .children(
-            errors
-                .into_iter()
-                .map(move |error| div().text_xs().text_color(danger).child(error)),
-        )
+    v_flex().items_end().gap_1().child(field).children(
+        errors
+            .into_iter()
+            .map(move |error| div().text_xs().text_color(danger).child(error)),
+    )
 }
 
 /// Takes the next key pressed in the Settings window for the row that records, before
@@ -266,7 +245,7 @@ impl SettingsWindow {
                 self.refusal = None;
                 let _ = self
                     .owner
-                    .update(cx, |owner, cx| owner.add_shortcut_key(index, key, cx));
+                    .update(cx, |owner, cx| owner.set_shortcut_key(index, key, cx));
             }
         }
         cx.notify();

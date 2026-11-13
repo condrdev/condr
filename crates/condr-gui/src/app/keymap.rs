@@ -640,35 +640,21 @@ impl Condr {
         install(&self.keymap, cx);
     }
 
-    /// Gives shortcut `index` the key `key` as well, taking it from whichever shortcut
-    /// has it.
-    pub(super) fn add_shortcut_key(
+    /// Makes `key` shortcut `index`'s only key, taking it from whichever shortcut has it.
+    pub(super) fn set_shortcut_key(
         &mut self,
         index: usize,
         key: Keystroke,
         cx: &mut Context<Self>,
     ) {
         let mut changes = Vec::new();
-        if let Some(owner) = self.keymap.keys.iter().position(|keys| keys.contains(&key)) {
-            if owner == index {
-                return;
-            }
+        if let Some(owner) = self.keymap.keys.iter().position(|keys| keys.contains(&key))
+            && owner != index
+        {
             changes.push((owner, without(&self.keymap.keys[owner], &key)));
         }
-        let mut keys = self.keymap.keys[index].clone();
-        keys.push(key);
-        changes.push((index, keys));
+        changes.push((index, vec![key]));
         self.override_shortcuts(changes, cx);
-    }
-
-    pub(super) fn remove_shortcut_key(
-        &mut self,
-        index: usize,
-        key: &Keystroke,
-        cx: &mut Context<Self>,
-    ) {
-        let keys = without(&self.keymap.keys[index], key);
-        self.override_shortcuts(vec![(index, keys)], cx);
     }
 
     /// Back to the default keys, less any another shortcut's entry has taken.
