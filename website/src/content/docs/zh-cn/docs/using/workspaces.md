@@ -57,3 +57,14 @@ Condr 会自动将图片传到服务器，并将远程图片路径粘贴到命�
 ### 强制选择文本
 
 在运行 `vim` 或其他占用鼠标的终端程序时，按住 `Shift` 键再用鼠标拖拽，即可强行选中并复制终端文本。
+
+### 终端里的图片
+
+用 kitty 图形协议画图的程序，图片会直接显示在 Pane 里：yazi 的预览、`kitten icat`、viu、OpenCode 的图片预览、image.nvim、snacks.nvim、presenterm、timg，以及基于 ratatui-image 的程序。图片跟着文字滚动，动画会播放，远程 Device 和手机 App 上也一样能看到。
+
+少数程序只看环境变量，需要手动告诉它们：
+
+- **chafa**：`chafa -f kitty`
+- **Codex**：目前在 Condr 里不画图，它只认环境变量里的 kitty、Ghostty 或 WezTerm。
+
+不支持 Sixel 和 iTerm2 的图片协议。Windows 上程序运行在系统的控制台层（ConPTY）之后，它不会把协议的应答传回给程序，所以大多数程序会判断不支持，退回文字。

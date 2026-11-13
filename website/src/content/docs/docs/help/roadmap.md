@@ -9,10 +9,6 @@ Condr is in Public Preview. This page lists what comes next; the order is the or
 
 ## Next
 
-### Images in the terminal
-
-Programs that draw images with the kitty graphics protocol, such as yazi, show them in their Pane instead of falling back to text, on remote Devices too.
-
 ### Mobile apps (iOS and Android)
 
 **Both in early preview.** The iPhone app is in public beta on TestFlight, and the Android app ships as a signed APK in its own releases on GitHub; see [Mobile app](/docs/using/mobile/). Both show the Agents on each of your Devices and the Needs you list, and open Panes so you can read and reply.

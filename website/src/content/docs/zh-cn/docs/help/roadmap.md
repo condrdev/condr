@@ -9,10 +9,6 @@ Condr 正处于公开预览阶段。本页列出后续准备开发的功能，�
 
 ## 接下来
 
-### 终端里的图片
-
-用 kitty 图形协议画图的程序（例如 yazi）会在 Pane 里直接显示图片，不再退回文字，远程设备上也一样。
-
 ### 手机端（iOS 与 Android）
 
 **两端均为早期预览**。iPhone 版通过 TestFlight 公开测试，Android 版以签名 APK 形式在 GitHub 上单独发布，详见[手机端](/zh-cn/docs/using/mobile/)。两端都能查看各设备上的 Agent 与 Needs you 列表，打开 Pane 进行阅读和回复。
