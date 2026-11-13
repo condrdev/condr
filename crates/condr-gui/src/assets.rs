@@ -81,6 +81,8 @@ gpui_kit::assets::icon_assets!(
         FilePlus,
         // The transfer strip's Clear.
         BrushCleaning,
+        // The sidebar's Command Palette button.
+        Command,
     ]
 );
 

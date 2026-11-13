@@ -3,6 +3,7 @@ mod icon;
 mod item;
 
 use super::*;
+use gpui_kit::component::kbd::Kbd;
 use item::*;
 
 pub(super) use drag_drop::*;
@@ -789,25 +790,43 @@ impl Condr {
                     ))
                     .child(div().flex_1())
                     .child(
-                        Button::new("command-palette")
-                            .debug_selector(|| "command-palette-button".into())
-                            .ghost()
-                            .small()
-                            .icon(IconName::Search)
-                            .tooltip(if cfg!(target_os = "macos") {
-                                "Command Palette  ⇧⇧"
-                            } else {
-                                "Command Palette  Shift Shift"
-                            })
-                            .accessibility_label("Command Palette")
-                            .on_click(move |_, window, cx| {
-                                let _ = palette_owner.update(cx, |this, cx| {
-                                    let all = command_palette::OpenCommandPalette {
-                                        page: command_palette::Page::All,
+                        // Shift twice is no key binding for `tooltip_with_action` to find, so
+                        // the tooltip draws the pair as Settings' tooltip draws its key.
+                        div()
+                            .id("command-palette-tooltip")
+                            .tooltip(|window, cx| {
+                                Tooltip::element(|_, cx| {
+                                    let shift = || {
+                                        Kbd::new(Keystroke::parse("shift").expect("a key"))
+                                            .appearance(false)
                                     };
-                                    this.action_open_command_palette(&all, window, cx)
-                                });
-                            }),
+                                    h_flex().gap_3().child("Command Palette").child(
+                                        h_flex()
+                                            .gap_1()
+                                            .text_xs()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(shift())
+                                            .child(shift()),
+                                    )
+                                })
+                                .build(window, cx)
+                            })
+                            .child(
+                                Button::new("command-palette")
+                                    .debug_selector(|| "command-palette-button".into())
+                                    .ghost()
+                                    .small()
+                                    .icon(Glyph::Command)
+                                    .accessibility_label("Command Palette")
+                                    .on_click(move |_, window, cx| {
+                                        let _ = palette_owner.update(cx, |this, cx| {
+                                            let all = command_palette::OpenCommandPalette {
+                                                page: command_palette::Page::All,
+                                            };
+                                            this.action_open_command_palette(&all, window, cx)
+                                        });
+                                    }),
+                            ),
                     )
                     .child(self.render_ports_button(view, cx))
                     .child(
