@@ -80,6 +80,16 @@ impl RuntimeState {
         Some(client_ids)
     }
 
+    /// Whether any Client receives this Pane's frames (ADR 0041), so its animations play
+    /// (ADR 0065).
+    pub(super) fn pane_watched(&self, pane_id: PaneId) -> bool {
+        self.subscribers.keys().any(|client_id| {
+            self.watched_terminals
+                .get(client_id)
+                .is_none_or(|watched| watched.contains(&pane_id))
+        })
+    }
+
     pub(super) fn terminal_render_snapshot(
         &mut self,
         client_id: u64,

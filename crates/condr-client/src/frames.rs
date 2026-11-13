@@ -438,6 +438,8 @@ pub fn merge_terminal_deltas(
         cursor: next.cursor,
         selection: next.selection,
         runs,
+        // The later list wins; neither changed them when both are `None`.
+        images: next.images.or(previous.images),
     })
 }
 

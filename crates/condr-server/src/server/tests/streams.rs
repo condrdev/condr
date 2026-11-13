@@ -342,3 +342,35 @@ fn terminal_round_trip_with_and_without_a_concurrent_download() {
     thread.join().unwrap().unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }
+
+/// ADR 0065: a Client fetches a terminal image's PNG by its key; one the Server does not
+/// hold is not found.
+#[test]
+fn a_terminal_image_is_fetched_as_png_by_its_key() {
+    let (handle, endpoint, thread) = start();
+    let (connection, _) = StreamConnection::connect(&endpoint, "streams-test").unwrap();
+    let pixels: Vec<u8> = (0..64 * 64 * 4).map(|i| (i * 7) as u8).collect();
+    let image = condr_core::TerminalImage::new(64, 64, 4, pixels);
+    let key = image.key;
+    let expected = image.encode_png().unwrap();
+    super::super::images::IMAGES.insert(image);
+    assert_eq!(
+        condr_client::fetch_image(&connection, key).unwrap(),
+        expected
+    );
+    assert_eq!(
+        condr_client::fetch_image(&connection, key).unwrap(),
+        expected,
+        "the encoded PNG is kept"
+    );
+    let unknown = condr_core::TerminalImageKey([7; 32]);
+    assert_eq!(
+        condr_client::fetch_image(&connection, unknown)
+            .unwrap_err()
+            .error,
+        StreamError::NotFound
+    );
+    drop(connection);
+    handle.stop();
+    thread.join().unwrap().unwrap();
+}

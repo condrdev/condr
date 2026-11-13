@@ -291,6 +291,7 @@ mod tests {
             cells: Vec::new(),
             cursor: None,
             selection: None,
+            images: Vec::new(),
         };
         let screen = screen(&view);
         assert_eq!(screen.scrolled_lines, 7);

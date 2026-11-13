@@ -14,8 +14,10 @@ use std::thread;
 use std::time::Duration;
 
 use super::RuntimeState;
+use super::images::IMAGES;
 use crate::endpoint::EndpointStream;
 use crate::poison::OrAbort as _;
+use condr_core::TerminalImageKey;
 
 /// A loopback connect either answers or is refused at once; this only bounds a port
 /// whose listener stopped accepting.
@@ -66,6 +68,7 @@ fn open(state: &Arc<Mutex<RuntimeState>>, stream: Stream, target: StreamTarget) 
             let state = Arc::clone(state);
             Box::new(move |stream| upload(&state, stream, &file, replace))
         }
+        StreamTarget::Image(key) => Box::new(move |stream| image(stream, &key)),
         StreamTarget::Unknown => return stream.refuse(StreamError::Unsupported, ""),
     };
     // Off the reader thread, which must never block on a consumer.
@@ -119,6 +122,22 @@ fn download(state: &Arc<Mutex<RuntimeState>>, stream: &Arc<Stream>, file: &Strea
     }
     stream.finish();
     // The Client answers with its own Finish once the file is in place.
+    while let Ok(Some(_)) = stream.read() {}
+}
+
+/// A terminal image's PNG (ADR 0065), encoded here on its first fetch.
+fn image(stream: &Arc<Stream>, key: &TerminalImageKey) {
+    let Some(png) = IMAGES.png(key) else {
+        return stream.refuse(StreamError::NotFound, "");
+    };
+    stream.accept(Some(png.len() as u64));
+    for chunk in png.chunks(MAX_STREAM_CHUNK) {
+        if stream.write(chunk).is_err() {
+            return;
+        }
+    }
+    stream.finish();
+    // The Client finishes its side once it has the whole image; dropping sooner resets.
     while let Ok(Some(_)) = stream.read() {}
 }
 

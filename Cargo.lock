@@ -1414,6 +1414,7 @@ dependencies = [
  "filedescriptor",
  "gix",
  "nix",
+ "png 0.18.1",
  "portable-pty",
  "prost",
  "prost-build",
@@ -1422,6 +1423,7 @@ dependencies = [
  "relative-path",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "smol_str",
  "sysinfo 0.31.4",
  "toml 1.1.4+spec-1.1.0",
@@ -1436,6 +1438,7 @@ name = "condr-ghostty-vt"
 version = "0.2.2"
 dependencies = [
  "dirs 6.0.0",
+ "png 0.18.1",
  "sha2 0.10.9",
  "tracing",
  "tracing-subscriber",

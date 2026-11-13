@@ -944,6 +944,7 @@ mod tests {
             mouse_tracking: TerminalMouseTracking::None,
             cells,
             cursor: None,
+            images: Vec::new(),
         };
         assert_eq!(
             link_at(&view, 0, 1),

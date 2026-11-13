@@ -3,6 +3,7 @@
 //! terminal's own dirty marks.
 
 use super::{Error, Rgb, Terminal, check, sys};
+use std::ffi::c_void;
 use std::mem::{MaybeUninit, size_of};
 use std::ptr;
 
@@ -132,10 +133,44 @@ pub struct Cell<'a> {
     pub hyperlink: bool,
 }
 
+/// Which pass of a frame an image is drawn in (ADR 0065).
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ImageLayer {
+    BelowBackground,
+    BelowText,
+    AboveText,
+}
+
+/// One place an image is drawn, as the render state resolved it: placeholders, relative
+/// placements and scrolling included. Pixels use the cell size the terminal was given.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ImagePlacement {
+    pub image_id: u32,
+    /// Changes whenever the image's pixels do, an animation's next frame included, and is
+    /// never reused.
+    pub generation: u64,
+    pub layer: ImageLayer,
+    pub z: i32,
+    /// The top-left cell in the viewport; negative when the image starts above or left.
+    pub column: i32,
+    pub row: i32,
+    pub offset_x: u32,
+    pub offset_y: u32,
+    /// The size to draw at.
+    pub width: u32,
+    pub height: u32,
+    /// The part of the image drawn, in its own pixels.
+    pub source_x: u32,
+    pub source_y: u32,
+    pub source_width: u32,
+    pub source_height: u32,
+}
+
 pub struct RenderState {
     raw: sys::GhosttyRenderState,
     rows: sys::GhosttyRenderStateRowIterator,
     cells: sys::GhosttyRenderStateRowCells,
+    images: sys::GhosttyRenderStateImageIterator,
     text: Vec<u8>,
 }
 
@@ -149,6 +184,7 @@ impl RenderState {
             raw: ptr::null_mut(),
             rows: ptr::null_mut(),
             cells: ptr::null_mut(),
+            images: ptr::null_mut(),
             text: vec![0; 64],
         };
         // SAFETY: default allocator; a handle is set only by a call that succeeded, and
@@ -162,6 +198,10 @@ impl RenderState {
             check(sys::ghostty_render_state_row_cells_new(
                 ptr::null(),
                 &mut state.cells,
+            ))?;
+            check(sys::ghostty_render_state_image_iterator_new(
+                ptr::null(),
+                &mut state.images,
             ))?;
         }
         Ok(state)
@@ -233,6 +273,40 @@ impl RenderState {
         }
     }
 
+    /// Changes whenever the last update changed the image placements; compare it for
+    /// equality only.
+    pub fn image_placements_generation(&self) -> u64 {
+        let mut generation = 0u64;
+        let _ = self.get(
+            sys::GhosttyRenderStateData::GHOSTTY_RENDER_STATE_DATA_IMAGE_PLACEMENTS_GENERATION,
+            &mut generation,
+        );
+        generation
+    }
+
+    /// The images the last update found in the viewport, in the order to draw them.
+    pub fn image_placements(&mut self) -> Vec<ImagePlacement> {
+        let mut images = self.images;
+        if self
+            .get(
+                sys::GhosttyRenderStateData::GHOSTTY_RENDER_STATE_DATA_IMAGE_ITERATOR,
+                &mut images,
+            )
+            .is_err()
+        {
+            return Vec::new();
+        }
+        let mut placements = Vec::new();
+        // SAFETY: the iterator was just populated from this state.
+        while unsafe { sys::ghostty_render_state_image_iterator_next(self.images) } {
+            if let Some(placement) = read_image(self.images) {
+                placements.push(placement);
+            }
+        }
+        placements.sort_by_key(|placement| (placement.layer, placement.z, placement.image_id));
+        placements
+    }
+
     /// Visits the viewport's rows from the top.
     pub fn for_each_row(&mut self, mut visit: impl FnMut(&mut Row<'_>)) -> Result<(), Error> {
         let mut rows = self.rows;
@@ -259,6 +333,9 @@ impl Drop for RenderState {
     fn drop(&mut self) {
         // SAFETY: created in `new` (a null handle is ignored) and freed only here.
         unsafe {
+            if !self.images.is_null() {
+                sys::ghostty_render_state_image_iterator_free(self.images);
+            }
             if !self.cells.is_null() {
                 sys::ghostty_render_state_row_cells_free(self.cells);
             }
@@ -367,6 +444,92 @@ impl Row<'_> {
         }
         Ok(())
     }
+}
+
+fn read_image(images: sys::GhosttyRenderStateImageIterator) -> Option<ImagePlacement> {
+    use sys::GhosttyRenderStateImageData as Data;
+    let mut protocol = sys::GhosttyImageProtocol::GHOSTTY_IMAGE_PROTOCOL_KITTY;
+    let mut layer = sys::GhosttyRenderStateImageLayer::GHOSTTY_RENDER_STATE_IMAGE_LAYER_ABOVE_TEXT;
+    let (mut image_id, mut generation) = (0u32, 0u64);
+    let (mut z, mut column, mut row) = (0i32, 0i32, 0i32);
+    let [mut offset_x, mut offset_y, mut width, mut height] = [0u32; 4];
+    let [
+        mut source_x,
+        mut source_y,
+        mut source_width,
+        mut source_height,
+    ] = [0u32; 4];
+    let keys = [
+        Data::GHOSTTY_RENDER_STATE_IMAGE_DATA_PROTOCOL,
+        Data::GHOSTTY_RENDER_STATE_IMAGE_DATA_IMAGE_ID,
+        Data::GHOSTTY_RENDER_STATE_IMAGE_DATA_IMAGE_GENERATION,
+        Data::GHOSTTY_RENDER_STATE_IMAGE_DATA_LAYER,
+        Data::GHOSTTY_RENDER_STATE_IMAGE_DATA_Z,
+        Data::GHOSTTY_RENDER_STATE_IMAGE_DATA_VIEWPORT_COL,
+        Data::GHOSTTY_RENDER_STATE_IMAGE_DATA_VIEWPORT_ROW,
+        Data::GHOSTTY_RENDER_STATE_IMAGE_DATA_CELL_OFFSET_X,
+        Data::GHOSTTY_RENDER_STATE_IMAGE_DATA_CELL_OFFSET_Y,
+        Data::GHOSTTY_RENDER_STATE_IMAGE_DATA_PIXEL_WIDTH,
+        Data::GHOSTTY_RENDER_STATE_IMAGE_DATA_PIXEL_HEIGHT,
+        Data::GHOSTTY_RENDER_STATE_IMAGE_DATA_SOURCE_X,
+        Data::GHOSTTY_RENDER_STATE_IMAGE_DATA_SOURCE_Y,
+        Data::GHOSTTY_RENDER_STATE_IMAGE_DATA_SOURCE_WIDTH,
+        Data::GHOSTTY_RENDER_STATE_IMAGE_DATA_SOURCE_HEIGHT,
+    ];
+    let mut values: [*mut c_void; 15] = [
+        (&raw mut protocol).cast(),
+        (&raw mut image_id).cast(),
+        (&raw mut generation).cast(),
+        (&raw mut layer).cast(),
+        (&raw mut z).cast(),
+        (&raw mut column).cast(),
+        (&raw mut row).cast(),
+        (&raw mut offset_x).cast(),
+        (&raw mut offset_y).cast(),
+        (&raw mut width).cast(),
+        (&raw mut height).cast(),
+        (&raw mut source_x).cast(),
+        (&raw mut source_y).cast(),
+        (&raw mut source_width).cast(),
+        (&raw mut source_height).cast(),
+    ];
+    // SAFETY: the iterator is at a placement; each value points at its key's type.
+    check(unsafe {
+        sys::ghostty_render_state_image_get_multi(
+            images,
+            keys.len(),
+            keys.as_ptr(),
+            values.as_mut_ptr(),
+            ptr::null_mut(),
+        )
+    })
+    .ok()?;
+    // Later versions may add protocols; only kitty's images are drawn.
+    if protocol != sys::GhosttyImageProtocol::GHOSTTY_IMAGE_PROTOCOL_KITTY {
+        return None;
+    }
+    use sys::GhosttyRenderStateImageLayer as Layer;
+    let layer = match layer {
+        Layer::GHOSTTY_RENDER_STATE_IMAGE_LAYER_BELOW_BACKGROUND => ImageLayer::BelowBackground,
+        Layer::GHOSTTY_RENDER_STATE_IMAGE_LAYER_BELOW_TEXT => ImageLayer::BelowText,
+        _ => ImageLayer::AboveText,
+    };
+    Some(ImagePlacement {
+        image_id,
+        generation,
+        layer,
+        z,
+        column,
+        row,
+        offset_x,
+        offset_y,
+        width,
+        height,
+        source_x,
+        source_y,
+        source_width,
+        source_height,
+    })
 }
 
 fn cells_get<T>(

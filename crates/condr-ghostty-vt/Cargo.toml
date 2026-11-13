@@ -9,6 +9,7 @@ publish = false
 links = "ghostty-vt"
 
 [dependencies]
+png.workspace = true
 tracing.workspace = true
 
 [build-dependencies]

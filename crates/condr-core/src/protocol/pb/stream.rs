@@ -1,9 +1,9 @@
 use super::*;
-use crate::WorkspaceId;
 use crate::protocol::{
     StreamClientMessage, StreamError as DomainError, StreamFile as DomainFile, StreamMessage,
     StreamServerMessage, StreamTarget,
 };
+use crate::{TerminalImageKey, WorkspaceId};
 
 impl From<DomainError> for StreamError {
     fn from(error: DomainError) -> Self {
@@ -75,6 +75,7 @@ impl TryFrom<&StreamClientMessage> for super::StreamClientMessage {
                         file: Some(encode_file(file)),
                         replace: *replace,
                     }),
+                    StreamTarget::Image(key) => Target::Image(key.0.to_vec()),
                     StreamTarget::Unknown => return Err("an unknown target cannot be sent".into()),
                 };
                 Message::Open(StreamOpen {
@@ -131,6 +132,10 @@ impl TryFrom<super::StreamClientMessage> for StreamClientMessage {
                         file: decode_file(required(upload.file, "upload file")?)?,
                         replace: upload.replace,
                     },
+                    Some(Target::Image(key)) => StreamTarget::Image(TerminalImageKey(
+                        key.try_into()
+                            .map_err(|_| malformed("a terminal image key is not 32 bytes"))?,
+                    )),
                 };
                 StreamMessage::Open {
                     stream: open.stream,

@@ -101,6 +101,7 @@ fn terminal_view(revision: u64, text: &str) -> TerminalView {
         mouse_tracking: TerminalMouseTracking::None,
         cells,
         cursor: None,
+        images: Vec::new(),
     }
 }
 

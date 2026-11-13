@@ -162,6 +162,55 @@ pub enum TerminalMouseTracking {
     Motion,
 }
 
+/// A kitty graphics image's SHA-256 over its size, layout and pixels: what names it on
+/// the wire and in every cache (ADR 0065).
+#[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct TerminalImageKey(pub [u8; 32]);
+
+impl std::fmt::Debug for TerminalImageKey {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for byte in &self.0[..6] {
+            write!(formatter, "{byte:02x}")?;
+        }
+        formatter.write_str("…")
+    }
+}
+
+/// Which pass of a frame an image is drawn in: under the cell backgrounds, between them
+/// and the text, or over the text.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum TerminalImageLayer {
+    BelowBackground,
+    BelowText,
+    AboveText,
+}
+
+/// One place a kitty graphics image shows in the viewport (ADR 0065), as the VT resolved
+/// it. Pixel values are the VT's, in the cell size its [`TerminalSize`] names; a Client
+/// with other cells scales them.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TerminalImagePlacement {
+    pub image: TerminalImageKey,
+    pub image_width: u32,
+    pub image_height: u32,
+    pub layer: TerminalImageLayer,
+    pub z: i32,
+    /// The top-left cell; negative when the image starts above or left of the viewport.
+    pub row: i32,
+    pub column: i32,
+    /// Where the image starts inside that cell.
+    pub offset_x: u32,
+    pub offset_y: u32,
+    /// The size to draw it at.
+    pub width: u32,
+    pub height: u32,
+    /// The part of the image drawn, in its own pixels.
+    pub source_x: u32,
+    pub source_y: u32,
+    pub source_width: u32,
+    pub source_height: u32,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TerminalView {
     pub revision: u64,
@@ -173,6 +222,8 @@ pub struct TerminalView {
     /// The Server-tracked selection clipped to this viewport. The VT keeps it attached to
     /// its text while output scrolls, which a viewport-anchored Client copy cannot.
     pub selection: Option<TerminalSelection>,
+    /// The kitty graphics images in the viewport, in the order to draw them.
+    pub images: Vec<TerminalImagePlacement>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -190,6 +241,8 @@ pub struct TerminalViewDelta {
     pub cursor: Option<TerminalCursor>,
     pub selection: Option<TerminalSelection>,
     pub runs: Vec<TerminalCellRun>,
+    /// The whole list when it changed, `None` when it did not.
+    pub images: Option<Vec<TerminalImagePlacement>>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -264,10 +317,12 @@ impl TerminalView {
             });
         }
 
+        let images_changed = previous.images != current.images;
         let metadata_changed = previous.display_offset != current.display_offset
             || previous.mouse_tracking != current.mouse_tracking
             || previous.cursor != current.cursor
-            || previous.selection != current.selection;
+            || previous.selection != current.selection
+            || images_changed;
         if changed_cells == 0 && !metadata_changed {
             return None;
         }
@@ -283,6 +338,7 @@ impl TerminalView {
             cursor: current.cursor,
             selection: current.selection,
             runs,
+            images: images_changed.then(|| current.images.clone()),
         }))
     }
 
@@ -349,6 +405,9 @@ impl TerminalView {
         self.mouse_tracking = delta.mouse_tracking;
         self.cursor = delta.cursor;
         self.selection = delta.selection;
+        if let Some(images) = &delta.images {
+            self.images.clone_from(images);
+        }
     }
 }
 

@@ -20,6 +20,7 @@ fn frame_test_view(revision: u64, text: &str) -> TerminalView {
         mouse_tracking: TerminalMouseTracking::None,
         cells,
         cursor: None,
+        images: Vec::new(),
     }
 }
 
@@ -302,6 +303,7 @@ fn terminal_frame_wire_drops_hyperlinks_over_budget_without_losing_text() {
             start: 0,
             cells: view.cells.clone(),
         }],
+        images: None,
     };
 
     for frame in [

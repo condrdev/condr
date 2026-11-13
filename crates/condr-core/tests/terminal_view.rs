@@ -32,6 +32,7 @@ fn frame_test_view(revision: u64, text: &str) -> TerminalView {
         mouse_tracking: TerminalMouseTracking::None,
         cells,
         cursor: None,
+        images: Vec::new(),
     }
 }
 
@@ -74,6 +75,7 @@ fn terminal_frame_wire_interns_hyperlinks_and_round_trips() {
             start: 1,
             cells: view.cells[1..4].to_vec(),
         }],
+        images: None,
     };
 
     for frame in [
@@ -115,6 +117,7 @@ fn link_free_deltas_take_the_budget_fast_path_without_changing_results() {
             start: 1,
             cells: vec![frame_test_view(2, "x").cells.remove(0)],
         }],
+        images: None,
     };
 
     let returned = hyperlinks
@@ -159,6 +162,7 @@ fn retained_hyperlinks_share_storage_across_sparse_deltas() {
                     start: 1,
                     cells: vec![cell],
                 }],
+                images: None,
             },
         )
         .unwrap();
@@ -204,6 +208,7 @@ fn terminal_delta_rejects_revision_gaps_and_invalid_runs() {
         mouse_tracking: TerminalMouseTracking::None,
         cursor: None,
         runs: Vec::new(),
+        images: None,
     });
     assert!(matches!(
         view.apply_frame(gap),
@@ -224,6 +229,7 @@ fn terminal_delta_rejects_revision_gaps_and_invalid_runs() {
             start: 4,
             cells: vec![blank_cell()],
         }],
+        images: None,
     });
     assert_eq!(
         view.apply_frame(invalid),

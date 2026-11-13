@@ -44,6 +44,9 @@ message StreamOpen {
     uint32 forward_port = 2;
     StreamFile download = 3;
     StreamUpload upload = 4;
+    // A terminal image's PNG by its SHA-256, 32 bytes (ADR 0065); one the Server no
+    // longer holds is NOT_FOUND.
+    bytes image = 5;
   }
 }
 

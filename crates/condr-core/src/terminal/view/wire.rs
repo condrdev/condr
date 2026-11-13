@@ -551,6 +551,76 @@ pub(crate) fn decode_selection(selection: pb::TerminalSelection) -> WireResult<T
     })
 }
 
+fn encode_images(images: &[TerminalImagePlacement]) -> pb::TerminalImages {
+    use pb::TerminalImageLayer as Wire;
+    pb::TerminalImages {
+        placements: images
+            .iter()
+            .map(|image| pb::TerminalImagePlacement {
+                image: image.image.0.to_vec(),
+                image_width: image.image_width,
+                image_height: image.image_height,
+                layer: match image.layer {
+                    TerminalImageLayer::BelowBackground => Wire::BelowBackground,
+                    TerminalImageLayer::BelowText => Wire::BelowText,
+                    TerminalImageLayer::AboveText => Wire::AboveText,
+                } as i32,
+                z: image.z,
+                row: image.row,
+                column: image.column,
+                offset_x: image.offset_x,
+                offset_y: image.offset_y,
+                width: image.width,
+                height: image.height,
+                source_x: image.source_x,
+                source_y: image.source_y,
+                source_width: image.source_width,
+                source_height: image.source_height,
+            })
+            .collect(),
+    }
+}
+
+fn decode_images(images: pb::TerminalImages) -> WireResult<Vec<TerminalImagePlacement>> {
+    use pb::TerminalImageLayer as Wire;
+    if images.placements.len() > MAX_TERMINAL_IMAGE_PLACEMENTS {
+        return Err(malformed("too many terminal image placements"));
+    }
+    images
+        .placements
+        .into_iter()
+        .map(|image| {
+            Ok(TerminalImagePlacement {
+                image: TerminalImageKey(
+                    image
+                        .image
+                        .try_into()
+                        .map_err(|_| malformed("a terminal image key is not 32 bytes"))?,
+                ),
+                image_width: image.image_width,
+                image_height: image.image_height,
+                layer: match enum_or(image.layer, "image layer", Wire::AboveText)? {
+                    Wire::Unspecified => unreachable!("enum_or rejects 0"),
+                    Wire::BelowBackground => TerminalImageLayer::BelowBackground,
+                    Wire::BelowText => TerminalImageLayer::BelowText,
+                    Wire::AboveText => TerminalImageLayer::AboveText,
+                },
+                z: image.z,
+                row: image.row,
+                column: image.column,
+                offset_x: image.offset_x,
+                offset_y: image.offset_y,
+                width: image.width,
+                height: image.height,
+                source_x: image.source_x,
+                source_y: image.source_y,
+                source_width: image.source_width,
+                source_height: image.source_height,
+            })
+        })
+        .collect()
+}
+
 impl From<&TerminalView> for pb::TerminalView {
     fn from(view: &TerminalView) -> Self {
         let mut hyperlinks = WireHyperlinks::default();
@@ -564,6 +634,7 @@ impl From<&TerminalView> for pb::TerminalView {
             cells: Some(cells),
             cursor: view.cursor.map(encode_cursor),
             selection: view.selection.map(encode_selection),
+            images: Some(encode_images(&view.images)),
         }
     }
 }
@@ -590,6 +661,11 @@ impl TryFrom<pb::TerminalView> for TerminalView {
             cells,
             cursor: view.cursor.map(decode_cursor).transpose()?,
             selection: view.selection.map(decode_selection).transpose()?,
+            images: view
+                .images
+                .map(decode_images)
+                .transpose()?
+                .unwrap_or_default(),
         })
     }
 }
@@ -620,6 +696,7 @@ impl From<&TerminalViewDelta> for pb::TerminalViewDelta {
                 .map(|run| run.cells.len() as u32)
                 .collect(),
             cells: Some(cells),
+            images: delta.images.as_deref().map(encode_images),
         }
     }
 }
@@ -685,6 +762,7 @@ impl TryFrom<pb::TerminalViewDelta> for TerminalViewDelta {
             cursor: delta.cursor.map(decode_cursor).transpose()?,
             selection: delta.selection.map(decode_selection).transpose()?,
             runs,
+            images: delta.images.map(decode_images).transpose()?,
         })
     }
 }

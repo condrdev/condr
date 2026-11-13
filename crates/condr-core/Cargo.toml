@@ -20,8 +20,10 @@ runtime = [
     "dep:filedescriptor",
     "dep:gix",
     "dep:nix",
+    "dep:png",
     "dep:portable-pty",
     "dep:regex-automata",
+    "dep:sha2",
     "dep:sysinfo",
     "dep:toml",
     "dep:toml_edit",
@@ -34,12 +36,14 @@ base64.workspace = true
 condr-ghostty-vt = { workspace = true, optional = true }
 dirs = { workspace = true, optional = true }
 gix = { workspace = true, optional = true }
+png = { workspace = true, optional = true }
 portable-pty = { workspace = true, optional = true }
 prost.workspace = true
 regex-automata = { workspace = true, optional = true }
 relative-path.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2 = { workspace = true, optional = true }
 smol_str.workspace = true
 sysinfo = { workspace = true, optional = true }
 toml = { workspace = true, optional = true }

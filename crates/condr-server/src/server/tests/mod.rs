@@ -323,6 +323,7 @@ fn terminal_test_view(revision: u64, text: &str) -> TerminalView {
         mouse_tracking: condr_core::TerminalMouseTracking::None,
         cells,
         cursor: None,
+        images: Vec::new(),
     }
 }
 
