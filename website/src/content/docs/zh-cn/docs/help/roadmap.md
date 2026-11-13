@@ -3,7 +3,7 @@ title: 路线图
 description: Condr 接下来按顺序开发的功能、等待更多反馈才排期的事项、更长远的计划，以及明确不做的方向。
 ---
 
-Condr 0.1 正处于公开预览阶段。本页列出后续准备开发的功能，排列顺序即为开发顺序，不承诺具体交付日期。如果想推动某项进展或提出新需求，请在 [GitHub Issues](https://github.com/condrdev/condr/issues) 中说明你的具体使用场景。
+Condr 正处于公开预览阶段。本页列出后续准备开发的功能，排列顺序即为开发顺序，不承诺具体交付日期。如果想推动某项进展或提出新需求，请在 [GitHub Issues](https://github.com/condrdev/condr/issues) 中说明你的具体使用场景。
 
 ---
 
@@ -29,15 +29,27 @@ Condr 将官方支持更多常用的 Agent CLI，并按[支持级别](/zh-cn/doc
 
 支持在当前 Pane 的终端缓冲区中搜索，包括已滚出可视区域的内容。匹配项会自动高亮，并支持跳转定位。
 
-### 端口探测与转发
+### 端口探测
 
-Agent 在 Workspace 中启动 dev server 后，Condr 会在对应的 Workspace 和 Pane 上标出其监听的端口。对于经由 SSH 连接的设备，点击端口即可转发至本机并在浏览器中打开。
+Agent 在 Workspace 中启动 dev server 后，Condr 会在对应的 Pane 和 **Ports** 页面上列出其监听的端口。对于远程设备，点击端口即可转发至本机。
 
 ### GitHub 集成
 
 Workspace 将展示当前分支关联的 GitHub PR、PR 状态及 CI 检查结果，点击可直接在浏览器中查看。支持输入 PR 编号或链接，将该 PR 检出为独立的 Managed Worktree。PR 合并后，Condr 会提示清理对应的 worktree，但不会自动删除。
 
 创建、合并及评审 PR 仍交由 Agent 与 `gh` 处理。
+
+### 开箱即用的 worktree
+
+新建 Managed Worktree 时可以从任意分支开始，包括只存在于远程的分支；`condr workspace create` 也能新建 worktree，并在其中启动 Agent、发出第一条提示。仓库中提交的一份声明会写明要从父仓库复制哪些被忽略的文件（例如 `.env`），以及准备和清理 worktree 的命令；Condr 第一次执行这些命令前，以及命令变化后，都会先征得你的确认。
+
+### 把 WSL 发行版作为设备
+
+在 Windows 上，WSL 2 发行版可以作为独立的设备连接，其中运行的 Agent 能被识别并上报状态，Git 也在 Linux 一侧照常工作。**Connect Remote Device** 会列出本机已安装的发行版。
+
+### 多仓库的改动
+
+在包含多个仓库的父目录上打开 Workspace 时，Changes 和 History 会按仓库分组，列出下一层每个仓库的改动与提交。
 
 ---
 
@@ -48,7 +60,6 @@ Workspace 将展示当前分支关联的 GitHub PR、PR 状态及 CI 检查结�
 - **从 Diff Tab 跳到编辑器**：支持在 Diff Tab 中直接调用外部编辑器打开当前文件。
 - **在 GUI 中启动 Agent**：列出设备上已安装的 Agent，点击即可在 Pane 中启动。
 - **定时任务**：按预设时间启动 Agent，或定时向运行中的 Agent 投递提示词。
-- **TCP 与 Peer-to-peer 设备的端口转发**：将端口转发扩展至非 SSH 连接的设备。
 
 ---
 
@@ -60,7 +71,7 @@ Workspace 将展示当前分支关联的 GitHub PR、PR 状态及 CI 检查结�
 | :--- | :--- |
 | 团队协作与权限管理 | 出现多人共用同一个 Server 的真实需求 |
 | 编辑器 | 审查改动时经常需要顺手修改代码，而远程设备上的文件无法通过 Open in 在本机编辑器中打开 |
-| 内置浏览器 | 端口转发上线后，在系统浏览器和 Condr 之间来回切换仍是常见的不便 |
+| 内置浏览器 | 为查看转发的端口在系统浏览器和 Condr 之间来回切换，仍是常见的不便 |
 | 任务看板 | 同时进行的任务多到侧栏和 Needs you 列表已经看不过来 |
 
 ---
