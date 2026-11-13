@@ -95,7 +95,7 @@ A Workspace's view, optionally named by the user: either a terminal layout that 
 `Alt+1` through `Alt+9` (`Cmd+1` through `Cmd+9` on macOS) activate the corresponding displayed Tab number in the current Workspace, unless `[client.keybindings]` gives `go-to-tab-1` through `go-to-tab-9` other keys (ADR 0063). A missing number does nothing, and 9 means the ninth Tab, not the last. These GUI shortcuts are consumed before terminal input and do not switch Tabs while a modal dialog is open.
 
 **Pane**:
-A terminal location and layout leaf within a terminal Tab. It may show a shell or an Agent running inside that shell.
+A terminal location and layout leaf within a terminal Tab. It may show a shell or an Agent running inside that shell. Programs in it can draw images through the kitty graphics protocol (ADR 0065).
 _Avoid_: Agent
 
 **Diff Tab**:

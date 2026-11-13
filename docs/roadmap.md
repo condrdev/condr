@@ -6,16 +6,18 @@
 
 ### 终端里的图片（kitty 图形协议）
 
-**为什么**：ADR 0051 让 kitty 图形保持关闭，程序探测不到支持，只能退回文字，或者画出一排占位方块。当初排在后面，是因为“主流 Agent CLI 会不会输出 kitty 图形”没有确认（`docs/research/libghostty-vt-migration-view.md`）。herdr-app 0.1.10 的更新说明写到 Claude Code、yazi 等程序会用 kitty 占位符画图，这算是一条外部证据；落地前要在 Condr 里实测哪些 Agent 和常用工具真的会画。
+**为什么**：ADR 0051 让 kitty 图形保持关闭，程序探测不到支持，只能退回文字，或者画出一排占位方块。逐个读源码的结论（ADR 0065“Who draws”）：OpenCode、yazi、`kitten icat`、viu、ranger、image.nvim、mpv、ratatui-image 等程序会画；Claude Code、yazi 的占位符驱动、snacks.nvim、timg 还要看 XTVERSION 是不是 Ghostty。
 
-**做到哪**（落地前先写 ADR，修订 ADR 0051 中“Kitty graphics stay off”那一句）：
+**做到哪**（ADR 0065，按切片在 main 上做，第 3 步之前存储上限保持 0、XTVERSION 不变）：
 
-1. Server：设图片存储上限、注册进程全局的 PNG 解码回调，从 render state 读出图片和摆放位置。只开直接传输，不开 file、temp-file 和 shm：这三种会让 Server 去读本机文件或共享内存。
-2. 协议：图片以 generation 为键去重，像素只发一次，视觉帧里只带摆放（位置、尺寸、z 序、裁剪）；Bootstrap 补发仍在屏上的图片。远程连接（TCP、Peer-to-peer、手机）的带宽要先量。
-3. GUI：像素做成 `RenderImage`，按 cell 的像素尺寸画进终端，按 z 序画在文字上面或下面，跟着滚动和缩放走；支持 Unicode 占位符。
-4. 回答 kitty 图形的探测查询，让程序知道可以用。
+1. Server：绑定图片相关的 C 函数，用 `png` crate 解码，从 render state 读摆放，清空占位符 cell，按内容 SHA-256 去重、编码成 PNG 放进 128 MiB 的缓存。
+2. 协议：视觉帧带摆放（变了才发），像素通过 Stream 的 `image` 目标按哈希拉取；图片打开的 Stream 连接保持到终端连接结束。
+3. GUI：按层画图（选区和光标在最上面），256 MiB 解码缓存；cell 尺寸改报设备像素；同一个提交里打开每个 screen 64 MiB 的存储、四种传输方式，XTVERSION 改答 `ghostty (Condr <version>)`。
+4. 动画：Server 只给有 Client 在看的 Pane tick。
+5. Companion 报真实的 cell 尺寸。
+6. Companion 画图，随它自己的版本发布。
 
-**停在哪**：不做 Sixel 和 iTerm2 的图片协议；动画先只画当前帧；Companion 先不画图片；Server 重启后图片不保留（ADR 0005）。
+**停在哪**：不做 Sixel 和 iTerm2 的图片协议（libghostty-vt 没有实现）；Server 重启后图片不保留，随终端内容持久化另写 ADR；不设关闭图片或调存储上限的开关；不设 `TERM_PROGRAM`，所以 Codex、chafa 这类只看环境变量的程序不画；Windows 上 ConPTY 吞掉 `a=q` 的应答，等微软的修复发布后再升级 ConPTY。
 
 ### 移动端 Companion（iOS 与 Android）
 
