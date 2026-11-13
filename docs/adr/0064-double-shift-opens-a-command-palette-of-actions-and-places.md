@@ -30,7 +30,7 @@ Four kinds of row, from every connected Device, whichever window the palette ope
 
 | Row | Shows | Matched and highlighted | Matched only |
 | --- | --- | --- | --- |
-| Agent | its mark with the state on it, Pane title, Workspace › Tab, the state's name | Pane title | Agent kind, Workspace and Tab names |
+| Agent | its mark with the state on it, Pane title, Workspace, the state's name | Pane title | Agent kind, Workspace and Tab names |
 | Tab | its number and name, or its focused Pane's title as the tab bar has it; Workspace | Tab name | Workspace name |
 | Workspace | name, Root Directory | name | Root Directory |
 | Device | plug, name, connection state | name | |

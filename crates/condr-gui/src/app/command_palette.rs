@@ -182,10 +182,12 @@ impl Condr {
         let owner = cx.weak_entity();
         let palette = cx.new(|cx| CommandPalette::new(owner, action.page, window, cx));
         let content = palette.clone();
-        window.open_dialog(cx, move |dialog, window, _| {
+        window.open_dialog(cx, move |dialog, window, cx| {
             let content = content.clone();
             dialog
                 .w(rems(40.).to_pixels(window.rem_size()))
+                // One surface: the list's own colour, not the dialog's darker one around it.
+                .bg(cx.theme().popover)
                 .close_button(false)
                 // Summoned by the keyboard, it is there at once for the typing that follows.
                 .entrance(gpui_kit::component::dialog::DialogEntrance::None)
@@ -344,7 +346,7 @@ impl Condr {
                                 target: Target::Agent(key, pane_id),
                                 also: format!("{title} {kind} {name} {tab_text}"),
                                 label: title,
-                                detail: format!("{name} › {tab_text}{device}"),
+                                detail: format!("{name}{device}"),
                                 enabled: true,
                                 look: Look::Agent(agent.kind, status),
                             },
@@ -585,6 +587,8 @@ impl Render for CommandPalette {
                 .ghost()
                 .xsmall()
                 .selected(page == self.page)
+                // Ghost's selected fill matches the popover; take the list's selected-row tone.
+                .when(page == self.page, |button| button.bg(theme.accent))
                 .on_click(move |_, window, cx| {
                     let _ = owner.update(cx, |this, cx| {
                         this.page = page;
@@ -614,7 +618,6 @@ impl Render for CommandPalette {
             .child(tabs)
             .child(
                 Command::new(&self.command)
-                    .bordered(false)
                     .filterable(false)
                     .max_h(rems(24.))
                     .placeholder(match page {
