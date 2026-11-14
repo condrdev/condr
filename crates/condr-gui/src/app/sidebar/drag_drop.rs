@@ -24,6 +24,42 @@ impl Condr {
         }
     }
 
+    /// Moves `dragged` to the slot the insertion line shows, wherever over its Device's
+    /// list it is let go.
+    pub(in crate::app) fn drop_workspace(&mut self, dragged: &DraggedWorkspace) {
+        let Some(DropTarget::Workspace {
+            key,
+            workspace_id,
+            after,
+        }) = self.drop_target.take()
+        else {
+            return;
+        };
+        if dragged.key != key {
+            return;
+        }
+        let Some(session) = self
+            .connection(key)
+            .and_then(|connection| connection.presented_session())
+        else {
+            return;
+        };
+        let place = |id| session.workspaces().iter().position(|w| w.id() == id);
+        let (Some(source), Some(target)) = (place(dragged.workspace_id), place(workspace_id))
+        else {
+            return;
+        };
+        if let Some(index) = drop_index(source, target, after) {
+            self.send_layout_to(
+                key,
+                LayoutCommand::MoveWorkspace {
+                    workspace_id: dragged.workspace_id,
+                    target_index: index as u32,
+                },
+            );
+        }
+    }
+
     /// The side recorded for `target` when the drop happens, clearing the indicator.
     pub(in crate::app) fn take_drop_after(&mut self, target: DropTarget) -> bool {
         self.drop_target
@@ -87,12 +123,29 @@ impl DropTarget {
 }
 
 /// Which half of `bounds` the pointer is in (`true` = right or bottom), `None` outside.
+/// The item also claims half the `gap` to its neighbours, so no point between two items
+/// is neither's.
 pub(in crate::app) fn drop_half(
     position: Point<Pixels>,
     bounds: Bounds<Pixels>,
     horizontal: bool,
+    gap: Pixels,
 ) -> Option<bool> {
-    bounds.contains(&position).then(|| {
+    let half = gap / 2.;
+    let reach = if horizontal {
+        Edges {
+            left: half,
+            right: half,
+            ..Edges::default()
+        }
+    } else {
+        Edges {
+            top: half,
+            bottom: half,
+            ..Edges::default()
+        }
+    };
+    bounds.extend(reach).contains(&position).then(|| {
         if horizontal {
             position.x >= bounds.center().x
         } else {
@@ -112,26 +165,35 @@ pub(in crate::app) fn drop_index(source: usize, target: usize, after: bool) -> O
     (index != source).then_some(index)
 }
 
-/// The insertion line, positioned on the edge of a `relative()` parent.
-pub(super) fn drop_indicator(horizontal: bool, after: bool, cx: &App) -> Div {
-    let line = div().absolute().rounded_full().bg(cx.theme().primary);
+/// The insertion line of a `relative()` parent, centred in the `gap` past the edge, so
+/// the slot between two items draws one line whichever of them the pointer is over.
+pub(super) fn drop_indicator(horizontal: bool, after: bool, gap: Pixels, cx: &App) -> Div {
+    let line = div()
+        .debug_selector(|| "drop-indicator".into())
+        .absolute()
+        .rounded_full()
+        .bg(cx.theme().primary);
+    let edge = -(gap / 2.) - px(1.);
     match (horizontal, after) {
-        (true, false) => line.top_0().bottom_0().w(px(2.)).left(px(-1.)),
-        (true, true) => line.top_0().bottom_0().w(px(2.)).right(px(-1.)),
-        (false, false) => line.left_0().right_0().h(px(2.)).top(px(-1.)),
-        (false, true) => line.left_0().right_0().h(px(2.)).bottom(px(-1.)),
+        (true, false) => line.top_0().bottom_0().w(px(2.)).left(edge),
+        (true, true) => line.top_0().bottom_0().w(px(2.)).right(edge),
+        (false, false) => line.left_0().right_0().h(px(2.)).top(edge),
+        (false, true) => line.left_0().right_0().h(px(2.)).bottom(edge),
     }
 }
 
 /// Makes `element` a drop target for drags of type `D`: it reports which half the
 /// pointer is over while a drag moves (`None` once it leaves) and draws the insertion
-/// line when `indicator` says it is the current target.
+/// line when `indicator` says it is the current target. `gap` is the space between it and
+/// its neighbours; a drop let go there lands on the list around them, which takes the
+/// target recorded here.
 pub(in crate::app) fn attach_drop_target<
     D: 'static,
     E: InteractiveElement + ParentElement + Styled,
 >(
     element: E,
     horizontal: bool,
+    gap: Pixels,
     indicator: Option<bool>,
     on_move: impl Fn(Option<bool>, &mut App) + 'static,
     cx: &App,
@@ -142,12 +204,12 @@ pub(in crate::app) fn attach_drop_target<
         .drag_over::<D>(|style, _, _, cx| style.bg(cx.theme().tokens.drop_target))
         .on_drag_move::<D>(move |event, _, cx| {
             on_move(
-                drop_half(event.event.position, event.bounds, horizontal),
+                drop_half(event.event.position, event.bounds, horizontal, gap),
                 cx,
             )
         });
     match indicator {
-        Some(after) => element.child(drop_indicator(horizontal, after, cx)),
+        Some(after) => element.child(drop_indicator(horizontal, after, gap, cx)),
         None => element,
     }
 }
@@ -168,11 +230,32 @@ pub(in crate::app) struct DraggedServer {
 pub(in crate::app) struct DragPreview {
     pub(in crate::app) icon: Option<IconName>,
     pub(in crate::app) name: SharedString,
+    /// Where the drag started inside its source, as GPUI hands it to `on_drag`.
+    pub(in crate::app) offset: Point<Pixels>,
 }
 
 impl Render for DragPreview {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // GPUI places the preview where its source was grabbed, which leaves a small chip
+        // far from the pointer when the source is wide, such as a Pane's header. Padding
+        // by that offset puts a zero-size point at the pointer, and the chip centres on it,
+        // held under the pointer.
+        div().pl(self.offset.x).pt(self.offset.y).child(
+            h_flex()
+                .size_0()
+                .justify_center()
+                .items_center()
+                .child(self.chip(cx)),
+        )
+    }
+}
+
+impl DragPreview {
+    fn chip(&self, cx: &App) -> impl IntoElement {
         h_flex()
+            .debug_selector(|| "drag-preview".into())
+            .flex_none()
+            .whitespace_nowrap()
             .px_2()
             .py_1()
             .gap_x_2()

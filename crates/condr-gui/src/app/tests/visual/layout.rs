@@ -105,7 +105,15 @@ fn cold_split_workspace_uses_the_real_dock_size_before_first_paint() {
     let pane_width = first.size.width + second.size.width;
     assert!((first.size.width / pane_width - 0.3).abs() < 0.03);
     assert!(first.right() <= second.left());
-    assert!(second.left() - first.right() <= px(8.));
+    // Between them only the gap between two Pane cards and the cards' borders.
+    assert!(second.left() - first.right() <= px(10.));
+    // The split handle sits in the middle of that gap, not against either card.
+    let handle = window.debug_bounds("pane-split-handle").unwrap();
+    let middle = (first.right() + second.left()) / 2.;
+    assert!(
+        (handle.center().x - middle).abs() <= px(1.),
+        "the split handle at {handle:?} should sit midway between {first:?} and {second:?}"
+    );
     window.run_until_parked();
     assert_eq!(
         window.read(|app| view.read(app).dock_rebuild_count),
@@ -257,9 +265,11 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
         heading.right() <= new_workspace.left(),
         "New Workspace should sit to the right of the Server name"
     );
+    // The heading is padded as a Workspace row is, so its last button lines up with the
+    // rows' trailing counts.
     assert!(
-        (heading_row.right() - new_workspace.right()).abs() <= px(1.),
-        "New Workspace should align with the heading's right edge"
+        (heading_row.right() - px(4.) - new_workspace.right()).abs() <= px(1.),
+        "New Workspace should align with the heading's right padding"
     );
     window
         .debug_bounds("add-server")
@@ -361,6 +371,27 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
     let agent_status = window.debug_bounds(agent_status_selector).unwrap();
     let agent_label = window.debug_bounds(agent_label_selector).unwrap();
     assert!(agent_status.right() <= agent_label.left());
+    // The Pane's header and its Tab lead with the same state.
+    let tab_id = window.read(|app| {
+        let session = view.read(app).active_session().unwrap();
+        session
+            .workspaces()
+            .first()
+            .unwrap()
+            .tabs()
+            .first()
+            .unwrap()
+            .id()
+    });
+    for selector in [
+        format!("terminal-pane-status-{}", pane_id.as_u64()),
+        format!("tab-status-{}", tab_id.as_u64()),
+    ] {
+        assert!(
+            window.debug_bounds(leaked_selector(selector)).is_some(),
+            "an Agent's state should show on its Pane and its Tab"
+        );
+    }
 
     let selection_before = window.read(|app| {
         let condr = view.read(app);
@@ -528,7 +559,11 @@ fn server_workspace_button_and_only_tab_close_round_trip() {
     assert!(window.update(|window, cx| window.has_active_dialog(cx)));
     window.update(|window, cx| window.close_dialog(cx));
     window.run_until_parked();
-    window.update(|window, cx| _ = window.draw(cx));
+    // The close button moves when the Tab widens for its shell's title.
+    title_every_pane(window, &view, "runner@ci-host: ~/projects/condr");
+    let tab = window
+        .debug_bounds(tab_selector(tab_id))
+        .expect("the only Tab should be rendered");
 
     // Hovering the Tab reveals its close button; closing the only Tab asks first, since
     // it takes the Workspace with it.
@@ -927,7 +962,8 @@ fn a_blocked_agent_is_listed_under_needs_you_with_what_it_waits_for() {
 }
 
 /// Twelve Tabs are wider than the title bar: the strip scrolls them, keeps "Open in" in
-/// place, and shows the newest, active Tab rather than the first.
+/// place, and shows the newest, active Tab rather than the first, even as each Tab widens
+/// once its shell titles it.
 #[test]
 fn a_tab_strip_wider_than_its_slot_scrolls_and_keeps_open_in_in_place() {
     let _serial_guard = acquire_visual_test_lock();
@@ -958,7 +994,13 @@ fn a_tab_strip_wider_than_its_slot_scrolls_and_keeps_open_in_in_place() {
         })
     }));
     for expected in 2..=12 {
-        window.update(|window, cx| _ = window.draw(cx));
+        // Each new Tab widens after the row scrolled to it, as a Windows shell's title makes
+        // it do there.
+        title_every_pane(
+            window,
+            &view,
+            r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+        );
         let new_tab = window.debug_bounds("new-tab").expect("New Tab is rendered");
         let strip = window.debug_bounds("workspace-tabs").unwrap();
         assert!(
@@ -1118,8 +1160,8 @@ fn closing_a_pane_with_a_running_agent_asks_first() {
     );
 }
 
-/// A Device's heading folds its Workspaces away from the chevron before its name, which
-/// stays to unfold it, and the GUI state remembers the fold.
+/// A Device's heading folds its Workspaces away from the chevron that hovering swaps in for
+/// its status, or from a click on the selected Device, and the GUI state remembers the fold.
 #[test]
 fn a_device_folds_its_workspaces_away_and_remembers_it() {
     let _serial_guard = acquire_visual_test_lock();
@@ -1154,6 +1196,10 @@ fn a_device_folds_its_workspaces_away_and_remembers_it() {
     };
     window.update(|window, cx| _ = window.draw(cx));
     assert!(window.debug_bounds(row).is_some());
+    assert!(
+        window.debug_bounds("device-status-1").is_some(),
+        "the Device's status leads its heading"
+    );
 
     fold(window);
     assert!(
@@ -1167,7 +1213,11 @@ fn a_device_folds_its_workspaces_away_and_remembers_it() {
         assert!(state.servers.values().all(|server| server.folded));
     });
 
-    fold(window);
+    // The Device is the selected one, so a click on its name unfolds it, as on a Workspace.
+    let name = window.debug_bounds("server-heading-1").unwrap();
+    window.simulate_click(name.center(), Modifiers::default());
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
     assert!(
         window.debug_bounds(row).is_some(),
         "unfolded, they are back"

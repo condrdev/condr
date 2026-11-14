@@ -1,4 +1,5 @@
 use super::*;
+use std::time::Duration;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::app) enum SidebarIconTone {
@@ -24,7 +25,6 @@ pub(in crate::app) enum CondrIconName {
     Circle,
     /// Lucide `circle` with a `currentColor` fill.
     CircleFilled,
-    CircleAlert,
     /// Lucide's `server` with a plus in the corner; Lucide itself has no server-plus.
     ServerPlus,
     /// Lucide `folder-plus`: create a Workspace from a directory.
@@ -71,7 +71,6 @@ impl IconNamed for CondrIconName {
         match self {
             Self::Circle => "icons/circle.svg",
             Self::CircleFilled => "icons/circle-filled.svg",
-            Self::CircleAlert => "icons/circle-alert.svg",
             Self::ServerPlus => "icons/server-plus.svg",
             Self::FolderPlus => "icons/folder-plus.svg",
             Self::ArrowLeftRight => "icons/arrow-left-right.svg",
@@ -132,31 +131,54 @@ pub(in crate::app) const BELL_SIDEBAR_STATUS: SidebarStatusVisual = SidebarStatu
 };
 
 /// A state at badge size: a glyph is a smudge here, so it is a plain dot in the tone's
-/// color. Only the bell keeps its glyph, which a dot could not say, and an unknown
-/// state shows nothing.
-pub(in crate::app) fn status_badge(
-    glyph: SidebarGlyph,
-    tone: SidebarIconTone,
-    cx: &App,
-) -> Option<AnyElement> {
-    match glyph {
+/// color, fading in and out while working. Only the bell keeps its glyph, which a dot
+/// could not say, and an unknown state shows nothing.
+pub(in crate::app) fn status_badge(status: SidebarStatusVisual, cx: &App) -> Option<AnyElement> {
+    match status.glyph {
         SidebarGlyph::Info => None,
         SidebarGlyph::Bell => Some(
-            glyph
+            status
+                .glyph
                 .icon()
                 .size_2()
-                .text_color(tone.color(cx))
+                .text_color(status.tone.color(cx))
                 .into_any_element(),
         ),
         _ => Some(
             div()
                 .size(px(6.))
                 .rounded_full()
-                .bg(tone.color(cx))
-                .into_any_element(),
+                .bg(status.tone.color(cx))
+                .map(|dot| {
+                    if status.key == "working" {
+                        fading(dot)
+                    } else {
+                        dot.into_any_element()
+                    }
+                }),
         ),
     }
 }
+
+/// Something under way, a working Agent or a connecting Device: it fades between full and
+/// a third on a slow cosine, every one in step.
+pub(in crate::app) fn fading(element: Div) -> AnyElement {
+    element
+        .with_animation(
+            "working-fade",
+            Animation::new(WORKING_FADE)
+                .repeat_synced()
+                .with_max_fps(WORKING_FADE_FPS),
+            |element, turn| element.opacity(0.65 + 0.35 * (turn * std::f32::consts::TAU).cos()),
+        )
+        .into_any_element()
+}
+
+/// How long a working dot takes to fade out and back in.
+const WORKING_FADE: Duration = Duration::from_millis(2000);
+/// A fade this slow looks smooth at this rate, and a window with an Agent working for
+/// hours does not repaint at the display's.
+const WORKING_FADE_FPS: f32 = 30.;
 
 /// A Workspace's agents rolled up by state, ordered by how urgently each wants a person.
 /// An agent with nothing to report still counts, as idle: folded, the row is the only
@@ -164,8 +186,7 @@ pub(in crate::app) fn status_badge(
 pub(in crate::app) fn agent_status_summary(
     statuses: impl IntoIterator<Item = SidebarStatusVisual>,
 ) -> Vec<(SidebarStatusVisual, usize)> {
-    const ORDER: [&str; 6] = ["bell", "blocked", "error", "done", "working", "idle"];
-    let rank = |status: &SidebarStatusVisual| ORDER.iter().position(|key| *key == status.key);
+    let rank = |status: &SidebarStatusVisual| URGENCY.iter().position(|key| *key == status.key);
     let mut summary: Vec<(SidebarStatusVisual, usize)> = Vec::new();
     let statuses = statuses.into_iter().map(|status| {
         if status.key == "unknown" {
@@ -182,6 +203,17 @@ pub(in crate::app) fn agent_status_summary(
     }
     summary.sort_by_key(|(status, _)| rank(status));
     summary
+}
+
+/// How urgently each state wants a person, most first.
+const URGENCY: [&str; 6] = ["bell", "blocked", "error", "done", "working", "idle"];
+
+/// Where a state ranks by `URGENCY`, an unknown one with the idle.
+pub(in crate::app) fn urgency(status: SidebarStatusVisual) -> usize {
+    URGENCY
+        .iter()
+        .position(|key| *key == status.key)
+        .unwrap_or(URGENCY.len() - 1)
 }
 
 pub(in crate::app) fn agent_sidebar_status(state: AgentDisplayState) -> SidebarStatusVisual {
@@ -269,8 +301,7 @@ enum SidebarIconGraphic {
     /// agents reads by agent first and by state second.
     Agent {
         kind: AgentKind,
-        glyph: SidebarGlyph,
-        tone: SidebarIconTone,
+        status: SidebarStatusVisual,
     },
 }
 
@@ -303,8 +334,7 @@ impl CondrSidebarIcon {
         Self {
             graphic: SidebarIconGraphic::Agent {
                 kind,
-                glyph: visual.glyph,
-                tone: visual.tone,
+                status: visual,
             },
             selector: selector.into(),
             tooltip: Some(tooltip.into()),
@@ -330,14 +360,14 @@ impl CondrSidebarIcon {
                 .text_color(gpui_kit::white())
                 .child(initial)
                 .into_any_element(),
-            SidebarIconGraphic::Agent { kind, glyph, tone } => {
+            SidebarIconGraphic::Agent { kind, status } => {
                 // Past the mark's corner, on a disc of the sidebar's own color so it
                 // reads over any mark.
                 div()
                     .relative()
                     .size_4()
                     .child(agent_mark(kind, cx.theme().sidebar_foreground).size_4())
-                    .when_some(status_badge(glyph, tone, cx), |this, badge| {
+                    .when_some(status_badge(status, cx), |this, badge| {
                         this.child(
                             div()
                                 .absolute()

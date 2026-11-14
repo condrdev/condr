@@ -5,6 +5,7 @@
 
 use crate::forward::StreamOpener;
 use crate::streams::{Stream, StreamFailure};
+use condr_core::TerminalImageKey;
 use condr_core::protocol::{MAX_STREAM_CHUNK, StreamError, StreamFile, StreamTarget};
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
@@ -130,6 +131,33 @@ pub fn download(
     guard.1 = true;
     stream.finish();
     Ok(done)
+}
+
+/// The most bytes one terminal image's PNG may take; the Server's own limits keep a real
+/// one well below it.
+const MAX_IMAGE_PNG_BYTES: usize = 128 * 1024 * 1024;
+
+/// A terminal image's PNG by its key (ADR 0065).
+pub fn fetch_image(
+    opener: &dyn StreamOpener,
+    key: TerminalImageKey,
+) -> Result<Vec<u8>, StreamFailure> {
+    let stream = opener.open(StreamTarget::Image(key))?;
+    let size = stream.opened()?;
+    let mut png = Vec::with_capacity(
+        size.and_then(|size| usize::try_from(size).ok())
+            .unwrap_or(0)
+            .min(MAX_IMAGE_PNG_BYTES),
+    );
+    while let Some(data) = stream.read()? {
+        if png.len() + data.len() > MAX_IMAGE_PNG_BYTES {
+            stream.reset(StreamError::Other, "image too large");
+            return Err(failure(StreamError::Other, "image too large"));
+        }
+        png.extend_from_slice(&data);
+    }
+    stream.finish();
+    Ok(png)
 }
 
 /// Uploads `source` as `file`; `progress` hears bytes handed to the Stream, at most a

@@ -2,6 +2,7 @@ mod actions;
 mod change_marks;
 mod change_tree;
 mod changes;
+mod command_palette;
 mod config;
 mod connection;
 mod connection_status;
@@ -16,6 +17,7 @@ mod files;
 mod gui_state;
 mod history;
 mod ime;
+mod keymap;
 #[cfg(unix)]
 mod login_environment;
 mod navigation;
@@ -36,6 +38,7 @@ mod settings;
 mod sidebar;
 mod startup;
 mod syntax;
+mod terminal_images;
 mod terminal_input;
 mod terminal_panel;
 mod transfers;
@@ -113,12 +116,15 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use ime::TerminalComposition;
+use keymap::SHORTCUT_CONTEXT;
+#[cfg(test)]
+use keymap::TAB_MODIFIER;
 use new_workspace::{NewWorkspaceDialog, NewWorkspaceWay};
 use relative_path::{RelativePath, RelativePathBuf};
 use server_connection::*;
 use settings::{
-    Appearance, SHORTCUT_CONTEXT, SettingsWindow, TerminalFont, apply_appearance,
-    apply_terminal_color_scheme, apply_terminal_font, sync_theme_with_system,
+    Appearance, SettingsWindow, TerminalFont, apply_appearance, apply_color_schemes,
+    apply_terminal_font, sync_theme_with_system,
 };
 #[cfg(all(test, feature = "test-support"))]
 use settings::{
@@ -131,9 +137,9 @@ use settings::{
 };
 #[cfg(test)]
 use sidebar::*;
+use startup::connect_to_server;
 #[cfg(test)]
-use startup::{TAB_MODIFIER, connect_to_server_with, lock_exclusively, single_instance_lock_path};
-use startup::{connect_to_server, fixed_shortcut};
+use startup::{connect_to_server_with, lock_exclusively, single_instance_lock_path};
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Range;
@@ -142,7 +148,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
-use terminal_input::{PendingSize, TerminalGeometry};
+use terminal_input::{OptionAsMeta, PendingSize, TerminalGeometry};
 #[cfg(test)]
 use terminal_input::{
     TerminalClipboardShortcut, should_defer_to_character_input, terminal_clipboard_shortcut,
@@ -226,7 +232,6 @@ const WAKE_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 /// Two messages from a newer protocol this close together mean the Server keeps sending
 /// what this build cannot read: stop resynchronizing and say to update (ADR 0028).
 const UNKNOWN_MESSAGE_WINDOW: Duration = Duration::from_secs(10);
-const ACTIVE_PANE_BORDER_RGB: u32 = 0x0078d4;
 const INITIAL_SIDEBAR_WIDTH: Pixels = px(240.);
 const MIN_SIDEBAR_WIDTH: Pixels = px(150.);
 const MAX_SIDEBAR_WIDTH: Pixels = px(360.);
@@ -235,6 +240,12 @@ const SIDEBAR_RESIZE_HANDLE_WIDTH: Pixels = px(6.);
 /// The main window's title bar hosts the Tab strip, so it takes the strip's old height
 /// rather than the Kit's default; the Tabs keep the same room above and below.
 const WORKSPACE_TITLE_BAR_HEIGHT: Pixels = px(36.);
+
+/// A menu item's icon. The Kit centres it on the label's cap height, which leaves it a
+/// pixel above the lowercase most labels are made of; it moves down to meet them.
+fn menu_icon(icon: impl Into<Icon>) -> Icon {
+    icon.into().relative().top(px(1.))
+}
 
 /// The drag payload of the sidebar resize handle; the shell tracks its moves.
 #[derive(Clone)]
@@ -307,7 +318,16 @@ pub(crate) struct Condr {
     /// Devices folded in the left sidebar, their Workspaces hidden under the heading.
     sidebar_folded_devices: HashSet<ConnectionKey>,
     terminal_font: TerminalFont,
-    terminal_color_scheme: SharedString,
+    /// `[client.keybindings]` as last read or written; `keymap` is what it comes to.
+    keybindings: toml::Table,
+    keymap: keymap::Keymap,
+    /// The window actions last chosen in the Command Palette, latest first, by their place
+    /// in `keymap::all()`; kept until the GUI quits (ADR 0064).
+    recent_actions: Vec<usize>,
+    option_as_meta: OptionAsMeta,
+    /// Each mode's terminal colour scheme, empty for its default (ADR 0062).
+    dark_color_scheme: SharedString,
+    light_color_scheme: SharedString,
     /// The Preview Tab's font size; it shares the terminal's font family.
     code_font_size: f32,
     /// What "Open in" offers, once the startup scan has reported; `None` hides the button.
@@ -405,12 +425,15 @@ impl Condr {
             auto_check_updates,
             update_channel,
             terminal_font,
-            terminal_color_scheme,
+            dark_color_scheme,
+            light_color_scheme,
             code_theme,
             code_font_size,
             default_editor,
             custom_editors,
             workspace_editors,
+            keybindings,
+            option_as_meta,
         } = config;
         let mut connections = vec![connection];
         for (index, (name, endpoint)) in saved_servers.into_iter().enumerate() {
@@ -430,13 +453,14 @@ impl Condr {
             cx.observe_window_appearance(window, |this, window, cx| {
                 if this.appearance == Appearance::System {
                     sync_theme_with_system(window, cx);
+                    this.send_terminal_colors(None, cx);
                     // The Settings window follows the system too.
                     cx.refresh_windows();
                 }
             });
         apply_appearance(appearance, Some(window), cx);
         apply_terminal_font(&terminal_font, cx);
-        apply_terminal_color_scheme(&terminal_color_scheme, cx);
+        apply_color_schemes(&dark_color_scheme, &light_color_scheme, cx);
         syntax::set_code_theme(code_theme, cx);
         let theme_subscription = cx.observe_global::<Theme>(|this, cx| {
             this.sync_diff_highlighters(cx);
@@ -513,7 +537,12 @@ impl Condr {
             sidebar_workspace_open: HashMap::new(),
             sidebar_folded_devices: HashSet::new(),
             terminal_font,
-            terminal_color_scheme,
+            keybindings,
+            keymap: keymap::Keymap::default(),
+            recent_actions: Vec::new(),
+            option_as_meta,
+            dark_color_scheme,
+            light_color_scheme,
             code_font_size,
             open_targets: None,
             opening_workspace: None,
@@ -547,6 +576,15 @@ impl Condr {
         this.connections[0].subscribe();
         if let Some(error) = config_error {
             this.report_error(error, cx);
+        }
+        this.apply_keymap(cx);
+        for (shortcut, errors) in keymap::all().zip(&this.keymap.errors) {
+            for error in errors {
+                tracing::warn!("[client.keybindings] {}: {error}", shortcut.name);
+            }
+        }
+        for name in &this.keymap.unknown {
+            tracing::warn!("[client.keybindings] names no shortcut {name}");
         }
         this.apply_keep_awake(cx);
         this.scan_open_targets(cx);

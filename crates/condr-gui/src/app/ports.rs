@@ -7,7 +7,7 @@
 use super::sidebar::CondrIconName;
 use super::*;
 use condr_client::{Forward, LinkStatus, LocalPort, StreamLink, StreamOpener};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 /// Width of the page's Device column.
 const DEVICE_COLUMN_WIDTH: Rems = rems(14.);
@@ -29,7 +29,13 @@ pub(super) enum PortsScope {
 pub(super) struct DeviceForwards {
     link: Option<Arc<StreamLink>>,
     entries: Vec<ForwardEntry>,
+    /// Terminal images' hold on the link, taken by the first fetch and kept until the
+    /// Device is ended, rather than one per fetch (ADR 0065).
+    images: ImageHold,
 }
+
+/// See [`DeviceForwards::image_hold`].
+pub(super) type ImageHold = Arc<Mutex<Option<Retained>>>;
 
 struct ForwardEntry {
     forward: Forward,
@@ -71,6 +77,10 @@ impl DeviceForwards {
     /// the address the Device has then.
     pub(super) fn end(&mut self) {
         self.entries.clear();
+        self.images
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
         if let Some(link) = self.link.take() {
             link.set_terminal_connected(false);
         }
@@ -87,6 +97,11 @@ impl DeviceForwards {
             self.link
                 .get_or_insert_with(|| super::transfers::new_link(device, endpoint, events)),
         )
+    }
+
+    /// Where the first terminal image fetch keeps its hold on the link.
+    pub(super) fn image_hold(&self) -> ImageHold {
+        Arc::clone(&self.images)
     }
 
     fn status(&self) -> LinkStatus {
@@ -747,32 +762,6 @@ impl Condr {
         } else {
             button.label(count.to_string()).into_any_element()
         }
-    }
-}
-
-/// A remote Device header's button: that Device's forwards. Free of `self`, since the
-/// header is drawn from a closure the sidebar calls again on every frame.
-pub(super) fn device_ports_button(
-    key: ConnectionKey,
-    count: usize,
-    owner: WeakEntity<Condr>,
-) -> AnyElement {
-    let button = Button::new(("device-ports", key))
-        .debug_selector(move || format!("device-ports-{key}"))
-        .ghost()
-        .small()
-        .icon(Icon::new(CondrIconName::ArrowLeftRight))
-        .tooltip("Ports on this Device")
-        .on_click(move |_, window, cx| {
-            cx.stop_propagation();
-            let _ = owner.update(cx, |this, cx| {
-                this.open_ports(PortsScope::Device(key), window, cx)
-            });
-        });
-    if count == 0 {
-        button.into_any_element()
-    } else {
-        button.label(count.to_string()).into_any_element()
     }
 }
 

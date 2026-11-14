@@ -10,7 +10,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 rust-version = "1.99"
 license = "Apache-2.0"
@@ -45,10 +45,18 @@ gpui-pre-http-client-tls = "0.3"
 # The Preview Tab's line diff for its change marks (ADR 0050); Kit already builds it into
 # the GUI for its `Diff`, so this adds no code. Keep it on Kit's version.
 similar = "2.7"
+# The Command Palette's fuzzy matching and its highlights (ADR 0064).
+nucleo-matcher = { version = "0.3", default-features = false, features = ["unicode-normalization", "unicode-casefold"] }
+# Which Option key is held, for Option as Meta on one side only (ADR 0063): GPUI's
+# modifiers do not tell left from right. Kit already builds it for GPUI's macOS backend;
+# keep it on Kit's version.
+objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["std", "CGEventSource", "CGEventTypes"] }
 # Reads GPUI's `AsyncBody`, a `futures::AsyncRead`; already built for GPUI.
 futures-lite = "2"
 gpui-fps = "0.6"
 image = { version = "0.25.10", default-features = false, features = ["bmp", "png"] }
+# Kitty graphics (ADR 0065): the VT decodes a program's PNG and the Server encodes images.
+png = "0.18"
 serde = { version = "1.0", features = ["derive"] }
 # preserve_order: hook installers rewrite the user's settings.json and must not reorder it.
 serde_json = { version = "1.0", features = ["preserve_order"] }

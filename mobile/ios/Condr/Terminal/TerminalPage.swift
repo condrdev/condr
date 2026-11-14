@@ -11,6 +11,9 @@ struct TerminalPage: View {
     struct Grid: Hashable {
         let rows: Int
         let columns: Int
+        /// A cell in device pixels, which programs size images by (ADR 0065).
+        let cellWidth: Int
+        let cellHeight: Int
     }
 
     let ref: PaneRef
@@ -31,7 +34,11 @@ struct TerminalPage: View {
         {
             TerminalHost(
                 screen: session.screen, fontSize: preferences.fontSize,
-                grid: { rows, columns in grid = Grid(rows: rows, columns: columns) },
+                grid: { rows, columns, cell in
+                    grid = Grid(
+                        rows: rows, columns: columns, cellWidth: Int(cell.width),
+                        cellHeight: Int(cell.height))
+                },
                 session: session,
                 open: { UIApplication.shared.open($0) },
                 idleTap: { focused = false }
@@ -59,10 +66,12 @@ struct TerminalPage: View {
                 try? await Task.sleep(for: .milliseconds(250))
                 guard !Task.isCancelled else { return }
                 session.show(
-                    ref, rows: UInt16(clamping: grid.rows), columns: UInt16(clamping: grid.columns))
+                    ref, rows: UInt16(clamping: grid.rows), columns: UInt16(clamping: grid.columns),
+                    cellWidth: UInt16(clamping: grid.cellWidth),
+                    cellHeight: UInt16(clamping: grid.cellHeight))
             }
             .onAppear {
-                session.show(ref, rows: 0, columns: 0)
+                session.show(ref, rows: 0, columns: 0, cellWidth: 0, cellHeight: 0)
                 if UserDefaults.standard.bool(forKey: "focus") { focused = true }
             }
             .onDisappear { session.hide(ref) }

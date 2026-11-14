@@ -1,57 +1,5 @@
 # Condr Roadmap
 
-> 最近核对：2026-10-26。本文只回答三个问题：现在有什么、接下来做什么、什么留到远期。功能细节以 [ADR](adr/)、[CONTEXT.md](../CONTEXT.md)、[Development Build](development-build.md) 和 [Releases](releases.md) 为准，不在这里重复。
-
-## 定位
-
-Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥有终端、Agent 和 Git 运行时，GUI 与 CLI 只是它的客户端。Agent 是终端里的可选进程，Condr 编排、呈现、通知，不自建对话循环。
-
-一句话闭环：选项目（可选 worktree）→ 并行跑多个原生 Agent CLI → 一眼看状态、随时介入 → 关窗口任务继续 → 重连恢复 → 收尾。
-
-Condr 要守住的差异是原生 GUI 而非 TUI、Windows 一等公民、Server 自带加密配对而非只靠 SSH、Git 侧栏与 Diff，不能被功能数量带偏。
-
-判断新事项的三个问题，按顺序问：
-
-1. 它让上面的闭环更快、更可靠或更安全吗？
-2. 它跨 Agent、跨平台、能被 GUI 和 CLI 共用吗？
-3. 它依赖尚未稳定的协议或权限模型吗？
-
-三问都过才排进近期；只过第一问的放到摩擦记录里等证据。
-
-## 现状（2026-10-26）
-
-单人维护，用 Condr 开发 Condr。MVP 七个阶段（GitHub #1–#16）已于 2026-08-30 关闭。0.1.0 于 2026-09-23 作为公开预览发布，到 2026-10-22 已发到 0.1.14。手机端 Companion 以自己的版本发布（ADR 0049），2026-10-23 为 0.1.15：iOS 经 TestFlight 公开测试，Android 以签名 APK 发布。Windows 和 macOS 的新机器已经只看文档走通了安装、连接远程 Device、多 worktree 与多 Agent、断开 GUI 后重连和 Server 重启。官网文档有中英两版，已没有施工中的页面。仓库尚无外部用户反馈，Issue tracker 为空。
-
-**已具备**
-
-| 领域 | 现状 |
-| --- | --- |
-| 运行时 | 一机一 Server（ADR 0013）；GUI 断开不影响 PTY 和 Agent；重连先取权威 Bootstrap 再订阅事件；Server 重启按 Session Snapshot 恢复结构并 resume 原生会话；可在登录时（Linux 为开机时）自启（ADR 0057），崩溃后由 Supervisor 重新拉起（ADR 0058）；当前 Workspace 和 Tab 是每个客户端自己的视图（ADR 0021），GUI 重启后恢复窗口、侧栏与视图（ADR 0023）；Windows 上每个 Terminal 的进程归属由 Job Object 决定（ADR 0030），Server 与 GUI 以桌面 shell 给的进程状态运行（ADR 0031） |
-| 终端 | libghostty-vt（Ghostty 的终端内核，ADR 0051）+ 自绘 GPUI 元素；颜色查询回答所选配色，程序的进度条与桌面通知（ADR 0054）；zsh/bash/fish 的 Shell 集成：提示符跳转与长命令通知（ADR 0055）；合并视觉流（ADR 0004）；kitty keyboard、OSC 7/52/777、图片粘贴（含远程，ADR 0012）；Server 侧选区（ADR 0008） |
-| Agent | 每种 CLI 一个规格模块，9 种完整支持，Kimi 仅识别（ADR 0035）；状态只来自 CLI 自己：会说 Program Status Protocol 的经 OSC 7501 上报（ADR 0044），否则靠 hooks 经 OSC 777 回写（ADR 0014）；`Blocked` 和 `Error` 带 `detail`，sidebar、OS 通知、CLI JSON 和左侧栏顶部跨 Device 的「Needs you」列表都显示它（ADR 0024）；完成、失败或需输入时发 OS 通知 |
-| Agent 驱动 | `condr workspace|tab|pane|agent` 全部 JSON 输出；内嵌 Skill（`condr --skill`）；`agent start|prompt|wait` 可跨 Pane 编排；`--device <name>` 直连保存的远程 Device，`device list` 与 `workspace list --all-devices` 汇总多机（ADR 0022） |
-| Git | gix 只读查询 + Managed Worktree；右侧栏 Changes 和 Files、Diff Tab、Preview Tab（ADR 0017/0018）；Changes 与 Diff Tab 可在对 HEAD 和对 base 分支之间切换，Condr 新建的 worktree 记下分叉时父 Workspace 的分支（ADR 0034）；Preview Tab 用 syntect 高亮，主题和字号在 Settings 里选（ADR 0032），渲染 Markdown、SVG 和常见图片，动图始终播放（ADR 0037），并能编辑保存；Files 能新建、重命名、删除条目并在系统文件管理器中显示（ADR 0045）；Diff Tab 可并排或单栏显示并折叠未改动的行，右侧栏的 History 列出提交并在 Diff Tab 打开其文件（ADR 0046）；Preview Tab 的 Source 在 gutter 和滚动条上标出改动的行（ADR 0050） |
-| 远程 | `ssh://` 转发远端私有 socket 并可拉起远端 Server（ADR 0015）；`tcp://` 走 `Noise_IKpsk2` 静态密钥 + 一次性 invite（ADR 0011）；`p2p://` 经 iroh 打洞或自建 relay 连 NAT 后的机器（ADR 0025/0026）；Settings 可签 invite、撤销设备；新建 Workspace 时可浏览远程 Device 的目录；机器唤醒后 GUI 重新探测每条连接；任一远程 Device 的端口可转发到本机（GUI 的 Ports 页面与 `condr port forward`），Files 可下载、上传单个文件（`condr file`），二者走每台 Device 一条单独的 Stream 连接，终端连接不受影响（ADR 0061） |
-| 移动端 | iOS 与 Android 的 Companion 共用一份 Rust 客户端库（ADR 0039），扫码或粘贴链接配对，经 `p2p://` 或 `tcp://` 连接（ADR 0040）；列出各 Device 的 Agent 与「Needs you」，打开的 Pane 是又一个窗口，能输入、滚动、选择并接管终端尺寸（ADR 0041）；App 锁可选；iPhone 在 Agent 完成、失败或进入 Blocked 时经 Condr Cloud 收到推送（ADR 0047） |
-| 诊断 | `tracing` 日志按天滚动写入 Log 目录，panic 带 backtrace（ADR 0019）；`condr server status --json` 报 uptime、各类计数、订阅客户端数和最近的 warn/error；三个带负载的 `cargo test` 分别量 VT 增量合并、monitor 按显示节拍发布和 GUI shaping 缓存 |
-| 发布 | nightly 与 `v*` 正式版共用一条流水线，产出 Linux x86_64/arm64、macOS arm64 与 Windows x86_64 的 desktop 与 headless 包（Windows 的 GUI 只有安装包）、校验和、安装脚本；macOS 包以 Developer ID 签名并公证；release notes 由 git-cliff 从 `feat`/`fix` 提交生成；GUI 按渠道检查新版本并提示，不自动安装（ADR 0029），更新后提示重启本机旧版 Server；协议按字段号演进，CI 对 `proto/` 跑 `buf lint` 和 `buf breaking`（ADR 0027/0028）；Companion 有自己的版本与 `companion-v*` 发布（ADR 0049） |
-| 文档 | condr.dev 中英双语：入门、使用、参考、帮助四组页面，含 CLI、配置与快捷键参考，故障排查、安全模型、架构说明和 Windows SmartScreen 放行步骤，以及手机端与隐私政策页 |
-
-**代码里确实没有的**
-
-- 可观测性：上面三个基准各自在进程内跑，整条 PTY → GPUI 链路的帧率仍靠 Windows 上手工观察。
-- 授权：认证即拥有整个 Session；唯一的分级是"只有 Local/SSH 连接能管理 Server"（ADR 0036 已去掉 controller 租约）。没有 capability，密钥也没有进 Keychain。invite 里的 `<server key>` 是 `Noise_IK` 握手的输入，Client 只对它加密第一条消息，所以 invite 本身就是信任锚，不需要再做首连指纹确认。
-- Windows 代码签名（SmartScreen）。
-- Diff Tab 的语法高亮：GPUI Kit 已在上游合入 Diff 的高亮器接口（gpui-kit#3618），等含它的版本发到 crates.io 再接 `syntax.rs`（ADR 0046）。
-- Android 的推送：Firebase 项目还没建，发布的 APK 不含 `google-services.json`，所以收不到推送，只在前台更新。
-- 终端内搜索。
-- 协议兼容窗口的长度尚未决定。ADR 0028 原定在首个正式版时决定；Releases 目前只写了 Client 与 Server 不承诺跨 build 兼容，需要一起更新。首个正式版把协议升到 `2`，定下两个最低版本，`WatchTerminals` 是第一个受门控的消息；在那之前，iOS 的 Companion 经 TestFlight 公开链接分发，Android 以签名 APK 在 GitHub Releases 的 Companion 版本中发布（ADR 0049）；App Store 与 Google Play 随首个正式版上架（ADR 0041）。
-
-**已知限制**（出现摩擦再立 Issue）：
-
-- kitty keyboard 协议可协商（Claude Code 请求标志 5，Codex 请求 7），按下、重复与松开都会上报；但不上报单独的修饰键、小键盘键和标志 8 下普通文字键的松开。
-- OpenCode、Cursor 和 Antigravity 还没跑过真实会话；OMP、Grok 和 Copilot 只在 Linux 上验证过。OSC 支持范围没有对照表。
-
 ## 近期方向
 
 按优先级排列。每项写清为什么、做到哪、什么时候停。
@@ -100,21 +48,13 @@ Condr 要守住的差异是原生 GUI 而非 TUI、Windows 一等公民、Server
 
 **做到哪**：回滚内容只在 Server 的 VT 里，所以搜索是一个协议请求，由 Server 在 VT 上查找并返回匹配的位置，GUI 高亮并滚动过去。CLI 可以用同一个请求。
 
-**停在哪**：只在当前 Pane 里搜索，不做跨 Pane 或跨 Workspace 的搜索。命令面板和文件快速打开不做。
-
-### 转发与文件传输
-
-**为什么**：Agent 在远端 Workspace 里起了前端 dev server，用户要在本机浏览器看效果；Agent 写出了报告、构建产物或截图，用户要拿到本机；用户手上有 Agent 需要的文件。今天只有 SSH Device 能靠手敲 `ssh -L` 转发，TCP 与 Peer-to-peer Device 什么都做不了，文件只能借终端想办法。"看见 Agent 做出来的东西"是介入和收尾闭环的一部分。
-
-**做到哪**（按 [ADR 0061](adr/0061-streams-carry-port-forwarding-and-file-transfer.md) 的 Delivery）：第 1–5 步已于 2026-11-05 合并，即 Stream 连接、`condr port forward`、GUI 的 Ports 页面、`condr file`、Files 的下载上传与传输条；第 6 步的 `--skill`、CONTEXT.md、官网与 SECURITY.md 也已完成。还剩 Windows 手动验收：限速 10 Mbit/s 边下载边打字，看 ping 的增量是否超过 100 ms，并确认 Windows SSH 的第二次登录、从 Explorer 拖入、Ports 页面与传输条。
-
-**停在哪**：只转发到远端 Server 本机的回环地址，本机 listener 只绑回环；转发不跨 GUI 运行保存。只传单个文件，限 Workspace 之内，不做目录、断点续传或同步。不做反向转发、UDP、两台远端 Device 之间互传、拖文件进远程终端，也不做手机端的转发与传输。远程贴图仍按 ADR 0012 走终端连接。慢链路上传输会让终端变慢，10 Mbit/s 下每个进行中的传输最多约 0.8 秒，两条连接挤在同一条 TCP（用户自己的 SSH master、走 Relay）时可达数秒；若 Windows 验收里 ping 的增量超过 100 ms，再做按延迟收放窗口。
+**停在哪**：只在当前 Pane 里搜索，不做跨 Pane 或跨 Workspace 的搜索，不做文件快速打开。
 
 ### 探测 Workspace 里的端口
 
 **为什么**：转发要用户自己知道端口号。Server 已有按平台实现的进程表（Agent 检测用），加一步"该进程树在监听哪些端口"是同一条路；探测到的端口点一下就转发，不必再看终端里打出的地址。
 
-**做到哪**（落地前先写 ADR，排在"转发与文件传输"之后）：Server 在进程表变化时查 Pane 进程树的监听端口（Linux `/proc/net/tcp*`，macOS `proc_pidfdinfo`，Windows `GetExtendedTcpTable`），作为 Pane 状态经事件下发；GUI 在 Pane 上显示端口徽标，Ports 页面列出探测到、尚未转发的端口，点一下即调用 ADR 0061 的转发；`condr pane|workspace` 的 JSON 携带端口。
+**做到哪**（落地前先写 ADR）：Server 在进程表变化时查 Pane 进程树的监听端口（Linux `/proc/net/tcp*`，macOS `proc_pidfdinfo`，Windows `GetExtendedTcpTable`），作为 Pane 状态经事件下发；GUI 在 Pane 上显示端口徽标，Ports 页面列出探测到、尚未转发的端口，点一下即调用 ADR 0061 的转发；`condr pane|workspace` 的 JSON 携带端口。
 
 **停在哪**：不自动转发探测到的端口（默认只列出，点了才转），不解析进程输出里的 URL。
 
@@ -146,7 +86,7 @@ ADR 要回答三个问题：
 2. CLI：`condr workspace create` 能新建 Managed Worktree，同样可选起点，并可在新 Workspace 的第一个 Pane 里启动 Agent、发出第一条提示；JSON 返回新的 Workspace 与 Pane。内嵌 Skill 写上“一个 Agent 一个 worktree”的编排方式。
 3. 初始化：仓库里一份可以提交的声明，写明要从父仓库复制的被忽略文件（考虑沿用 `.worktreeinclude` 的写法）、setup 命令和 teardown 命令，从父仓库已提交的版本读取。Server 在 `CreateWorktree` 之后复制文件，在新 Workspace 的第一个 Pane 里执行 setup，输出留在终端里；要启动 Agent 的，等 setup 结束再启动。Remove Worktree 之前执行 teardown。这是在执行仓库里写下的命令，所以第一次执行和声明内容变化时都要用户确认，确认记在 Server 这台机器上；Windows 要有 PowerShell 的写法。
 
-**停在哪**：setup 失败不自动删除 worktree，输出留在 Pane 里给人看。不做后台服务的监管、端口分配或反向代理（端口见上一节）。不做一个任务在多个仓库各开一个 worktree（见“多仓库 Workspace 的 Changes”）。
+**停在哪**：setup 失败不自动删除 worktree，输出留在 Pane 里给人看。不做后台服务的监管、端口分配或反向代理（端口见“探测 Workspace 里的端口”）。不做一个任务在多个仓库各开一个 worktree（见“多仓库 Workspace 的 Changes”）。
 
 ### 公开预览收尾，拿到第一批外部用户
 
@@ -169,14 +109,6 @@ ADR 要回答三个问题：
 
 **停在哪**：只做 WSL 2。不自动在发行版里安装 `condr`，和 SSH 一样留给以后的远端安装。不做 Windows 与 WSL 之间的路径翻译。
 
-### 自定义快捷键
-
-**为什么**：窗口快捷键在终端之前处理，而且写死在代码里，和终端程序或用户的习惯冲突时只能改源码。macOS 上 Option 不能当 Meta 用，shell 的 `Option + B/F` 和 Claude Code 的 `meta+p` 都按不出来，快捷键参考里写明了这一点。
-
-**做到哪**：`config.toml` 的 `[client]` 下按动作名重绑或解绑快捷键，Settings 里可以改，快捷键参考页列出全部动作名。macOS 增加“Option 作为 Meta”的开关，左右 Option 可以分开设。
-
-**停在哪**：不做 `when` 条件表达式和多键序列。不改终端里程序自己的按键。
-
 ### 多仓库 Workspace 的 Changes
 
 **为什么**：常见的做法是把几个仓库放在一个父目录下，一起交给 Agent。今天只有 Workspace 在某个仓库里时才有 Changes，父目录本身不是仓库，右侧栏就只剩 Files。
@@ -187,7 +119,7 @@ ADR 要回答三个问题：
 
 ## 按摩擦记录再做
 
-这些都通过了第一问，但还没有足够的使用证据；出现两次以上真实摩擦再排。外部用户的 Issue 和单人 dogfood 一样算数。
+这些还没有足够的使用证据；出现两次以上真实摩擦再排。外部用户的 Issue 和单人 dogfood 一样算数。
 
 - Diff Tab 内跳到编辑器。
 - GUI 里启动 Agent 的菜单：列出这台 Device 上装了哪些 Agent，点一下就在 Pane 里启动。现在在终端里输入命令已经够快。真要做时，用协议里现成的 `AgentCommand::Available` 和 `Start`。
@@ -212,6 +144,7 @@ ADR 要回答三个问题：
 
 - 日常修复合入 `main` 即进入次日 Nightly；需要固定版本时按 [Releases](releases.md) 打 `v*` 标签。
 - 对外宣布之后正式版是否放慢，尚未决定。要权衡的是：每个正式版都会让 GUI 亮起更新提示，更新后还会提示重启旧版 Server，发得越勤，修复越快到用户手里，提示也越频繁。
-- 每个近期方向落地前先写 ADR，落地时同步更新 CONTEXT.md、AGENTS.md 与本文的现状表。
+- 首个稳定版（release gate）：定下协议兼容窗口，把协议升到 `2` 并定下两个最低版本，`WatchTerminals` 是第一个受门控的消息（ADR 0028、0041），Releases 里“不承诺跨 build 兼容”一起改；App Store 与 Google Play 随它上架。
+- 每个近期方向落地前先写 ADR，落地时同步更新 CONTEXT.md 与 AGENTS.md，并从本文删去这一项。
 - 本文每次重大方向变化时整体重写，不追加"已完成"段落；历史看 git log 和 ADR。
 

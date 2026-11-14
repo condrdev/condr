@@ -611,6 +611,7 @@ fn terminal_snapshot(pane_id: PaneId, text: String) -> PaneTerminalSnapshot {
                 hyperlink: None,
             }],
             cursor: None,
+            images: Vec::new(),
         }),
         exited: false,
         title: None,

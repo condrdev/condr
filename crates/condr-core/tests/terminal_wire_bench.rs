@@ -101,6 +101,7 @@ fn full(cells: &[TerminalCell]) -> PaneTerminalFrame {
             cells: cells.to_vec(),
             cursor: cursor(),
             selection: None,
+            images: Vec::new(),
         }),
     }
 }
@@ -122,6 +123,7 @@ fn delta(cells: &[TerminalCell], rows: &[usize]) -> PaneTerminalFrame {
                     cells: cells[row * COLUMNS..(row + 1) * COLUMNS].to_vec(),
                 })
                 .collect(),
+            images: None,
         }),
     }
 }

@@ -1,4 +1,5 @@
 use super::*;
+use gpui_kit::component::theme::ThemeMode;
 
 #[test]
 fn a_settings_draft_survives_failed_send_and_saved_feedback_stays_on_its_device() {
@@ -139,13 +140,13 @@ fn settings_pages_follow_the_device_and_the_proxy_reaches_only_this_machines_cli
         1
     );
     assert!(
-        settings.debug_bounds("terminal-color-scheme").is_none(),
+        settings.debug_bounds("dark-color-scheme").is_none(),
         "this machine opens on General"
     );
     settings.update(|_, cx| select_settings_page(&settings_view, 1, cx));
     settings.update(|window, cx| _ = window.draw(cx));
     assert!(
-        settings.debug_bounds("terminal-color-scheme").is_some(),
+        settings.debug_bounds("dark-color-scheme").is_some(),
         "Appearance comes next"
     );
 
@@ -156,7 +157,7 @@ fn settings_pages_follow_the_device_and_the_proxy_reaches_only_this_machines_cli
     });
     settings.update(|window, cx| _ = window.draw(cx));
     assert!(settings.debug_bounds("agent-hooks-claude-state").is_some());
-    assert!(settings.debug_bounds("terminal-color-scheme").is_none());
+    assert!(settings.debug_bounds("dark-color-scheme").is_none());
     settings.update(|_, cx| {
         view.update(cx, |this, _| {
             this.connection_mut(2).unwrap().status = ConnectionStatus::Disconnected;
@@ -396,50 +397,82 @@ fn the_terminal_settings_controls_drive_the_preferences_and_reset() {
             .and_then(|view| view.upgrade())
             .expect("the Settings window view is recorded")
     });
-    // Appearance, after this machine's General.
+    // Appearance, after this machine's General, tall enough to show the whole page.
+    settings.simulate_resize(size(px(864.), px(900.)));
     settings.update(|_, cx| select_settings_page(&settings_view, 1, cx));
     settings.update(|window, cx| _ = window.draw(cx));
-    let select_state = settings.read(|app| settings_view.read(app).color_scheme.clone());
+    let select_state = settings.read(|app| settings_view.read(app).dark_color_scheme.clone());
+    let palette = |window: &mut VisualTestContext| {
+        window.read(|app| app.global::<TerminalPalette>().background)
+    };
+    let set_mode = |window: &mut VisualTestContext, mode: &str| {
+        window.update(|_, cx| select_appearance(&owner, mode, cx));
+        window.run_until_parked();
+    };
+    set_mode(window, "dark");
 
-    // Colors: the real Select, opened by click, filtered by typing, confirmed by Enter.
+    // Dark colors: the real Select, opened by click, filtered by typing, confirmed by Enter.
     let select = settings
-        .debug_bounds("terminal-color-scheme")
-        .expect("the Colors select should render");
+        .debug_bounds("dark-color-scheme")
+        .expect("the Dark colors select should render");
+    // Both Selects stay inside the page, ending where the Font size stepper does.
+    let stepper = settings
+        .debug_bounds("terminal-font-size-increase")
+        .unwrap();
+    for selector in ["dark-color-scheme", "light-color-scheme"] {
+        let field = settings.debug_bounds(selector).unwrap();
+        assert!(
+            field.right() <= stepper.right() + px(1.),
+            "{selector} overflows the page: {field:?} past {stepper:?}"
+        );
+    }
     settings.simulate_click(select.center(), Modifiers::default());
     settings.run_until_parked();
     settings.simulate_input("Kanagawa Dragon");
     settings.simulate_keystrokes("enter");
     settings.run_until_parked();
     assert_eq!(
-        window.read(|app| view.read(app).terminal_color_scheme.clone()),
+        window.read(|app| view.read(app).dark_color_scheme.clone()),
         "Kanagawa Dragon",
         "confirming a scheme in the select must store it"
     );
     let expected = crate::color_scheme::palette("Kanagawa Dragon").unwrap();
     assert_eq!(
-        window.read(|app| app.global::<TerminalPalette>().background),
+        palette(window),
         expected.background,
         "the chosen scheme must reach the terminal palette"
     );
-    assert!(window.read(|app| color_scheme_is_dirty(&owner, app)));
+    assert_eq!(
+        window.read(|app| crate::terminal_element::rgb_value(app.theme().background)),
+        crate::terminal_element::rgb_value(expected.background),
+        "the interface must take its colours from the scheme"
+    );
+    assert!(window.read(|app| color_scheme_is_dirty(&owner, ThemeMode::Dark, app)));
+    assert!(!window.read(|app| color_scheme_is_dirty(&owner, ThemeMode::Light, app)));
 
-    // Reset All for Colors: preference and widget both return to Default.
-    settings.update(|window, cx| reset_color_scheme(&owner, &select_state, window, cx));
+    // Light mode shows the light scheme, its default here.
+    set_mode(window, "light");
+    let light_default = crate::color_scheme::palette("GitHub Light Default").unwrap();
+    assert_eq!(palette(window), light_default.background);
+
+    // Reset All for Dark colors: preference and widget both return to Default.
+    settings.update(|window, cx| {
+        reset_color_scheme(&owner, ThemeMode::Dark, &select_state, window, cx)
+    });
     settings.run_until_parked();
     assert_eq!(
-        window.read(|app| view.read(app).terminal_color_scheme.clone()),
+        window.read(|app| view.read(app).dark_color_scheme.clone()),
         ""
     );
-    assert!(!window.read(|app| color_scheme_is_dirty(&owner, app)));
+    assert!(!window.read(|app| color_scheme_is_dirty(&owner, ThemeMode::Dark, app)));
     assert_eq!(
         window.read(|app| select_state.read(app).selected_value().cloned()),
         Some("Default".into()),
         "the select must show Default after a reset"
     );
-    assert_eq!(
-        window.read(|app| app.global::<TerminalPalette>().background),
-        TerminalPalette::default().background
-    );
+    set_mode(window, "dark");
+    assert_eq!(palette(window), TerminalPalette::default().background);
+    set_mode(window, "system");
 
     // The Preview and Diff Colors: a Select of the same kind, reset back to Default.
     let code_select = settings.read(|app| settings_view.read(app).code_theme.clone());
@@ -1550,4 +1583,126 @@ fn closing_settings_leaves_the_terminal_taking_server_output() {
         }),
         "the terminal stopped taking Server output once Settings closed"
     );
+}
+
+/// A key recorded on the Shortcuts page drives the main window at once and lands in
+/// `[client.keybindings]` in place of the default; a key without a modifier is refused,
+/// Escape cancels without closing Settings, and reset brings the default back (ADR 0063).
+#[test]
+fn a_recorded_shortcut_drives_the_main_window_and_is_saved() {
+    let _serial_guard = acquire_visual_test_lock();
+    let directory = TestDirectory::new("recorded-shortcut");
+    let config_path = directory.0.join("config.toml");
+    let mut cx = TestAppContext::single();
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        super::super::super::startup::bind_keys(cx);
+    });
+    let (view, window, _server) = connected_condr(&mut cx);
+    let main_window = window.update(|window, _| window.window_handle());
+    let (old_key, new_key) = if cfg!(target_os = "macos") {
+        ("cmd-b", "cmd-k")
+    } else {
+        ("ctrl-shift-b", "ctrl-k")
+    };
+    let index = crate::app::keymap::all()
+        .position(|shortcut| shortcut.name == "toggle-sidebar")
+        .unwrap();
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| {
+            this.client_config_path = Some(config_path.clone());
+            this.open_settings(window, cx);
+        });
+    });
+    window.run_until_parked();
+    let settings_handle = window
+        .windows()
+        .into_iter()
+        .find(|handle| *handle != main_window)
+        .unwrap();
+    let settings = VisualTestContext::from_window(settings_handle, window).into_mut();
+    let settings_view = settings.read(|app| {
+        view.read(app)
+            .settings_view
+            .as_ref()
+            .and_then(|view| view.upgrade())
+            .unwrap()
+    });
+    // General, Appearance, Notifications, Power, then Shortcuts.
+    settings.update(|_, cx| select_settings_page(&settings_view, 4, cx));
+    settings.update(|window, cx| _ = window.draw(cx));
+    let edit = settings
+        .debug_bounds("shortcut-toggle-sidebar-edit")
+        .expect("the Shortcuts page lists Toggle sidebar");
+    settings.simulate_click(edit.center(), Modifiers::default());
+    assert_eq!(
+        settings.read(|app| settings_view.read(app).recording),
+        Some(index)
+    );
+
+    // Tapping a modifier alone is not a key: the row keeps waiting, with nothing to say.
+    settings.simulate_modifiers_change(Modifiers {
+        control: true,
+        ..Modifiers::default()
+    });
+    settings.simulate_modifiers_change(Modifiers::default());
+    assert_eq!(
+        settings.read(|app| settings_view.read(app).recording),
+        Some(index)
+    );
+    assert!(settings.read(|app| settings_view.read(app).refusal.is_none()));
+
+    settings.simulate_keystrokes("k");
+    let refused = settings.read(|app| settings_view.read(app).refusal.clone());
+    assert!(
+        refused.is_some_and(|(row, why)| row == index && why.starts_with("k needs")),
+        "a bare letter is refused under its row"
+    );
+    assert_eq!(
+        settings.read(|app| settings_view.read(app).recording),
+        Some(index),
+        "the row keeps waiting"
+    );
+    settings.simulate_keystrokes("escape");
+    assert_eq!(settings.read(|app| settings_view.read(app).recording), None);
+    assert_eq!(window.windows().len(), 2, "Escape cancels, not closes");
+
+    settings.update(|window, cx| _ = window.draw(cx));
+    settings.simulate_click(edit.center(), Modifiers::default());
+    settings.simulate_keystrokes(new_key);
+    assert_eq!(settings.read(|app| settings_view.read(app).recording), None);
+    let collapsed = |window: &mut VisualTestContext| {
+        window.read(|app| view.read(app).main_view().sidebar_collapsed)
+    };
+    assert!(!collapsed(window));
+    // As a Pane would be, something under the window's key context has focus.
+    window.update(|window, cx| {
+        let focus = view.read(cx).main_view().focus_handle.clone();
+        focus.focus(window, cx);
+    });
+    window.simulate_keystrokes(new_key);
+    assert!(collapsed(window), "the recorded key toggles the sidebar");
+    window.simulate_keystrokes(old_key);
+    assert!(
+        collapsed(window),
+        "the default key no longer does: the new one replaced it"
+    );
+    window.simulate_keystrokes(new_key);
+    assert!(!collapsed(window));
+    assert!(wait_until(window, |_| {
+        std::fs::read_to_string(&config_path)
+            .is_ok_and(|config| config.contains(&format!("toggle-sidebar = [\"{new_key}\"]")))
+    }));
+
+    window.update(|_, cx| view.update(cx, |this, cx| this.reset_shortcut(index, cx)));
+    window.simulate_keystrokes(new_key);
+    assert!(!collapsed(window), "reset drops the recorded key");
+    window.simulate_keystrokes(old_key);
+    assert!(collapsed(window), "and gives the default back");
+    assert!(wait_until(window, |_| {
+        std::fs::read_to_string(&config_path).is_ok_and(|config| !config.contains("toggle-sidebar"))
+    }));
+
+    settings.update(|window, _| window.remove_window());
+    window.run_until_parked();
 }

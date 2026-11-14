@@ -419,7 +419,7 @@ impl Condr {
         if should_defer_to_character_input(event) || window.has_active_dialog(cx) {
             return;
         }
-        if let Some(action) = fixed_shortcut(stroke) {
+        if let Some(action) = self.keymap.action_for(stroke) {
             window.dispatch_action(action, cx);
             cx.stop_propagation();
             return;
@@ -477,7 +477,7 @@ impl Condr {
             // GPUI hands it to the app first. No terminal program needs it.
             return;
         }
-        let key_code = terminal_key_for(stroke);
+        let key_code = terminal_key_for(stroke, self.option_as_meta.applies(modifiers));
         if let Some(key_code) = key_code {
             self.clear_selection(cx);
             self.restart_cursor_blink(key, pane_id, cx);
@@ -520,7 +520,8 @@ impl Condr {
             key,
             pane_id,
             TerminalCommand::Key {
-                key: terminal_key_for(stroke).unwrap_or(pressed),
+                key: terminal_key_for(stroke, self.option_as_meta.applies(stroke.modifiers))
+                    .unwrap_or(pressed),
                 modifiers: terminal_modifiers(stroke.modifiers),
                 kind: TerminalKeyEventKind::Release,
             },
@@ -538,14 +539,85 @@ fn terminal_modifiers(modifiers: Modifiers) -> TerminalModifiers {
     }
 }
 
+/// Which Option keys type Meta, Esc and the key, rather than the character macOS
+/// composes (`[client.terminal] macos_option_as_meta`, ADR 0063). Elsewhere Alt always
+/// is Meta.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum OptionAsMeta {
+    #[default]
+    Off,
+    Left,
+    Right,
+    Both,
+}
+
+impl OptionAsMeta {
+    pub(super) const ALL: [Self; 4] = [Self::Off, Self::Left, Self::Right, Self::Both];
+
+    pub(super) fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Left => "left",
+            Self::Right => "right",
+            Self::Both => "both",
+        }
+    }
+
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::Left => "Left Option",
+            Self::Right => "Right Option",
+            Self::Both => "Both",
+        }
+    }
+
+    /// An unknown value types characters, as Off does.
+    pub(super) fn from_str(value: &str) -> Self {
+        Self::ALL
+            .into_iter()
+            .find(|option| option.as_str() == value)
+            .unwrap_or_default()
+    }
+
+    /// Whether the Option held in `modifiers` types Meta.
+    pub(super) fn applies(self, modifiers: Modifiers) -> bool {
+        if !cfg!(target_os = "macos") || !modifiers.alt {
+            return false;
+        }
+        match self {
+            Self::Off => false,
+            Self::Both => true,
+            Self::Left => option_keys_held().0,
+            Self::Right => option_keys_held().1,
+        }
+    }
+}
+
+/// Whether the left and the right Option key are down. GPUI's modifiers have one Alt, so
+/// this asks the window server, whose flags still tell the two apart.
+#[cfg(target_os = "macos")]
+fn option_keys_held() -> (bool, bool) {
+    use objc2_core_graphics::{CGEventSource, CGEventSourceStateID};
+    let flags = CGEventSource::flags_state(CGEventSourceStateID::HIDSystemState).0;
+    // NX_DEVICELALTKEYMASK and NX_DEVICERALTKEYMASK, from IOLLEvent.h.
+    (flags & 0x20 != 0, flags & 0x40 != 0)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn option_keys_held() -> (bool, bool) {
+    (false, false)
+}
+
 /// The terminal key a GPUI keystroke stands for, or `None` when it is plain text (which
-/// arrives through the input handler) or not terminal input at all.
+/// arrives through the input handler) or not terminal input at all. `option_as_meta`
+/// sends an Option chord as Meta and the key, not the text Option composes.
 ///
 /// Platform notes: GPUI's `key` is the unshifted key name on every platform, `key_char` is
 /// what typing would produce. macOS fills `key_char` for Option chords ("ß" for option-s),
 /// so Option types characters like Terminal.app, iTerm2 and Zed do by default; Windows
 /// leaves `key_char` empty while Alt is held, so a shifted letter is uppercased here.
-pub(super) fn terminal_key_for(stroke: &Keystroke) -> Option<TerminalKey> {
+pub(super) fn terminal_key_for(stroke: &Keystroke, option_as_meta: bool) -> Option<TerminalKey> {
     let modifiers = stroke.modifiers;
     let named = match stroke.key.as_str() {
         "enter" => Some(TerminalKey::Enter),
@@ -576,6 +648,7 @@ pub(super) fn terminal_key_for(stroke: &Keystroke) -> Option<TerminalKey> {
     let printable = stroke
         .key_char
         .as_deref()
+        .filter(|_| !option_as_meta)
         .filter(|text| !text.is_empty() && text.chars().all(|ch| !ch.is_control()));
     if cfg!(target_os = "macos") && !modifiers.control && printable.is_some() {
         // Option produced text (ß, €, [ on non-US layouts, or a composed sequence): let

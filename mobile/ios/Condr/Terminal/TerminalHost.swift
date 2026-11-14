@@ -10,8 +10,9 @@ import SwiftUI
 struct TerminalHost: UIViewRepresentable {
     let screen: TerminalScreen?
     let fontSize: Double
-    /// The grid the view fits at its size and font, whenever either changes.
-    let grid: @MainActor (_ rows: Int, _ columns: Int) -> Void
+    /// The grid the view fits at its size and font, and a cell in device pixels, whenever
+    /// any of them changes.
+    let grid: @MainActor (_ rows: Int, _ columns: Int, _ cell: CGSize) -> Void
     /// Where the touches go.
     let session: Session
     let open: @MainActor (URL) -> Void
@@ -92,7 +93,11 @@ struct TerminalHost: UIViewRepresentable {
         var menu: UIEditMenuInteraction?
         private var encoder = ScreenEncoder()
         private var shown: TerminalScreen?
-        private var lastGrid: (rows: Int, columns: Int)?
+        private var lastGrid: (rows: Int, columns: Int, cell: CGSize)?
+        /// The kitty graphics images on screen (ADR 0065), over SwiftTerm's text in the
+        /// order they come, each decoded once while it stays on screen.
+        private let images = UIView()
+        private var decoded: [String: UIImage] = [:]
         /// Swipe distance not yet turned into lines, in points.
         private var dragged: CGFloat = 0
         /// Where a long press began, while its finger still moves the selection's end.
@@ -104,12 +109,55 @@ struct TerminalHost: UIViewRepresentable {
         }
 
         func show(_ screen: TerminalScreen?, in view: Surface) {
-            guard let screen, screen != shown else { return }
-            let dimensions = view.terminalDimensions
-            view.feed(
-                byteArray: encoder.encode(screen, rows: dimensions.rows, columns: dimensions.cols)[
-                    ...])
-            shown = screen
+            guard let screen else { return }
+            if screen != shown {
+                let dimensions = view.terminalDimensions
+                view.feed(
+                    byteArray: encoder.encode(
+                        screen, rows: dimensions.rows, columns: dimensions.cols)[...])
+                shown = screen
+            }
+            // An image's PNG may arrive with no new screen; drawing again picks it up.
+            draw(screen.images, in: view)
+        }
+
+        private func draw(_ placements: [ScreenImage], in view: Surface) {
+            if images.superview !== view {
+                images.isUserInteractionEnabled = false
+                view.addSubview(images)
+            }
+            images.frame = view.bounds
+            images.subviews.forEach { $0.removeFromSuperview() }
+            let cell = TerminalHost.cellSize(view.font, scale: view.traitCollection.displayScale)
+            var kept: [String: UIImage] = [:]
+            for placement in placements {
+                guard
+                    let image = decoded[placement.key]
+                        ?? host.session.terminalImage(placement.key).flatMap(UIImage.init(data:))
+                else { continue }
+                kept[placement.key] = image
+                let imageView = UIImageView(image: Self.crop(image, to: placement))
+                imageView.contentMode = .scaleToFill
+                imageView.frame = CGRect(
+                    x: placement.column * cell.width, y: placement.row * cell.height,
+                    width: placement.width * cell.width, height: placement.height * cell.height)
+                images.addSubview(imageView)
+            }
+            decoded = kept
+        }
+
+        /// The part of the image a placement shows.
+        private static func crop(_ image: UIImage, to placement: ScreenImage) -> UIImage {
+            guard let full = image.cgImage,
+                placement.sourceX > 0 || placement.sourceY > 0 || placement.sourceWidth < 1
+                    || placement.sourceHeight < 1
+            else { return image }
+            let (width, height) = (Double(full.width), Double(full.height))
+            let part = CGRect(
+                x: placement.sourceX * width, y: placement.sourceY * height,
+                width: placement.sourceWidth * width, height: placement.sourceHeight * height
+            ).integral
+            return full.cropping(to: part).map { UIImage(cgImage: $0) } ?? image
         }
 
         /// The cell under `point`, on the screen as last drawn.
@@ -129,9 +177,16 @@ struct TerminalHost: UIViewRepresentable {
                     view.feed(
                         byteArray: encoder.encode(screen, rows: newRows, columns: newCols)[...])
                 }
-                if lastGrid?.rows != newRows || lastGrid?.columns != newCols {
-                    lastGrid = (newRows, newCols)
-                    host.grid(newRows, newCols)
+                let scale = view.traitCollection.displayScale
+                let points = TerminalHost.cellSize(view.font, scale: scale)
+                let cell = CGSize(
+                    width: (points.width * scale).rounded(),
+                    height: (points.height * scale).rounded())
+                if lastGrid?.rows != newRows || lastGrid?.columns != newCols
+                    || lastGrid?.cell != cell
+                {
+                    lastGrid = (newRows, newCols, cell)
+                    host.grid(newRows, newCols, cell)
                 }
             }
         }

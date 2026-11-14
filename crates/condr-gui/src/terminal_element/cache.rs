@@ -30,6 +30,9 @@ pub(super) struct CachedShape {
     pub(super) used: u64,
 }
 
+/// An image placement's last drawn image, with the image's size.
+pub(super) type DrawnImage = ((u32, u32), std::sync::Arc<gpui_kit::RenderImage>);
+
 /// Entries unused for this many frames are dropped once the table grows past the grid.
 const SHAPE_CACHE_RETAIN_FRAMES: u64 = 120;
 
@@ -41,6 +44,10 @@ pub(crate) struct TerminalRenderCache {
     pub(super) cell_count: usize,
     /// Reused across frames so a redraw does not reallocate the positioned-cell list.
     pub(super) scratch_cells: Vec<ShapedCell>,
+    /// What each image placement drew last, by its place in the view's list, with the
+    /// image's size: an animation's next frame, still on its way, keeps the last one on
+    /// screen rather than a gap (ADR 0065).
+    pub(super) images: Vec<Option<DrawnImage>>,
     #[cfg(all(test, feature = "test-support"))]
     pub(super) shaped_cells: usize,
 }

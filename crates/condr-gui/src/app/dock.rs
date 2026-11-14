@@ -17,6 +17,9 @@ pub(super) struct DockSurface {
     pub(super) programmatic_layout_events: usize,
     pub(super) pending_projection_request: Option<u64>,
     pub(super) pending_projection_applied_sequence: Option<u64>,
+    /// The Pane this surface last gave the keyboard to. `terminal_input.target` already
+    /// names the new Pane by the time the Dock syncs, so it cannot tell that focus moved.
+    pub(super) keyboard_pane: Option<PaneId>,
     #[cfg(feature = "test-support")]
     pub(super) layout_size: Option<Size<Pixels>>,
 }
@@ -29,16 +32,25 @@ pub(super) struct DraggedPane {
     pub(super) pane_id: PaneId,
 }
 
+/// Half the 8px gap around and between the Panes' cards, in the colour of the bars around
+/// them. The Kit's split handles overlay the seam rather than take room, so the area and
+/// each Pane's slot both keep half of it.
+const HALF_GAP: Pixels = px(4.);
+/// A Pane card's corner radius.
+pub(super) const PANE_RADIUS: Pixels = px(8.);
+
 pub(super) struct CondrDockRenderer;
 
 impl DockAreaRenderer for CondrDockRenderer {
-    fn frame(&self, _: &mut Window, _: &mut App) -> Stateful<Div> {
+    fn frame(&self, _: &mut Window, cx: &mut App) -> Stateful<Div> {
         div()
             .id("condr-dock-area")
             .size_full()
             .overflow_hidden()
             .flex()
             .flex_row()
+            .p(HALF_GAP)
+            .bg(cx.theme().sidebar)
     }
 
     fn center_frame(&self, _: &mut Window, _: &mut App) -> Stateful<Div> {
@@ -70,8 +82,9 @@ impl DockAreaRenderer for CondrDockRenderer {
             .overflow_hidden()
     }
 
-    /// The Panes draw their own borders; the Kit's one-pixel divider sits on the seam
-    /// and paints over one pixel of them, so it only shows while a drag is under way.
+    /// The Kit straddles the handle on the seam between two slots, the middle of the gap
+    /// between their cards, and gives what is drawn here a one-pixel slot there: a line
+    /// that shows only while a drag is under way.
     fn render_split_handle(
         &self,
         handle: &gpui_kit::base::ResizeHandleContext,
@@ -80,6 +93,7 @@ impl DockAreaRenderer for CondrDockRenderer {
     ) -> Option<AnyElement> {
         Some(
             div()
+                .debug_selector(|| "pane-split-handle".into())
                 .flex_none()
                 .map(|this| match handle.axis() {
                     Axis::Horizontal => this.h_full().w(px(1.)),
@@ -106,6 +120,7 @@ impl TabGroupRenderer for CondrTabGroupRenderer {
     ) -> Stateful<Div> {
         div()
             .id("condr-tab-group")
+            .p(HALF_GAP)
             .size_full()
             .flex()
             .flex_col()
@@ -373,6 +388,7 @@ impl Condr {
                 programmatic_layout_events: 0,
                 pending_projection_request: None,
                 pending_projection_applied_sequence: None,
+                keyboard_pane: None,
                 #[cfg(feature = "test-support")]
                 layout_size: None,
             }
@@ -399,7 +415,8 @@ impl Condr {
 
         // Focus follows the presented Pane, not every rebuild: one for a Git refresh must
         // leave an open context menu or a sidebar field holding the keyboard.
-        let retargeted = (input_window && self.terminal_input.target != Some((key, focused)))
+        let retargeted = (input_window
+            && self.dock_surfaces[&surface_key].keyboard_pane != Some(focused))
             || shown_surface != Some(surface_key);
         if input_window {
             self.terminal_input.target = Some((key, focused));
@@ -442,6 +459,10 @@ impl Condr {
             }
         }
         if retargeted || needs_rebuild {
+            self.dock_surfaces
+                .get_mut(&surface_key)
+                .expect("Dock surface was installed")
+                .keyboard_pane = Some(focused);
             self.focus_pane_panel(surface_key, focused, window, cx);
         }
     }

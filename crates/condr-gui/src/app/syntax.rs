@@ -156,10 +156,16 @@ pub(crate) fn apply_code_theme(cx: &mut App) {
     };
     let chosen = theme(&code.name, GuiTheme::global(cx).is_dark());
     code.painting.set(chosen);
+    let default = code.name.is_empty();
 
     let gui = GuiTheme::global_mut(cx);
     let mut highlight = (*gui.highlight_theme).clone();
-    let background = chosen.settings.background.map(hsla);
+    // Default sits on the interface's own surface (ADR 0062); a named theme brings its own.
+    let background = if default {
+        Some(gui.background)
+    } else {
+        chosen.settings.background.map(hsla)
+    };
     highlight.style.editor_background = background;
     highlight.style.editor_gutter_background = background;
     highlight.style.editor_foreground = chosen.settings.foreground.map(text_color);

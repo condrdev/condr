@@ -17,6 +17,7 @@ use super::super::changes::SidebarView;
 use super::super::history::DiffCommit;
 use super::super::ports::PortsScope;
 use super::super::transfers::TransferState;
+use super::super::window_view::WindowScope;
 use super::*;
 use condr_core::protocol::{
     LayoutCommand, LayoutResult, RelativePathBuf, ServerMessage, SessionEvent,
@@ -344,6 +345,61 @@ pub(crate) fn run(directory: PathBuf) {
         "transfers",
         (1280. - 320., 36., 320., 764.),
     );
+
+    // Two screens: the main window with its agents and Changes, and beside it the Diff Tab in a
+    // window of its own, as it would sit on a second display (ADR 0043).
+    update(&mut cx, window, &view, |this, window, cx| {
+        this.select_workspace(1, condr, window, cx);
+        this.files_view
+            .sidebar_views
+            .insert((1, condr), SidebarView::Changes);
+        this.show_diff_on(1, condr, RelativePathBuf::from(DEMO_FILE), window, cx);
+    });
+    // Before: the Diff Tab still in the main window, where the website's animation starts.
+    settle(&mut cx);
+    stage(&mut cx, window, &view, &staged);
+    let mut image = capture(&mut cx, window);
+    let scale = image.width() as f32 / 1280.;
+    traffic_lights(&mut image, scale);
+    save(
+        &image,
+        &directory,
+        "screen-main-diff",
+        (0., 0., 1280., 800.),
+    );
+    let diff_tab = cx.read(|app| {
+        let connection = view.read(app).connection(1).unwrap();
+        connection.session().unwrap().diff_tab(condr).unwrap().id()
+    });
+    update(&mut cx, window, &view, move |this, window, cx| {
+        this.open_in_new_window(WindowScope::Tab(1, diff_tab), window, cx)
+    });
+    wait(&mut cx, "the Diff Tab has its window", |app| {
+        view.read(app)
+            .window_for(WindowScope::Tab(1, diff_tab))
+            .is_some()
+    });
+    let detached = cx.read(|app| {
+        view.read(app)
+            .window_for(WindowScope::Tab(1, diff_tab))
+            .unwrap()
+    });
+    update(&mut cx, window, &view, |this, window, cx| {
+        this.show_view(1, condr, Some(condr_tab));
+        this.rebuild_dock(window, cx);
+    });
+    settle(&mut cx);
+    stage(&mut cx, window, &view, &staged);
+    for (name, shown) in [("screen-main", window), ("screen-diff", detached)] {
+        let mut image = capture(&mut cx, shown);
+        let scale = image.width() as f32 / 1280.;
+        traffic_lights(&mut image, scale);
+        // The detached window takes the main one's outer size, so it is a little taller.
+        save(&image, &directory, name, (0., 0., 1280., 800.));
+    }
+    update(&mut cx, detached, &view, |this, window, cx| {
+        this.bring_back_and_close(window, cx)
+    });
 
     // The hero: the whole window, larger so the Panes between the sidebars have room. It is a
     // window of its own, opened once this one is gone: a Server sizes a terminal for one client.

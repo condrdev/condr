@@ -5,6 +5,9 @@ pub(super) type SidebarClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut A
 
 pub(super) type SidebarDropHandler = Rc<dyn Fn(&DraggedWorkspace, &mut Window, &mut App)>;
 
+/// The space between a section's Workspaces, which a drop target there reaches into.
+const ROW_GAP: Rems = rems(0.25);
+
 pub(super) type SidebarServerDropHandler = Rc<dyn Fn(&DraggedServer, &mut Window, &mut App)>;
 
 pub(super) type SidebarSuffixBuilder = Rc<dyn Fn(&mut Window, &mut App) -> AnyElement>;
@@ -31,7 +34,6 @@ pub(in crate::app) struct CondrSidebarTreeItem {
     pub(super) disabled: bool,
     pub(super) context_menu: Option<SidebarContextMenuBuilder>,
     pub(super) drag: Option<DraggedWorkspace>,
-    pub(super) on_drop: Option<SidebarDropHandler>,
     /// Which side the insertion line shows on, when this item is the drop target.
     pub(super) drop_indicator: Option<bool>,
     pub(super) on_drop_move: Option<SidebarDropMoveHandler>,
@@ -69,7 +71,6 @@ impl CondrSidebarTreeItem {
             disabled: false,
             context_menu: None,
             drag: None,
-            on_drop: None,
             drop_indicator: None,
             on_drop_move: None,
         }
@@ -80,7 +81,8 @@ impl CondrSidebarTreeItem {
         self
     }
 
-    /// Shows the insertion line on `indicator`'s side and reports pointer halves.
+    /// Shows the insertion line on `indicator`'s side and reports pointer halves; the
+    /// section takes the drop (`CondrSidebarSection::on_workspace_drop`).
     pub(in crate::app) fn drop_target(
         mut self,
         indicator: Option<bool>,
@@ -88,14 +90,6 @@ impl CondrSidebarTreeItem {
     ) -> Self {
         self.drop_indicator = indicator;
         self.on_drop_move = Some(Rc::new(on_move));
-        self
-    }
-
-    pub(in crate::app) fn on_drop(
-        mut self,
-        handler: impl Fn(&DraggedWorkspace, &mut Window, &mut App) + 'static,
-    ) -> Self {
-        self.on_drop = Some(Rc::new(handler));
         self
     }
 
@@ -184,7 +178,6 @@ impl CondrSidebarTreeItem {
             disabled,
             context_menu,
             drag,
-            on_drop,
             drop_indicator,
             on_drop_move,
         } = self;
@@ -382,29 +375,15 @@ impl CondrSidebarTreeItem {
             })
             .when_some(drag, |this, drag| {
                 let name = drag.name.clone();
-                this.on_drag(drag, move |_, _, _, cx| {
+                this.on_drag(drag, move |_, offset, _, cx| {
                     cx.stop_propagation();
                     cx.new(|_| DragPreview {
                         icon: Some(IconName::Folder),
                         name: name.clone(),
+                        offset,
                     })
                 })
-            })
-            .when_some(on_drop, |this, on_drop| {
-                this.on_drop(move |dragged: &DraggedWorkspace, window, cx| {
-                    on_drop(dragged, window, cx)
-                })
             });
-        let row = match on_drop_move {
-            Some(on_move) => attach_drop_target::<DraggedWorkspace, _>(
-                row,
-                false,
-                drop_indicator,
-                move |half, cx| on_move(half, cx),
-                cx,
-            ),
-            None => row,
-        };
         let row = if let Some(context_menu) = context_menu {
             row.context_menu(move |menu, window, cx| context_menu(menu, window, cx))
                 .into_any_element()
@@ -412,22 +391,32 @@ impl CondrSidebarTreeItem {
             row.into_any_element()
         };
 
-        v_flex()
-            .w_full()
-            .child(row)
-            .when(show_children, |this| {
-                this.child(
-                    v_flex()
-                        .border_l_1()
-                        .border_color(cx.theme().sidebar_border)
-                        .gap_1()
-                        .ml_3p5()
-                        .pl_2p5()
-                        .py_0p5()
-                        .children(rendered_children),
-                )
-            })
-            .into_any_element()
+        let item = v_flex().w_full().child(row).when(show_children, |this| {
+            this.child(
+                v_flex()
+                    .border_l_1()
+                    .border_color(cx.theme().sidebar_border)
+                    .gap_1()
+                    .ml_3p5()
+                    .pl_2p5()
+                    .py_0p5()
+                    .children(rendered_children),
+            )
+        });
+        // The row and its open Agents are one target, so the slot after an open Workspace
+        // and before the next one is the same line.
+        match on_drop_move {
+            Some(on_move) => attach_drop_target::<DraggedWorkspace, _>(
+                item,
+                false,
+                ROW_GAP.to_pixels(window.rem_size()),
+                drop_indicator,
+                move |half, cx| on_move(half, cx),
+                cx,
+            )
+            .into_any_element(),
+            None => item.into_any_element(),
+        }
     }
 }
 
@@ -443,12 +432,16 @@ pub(in crate::app) struct CondrSidebarSection {
     pub(super) context_menu: Option<SidebarContextMenuBuilder>,
     pub(super) drag: Option<DraggedServer>,
     pub(super) on_drop: Option<SidebarServerDropHandler>,
+    /// Takes a Workspace let go anywhere over the section, gaps between rows included.
+    pub(super) on_workspace_drop: Option<SidebarDropHandler>,
     pub(super) drop_indicator: Option<bool>,
     pub(super) on_drop_move: Option<SidebarDropMoveHandler>,
     /// Whether the heading folds its items away, and the handler that flips it.
     pub(super) fold: Option<(bool, SharedString, SidebarClickHandler)>,
     /// Shown beside the label while folded: the hidden agents counted by state.
     pub(super) summary: Vec<(SidebarStatusVisual, usize)>,
+    /// Shown before the label, where hovering the heading reveals the fold chevron.
+    pub(super) status: Option<SidebarSuffixBuilder>,
 }
 
 impl CondrSidebarSection {
@@ -469,15 +462,17 @@ impl CondrSidebarSection {
             context_menu: None,
             drag: None,
             on_drop: None,
+            on_workspace_drop: None,
             drop_indicator: None,
             on_drop_move: None,
             fold: None,
             summary: Vec::new(),
+            status: None,
         }
     }
 
-    /// A chevron before the label folds the items away; it shows while the heading is
-    /// hovered, and always once folded, so a folded section reads as one.
+    /// A chevron before the label folds the items away. With a status it shows while the
+    /// heading is hovered, in the status's place, as a Workspace row's does over its icon.
     pub(in crate::app) fn foldable(
         mut self,
         folded: bool,
@@ -485,6 +480,14 @@ impl CondrSidebarSection {
         on_toggle: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
         self.fold = Some((folded, selector.into(), Rc::new(on_toggle)));
+        self
+    }
+
+    pub(in crate::app) fn status(
+        mut self,
+        status: impl Fn(&mut Window, &mut App) -> AnyElement + 'static,
+    ) -> Self {
+        self.status = Some(Rc::new(status));
         self
     }
 
@@ -514,6 +517,14 @@ impl CondrSidebarSection {
         handler: impl Fn(&DraggedServer, &mut Window, &mut App) + 'static,
     ) -> Self {
         self.on_drop = Some(Rc::new(handler));
+        self
+    }
+
+    pub(in crate::app) fn on_workspace_drop(
+        mut self,
+        handler: impl Fn(&DraggedWorkspace, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_workspace_drop = Some(Rc::new(handler));
         self
     }
 
@@ -560,7 +571,6 @@ impl SidebarItem for CondrSidebarSection {
         let heading_row_debug_selector =
             SharedString::from(format!("{}-row", self.heading_selector));
         let heading_debug_selector = self.heading_selector.clone();
-        let group = self.heading_selector.clone();
         let folded = self.fold.as_ref().is_some_and(|(folded, ..)| *folded);
         let rendered_items = if folded {
             Vec::new()
@@ -573,7 +583,7 @@ impl SidebarItem for CondrSidebarSection {
         let label = self.label.clone();
         let chevron = self.fold.map(|(folded, selector, on_toggle)| {
             let debug_selector = selector.clone();
-            let button = Button::new(ElementId::Name(selector))
+            Button::new(ElementId::Name(selector))
                 .debug_selector(move || debug_selector.to_string())
                 .xsmall()
                 .ghost()
@@ -590,15 +600,44 @@ impl SidebarItem for CondrSidebarSection {
                 .on_click(move |event, window, cx| {
                     cx.stop_propagation();
                     on_toggle(event, window, cx);
-                });
-            div()
-                .flex_none()
-                .when(!folded, |this| {
-                    this.opacity(0.)
-                        .group_hover(group.clone(), |style| style.opacity(1.))
                 })
-                .child(button)
         });
+        let group = self.heading_selector.clone();
+        // The status and the chevron share one slot; hovering the heading swaps them.
+        let slot = match (self.status.map(|status| status(window, cx)), chevron) {
+            (Some(status), Some(chevron)) => Some(
+                div()
+                    .relative()
+                    .flex_none()
+                    .size_5()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        div()
+                            .group_hover(group.clone(), |style| style.opacity(0.))
+                            .child(status),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .opacity(0.)
+                            .group_hover(group.clone(), |style| style.opacity(1.))
+                            .child(chevron),
+                    )
+                    .into_any_element(),
+            ),
+            (status, chevron) => status.or(chevron.map(IntoElement::into_any_element)),
+        };
+        let label = div()
+            .min_w_0()
+            .truncate()
+            .debug_selector(move || heading_debug_selector.to_string())
+            .child(self.label);
         let summary = (folded && !self.summary.is_empty())
             .then(|| super::status_counts(&self.summary, cx).font_normal());
 
@@ -610,27 +649,23 @@ impl SidebarItem for CondrSidebarSection {
             .flex_shrink_0()
             .items_center()
             .justify_between()
-            .pl_1()
+            .px_1()
+            .rounded(cx.theme().radius)
             // A Device heading stands apart from the Workspace rows' detail lines, which
             // share its size, by weight alone.
             .text_xs()
             .font_semibold()
             .text_color(cx.theme().sidebar_foreground.opacity(0.7))
-            .when(self.active, |this| {
-                this.text_color(cx.theme().sidebar_foreground)
-            })
-            .group(group.clone())
+            // Selected and hovered as a Workspace row is.
+            .map(|this| row_highlight(this, self.active, cx))
+            .group(group)
             .child(
                 h_flex()
                     .min_w_0()
                     .items_center()
                     .gap_1()
-                    .children(chevron)
-                    .child(
-                        div()
-                            .debug_selector(move || heading_debug_selector.to_string())
-                            .child(self.label),
-                    )
+                    .children(slot)
+                    .child(label)
                     .children(summary),
             )
             .child((self.action)(window, cx))
@@ -639,11 +674,12 @@ impl SidebarItem for CondrSidebarSection {
             })
             .when_some(self.drag, |this, drag| {
                 let name = drag.name.clone();
-                this.on_drag(drag, move |_, _, _, cx| {
+                this.on_drag(drag, move |_, offset, _, cx| {
                     cx.stop_propagation();
                     cx.new(|_| DragPreview {
                         icon: None,
                         name: name.clone(),
+                        offset,
                     })
                 })
             });
@@ -659,9 +695,11 @@ impl SidebarItem for CondrSidebarSection {
         // above its heading or below its last Workspace.
         let section = v_flex().relative().pb_3();
         let section = match self.on_drop_move {
+            // Sections follow one another with no space between.
             Some(on_move) => attach_drop_target::<DraggedServer, _>(
                 section,
                 false,
+                px(0.),
                 self.drop_indicator,
                 move |half, cx| on_move(half, cx),
                 cx,
@@ -674,9 +712,14 @@ impl SidebarItem for CondrSidebarSection {
                     on_drop(dragged, window, cx)
                 })
             })
+            .when_some(self.on_workspace_drop, |this, on_drop| {
+                this.on_drop(move |dragged: &DraggedWorkspace, window, cx| {
+                    on_drop(dragged, window, cx)
+                })
+            })
             .when(!self.collapsed, |this| {
                 this.child(heading)
-                    .child(v_flex().w_full().gap_1().children(rendered_items))
+                    .child(v_flex().w_full().gap(ROW_GAP).children(rendered_items))
             })
     }
 }

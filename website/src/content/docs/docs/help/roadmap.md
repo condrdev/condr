@@ -3,7 +3,7 @@ title: Roadmap
 description: What Condr builds next and in what order, what waits for more feedback, the longer-term plans, and the directions it will not take.
 ---
 
-Condr 0.1 is in Public Preview. This page lists what comes next; the order is the order of work, and no dates are promised. To push an item forward or ask for something new, describe your use case in [GitHub Issues](https://github.com/condrdev/condr/issues).
+Condr is in Public Preview. This page lists what comes next; the order is the order of work, and no dates are promised. To push an item forward or ask for something new, describe your use case in [GitHub Issues](https://github.com/condrdev/condr/issues).
 
 ---
 
@@ -25,15 +25,27 @@ Condr will officially support more popular Agent CLIs, each marked fully support
 
 Search the current Pane's terminal, including what has scrolled off screen, with matches highlighted and scrolled into view.
 
-### Port detection and forwarding
+### Port detection
 
-When an Agent starts a dev server in a Workspace, Condr shows the ports it listens on, on the Workspace and the Pane. On a Device connected over SSH, clicking a port forwards it to this machine and opens it in your browser.
+When an Agent starts a dev server in a Workspace, Condr shows the ports it listens on, on its Pane and on the **Ports** page. On a remote Device, clicking one forwards it to this machine.
 
 ### GitHub integration
 
 A Workspace shows the GitHub PR for its current branch, with the PR's state and CI check results; clicking opens it in your browser. Enter a PR number or link to check that PR out as a Managed Worktree. Once a PR is merged, Condr suggests removing its worktree but never deletes it on its own.
 
 Creating, merging and reviewing PRs stay with the Agent and `gh`.
+
+### Worktrees ready to use
+
+A new Managed Worktree can start from any branch, including one that exists only on the remote, and `condr workspace create` can make one and start an Agent in it with a first prompt. A file committed to the repository names the ignored files to copy from the parent, such as `.env`, and the commands that set the worktree up and tear it down; Condr asks you before running them the first time and whenever they change.
+
+### WSL distributions as Devices
+
+On Windows, a WSL 2 distribution connects as a Device of its own, so Agents running in it are recognized and report their state, and Git works on the Linux side. **Connect Remote Device** lists the distributions installed on this machine.
+
+### Changes across several repositories
+
+A Workspace opened on a folder that holds several repositories shows Changes and History for each repository one level down, grouped by repository.
 
 ---
 
@@ -44,7 +56,6 @@ These are under consideration but need more real use cases before they are sched
 - **Jump from a Diff Tab to your editor**: open the current file in an external editor straight from the Diff Tab.
 - **Start an Agent from the GUI**: list the Agents installed on a Device and start one in a Pane with a click.
 - **Scheduled tasks**: start an Agent on a schedule, or send a running Agent a prompt at set times.
-- **Port forwarding for TCP and Peer-to-peer Devices**: extend port forwarding to Devices not connected over SSH.
 
 ---
 
@@ -56,7 +67,7 @@ These will happen, but after everything above, and each waits for its own trigge
 | :--- | :--- |
 | Team collaboration and permissions | Several people really need to share one Server |
 | An editor | Reviewing changes often calls for quick code edits, and Open in cannot open a remote Device's files in a local editor |
-| A built-in browser | Once port forwarding ships, switching between the system browser and Condr is still a frequent annoyance |
+| A built-in browser | Switching between the system browser and Condr to check forwarded ports is still a frequent annoyance |
 | A task board | So many tasks run at once that the sidebar and the Needs you list can no longer keep track of them |
 
 ---

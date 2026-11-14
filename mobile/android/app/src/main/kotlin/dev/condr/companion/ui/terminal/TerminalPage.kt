@@ -124,7 +124,7 @@ fun TerminalPage(ref: PaneRef) {
     Box(Modifier.fillMaxSize().background(Color(TerminalPalette.BACKGROUND)))
     return
   }
-  var grid by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+  var grid by remember { mutableStateOf<Grid?>(null) }
   // The draft and Ctrl outlive a rotation.
   var text by rememberSaveable { mutableStateOf("") }
   var control by rememberSaveable { mutableStateOf(false) }
@@ -154,12 +154,18 @@ fun TerminalPage(ref: PaneRef) {
   // The grid settles after the keyboard, a rotation or a pinch; one Resize then, not one per
   // frame of the animation (ADR 0041).
   LaunchedEffect(grid) {
-    val (rows, columns) = grid ?: return@LaunchedEffect
+    val grid = grid ?: return@LaunchedEffect
     delay(250)
-    session.show(ref, rows.toUShort(), columns.toUShort())
+    session.show(
+      ref,
+      grid.rows.toUShort(),
+      grid.columns.toUShort(),
+      grid.cellWidth.toUShort(),
+      grid.cellHeight.toUShort(),
+    )
   }
   DisposableEffect(ref) {
-    session.show(ref, 0u, 0u)
+    session.show(ref, 0u, 0u, 0u, 0u)
     onDispose { session.hide(ref) }
   }
   LaunchedEffect(Unit) { if (stores.focus) focus.requestFocus() }
@@ -367,7 +373,10 @@ fun TerminalPage(ref: PaneRef) {
       TerminalCanvas(
         screen = screen,
         fontSizeSp = preferences.fontSize,
-        onGrid = { rows, columns -> grid = rows to columns },
+        onGrid = { rows, columns, cellWidth, cellHeight ->
+          grid = Grid(rows, columns, cellWidth, cellHeight)
+        },
+        image = session::terminalImage,
         touches =
           TerminalTouches(
             tap = { at, cell ->
@@ -520,3 +529,6 @@ private fun Modifier.pinchToSize(preferences: Preferences) =
       } while (event.changes.any { it.pressed })
     }
   }
+
+/** The grid the page fits, and a cell in pixels, which programs size images by (ADR 0065). */
+private data class Grid(val rows: Int, val columns: Int, val cellWidth: Int, val cellHeight: Int)

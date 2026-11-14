@@ -6,6 +6,8 @@ mod cursor_settle;
 #[cfg(feature = "runtime")]
 mod encode;
 #[cfg(feature = "runtime")]
+mod image;
+#[cfg(feature = "runtime")]
 mod input_queue;
 #[cfg(all(feature = "runtime", windows))]
 mod job;
@@ -52,10 +54,10 @@ pub use view::{
     CELL_WIDE, CELL_WIDTH, CELL_WRAPPED, DEFAULT_ANSI_COLORS, DEFAULT_BACKGROUND_COLOR,
     DEFAULT_CURSOR_COLOR, DEFAULT_FOREGROUND_COLOR, DETECTED_LINK_FLAG, TerminalCell,
     TerminalCellRun, TerminalColor, TerminalColors, TerminalCursor, TerminalCursorShape,
-    TerminalFrameError, TerminalHyperlinkBudget, TerminalMouseTracking, TerminalPosition,
-    TerminalProgress, TerminalProgressState, TerminalSelection, TerminalSelectionUnit,
-    TerminalSide, TerminalSize, TerminalUpdate, TerminalView, TerminalViewDelta, TerminalViewFrame,
-    default_indexed_color,
+    TerminalFrameError, TerminalHyperlinkBudget, TerminalImageKey, TerminalImageLayer,
+    TerminalImagePlacement, TerminalMouseTracking, TerminalPosition, TerminalProgress,
+    TerminalProgressState, TerminalSelection, TerminalSelectionUnit, TerminalSide, TerminalSize,
+    TerminalUpdate, TerminalView, TerminalViewDelta, TerminalViewFrame, default_indexed_color,
 };
 pub(crate) use view::{
     decode_position, decode_selection, decode_size, encode_position, encode_selection,
@@ -63,6 +65,8 @@ pub(crate) use view::{
 
 #[cfg(feature = "runtime")]
 pub use cursor_settle::CURSOR_POSITION_SETTLE;
+#[cfg(feature = "runtime")]
+pub use image::TerminalImage;
 #[cfg(feature = "runtime")]
 pub use launch::{ShellReadiness, TerminalLaunchProbe, clone_command};
 #[cfg(feature = "runtime")]
@@ -89,6 +93,8 @@ const MAX_TERMINAL_CELLS: usize = 65_536;
 const MAX_TERMINAL_CELL_TEXT_BYTES: usize = 256;
 const MAX_TERMINAL_HYPERLINK_URI_BYTES: usize = 8 * 1024;
 const MAX_TERMINAL_HYPERLINK_BYTES: usize = 4 * 1024 * 1024;
+/// The most image placements one view carries; a placeholder image is one per row.
+const MAX_TERMINAL_IMAGE_PLACEMENTS: usize = 4096;
 
 #[cfg(all(test, feature = "runtime"))]
 mod tests;

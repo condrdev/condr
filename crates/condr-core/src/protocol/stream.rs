@@ -3,7 +3,7 @@
 //! [`StreamClientMessage`] or [`StreamServerMessage`]. Both wrap a [`StreamMessage`],
 //! and each direction encodes only the members it may send.
 
-use crate::WorkspaceId;
+use crate::{TerminalImageKey, WorkspaceId};
 use relative_path::RelativePathBuf;
 use std::fmt;
 
@@ -30,6 +30,8 @@ pub enum StreamTarget {
         file: StreamFile,
         replace: bool,
     },
+    /// A terminal image's PNG, by the key its placements name (ADR 0065).
+    Image(TerminalImageKey),
     /// A target from a newer Client; the Server answers [`StreamError::Unsupported`].
     Unknown,
 }

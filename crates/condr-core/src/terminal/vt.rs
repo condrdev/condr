@@ -6,6 +6,7 @@ use super::view::blank_cell;
 use super::*;
 use condr_ghostty_vt::{self as ghostty, CellWidth, Color as VtColor, Event, Point, Underline};
 use smol_str::SmolStr;
+use std::collections::HashMap;
 use std::sync::LazyLock;
 
 /// How long a synchronized update (mode 2026) may hold frames before the Server shows
@@ -14,6 +15,12 @@ use std::sync::LazyLock;
 pub(super) const RENDER_HOLD_TIMEOUT: Duration = Duration::from_secs(1);
 /// Ghostty's default: history kept in the library's logical bytes, compressed when idle.
 const SCROLLBACK_BYTES: usize = 50_000_000;
+/// Kitty graphics storage for each screen (ADR 0065): a 4K screenshot and change, where
+/// one Server holds many Panes.
+const IMAGE_STORAGE_BYTES: u64 = 64 * 1024 * 1024;
+/// Images copied out for the Server and not yet taken; past this the oldest go, as a
+/// Pane nobody takes frames from must not grow without bound.
+const MAX_FRESH_IMAGE_BYTES: usize = 64 * 1024 * 1024;
 /// The most wheel steps one event reports, so a flung wheel cannot flood the program.
 pub(super) const MAX_MOUSE_WHEEL_STEPS: u16 = 64;
 /// alacritty's set without `:`, so a double-click keeps URLs and Windows paths whole.
@@ -72,6 +79,17 @@ pub(super) struct Vt {
     compression_seen: Option<u64>,
     /// The start of a hook event that the last read ended inside, kept for the next.
     hook_held: Vec<u8>,
+    /// The image placements as the render state last listed them, and that list's
+    /// generation; the library changes it only when the list changed.
+    images: Vec<TerminalImagePlacement>,
+    images_generation: Option<u64>,
+    /// The key and size of every image generation `images` names, hashed once.
+    image_keys: HashMap<u64, (TerminalImageKey, u32, u32)>,
+    /// Images first seen since the Server last took them, for its image cache.
+    fresh_images: Vec<TerminalImage>,
+    /// The clock animations run on, and when the next frame is due.
+    animation_epoch: Instant,
+    animation_due: Option<Instant>,
 }
 
 /// Where the next event `condr agent-hook` wrote is in `bytes`.
@@ -148,17 +166,26 @@ fn rgb(value: u32) -> ghostty::Rgb {
 
 impl Vt {
     pub(super) fn new(size: TerminalSize) -> io::Result<Self> {
+        Self::with_image_storage(size, IMAGE_STORAGE_BYTES)
+    }
+
+    pub(super) fn with_image_storage(size: TerminalSize, image_storage: u64) -> io::Result<Self> {
         let terminal = ghostty::Terminal::new(ghostty::Options {
             cols: size.columns.max(1),
             rows: size.rows.max(1),
             cell_width: u32::from(size.cell_width),
             cell_height: u32::from(size.cell_height),
             scrollback_bytes: SCROLLBACK_BYTES,
-            version: format!("Condr {}", env!("CARGO_PKG_VERSION")),
+            // Ghostty's core, which it is: programs that draw images decide by this name
+            // more than by the protocol's own query (ADR 0065).
+            version: format!("ghostty (Condr {})", env!("CARGO_PKG_VERSION")),
             terminfo_name: "xterm-256color".into(),
             // ConPTY keeps its own screen and does not pull history back on a resize.
             resize_pulls_scrollback: !cfg!(windows),
             colors: vt_colors(&TerminalColors::default()),
+            image_storage_bytes: image_storage,
+            // macOS puts `$TMPDIR` under /var/folders, where the library does not look.
+            image_temp_dir: std::env::temp_dir().to_string_lossy().into_owned(),
         })
         .map_err(other_error)?;
         let render = ghostty::RenderState::new().map_err(other_error)?;
@@ -172,6 +199,12 @@ impl Vt {
             held_since: None,
             compression_seen: None,
             hook_held: Vec::new(),
+            images: Vec::new(),
+            images_generation: None,
+            image_keys: HashMap::new(),
+            fresh_images: Vec::new(),
+            animation_epoch: Instant::now(),
+            animation_due: None,
         })
     }
 
@@ -679,6 +712,11 @@ impl Vt {
                 .hyperlink(Point::Viewport { x, y: u32::from(y) });
             cells[index].hyperlink = uri.map(SmolStr::from);
         }
+        let generation = self.render.image_placements_generation();
+        if self.images_generation != Some(generation) {
+            self.images_generation = Some(generation);
+            self.read_images();
+        }
         let display_offset = u32::try_from(self.display_offset()).unwrap_or(u32::MAX);
         let mut view = TerminalView {
             revision,
@@ -688,6 +726,7 @@ impl Vt {
             cells,
             cursor: self.cursor(size),
             selection: self.viewport_selection(&selected, size, display_offset),
+            images: self.images.clone(),
         };
         detect_links(&mut view);
         let mut hyperlinks = Hyperlinks::default();
@@ -698,6 +737,91 @@ impl Vt {
                 .and_then(|uri| hyperlinks.intern(&uri));
         }
         view
+    }
+
+    /// Reads the placements the render state lists, keying each image generation the
+    /// first time it shows and copying its pixels out for the Server.
+    fn read_images(&mut self) {
+        let mut keys = HashMap::new();
+        let mut images = Vec::new();
+        for placement in self.render.image_placements() {
+            if images.len() == MAX_TERMINAL_IMAGE_PLACEMENTS {
+                break;
+            }
+            let known = match self.image_keys.get(&placement.generation) {
+                Some(known) => *known,
+                None => {
+                    let Some(image) = self.terminal.image(placement.image_id) else {
+                        continue;
+                    };
+                    let image = TerminalImage::new(
+                        image.width,
+                        image.height,
+                        image.format.channels() as u8,
+                        image.pixels.to_vec(),
+                    );
+                    let known = (image.key, image.width, image.height);
+                    self.keep_fresh(image);
+                    known
+                }
+            };
+            keys.insert(placement.generation, known);
+            let (key, image_width, image_height) = known;
+            images.push(TerminalImagePlacement {
+                image: key,
+                image_width,
+                image_height,
+                layer: match placement.layer {
+                    ghostty::ImageLayer::BelowBackground => TerminalImageLayer::BelowBackground,
+                    ghostty::ImageLayer::BelowText => TerminalImageLayer::BelowText,
+                    ghostty::ImageLayer::AboveText => TerminalImageLayer::AboveText,
+                },
+                z: placement.z,
+                row: placement.row,
+                column: placement.column,
+                offset_x: placement.offset_x,
+                offset_y: placement.offset_y,
+                width: placement.width,
+                height: placement.height,
+                source_x: placement.source_x,
+                source_y: placement.source_y,
+                source_width: placement.source_width,
+                source_height: placement.source_height,
+            });
+        }
+        self.image_keys = keys;
+        self.images = images;
+    }
+
+    fn keep_fresh(&mut self, image: TerminalImage) {
+        self.fresh_images.push(image);
+        let mut bytes: usize = self.fresh_images.iter().map(TerminalImage::len).sum();
+        while bytes > MAX_FRESH_IMAGE_BYTES && self.fresh_images.len() > 1 {
+            bytes -= self.fresh_images.remove(0).len();
+        }
+    }
+
+    /// The images first shown since the last call, for the Server's image cache.
+    pub(super) fn take_images(&mut self) -> Vec<TerminalImage> {
+        std::mem::take(&mut self.fresh_images)
+    }
+
+    /// Moves playing animations on to the frame now due and returns how long until the
+    /// next, or `None` when nothing plays.
+    pub(super) fn tick_animations(&mut self) -> Option<Duration> {
+        let now = self.animation_epoch.elapsed();
+        let now_ms = u64::try_from(now.as_millis()).unwrap_or(u64::MAX);
+        let next = self.terminal.animation_tick(now_ms);
+        self.animation_due = next.map(|next| self.animation_epoch + Duration::from_millis(next));
+        next.map(|next| Duration::from_millis(next.saturating_sub(now_ms)))
+    }
+
+    /// How long until an animation's next frame is due, once one has ticked.
+    pub(super) fn animation_remaining(&self) -> Option<Duration> {
+        Some(
+            self.animation_due?
+                .saturating_duration_since(Instant::now()),
+        )
     }
 
     fn cursor(&self, size: TerminalSize) -> Option<TerminalCursor> {
@@ -821,6 +945,9 @@ impl Hyperlinks {
         Some(uri)
     }
 }
+
+/// The private-use character a kitty graphics placeholder cell starts with.
+const KITTY_PLACEHOLDER: char = '\u{10EEEE}';
 
 /// Kitty keyboard flags: disambiguate escape codes, and report every key as one.
 const KITTY_DISAMBIGUATE: u8 = 1;
@@ -983,9 +1110,10 @@ fn terminal_cell(cell: &ghostty::Cell<'_>, colors: &Colors) -> TerminalCell {
 }
 
 /// The cell's grapheme cluster, a space when it holds none, cut at a character boundary
-/// within the wire's limit.
+/// within the wire's limit. A kitty placeholder cell is blank too: the render state
+/// already resolved the image it shows, so the Client needs none of it (ADR 0065).
 pub(super) fn cell_text(text: &str) -> SmolStr {
-    if text.is_empty() {
+    if text.is_empty() || text.starts_with(KITTY_PLACEHOLDER) {
         return SmolStr::new_static(" ");
     }
     let mut end = text.len().min(MAX_TERMINAL_CELL_TEXT_BYTES);

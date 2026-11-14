@@ -1,4 +1,6 @@
+use super::images::IMAGES;
 use super::*;
+use condr_core::TerminalImageKey;
 use std::panic::{self, AssertUnwindSafe};
 
 pub(super) fn monitor_terminal(monitor: TerminalMonitor) {
@@ -73,11 +75,20 @@ fn publish_frames(
         .unwrap_or_else(Instant::now);
     // Output since the scrollback was last compressed to the end.
     let mut compression_pending = true;
+    // The images the Pane shows now, kept fresh in the image cache (ADR 0065).
+    let mut shown: Vec<TerminalImageKey> = Vec::new();
     loop {
-        // A held cursor move or an open synchronized update times out without new output.
-        // An idle Pane looks again only while its scrollback may still be compressed (ADR
-        // 0051) or a progress may time out (ADR 0054); otherwise it sleeps until output.
-        let wait = view_source.frame_wakeup();
+        // A held cursor move or an open synchronized update times out without new output,
+        // as does an animation's next frame while a Client watches (ADR 0065). An idle
+        // Pane looks again only while its scrollback may still be compressed (ADR 0051)
+        // or a progress may time out (ADR 0054); otherwise it sleeps until output.
+        let watched = state.lock().or_abort().pane_watched(pane_id);
+        let animation = watched.then(|| view_source.animation_wakeup()).flatten();
+        let wait = view_source
+            .frame_wakeup()
+            .into_iter()
+            .chain(animation)
+            .min();
         let idle = compression_pending
             .then_some(condr_core::TERMINAL_IDLE_CHECK)
             .into_iter()
@@ -119,9 +130,23 @@ fn publish_frames(
                 RuntimeState::panic_if_injected(state, "monitor", pane_id.as_u64());
                 // Full means a nudge is already pending; the probe reads the latest state.
                 let _ = activity.try_send(());
+                if watched {
+                    view_source.tick_animations();
+                }
                 let Some(frame) = view_source.take_frame() else {
                     continue;
                 };
+                for image in view_source.take_images() {
+                    IMAGES.insert(image);
+                }
+                let images = match &frame {
+                    TerminalViewFrame::Full(view) => Some(&view.images),
+                    TerminalViewFrame::Delta(delta) => delta.images.as_ref(),
+                };
+                if let Some(images) = images {
+                    shown = images.iter().map(|image| image.image).collect();
+                }
+                IMAGES.touch(&shown);
                 if !publish_terminal_frame(state, view_source, pane_id, instance_id, frame) {
                     return false;
                 }

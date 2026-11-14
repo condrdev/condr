@@ -7,6 +7,7 @@ mod apca;
 mod app;
 mod assets;
 mod color_scheme;
+mod interface_colors;
 mod terminal_element;
 
 pub(crate) use app::{Condr, ConnectionKey};

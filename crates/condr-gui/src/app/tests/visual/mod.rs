@@ -1,4 +1,5 @@
 mod changes;
+mod command_palette;
 mod connection;
 mod connection_lifecycle;
 mod dock;
@@ -227,6 +228,33 @@ fn terminal_contains(
                     .contains(expected)
             })
     })
+}
+
+/// Titles every Pane of the first Device the way a shell titles itself at its first prompt
+/// (bash does on Ubuntu, PowerShell on Windows), so each unnamed Tab is already as wide as
+/// it gets when a test measures it: a real title landing later cannot move what was measured.
+fn title_every_pane(window: &mut VisualTestContext, view: &Entity<Condr>, title: &str) {
+    let title = title.to_owned();
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            let connection = this.connection_mut(1).unwrap();
+            let panes: Vec<_> = connection
+                .session()
+                .map(|session| {
+                    session
+                        .workspaces()
+                        .iter()
+                        .flat_map(|workspace| workspace.tabs())
+                        .flat_map(|tab| tab.panes().iter().map(|pane| pane.id()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            for pane in panes {
+                connection.model.terminal_titles.insert(pane, title.clone());
+            }
+        });
+    });
+    window.update(|window, cx| _ = window.draw(cx));
 }
 
 fn tab_selector(tab_id: TabId) -> &'static str {

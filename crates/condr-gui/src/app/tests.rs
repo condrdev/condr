@@ -8,7 +8,7 @@ mod visual;
 
 use super::ClientTerminal;
 use super::terminal_input::{
-    PendingSize, clipboard_image_format, is_image_paste_gesture, next_hovered_link,
+    OptionAsMeta, PendingSize, clipboard_image_format, is_image_paste_gesture, next_hovered_link,
     prepare_clipboard_image, terminal_key_for,
 };
 use super::{
@@ -17,9 +17,8 @@ use super::{
     ServerConnection, SidebarGlyph, SidebarIconTone, SplitDown, SplitRight, TAB_MODIFIER,
     TerminalClipboardShortcut, ToggleChanges, ToggleSidebar, ToggleZoom, accepted_text_input,
     agent_sidebar_status, agent_status_summary, clear_pending_sizes_for_bootstrap,
-    connect_to_server_with, fixed_shortcut, lock_exclusively, reorder_connection,
-    should_defer_to_character_input, single_instance_lock_path, terminal_clipboard_shortcut,
-    upstream_counts,
+    connect_to_server_with, lock_exclusively, reorder_connection, should_defer_to_character_input,
+    single_instance_lock_path, terminal_clipboard_shortcut, upstream_counts,
 };
 use crate::terminal_element::HoveredTerminalLink;
 use condr_client::frames::read_bootstrap_batches;
@@ -35,6 +34,11 @@ use condr_core::{
 };
 use condr_server::{DeviceKey, Endpoint, TcpEndpoint};
 use gpui_kit::{AssetSource as _, KeyDownEvent, Keystroke, Task};
+
+/// The window action a terminal takes `stroke` for, with every shortcut at its default.
+fn default_shortcut(stroke: &Keystroke) -> Option<Box<dyn gpui_kit::Action>> {
+    super::keymap::Keymap::default().action_for(stroke)
+}
 
 /// Parses `keys` as this platform's keymap does, `secondary-` included.
 pub(super) fn keystroke(keys: &str) -> Keystroke {
@@ -97,6 +101,7 @@ fn terminal_view(revision: u64, text: &str) -> TerminalView {
         mouse_tracking: TerminalMouseTracking::None,
         cells,
         cursor: None,
+        images: Vec::new(),
     }
 }
 

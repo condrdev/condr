@@ -11,14 +11,17 @@
     clippy::all
 )]
 mod bindings;
+mod image;
 mod key;
 mod mouse;
 mod render;
 
+pub use image::{Image, ImageFormat};
 pub use key::{KeyAction, KeyEncoder, KeyEvent, Mods, PhysicalKey};
 pub use mouse::{MouseAction, MouseButton, MouseEncoder, MouseEvent};
 pub use render::{
-    Cell, CellWidth, Color, Cursor, CursorStyle, Dirty, RenderState, Row, Style, Underline,
+    Cell, CellWidth, Color, Cursor, CursorStyle, Dirty, ImageLayer, ImagePlacement, RenderState,
+    Row, Style, Underline,
 };
 
 use bindings as sys;
@@ -171,6 +174,12 @@ pub struct Options {
     /// Whether a resize pulls scrollback back onto the screen; ConPTY keeps its own.
     pub resize_pulls_scrollback: bool,
     pub colors: Colors,
+    /// Kitty graphics storage for each screen, in bytes; zero turns the protocol off and
+    /// leaves its queries unanswered (ADR 0065).
+    pub image_storage_bytes: u64,
+    /// The directory a temporary-file image may be read and deleted from, besides the
+    /// library's own `/tmp`, `/private/tmp` and `/dev/shm`.
+    pub image_temp_dir: String,
 }
 
 /// The colours a program's colour queries are answered with and its default and palette
@@ -322,7 +331,7 @@ unsafe impl Send for Terminal {}
 
 impl Terminal {
     pub fn new(options: Options) -> Result<Self, Error> {
-        route_library_log();
+        install_process_callbacks();
         let mut raw = ptr::null_mut();
         // SAFETY: a null allocator is the library's default; `raw` is read only once the
         // call succeeded.
@@ -341,9 +350,16 @@ impl Terminal {
             scheme: options.colors.scheme(),
             panics: 0,
         }));
-        let terminal = Self { raw, callbacks };
+        let mut terminal = Self { raw, callbacks };
         terminal.install(&options)?;
         terminal.apply_colors(&options.colors)?;
+        // Creation takes no cell size, and without one no image has a size to draw at.
+        terminal.resize(
+            options.cols,
+            options.rows,
+            options.cell_width,
+            options.cell_height,
+        )?;
         Ok(terminal)
     }
 
@@ -465,13 +481,35 @@ impl Terminal {
             Opt::GHOSTTY_TERMINAL_OPT_RESIZE_PULL_SCROLLBACK,
             (&raw const options.resize_pulls_scrollback).cast(),
         )?;
-        // Condr draws no images and no custom glyphs (ADR 0051): a storage limit of zero
-        // turns the kitty graphics protocol off, so a probe hears nothing back.
-        let no_images = 0u64;
+        // A storage limit of zero turns the kitty graphics protocol off, so a probe hears
+        // nothing back (ADR 0065). Every medium is read here, where the program runs.
         self.set(
             Opt::GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT,
-            (&raw const no_images).cast(),
+            (&raw const options.image_storage_bytes).cast(),
         )?;
+        if options.image_storage_bytes > 0 {
+            let on = true;
+            self.set(
+                Opt::GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_MEDIUM_FILE,
+                (&raw const on).cast(),
+            )?;
+            self.set(
+                Opt::GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_MEDIUM_SHARED_MEM,
+                (&raw const on).cast(),
+            )?;
+            if !options.image_temp_dir.is_empty() {
+                // The library copies the directory, so it need not outlive the call.
+                let dir = sys::GhosttyString {
+                    ptr: options.image_temp_dir.as_ptr(),
+                    len: options.image_temp_dir.len(),
+                };
+                self.set(
+                    Opt::GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_MEDIUM_TEMP_FILE,
+                    (&raw const dir).cast(),
+                )?;
+            }
+        }
+        // No custom glyphs (ADR 0051).
         let no_glyphs = false;
         self.set(
             Opt::GHOSTTY_TERMINAL_OPT_GLYPH_PROTOCOL,
@@ -940,12 +978,12 @@ unsafe fn take_allocated(text: *mut u8, len: usize) -> String {
     copied
 }
 
-/// Sends libghostty-vt's own log to `tracing` (ADR 0019), once per process. The parser
-/// logs what it skips sequence by sequence, so only an error stays above debug: a
-/// program's output cannot flood the log.
-fn route_library_log() {
-    static ROUTED: std::sync::Once = std::sync::Once::new();
-    ROUTED.call_once(|| {
+/// Sends libghostty-vt's own log to `tracing` (ADR 0019) and installs its PNG decoder
+/// (ADR 0065), once per process. The parser logs what it skips sequence by sequence, so
+/// only an error stays above debug: a program's output cannot flood the log.
+fn install_process_callbacks() {
+    static INSTALLED: std::sync::Once = std::sync::Once::new();
+    INSTALLED.call_once(|| {
         // SAFETY: a callback of the type the option names, safe to call from any thread.
         unsafe {
             sys::ghostty_sys_set(
@@ -953,6 +991,7 @@ fn route_library_log() {
                 library_log as *const c_void,
             );
         }
+        image::install_png_decoder();
     });
 }
 

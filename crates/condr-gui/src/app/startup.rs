@@ -5,10 +5,6 @@ use super::*;
 #[cfg(target_os = "macos")]
 use gpui_kit::component::input;
 
-thread_local! {
-    static FIXED_BINDINGS: Vec<KeyBinding> = fixed_bindings();
-}
-
 /// Cmd on macOS and Ctrl elsewhere, as `secondary-` was before `KeyBinding::new` stopped
 /// resolving it without an `App`.
 macro_rules! secondary {
@@ -21,121 +17,6 @@ macro_rules! secondary {
     };
 }
 
-/// Held with a digit to pick the Nth Tab: Cmd on macOS and Alt elsewhere.
-pub(super) const TAB_MODIFIER: &str = if cfg!(target_os = "macos") {
-    "cmd"
-} else {
-    "alt"
-};
-
-pub(super) fn fixed_shortcut(stroke: &Keystroke) -> Option<Box<dyn Action>> {
-    if stroke.modifiers.function {
-        return None;
-    }
-    let mut normalized = stroke.clone();
-    let modifiers = stroke.modifiers;
-    if !cfg!(target_os = "macos") && !modifiers.control && !modifiers.platform && modifiers.alt {
-        // Windows GPUI turns Shift+= / Shift+- into + / _ and clears Shift.
-        let key_char = stroke.key_char.as_deref();
-        if stroke.key == "+" || key_char == Some("+") {
-            normalized.key = "=".into();
-            normalized.modifiers.shift = true;
-        } else if stroke.key == "_" || key_char == Some("_") {
-            normalized.key = "-".into();
-            normalized.modifiers.shift = true;
-        }
-    }
-    if cfg!(target_os = "macos") && modifiers.platform && !modifiers.control && !modifiers.alt {
-        // GPUI may fold Cmd+Shift+] / [ into Cmd+} / {.
-        match stroke.key.as_str() {
-            "]" if modifiers.shift => normalized.key = "}".into(),
-            "[" if modifiers.shift => normalized.key = "{".into(),
-            _ => {}
-        }
-        if matches!(normalized.key.as_str(), "{" | "}") {
-            normalized.modifiers.shift = false;
-        }
-    }
-    // IME text is handled before this fallback; only the normalized command chord
-    // participates here, so produced text cannot strip Ctrl/Alt into another shortcut.
-    normalized.key_char = None;
-    FIXED_BINDINGS.with(|bindings| {
-        bindings
-            .iter()
-            .find(|binding| {
-                binding.match_keystrokes(std::slice::from_ref(&normalized)) == Some(false)
-            })
-            .map(|binding| binding.action().boxed_clone())
-    })
-}
-
-fn fixed_bindings() -> Vec<KeyBinding> {
-    let mut bindings = vec![
-        KeyBinding::new(secondary!(","), OpenSettings, Some("Condr")),
-        KeyBinding::new("ctrl-tab", NextTab, Some("Condr")),
-        KeyBinding::new("ctrl-shift-tab", PreviousTab, Some("Condr")),
-        // Workspaces stack vertically in the sidebar, so Up/Down walk them.
-        KeyBinding::new(secondary!("shift-up"), PreviousWorkspace, Some("Condr")),
-        KeyBinding::new(secondary!("shift-down"), NextWorkspace, Some("Condr")),
-    ];
-    bindings.extend((0..9).map(|index| {
-        KeyBinding::new(
-            // Nine short strings, once per thread.
-            format!("{TAB_MODIFIER}-{}", index + 1).leak(),
-            ActivateTab { index },
-            Some("Condr"),
-        )
-    }));
-    if cfg!(target_os = "macos") {
-        bindings.extend([
-            KeyBinding::new("cmd-t", NewTab, Some("Condr")),
-            KeyBinding::new("cmd-w", ClosePane, Some("Condr")),
-            KeyBinding::new("cmd-}", NextTab, Some("Condr")),
-            KeyBinding::new("cmd-{", PreviousTab, Some("Condr")),
-            KeyBinding::new("cmd-d", SplitRight, Some("Condr")),
-            KeyBinding::new("cmd-shift-d", SplitDown, Some("Condr")),
-            KeyBinding::new("cmd-alt-left", FocusLeft, Some("Condr")),
-            KeyBinding::new("cmd-alt-right", FocusRight, Some("Condr")),
-            KeyBinding::new("cmd-alt-up", FocusUp, Some("Condr")),
-            KeyBinding::new("cmd-alt-down", FocusDown, Some("Condr")),
-            KeyBinding::new("cmd-ctrl-left", ResizeLeft, Some("Condr")),
-            KeyBinding::new("cmd-ctrl-right", ResizeRight, Some("Condr")),
-            KeyBinding::new("cmd-ctrl-up", ResizeUp, Some("Condr")),
-            KeyBinding::new("cmd-ctrl-down", ResizeDown, Some("Condr")),
-            KeyBinding::new("cmd-shift-enter", ToggleZoom, Some("Condr")),
-            // VS Code's primary / secondary sidebar chords.
-            KeyBinding::new("cmd-b", ToggleSidebar, Some("Condr")),
-            KeyBinding::new("cmd-alt-b", ToggleChanges, Some("Condr")),
-            // The system chords every macOS app answers; the app menu shows them too.
-            KeyBinding::new("cmd-q", QuitApp, Some("Condr")),
-            KeyBinding::new("cmd-h", HideApp, Some("Condr")),
-            KeyBinding::new("cmd-alt-h", HideOtherApps, Some("Condr")),
-            KeyBinding::new("cmd-m", MinimizeWindow, Some("Condr")),
-            KeyBinding::new("cmd-ctrl-f", ToggleFullScreen, Some("Condr")),
-        ]);
-    } else {
-        bindings.extend([
-            KeyBinding::new("ctrl-shift-t", NewTab, Some("Condr")),
-            KeyBinding::new("ctrl-shift-w", ClosePane, Some("Condr")),
-            KeyBinding::new("alt-shift-=", SplitRight, Some("Condr")),
-            KeyBinding::new("alt-shift--", SplitDown, Some("Condr")),
-            KeyBinding::new("alt-left", FocusLeft, Some("Condr")),
-            KeyBinding::new("alt-right", FocusRight, Some("Condr")),
-            KeyBinding::new("alt-up", FocusUp, Some("Condr")),
-            KeyBinding::new("alt-down", FocusDown, Some("Condr")),
-            KeyBinding::new("alt-shift-left", ResizeLeft, Some("Condr")),
-            KeyBinding::new("alt-shift-right", ResizeRight, Some("Condr")),
-            KeyBinding::new("alt-shift-up", ResizeUp, Some("Condr")),
-            KeyBinding::new("alt-shift-down", ResizeDown, Some("Condr")),
-            KeyBinding::new("alt-shift-enter", ToggleZoom, Some("Condr")),
-            // Ctrl+B is the tmux prefix and readline's backward-char, so Shift joins it.
-            KeyBinding::new("ctrl-shift-b", ToggleSidebar, Some("Condr")),
-            KeyBinding::new("ctrl-alt-b", ToggleChanges, Some("Condr")),
-        ]);
-    }
-    bindings
-}
-
 pub(super) fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("tab", TerminalTab, Some("CondrTerminal")),
@@ -144,18 +25,26 @@ pub(super) fn bind_keys(cx: &mut App) {
     ]);
     cx.bind_keys(super::directory_browser::key_bindings());
     cx.bind_keys(super::new_workspace::key_bindings());
-    FIXED_BINDINGS.with(|bindings| cx.bind_keys(bindings.clone()));
+    cx.bind_keys(super::command_palette::key_bindings());
+    super::keymap::install(&super::keymap::Keymap::default(), cx);
 }
 
 /// The macOS menu bar. GPUI only answers Cmd+Q, Cmd+H and Cmd+M through menu items,
-/// so without these the system shortcuts do nothing; the key equivalents come from the
-/// bindings above. Quit runs the `on_app_quit` hooks, so pending config saves finish.
+/// so without these the system shortcuts do nothing. Quit runs the `on_app_quit` hooks,
+/// so pending config saves finish.
 #[cfg(target_os = "macos")]
 pub(super) fn install_app_menus(cx: &mut App) {
     cx.on_action(|_: &QuitApp, cx| cx.quit());
     cx.on_action(|_: &HideApp, cx| cx.hide());
     cx.on_action(|_: &HideOtherApps, cx| cx.hide_other_apps());
     cx.on_action(|_: &ShowAllApps, cx| cx.unhide_other_apps());
+    set_app_menus(cx);
+}
+
+/// The menus themselves, made again whenever the keymap changes: an item's key
+/// equivalent comes from the bindings when it is made.
+#[cfg(target_os = "macos")]
+pub(super) fn set_app_menus(cx: &mut App) {
     cx.set_menus([
         Menu::new(condr_core::APP_NAME).items([
             MenuItem::action("Settings…", OpenSettings),
@@ -190,6 +79,9 @@ pub(super) fn install_app_menus(cx: &mut App) {
 
 #[cfg(not(target_os = "macos"))]
 pub(super) fn install_app_menus(_cx: &mut App) {}
+
+#[cfg(not(target_os = "macos"))]
+pub(super) fn set_app_menus(_cx: &mut App) {}
 
 pub(super) fn connect_to_server_with<T>(
     endpoint: Endpoint,

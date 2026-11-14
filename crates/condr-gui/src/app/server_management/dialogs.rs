@@ -21,14 +21,14 @@ impl Condr {
         let ssh_owner = owner.clone();
         menu = menu.item(
             PopupMenuItem::new("SSH")
-                .icon(IconName::SquareTerminal)
+                .icon(menu_icon(IconName::SquareTerminal))
                 .on_click(move |_, window, cx| {
                     let _ = ssh_owner.update(cx, |this, cx| this.prompt_add_server_ssh(window, cx));
                 }),
         );
         menu.item(
             PopupMenuItem::new("Pairing link")
-                .icon(Icon::new(gpui_kit::assets::IconName::Link))
+                .icon(menu_icon(Icon::new(gpui_kit::assets::IconName::Link)))
                 .on_click(move |_, window, cx| {
                     let _ = owner.update(cx, |this, cx| this.prompt_add_server_link(window, cx));
                 }),

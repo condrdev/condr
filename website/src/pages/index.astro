@@ -11,6 +11,9 @@ import preview from '../../../assets/screenshots/preview.png';
 import history from '../../../assets/screenshots/history.png';
 import ports from '../../../assets/screenshots/ports.png';
 import transfers from '../../../assets/screenshots/transfers.png';
+import screenMain from '../../../assets/screenshots/screen-main.png';
+import screenDiff from '../../../assets/screenshots/screen-diff.png';
+import screenMainDiff from '../../../assets/screenshots/screen-main-diff.png';
 import Site from '../layouts/Site.astro';
 
 const phones = [
@@ -116,6 +119,29 @@ const methods = [
           <Image src={panes} alt="One Tab split three ways: Claude Code on the left, Codex top right and lazygit bottom right, all in the same worktree" widths={[640, 960, 1280, panes.width]} sizes="(max-width: 760px) 100vw, 850px" />
         </figure>
       </div>
+    </article>
+
+    <article class="showcase showcase-wide">
+      <div class="showcase-text">
+        <h3>One screen is not enough</h3>
+        <p>Open a Tab, a Workspace or a whole Device in a window of its own, from its menu or by dragging it out, and move it to another display.</p>
+      </div>
+      <!-- The Diff Tab leaves the main window for a second display and comes back (home.css, "Desk"). -->
+      <figure class="desk" aria-label="The Diff Tab leaves the main window for a window of its own on a second display, then comes back">
+        {[0, 1].map((i) => (
+          <div class={`monitor monitor-${i ? 'b' : 'a'}`}>
+            <div class="panel">
+              <div class="display">
+                {i === 0 && <Image class="shot" src={screenMain} alt="The main window: Claude Code, Codex and lazygit share a Tab beside the Changes list" widths={[640, 1080, 1280]} sizes="(max-width: 760px) 45vw, 540px" />}
+                {i === 0 && <Image class="shot shot-before" src={screenMainDiff} alt="" widths={[640, 1080, 1280]} sizes="(max-width: 760px) 45vw, 540px" />}
+              </div>
+            </div>
+            <div class="neck"></div>
+            <div class="foot"></div>
+          </div>
+        ))}
+        <Image class="window" src={screenDiff} alt="The Diff Tab in a window of its own on the second display, showing ports.rs side by side, with Bring Back in its title bar" widths={[640, 1080, 1280]} sizes="(max-width: 760px) 45vw, 540px" />
+      </figure>
     </article>
 
     <div class="features">
@@ -233,6 +259,12 @@ const methods = [
       }
       // Last, so what is already on screen never takes its hidden state.
       document.documentElement.classList.add("reveal-ready");
+    }
+
+    // The desk plays only while it can be seen.
+    {
+      const desk = document.querySelector<HTMLElement>(".desk")!;
+      new IntersectionObserver(([entry]) => desk.classList.toggle("playing", entry.isIntersecting), { threshold: 0.35 }).observe(desk);
     }
 
     // Switching the hero's screenshots dissolves one into the dot matrix the logo is drawn on and

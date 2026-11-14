@@ -3,6 +3,7 @@ mod icon;
 mod item;
 
 use super::*;
+use gpui_kit::component::kbd::Kbd;
 use item::*;
 
 pub(super) use drag_drop::*;
@@ -33,7 +34,10 @@ fn workspace_suffix(
 
 /// How a Pane's agent shows in the sidebar, the bell over its state while it wants a
 /// person; `None` when the Pane runs no agent.
-fn pane_sidebar_status(model: &SessionModel, pane_id: PaneId) -> Option<SidebarStatusVisual> {
+pub(super) fn pane_sidebar_status(
+    model: &SessionModel,
+    pane_id: PaneId,
+) -> Option<SidebarStatusVisual> {
     model.agents.get(&pane_id)?;
     let state = model.agent_display_state(pane_id)?;
     Some(if model.attention.contains(&pane_id) {
@@ -41,6 +45,95 @@ fn pane_sidebar_status(model: &SessionModel, pane_id: PaneId) -> Option<SidebarS
     } else {
         agent_sidebar_status(state)
     })
+}
+
+/// A Device's connection, before its name: plugged in green, amber with a spark while its
+/// Server runs another build (ADR 0027), amber and fading while it connects, unplugged
+/// grey, or red when the last try failed.
+pub(super) fn device_status(
+    key: ConnectionKey,
+    status: ConnectionStatus,
+    other_build: bool,
+    failed: bool,
+    cx: &App,
+) -> AnyElement {
+    let theme = cx.theme();
+    let (glyph, color) = match status {
+        ConnectionStatus::Connected if other_build => (Glyph::PlugZap, theme.warning),
+        ConnectionStatus::Connected => (Glyph::Plug, theme.success),
+        ConnectionStatus::Connecting => (Glyph::Plug, theme.warning),
+        ConnectionStatus::Disconnected if failed => (Glyph::Unplug, theme.danger),
+        ConnectionStatus::Disconnected => (Glyph::Unplug, theme.muted_foreground),
+    };
+    let icon = div()
+        .debug_selector(move || format!("device-status-{key}"))
+        .child(Icon::new(glyph).size_3p5().text_color(color));
+    if status == ConnectionStatus::Connecting {
+        fading(icon)
+    } else {
+        icon.into_any_element()
+    }
+}
+
+/// A mark at the Device heading's right end when there is something to act on: an amber
+/// triangle for another build (ADR 0027) that hides on click, or a red alert for a failed
+/// connection that connects on click. Hovering either says why.
+fn device_mark(
+    key: ConnectionKey,
+    status: ConnectionStatus,
+    build_notice: Option<String>,
+    failure: Option<String>,
+    owner: WeakEntity<Condr>,
+    cx: &App,
+) -> Option<AnyElement> {
+    let (id, glyph, color, tooltip) = match status {
+        ConnectionStatus::Connected => (
+            "build-notice",
+            Glyph::TriangleAlert,
+            cx.theme().warning,
+            format!("{}\nClick to dismiss.", build_notice?),
+        ),
+        ConnectionStatus::Disconnected => (
+            "connect-indicator",
+            Glyph::CircleAlert,
+            cx.theme().danger,
+            format!("Not connected: {}\nClick to connect.", failure?),
+        ),
+        ConnectionStatus::Connecting => return None,
+    };
+    Some(
+        Button::new((id, key))
+            .debug_selector(move || format!("{id}-{key}"))
+            .ghost()
+            .xsmall()
+            .compact()
+            .icon(Icon::new(glyph).text_color(color))
+            .tooltip(tooltip)
+            .on_click(move |_, window, cx| {
+                cx.stop_propagation();
+                let _ = owner.update(cx, |this, cx| {
+                    if status == ConnectionStatus::Connected {
+                        if let Some(connection) = this.connection_mut(key) {
+                            connection.build_notice_dismissed = true;
+                        }
+                        cx.notify();
+                    } else {
+                        this.connect_server(key, window, cx);
+                    }
+                });
+            })
+            .into_any_element(),
+    )
+}
+
+impl Condr {
+    fn toggle_device_fold(&mut self, key: ConnectionKey, cx: &mut Context<Self>) {
+        if !self.sidebar_folded_devices.remove(&key) {
+            self.sidebar_folded_devices.insert(key);
+        }
+        self.schedule_state_save(cx);
+        cx.notify();
+    }
 }
 
 /// Agents counted by state, `✓2 ◐1`: a folded Workspace's or a folded Device's.
@@ -54,7 +147,7 @@ fn status_counts(summary: &[(SidebarStatusVisual, usize)], cx: &App) -> Div {
             h_flex()
                 .items_center()
                 .gap_x_0p5()
-                .children(status_badge(status.glyph, status.tone, cx))
+                .children(status_badge(*status, cx))
                 .child(count.to_string())
         }))
 }
@@ -181,20 +274,11 @@ impl Condr {
                     .presented_session()
                     .map(|session| {
                         let active_workspace = self.presented_workspace_id(key, session);
-                        // Drop handlers need the source index of the dragged Workspace.
-                        let workspace_ids = Rc::new(
-                            session
-                                .workspaces()
-                                .iter()
-                                .map(|workspace| workspace.id())
-                                .collect::<Vec<_>>(),
-                        );
                         session
                             .workspaces()
                             .iter()
-                            .enumerate()
-                            .filter(|(_, workspace)| scope.lists_workspace(key, workspace.id()))
-                            .map(|(workspace_index, workspace)| {
+                            .filter(|workspace| scope.lists_workspace(key, workspace.id()))
+                            .map(|workspace| {
                                 let workspace_id = workspace.id();
                                 let workspace_name = workspace.name().to_owned();
                                 let git = connection.model.workspace_git.get(&workspace_id);
@@ -298,14 +382,12 @@ impl Condr {
                                 .children(agents)
                                 .disable(!connected)
                                 .when(connected, |item| {
-                                    let drop_owner = owner.clone();
                                     let move_owner = owner.clone();
                                     let target = DropTarget::Workspace {
                                         key,
                                         workspace_id,
                                         after: false,
                                     };
-                                    let workspace_ids = workspace_ids.clone();
                                     item.draggable(DraggedWorkspace {
                                         key,
                                         workspace_id,
@@ -316,33 +398,6 @@ impl Condr {
                                         move |half, cx| {
                                             let _ = move_owner.update(cx, |this, cx| {
                                                 this.set_drop_target(target, half, cx)
-                                            });
-                                        },
-                                    )
-                                    .on_drop(
-                                        move |dragged, _, cx| {
-                                            let _ = drop_owner.update(cx, |this, _| {
-                                                let after = this.take_drop_after(target);
-                                                if dragged.key != key {
-                                                    return;
-                                                }
-                                                let Some(source) = workspace_ids
-                                                    .iter()
-                                                    .position(|id| *id == dragged.workspace_id)
-                                                else {
-                                                    return;
-                                                };
-                                                if let Some(index) =
-                                                    drop_index(source, workspace_index, after)
-                                                {
-                                                    this.send_layout_to(
-                                                        key,
-                                                        LayoutCommand::MoveWorkspace {
-                                                            workspace_id: dragged.workspace_id,
-                                                            target_index: index as u32,
-                                                        },
-                                                    );
-                                                }
                                             });
                                         },
                                     )
@@ -360,7 +415,7 @@ impl Condr {
                                     let remove_name = workspace_name.clone();
                                     let menu = menu.item(
                                         PopupMenuItem::new("Rename Workspace")
-                                            .icon(Glyph::Pencil)
+                                            .icon(menu_icon(Glyph::Pencil))
                                             .disabled(!connected)
                                             .on_click(move |_, window, cx| {
                                                 let name = rename_name.clone();
@@ -380,7 +435,7 @@ impl Condr {
                                             menu.separator()
                                         .item(
                                             PopupMenuItem::new("Create Worktree")
-.icon(Glyph::GitBranchPlus)
+.icon(menu_icon(Glyph::GitBranchPlus))
                                                 .disabled(!connected)
                                                 .on_click(move |_, window, cx| {
                                                     let name = create_name.clone();
@@ -397,7 +452,7 @@ impl Condr {
                                         )
                                         .item(
                                             PopupMenuItem::new("Open Existing Worktree")
-.icon(Glyph::FolderGit2)
+.icon(menu_icon(Glyph::FolderGit2))
                                                 .disabled(!connected)
                                                 .on_click(move |_, window, cx| {
                                                     let name = open_name.clone();
@@ -418,7 +473,7 @@ impl Condr {
                                     let menu = if managed_worktree {
                                         menu.separator().item(
                                             PopupMenuItem::new("Remove Worktree")
-                                                .icon(Glyph::GitBranchMinus)
+                                                .icon(menu_icon(Glyph::GitBranchMinus))
                                                 .disabled(!connected)
                                                 .on_click(move |_, window, cx| {
                                                     let name = remove_name.clone();
@@ -438,7 +493,7 @@ impl Condr {
                                     };
                                     menu.item(
                                         PopupMenuItem::new("Open in New Window")
-                                            .icon(Glyph::AppWindow)
+                                            .icon(menu_icon(Glyph::AppWindow))
                                             .on_click(move |_, window, cx| {
                                                 let _ = detach_owner.update(cx, |this, cx| {
                                                     this.open_in_new_window(
@@ -452,7 +507,7 @@ impl Condr {
                                     .separator()
                                     .item(
                                         PopupMenuItem::new("Close Workspace")
-                                            .icon(IconName::Close)
+                                            .icon(menu_icon(IconName::Close))
                                             .disabled(!connected)
                                             .on_click(move |_, window, cx| {
                                                 let _ = close_owner.update(cx, |this, cx| {
@@ -489,11 +544,9 @@ impl Condr {
                 let connect_reason = connection.error.clone();
                 let build_notice = connection.build_notice();
                 let is_local = connection.endpoint.as_local_path().is_some();
-                let ports_count = connection.forwards.count();
-                let ports_owner = owner.clone();
                 let new_workspace_label = connection.label.clone();
-                let descendant_selected =
-                    workspaces.iter().any(CondrSidebarTreeItem::subtree_active);
+                let build_notice_shown = build_notice.is_some();
+                let failed = connect_reason.is_some();
                 let folded = self.sidebar_folded_devices.contains(&key);
                 // Folded, the heading counts what its Workspaces' rows would show.
                 let device_summary = if folded {
@@ -517,79 +570,17 @@ impl Condr {
                     move |_, cx| {
                         let owner = new_workspace_owner.clone();
                         let tooltip = format!("New Workspace on {new_workspace_label}");
-                        // A device that is not connected says so in its heading: red when
-                        // something failed, grey when the user disconnected, as on its page.
-                        // The mark tells why on hover and connects on click.
-                        let indicator = match status {
-                            // A connected Server of another build gets a mark that says which
-                            // side to update (ADR 0027); clicking it puts it away.
-                            ConnectionStatus::Connected => build_notice.clone().map(|notice| {
-                                let dismiss_owner = owner.clone();
-                                Button::new(("build-notice", key))
-                                    .debug_selector(move || format!("build-notice-{key}"))
-                                    .ghost()
-                                    .xsmall()
-                                    .compact()
-                                    .icon(
-                                        Icon::new(IconName::TriangleAlert)
-                                            .text_color(cx.theme().warning),
-                                    )
-                                    .tooltip(format!("{notice}\nClick to dismiss."))
-                                    .on_click(move |_, _, cx| {
-                                        let _ = dismiss_owner.update(cx, |this, cx| {
-                                            if let Some(connection) = this.connection_mut(key) {
-                                                connection.build_notice_dismissed = true;
-                                            }
-                                            cx.notify();
-                                        });
-                                    })
-                                    .into_any_element()
-                            }),
-                            ConnectionStatus::Connecting => {
-                                Some(Spinner::new().xsmall().into_any_element())
-                            }
-                            ConnectionStatus::Disconnected => {
-                                let connect_owner = owner.clone();
-                                let mark = match &connect_reason {
-                                    Some(_) => Icon::new(CondrIconName::CircleAlert)
-                                        .text_color(cx.theme().danger),
-                                    None => Icon::new(CondrIconName::Circle)
-                                        .text_color(cx.theme().muted_foreground),
-                                };
-                                let why = connect_reason.clone().map_or(
-                                    "Not connected. Click to connect.".to_owned(),
-                                    |reason| format!("Not connected: {reason}\nClick to connect."),
-                                );
-                                Some(
-                                    Button::new(("connect-indicator", key))
-                                        .debug_selector(move || format!("connect-indicator-{key}"))
-                                        .ghost()
-                                        .xsmall()
-                                        .compact()
-                                        .icon(mark)
-                                        .tooltip(why)
-                                        .on_click(move |_, window, cx| {
-                                            cx.stop_propagation();
-                                            let _ = connect_owner.update(cx, |this, cx| {
-                                                this.connect_server(key, window, cx)
-                                            });
-                                        })
-                                        .into_any_element(),
-                                )
-                            }
-                        };
                         h_flex()
                             .gap_1()
                             .items_center()
-                            .children(indicator)
-                            // Forwarding needs a remote Device; this one's ports are here.
-                            .when(!is_local, |row| {
-                                row.child(super::ports::device_ports_button(
-                                    key,
-                                    ports_count,
-                                    ports_owner.clone(),
-                                ))
-                            })
+                            .children(device_mark(
+                                key,
+                                status,
+                                build_notice.clone(),
+                                connect_reason.clone(),
+                                owner.clone(),
+                                cx,
+                            ))
                             .child(
                                 Button::new(("new-workspace", key))
                                     .debug_selector(move || format!("new-workspace-server-{key}"))
@@ -610,17 +601,12 @@ impl Condr {
                     workspaces,
                 )
                 .foldable(folded, format!("device-fold-{key}"), move |_, _, cx| {
-                    let _ = fold_owner.update(cx, |this, cx| {
-                        if !this.sidebar_folded_devices.remove(&key) {
-                            this.sidebar_folded_devices.insert(key);
-                        }
-                        this.schedule_state_save(cx);
-                        cx.notify();
-                    });
+                    let _ = fold_owner.update(cx, |this, cx| this.toggle_device_fold(key, cx));
                 })
+                .status(move |_, cx| device_status(key, status, build_notice_shown, failed, cx))
                 .summary(device_summary)
-                // Folded, the heading is the only sign that the shown Workspace is here.
-                .active(active_server && (folded || !descendant_selected))
+                // Selected as a Workspace row is: lit while it holds the shown Workspace.
+                .active(active_server)
                 .draggable(DraggedServer {
                     key,
                     name: connection.label.clone().into(),
@@ -642,6 +628,12 @@ impl Condr {
                         });
                     }
                 })
+                .on_workspace_drop({
+                    let drop_owner = owner.clone();
+                    move |dragged, _, cx| {
+                        let _ = drop_owner.update(cx, |this, _| this.drop_workspace(dragged));
+                    }
+                })
                 .context_menu(move |menu, _, _| {
                     let edit_owner = server_menu_owner.clone();
                     let connection_owner = server_menu_owner.clone();
@@ -658,18 +650,20 @@ impl Condr {
                     let menu = if is_local {
                         menu
                     } else {
-                        menu.item(PopupMenuItem::new("Edit").icon(Glyph::Pencil).on_click(
-                            move |_, window, cx| {
-                                let _ = edit_owner.update(cx, |this, cx| {
-                                    this.prompt_edit_server_on(key, window, cx)
-                                });
-                            },
-                        ))
+                        menu.item(
+                            PopupMenuItem::new("Edit")
+                                .icon(menu_icon(Glyph::Pencil))
+                                .on_click(move |_, window, cx| {
+                                    let _ = edit_owner.update(cx, |this, cx| {
+                                        this.prompt_edit_server_on(key, window, cx)
+                                    });
+                                }),
+                        )
                     };
                     let menu = menu
                         .item(
                             PopupMenuItem::new(connection_label)
-                                .icon(connection_icon)
+                                .icon(menu_icon(connection_icon))
                                 .disabled(connection_disabled)
                                 .on_click(move |_, window, cx| {
                                     let _ = connection_owner.update(cx, |this, cx| {
@@ -693,7 +687,7 @@ impl Condr {
                         )
                         .item(
                             PopupMenuItem::new("Open in New Window")
-                                .icon(Glyph::AppWindow)
+                                .icon(menu_icon(Glyph::AppWindow))
                                 .on_click(move |_, window, cx| {
                                     let _ = detach_owner.update(cx, |this, cx| {
                                         this.open_in_new_window(
@@ -708,25 +702,34 @@ impl Condr {
                         menu
                     } else {
                         menu.separator().item(
-                            PopupMenuItem::new("Delete").icon(Glyph::Trash).on_click(
-                                move |_, window, cx| {
+                            PopupMenuItem::new("Delete")
+                                .icon(menu_icon(Glyph::Trash))
+                                .on_click(move |_, window, cx| {
                                     let name = delete_name.clone();
                                     let _ = delete_owner.update(cx, |this, cx| {
                                         this.confirm_delete_server_on(key, name, window, cx)
                                     });
-                                },
-                            ),
+                                }),
                         )
                     }
                 })
+                // A click on the selected Device folds it, as on a selected Workspace; on any
+                // other it only selects, so switching never folds.
                 .on_click(move |_, window, cx| {
-                    let _ = select_owner.update(cx, |this, cx| this.select_server(key, window, cx));
+                    let _ = select_owner.update(cx, |this, cx| {
+                        if active_server {
+                            this.toggle_device_fold(key, cx);
+                        } else {
+                            this.select_server(key, window, cx);
+                        }
+                    });
                 })
             });
 
         let add_owner = cx.weak_entity();
         let settings_owner = cx.weak_entity();
         let keep_awake_owner = cx.weak_entity();
+        let palette_owner = cx.weak_entity();
         Sidebar::new("condr-sidebar")
             .collapsible(SidebarCollapsible::None)
             .w_full()
@@ -754,6 +757,45 @@ impl Condr {
                         cx,
                     ))
                     .child(div().flex_1())
+                    .child(
+                        // Shift twice is no key binding for `tooltip_with_action` to find, so
+                        // the tooltip draws the pair as Settings' tooltip draws its key.
+                        div()
+                            .id("command-palette-tooltip")
+                            .tooltip(|window, cx| {
+                                Tooltip::element(|_, cx| {
+                                    let shift = || {
+                                        Kbd::new(Keystroke::parse("shift").expect("a key"))
+                                            .appearance(false)
+                                    };
+                                    h_flex().gap_3().child("Command Palette").child(
+                                        h_flex()
+                                            .gap_1()
+                                            .text_xs()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(shift())
+                                            .child(shift()),
+                                    )
+                                })
+                                .build(window, cx)
+                            })
+                            .child(
+                                Button::new("command-palette")
+                                    .debug_selector(|| "command-palette-button".into())
+                                    .ghost()
+                                    .small()
+                                    .icon(Glyph::Command)
+                                    .accessibility_label("Command Palette")
+                                    .on_click(move |_, window, cx| {
+                                        let _ = palette_owner.update(cx, |this, cx| {
+                                            let all = command_palette::OpenCommandPalette {
+                                                page: command_palette::Page::All,
+                                            };
+                                            this.action_open_command_palette(&all, window, cx)
+                                        });
+                                    }),
+                            ),
+                    )
                     .child(self.render_ports_button(view, cx))
                     .child(
                         Button::new("add-server")
@@ -924,5 +966,40 @@ impl Condr {
             .border_color(cx.theme().sidebar_border)
             .children(avatars)
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod device_mark_tests {
+    // Not `use super::*`: it would glob in `gpui_kit::test` and shadow the built-in attribute.
+    use super::{ConnectionStatus, device_mark};
+    use gpui_kit::WeakEntity;
+
+    #[cfg(feature = "test-support")]
+    #[gpui_kit::test]
+    fn a_device_marks_only_something_to_act_on(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            let mark = |status, notice: Option<&str>, failure: Option<&str>| {
+                device_mark(
+                    1,
+                    status,
+                    notice.map(str::to_owned),
+                    failure.map(str::to_owned),
+                    WeakEntity::new_invalid(),
+                    cx,
+                )
+                .is_some()
+            };
+            assert!(mark(
+                ConnectionStatus::Connected,
+                Some("another build"),
+                None
+            ));
+            assert!(mark(ConnectionStatus::Disconnected, None, Some("refused")));
+            assert!(!mark(ConnectionStatus::Connected, None, None));
+            assert!(!mark(ConnectionStatus::Disconnected, None, None));
+            assert!(!mark(ConnectionStatus::Connecting, None, Some("refused")));
+        });
     }
 }

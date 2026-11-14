@@ -34,7 +34,7 @@ struct SessionTests {
     @Test func thePaneOnScreenRaisesNoBanner() {
         let client = FakeClient(Fixture.world(.working))
         let (session, _, alerts, _) = Fixture.session(client)
-        session.show(Fixture.ref, rows: 20, columns: 50)
+        session.show(Fixture.ref, rows: 20, columns: 50, cellWidth: 0, cellHeight: 0)
 
         client.update { state in
             state.workspaces[Fixture.address]?[0].panes[0].agent?.status = .done
@@ -48,8 +48,8 @@ struct SessionTests {
     @Test func showingAPaneSizesItAndLeavingGivesItBack() {
         let client = FakeClient(Fixture.world(.idle))
         let (session, _, _, _) = Fixture.session(client)
-        session.show(Fixture.ref, rows: 0, columns: 0)
-        session.show(Fixture.ref, rows: 18, columns: 44)
+        session.show(Fixture.ref, rows: 0, columns: 0, cellWidth: 0, cellHeight: 0)
+        session.show(Fixture.ref, rows: 18, columns: 44, cellWidth: 0, cellHeight: 0)
         session.hide(Fixture.ref)
         let shows = client.state.withLock { $0.shows }
         #expect(
@@ -64,13 +64,13 @@ struct SessionTests {
     @Test func theShownPanesScreenFollowsItsChanges() {
         let client = FakeClient(Fixture.world(.working))
         let (session, _, _, _) = Fixture.session(client)
-        session.show(Fixture.ref, rows: 2, columns: 2)
+        session.show(Fixture.ref, rows: 2, columns: 2, cellWidth: 0, cellHeight: 0)
         #expect(session.screen == nil)
 
         let screen = TerminalScreen(
             revision: 3, rows: 2, columns: 2, scrolledLines: 0, cells: [], cursor: nil,
             background: 0,
-            mouseTracking: false, hasSelection: false)
+            mouseTracking: false, hasSelection: false, images: [])
         client.update { state in
             state.screens[Fixture.ref] = screen
             state.changes = [.terminal(address: Fixture.address, pane: 7)]
@@ -105,7 +105,7 @@ struct SessionTests {
         let (session, router, _, _) = Fixture.session(client, saved: store)
         router.agentsPath = [.pane(Fixture.ref)]
         router.devicesPath = [.device(Fixture.address)]
-        session.show(Fixture.ref, rows: 1, columns: 1)
+        session.show(Fixture.ref, rows: 1, columns: 1, cellWidth: 0, cellHeight: 0)
 
         session.forget(Fixture.address)
 
@@ -169,7 +169,7 @@ struct SessionTests {
         let (session, _, _, _) = Fixture.session(client)
         session.send(key: .enter)
         #expect(client.state.withLock { $0.keys.isEmpty }, "nothing is sent before a Pane is shown")
-        session.show(Fixture.ref, rows: 10, columns: 40)
+        session.show(Fixture.ref, rows: 10, columns: 40, cellWidth: 0, cellHeight: 0)
         session.send(key: .character(text: "c"), control: true)
         session.send(text: "yes")
         session.wheel(row: 2, column: 5, lines: 3)

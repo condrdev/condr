@@ -1,61 +1,5 @@
 use super::*;
-
-/// A labelled action, as one row of the Shortcuts page.
-pub(super) type Shortcut = (&'static str, &'static dyn Action);
-
-/// The fixed shortcuts, grouped as the page shows them. The keys themselves are read
-/// from the keymap at render time, so this list can never disagree with `bind_keys`.
-pub(in crate::app) const SHORTCUTS: &[(&str, &[Shortcut])] = &[
-    (
-        "Application",
-        &[
-            ("Open Settings", &OpenSettings),
-            ("Toggle sidebar", &ToggleSidebar),
-            ("Toggle Changes & Files", &ToggleChanges),
-        ],
-    ),
-    (
-        "Workspaces",
-        &[
-            ("Next workspace", &NextWorkspace),
-            ("Previous workspace", &PreviousWorkspace),
-        ],
-    ),
-    (
-        "Tabs",
-        &[
-            ("New tab", &NewTab),
-            ("Next tab", &NextTab),
-            ("Previous tab", &PreviousTab),
-            ("Go to tab 1", &ActivateTab { index: 0 }),
-            ("Go to tab 2", &ActivateTab { index: 1 }),
-            ("Go to tab 3", &ActivateTab { index: 2 }),
-            ("Go to tab 4", &ActivateTab { index: 3 }),
-            ("Go to tab 5", &ActivateTab { index: 4 }),
-            ("Go to tab 6", &ActivateTab { index: 5 }),
-            ("Go to tab 7", &ActivateTab { index: 6 }),
-            ("Go to tab 8", &ActivateTab { index: 7 }),
-            ("Go to tab 9", &ActivateTab { index: 8 }),
-        ],
-    ),
-    (
-        "Panes",
-        &[
-            ("Split right", &SplitRight),
-            ("Split down", &SplitDown),
-            ("Close pane", &ClosePane),
-            ("Toggle zoom", &ToggleZoom),
-            ("Focus left", &FocusLeft),
-            ("Focus right", &FocusRight),
-            ("Focus up", &FocusUp),
-            ("Focus down", &FocusDown),
-            ("Resize left", &ResizeLeft),
-            ("Resize right", &ResizeRight),
-            ("Resize up", &ResizeUp),
-            ("Resize down", &ResizeDown),
-        ],
-    ),
-];
+use crate::app::keymap::{self, Shortcut};
 
 /// The keys a focused terminal takes for the clipboard before any action sees them, so
 /// the keymap cannot show them; a test holds them to `terminal_clipboard_shortcut`.
@@ -87,38 +31,226 @@ const NEXT_PROMPT_KEYS: &[&str] = if cfg!(target_os = "macos") {
     &["ctrl-down"]
 };
 
-/// The key context `bind_keys` registers the shortcuts under.
-pub(in crate::app) const SHORTCUT_CONTEXT: &str = "Condr";
+/// The window shortcuts, each row editing its keys (ADR 0063); on macOS the Option key
+/// first; and the Terminal's own keys, which the page only shows.
+pub(super) fn shortcuts_page(
+    owner: &WeakEntity<Condr>,
+    settings: &Entity<SettingsWindow>,
+    cx: &App,
+) -> SettingPage {
+    let mut page = SettingPage::new("Shortcuts").icon(IconName::LayoutDashboard);
+    if cfg!(target_os = "macos") {
+        page = page.group(option_group(owner));
+    }
+    let unknown = owner
+        .upgrade()
+        .map(|owner| owner.read(cx).keymap.unknown.clone())
+        .unwrap_or_default();
+    if !unknown.is_empty() {
+        page = page.group(
+            SettingGroup::new().item(SettingItem::render(move |_, _, cx| {
+                div()
+                    .debug_selector(|| "shortcuts-unknown".into())
+                    .text_sm()
+                    .text_color(cx.theme().danger)
+                    .child(format!(
+                        "[client.keybindings] names no shortcut: {}.",
+                        unknown.join(", ")
+                    ))
+            })),
+        );
+    }
+    let mut index = 0;
+    for (title, shortcuts) in keymap::GROUPS {
+        let mut group = SettingGroup::new().title(*title);
+        for shortcut in *shortcuts {
+            group = group.item(shortcut_row(index, shortcut, owner, settings));
+            index += 1;
+        }
+        if *title == "Application" {
+            // No key `[client.keybindings]` can write, so it only shows (ADR 0064).
+            group = group.item(fixed_row("Command Palette", &["shift", "shift"]));
+        }
+        page = page.group(group);
+    }
+    page.group(terminal_group())
+}
 
-/// Read-only: shortcuts are fixed per platform, so this page only shows them.
-pub(super) fn shortcuts_page() -> SettingPage {
-    SettingPage::new("Shortcuts")
-        .icon(IconName::LayoutDashboard)
-        .groups(
-            SHORTCUTS
-                .iter()
-                .map(|(title, rows)| {
-                    rows.iter().fold(
-                        SettingGroup::new().title(*title),
-                        |group, (label, action)| {
-                            group.item(SettingItem::new(
-                                *label,
-                                SettingField::render(move |_, window, _| {
-                                    div().children(
-                                        Kbd::binding_for_action(
-                                            *action,
-                                            Some(SHORTCUT_CONTEXT),
-                                            window,
-                                        )
-                                        .map(|kbd| kbd.outline()),
-                                    )
-                                }),
-                            ))
-                        },
-                    )
-                })
-                .chain([terminal_group()]),
+fn option_group(owner: &WeakEntity<Condr>) -> SettingGroup {
+    let (get_owner, set_owner) = (owner.clone(), owner.clone());
+    let options = OptionAsMeta::ALL
+        .map(|option| (option.as_str().into(), option.label().into()))
+        .to_vec();
+    SettingGroup::new().title("Keyboard").item(
+        SettingItem::new(
+            "Option as Meta",
+            SettingField::dropdown(
+                options,
+                move |cx| {
+                    get_owner
+                        .upgrade()
+                        .map(|owner| owner.read(cx).option_as_meta)
+                        .unwrap_or_default()
+                        .as_str()
+                        .into()
+                },
+                move |value: SharedString, cx| {
+                    let option = OptionAsMeta::from_str(&value);
+                    let _ = set_owner.update(cx, |owner, cx| owner.set_option_as_meta(option, cx));
+                },
+            )
+            .default_value(OptionAsMeta::default().as_str()),
         )
+        .description(
+            "Sends Esc and the key, as a shell expects of Meta, instead of typing a character such as ∫.",
+        ),
+    )
+}
+
+/// One shortcut's key and a button that records another in its place; reset drops its
+/// `[client.keybindings]` entry.
+fn shortcut_row(
+    index: usize,
+    shortcut: &'static Shortcut,
+    owner: &WeakEntity<Condr>,
+    settings: &Entity<SettingsWindow>,
+) -> SettingItem {
+    let (field_owner, dirty_owner, reset_owner) = (owner.clone(), owner.clone(), owner.clone());
+    let settings = settings.clone();
+    SettingItem::new(
+        shortcut.label,
+        SettingField::render(move |_, _, cx| {
+            shortcut_keys(index, shortcut.name, &field_owner, &settings, cx)
+        })
+        .on_reset(
+            move |cx| {
+                dirty_owner
+                    .upgrade()
+                    .is_some_and(|owner| owner.read(cx).keybindings.contains_key(shortcut.name))
+            },
+            move |_, cx| {
+                let _ = reset_owner.update(cx, |owner, cx| owner.reset_shortcut(index, cx));
+            },
+        ),
+    )
+}
+
+fn shortcut_keys(
+    index: usize,
+    name: &'static str,
+    owner: &WeakEntity<Condr>,
+    settings: &Entity<SettingsWindow>,
+    cx: &App,
+) -> impl IntoElement + use<> {
+    let (keys, mut errors) = owner
+        .upgrade()
+        .map(|owner| {
+            let keymap = &owner.read(cx).keymap;
+            (keymap.keys[index].clone(), keymap.errors[index].clone())
+        })
+        .unwrap_or_default();
+    let window = settings.read(cx);
+    let recording = window.recording == Some(index);
+    if let Some((row, why)) = &window.refusal
+        && *row == index
+    {
+        errors.push(why.to_string());
+    }
+    let settings = settings.clone();
+    let field = if recording {
+        Button::new(SharedString::from(format!("shortcut-{name}-recording")))
+            .debug_selector(move || format!("shortcut-{name}-recording"))
+            .label("Press a key…")
+            .outline()
+            .xsmall()
+            .tooltip("Esc cancels")
+            .on_click(move |_, _, cx| {
+                settings.update(cx, |this, cx| {
+                    this.recording = None;
+                    this.refusal = None;
+                    cx.notify();
+                });
+            })
+            .into_any_element()
+    } else {
+        h_flex()
+            .gap_1()
+            .children(keys.into_iter().map(|key| Kbd::new(key).outline()))
+            .child(
+                Button::new(SharedString::from(format!("shortcut-{name}-edit")))
+                    .debug_selector(move || format!("shortcut-{name}-edit"))
+                    .icon(Glyph::Pencil)
+                    .ghost()
+                    .xsmall()
+                    .tooltip("Change key")
+                    .on_click(move |_, _, cx| {
+                        settings.update(cx, |this, cx| {
+                            this.recording = Some(index);
+                            this.refusal = None;
+                            cx.notify();
+                        });
+                    }),
+            )
+            .into_any_element()
+    };
+    let danger = cx.theme().danger;
+    v_flex().items_end().gap_1().child(field).children(
+        errors
+            .into_iter()
+            .map(move |error| div().text_xs().text_color(danger).child(error)),
+    )
+}
+
+/// Takes the next key pressed in the Settings window for the row that records, before
+/// any binding or key listener can act on it: Escape there cancels, not closes.
+pub(super) fn key_recorder(window: &Window, cx: &mut Context<SettingsWindow>) -> Subscription {
+    let this = cx.weak_entity();
+    let handle = window.window_handle();
+    cx.intercept_keystrokes(move |event, window, cx| {
+        if window.window_handle() != handle {
+            return;
+        }
+        let taken = this
+            .update(cx, |this, cx| this.record(&event.keystroke, cx))
+            .unwrap_or(false);
+        if taken {
+            cx.stop_propagation();
+        }
+    })
+}
+
+impl SettingsWindow {
+    /// Whether a row was recording, and so took the key.
+    pub(super) fn record(&mut self, stroke: &Keystroke, cx: &mut Context<Self>) -> bool {
+        let Some(index) = self.recording else {
+            return false;
+        };
+        if matches!(
+            stroke.key.as_str(),
+            "shift" | "control" | "alt" | "platform" | "function"
+        ) {
+            // A modifier pressed and let go alone arrives as a key of its own; keep waiting.
+            return true;
+        }
+        if stroke.key == "escape" && !stroke.modifiers.modified() {
+            self.recording = None;
+            self.refusal = None;
+        } else {
+            let key = keymap::normalize(stroke);
+            if let Some(why) = keymap::refusal(&key) {
+                let refusal = format!("{} {why}.", keymap::written(&key));
+                self.refusal = Some((index, refusal.into()));
+            } else {
+                self.recording = None;
+                self.refusal = None;
+                let _ = self
+                    .owner
+                    .update(cx, |owner, cx| owner.set_shortcut_key(index, key, cx));
+            }
+        }
+        cx.notify();
+        true
+    }
 }
 
 /// The terminal's clipboard keys, every key that does each, the image paste that only a
@@ -136,15 +268,20 @@ fn terminal_group() -> SettingGroup {
     ];
     rows.into_iter().fold(
         SettingGroup::new().title("Terminal"),
-        |group, (label, keys)| {
-            group.item(SettingItem::new(
-                label,
-                SettingField::render(move |_, _, _| {
-                    h_flex().gap_1().children(keys.iter().map(|key| {
-                        Kbd::new(Keystroke::parse(key).expect("a valid keystroke")).outline()
-                    }))
+        |group, (label, keys)| group.item(fixed_row(label, keys)),
+    )
+}
+
+/// A row whose keys stay as they are, which the page only shows.
+fn fixed_row(label: &'static str, keys: &'static [&'static str]) -> SettingItem {
+    SettingItem::new(
+        label,
+        SettingField::render(move |_, _, _| {
+            h_flex().gap_1().children(
+                keys.iter().map(|key| {
+                    Kbd::new(Keystroke::parse(key).expect("a valid keystroke")).outline()
                 }),
-            ))
-        },
+            )
+        }),
     )
 }

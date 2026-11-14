@@ -1,15 +1,15 @@
 ---
 title: Keyboard shortcuts
-description: Every Condr key mapping on macOS, Windows and Linux, plus how copy and paste, scrolling and mouse interaction behave in the terminal.
+description: Every Condr key mapping on macOS, Windows and Linux, how to change the window shortcuts and make Option act as Meta, and how copy and paste, scrolling and mouse interaction behave in the terminal.
 ---
 
 Condr's shortcuts work on two levels:
-* **Window-level shortcuts**: drive the window, Workspaces, Tabs and Panes. The client intercepts and consumes them, and never passes them through to the terminal's foreground process.
+* **Window-level shortcuts**: drive the window, Workspaces, Tabs and Panes. The client intercepts and consumes them, and never passes them through to the terminal's foreground process. The tables below give their defaults; you can [change them](#change-a-shortcut).
 * **Terminal-level shortcuts**: cover the text and image clipboard, scrollback and mouse interaction, and work only while the current terminal Pane has focus.
 
 Every key combination not declared on this page passes through to the child process running in the current Pane.
 
-> **macOS note**: on macOS the `Option` key produces special characters (`Option + S` types `ß`) and is not mapped to the terminal's `Meta` key. So word-movement shortcuts in the shell, such as `Option + B` and `Option + F`, do not work.
+> **macOS note**: by default the `Option` key types special characters (`Option + S` types `ß`), as it does in Terminal.app and iTerm2. For word movement in the shell, such as `Option + B` and `Option + F`, turn on [Option as Meta](#option-as-meta).
 
 ---
 
@@ -23,6 +23,22 @@ Every key combination not declared on this page passes through to the child proc
 | Toggle the right sidebar (Changes & Files) | `Cmd + Option + B` | `Ctrl + Alt + B` |
 
 ---
+
+## Command Palette
+
+| Action | macOS | Windows / Linux |
+| :--- | :--- | :--- |
+| Open the Command Palette | `Shift` twice | `Shift` twice |
+| Open it on Actions | `Cmd + Shift + P` | `Ctrl + Shift + P` |
+| Open it on Go to | `Cmd + P` | `Ctrl + Shift + K` |
+| Next / previous page | `Tab` / `Shift + Tab` | `Tab` / `Shift + Tab` |
+| Run the highlighted row | `Enter` | `Enter` |
+| Close | `Esc` or the key that opened it | `Esc` or the key that opened it |
+
+* **Pages**: **All** shows up to five places and five actions that match; **Actions** lists every window action with its key, greyed where it cannot run in this window; **Go to** lists every connected Device and its Workspaces, Tabs and Agents, the Agents that need you first.
+* **Matching**: type letters of a name in order, not necessarily together; separate words must all match. It finds names, not terminal output or file contents.
+* **`Shift` twice**: press and release `Shift` twice within a second, with no other key between. It cannot be changed; the other two can.
+* The magnifier at the bottom of the left sidebar opens it too.
 
 ## Workspaces
 
@@ -126,6 +142,30 @@ Every key combination not declared on this page passes through to the child proc
 | :--- | :--- | :--- |
 | Open a URL | `Cmd + click` | `Ctrl + click` |
 | Force text selection (when a program owns the mouse) | `Shift + drag` | `Shift + drag` |
+
+---
+
+## Change a shortcut
+
+Every shortcut in the Window, Command Palette, Workspace, Tab and Pane tables above can be rebound or removed, except `Shift` twice. The actions without a default key, such as Close tab, Rename workspace or the Pane swaps, can be given one. The terminal's own keys (copy and paste, image paste, prompt jumps and the mouse) stay as they are.
+
+* **In Settings**: open **Shortcuts**. Click the pencil beside an action and press the new key, or `Esc` to cancel; it replaces the action's keys. The reset button brings back the defaults. A change applies at once.
+* **In `config.toml`**: [`[client.keybindings]`](/docs/reference/configuration/#clientkeybindings-window-shortcuts) lists each action's name. Restart Condr after a hand edit.
+* **Rules**:
+  * A shortcut needs `Cmd`, `Ctrl` or `Option` (`Ctrl` or `Alt` on Windows and Linux), unless it is an F-key: every other key is for typing.
+  * A key belongs to one action. Giving it to another takes it away from the first.
+  * On macOS, `Cmd + Q`, `Cmd + H`, `Cmd + Option + H`, `Cmd + M` and `Cmd + Ctrl + F` belong to the system and cannot be taken.
+  * One key per shortcut: no sequences such as tmux's prefix key.
+  * A shortcut reaches Condr before the terminal, even a key a program would want, such as `Ctrl + C`.
+  * A key Condr cannot use is left out and the reason shows under its action on the Shortcuts page.
+
+---
+
+## Option as Meta
+
+**macOS only.** Under **Settings > Shortcuts > Option as Meta**, choose which `Option` key sends Meta, `Esc` followed by the key, to the terminal instead of typing a character: **Left Option**, **Right Option** or **Both**. With one side set, `Option + B` on it moves back a word in the shell, while the other `Option` still types `å`, `é` or the `@` some layouts put there. `Option` then never starts an accent such as `Option + E` either. The setting is `macos_option_as_meta` in [`[client.terminal]`](/docs/reference/configuration/#clientterminal-terminal-display).
+
+On Windows and Linux, `Alt` is always Meta.
 
 ---
 

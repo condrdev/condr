@@ -9,7 +9,7 @@ Settings and keyboard shortcuts let you fit Condr to the way you work.
 
 - **Shortcut**: press `Cmd + ,` on macOS, or `Ctrl + ,` on Windows and Linux.
 - **The two tabs**:
-  - **Application**: this window's settings, such as the theme, terminal font size, system notifications and the shortcut list.
+  - **Application**: this window's settings, such as the theme, terminal font size, system notifications and the shortcuts.
   - **Device**: one Device's Server settings, such as the default shell, connection status and Agent integrations.
 
 ## Add an external editor (Open in)
@@ -40,6 +40,7 @@ command = ["code-insiders", "--reuse-window"]
 
 | Action | macOS | Windows / Linux |
 | --- | --- | --- |
+| Command Palette | Shift twice | Shift twice |
 | Open Settings | Cmd+, | Ctrl+, |
 | Toggle the left sidebar | Cmd+B | Ctrl+Shift+B |
 | Toggle the right Changes sidebar | Cmd+Option+B | Ctrl+Alt+B |
@@ -64,7 +65,7 @@ command = ["code-insiders", "--reuse-window"]
 | Select text while a program has mouse mode on | Shift+drag | Shift+drag |
 | Open a link in the terminal | Cmd+click | Ctrl+click |
 
-See [Keyboard shortcuts](/docs/reference/keybindings/) for the full list.
+These are the defaults. To change one, or to make `Option` act as Meta on macOS, open **Settings > Shortcuts**; [Keyboard shortcuts](/docs/reference/keybindings/#change-a-shortcut) has the full list and the rules.
 
 ## Set the default shell
 

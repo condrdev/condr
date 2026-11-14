@@ -19,6 +19,7 @@ trap 'rm -rf "$work"' EXIT
 # Only what the safe layer calls; bindgen pulls in the types they name. `types` adds the
 # ones only a callback or an option's `void*` names.
 functions=(
+  ghostty_alloc
   ghostty_cell_get
   ghostty_color_scheme_report_encode
   ghostty_focus_encode
@@ -40,6 +41,9 @@ functions=(
   ghostty_key_event_set_mods
   ghostty_key_event_set_unshifted_codepoint
   ghostty_key_event_set_utf8
+  ghostty_kitty_graphics_animation_tick
+  ghostty_kitty_graphics_image
+  ghostty_kitty_graphics_image_get_multi
   ghostty_mouse_encoder_encode
   ghostty_mouse_encoder_free
   ghostty_mouse_encoder_new
@@ -55,6 +59,10 @@ functions=(
   ghostty_paste_encode
   ghostty_render_state_free
   ghostty_render_state_get
+  ghostty_render_state_image_get_multi
+  ghostty_render_state_image_iterator_free
+  ghostty_render_state_image_iterator_new
+  ghostty_render_state_image_iterator_next
   ghostty_render_state_new
   ghostty_render_state_row_cells_free
   ghostty_render_state_row_cells_get
@@ -93,18 +101,25 @@ types=(
   GhosttyColorPaletteIndex
   GhosttyColorRgb
   GhosttyDeviceAttributes
+  GhosttyImageProtocol
+  GhosttyKittyGraphicsImageData
+  GhosttyKittyImageFormat
   GhosttyMouseEncoderSize
   GhosttyMousePosition
   GhosttyOptionAsAlt
   GhosttyRenderStateCursor
   GhosttyRenderStateCursorVisualStyle
   GhosttyRenderStateDirty
+  GhosttyRenderStateImageData
+  GhosttyRenderStateImageLayer
+  GhosttyRenderStateKittyPlacementKind
   GhosttyRenderStateRowSelection
   GhosttyRowData
   GhosttySgrUnderline
   GhosttySizeReportSize
   GhosttyString
   GhosttyStyle
+  GhosttySysImage
   GhosttySysLogLevel
   GhosttySysOption
   GhosttyTerminalDesktopNotification

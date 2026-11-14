@@ -22,6 +22,18 @@ pub struct GhosttyTerminalImpl {
 pub type GhosttyTerminal = *mut GhosttyTerminalImpl;
 #[repr(C)]
 #[derive(Debug)]
+pub struct GhosttyKittyGraphicsImpl {
+    _unused: [u8; 0],
+}
+pub type GhosttyKittyGraphics = *mut GhosttyKittyGraphicsImpl;
+#[repr(C)]
+#[derive(Debug)]
+pub struct GhosttyKittyGraphicsImageImpl {
+    _unused: [u8; 0],
+}
+pub type GhosttyKittyGraphicsImage = *const GhosttyKittyGraphicsImageImpl;
+#[repr(C)]
+#[derive(Debug)]
 pub struct GhosttyRenderStateImpl {
     _unused: [u8; 0],
 }
@@ -38,6 +50,12 @@ pub struct GhosttyRenderStateRowCellsImpl {
     _unused: [u8; 0],
 }
 pub type GhosttyRenderStateRowCells = *mut GhosttyRenderStateRowCellsImpl;
+#[repr(C)]
+#[derive(Debug)]
+pub struct GhosttyRenderStateImageIteratorImpl {
+    _unused: [u8; 0],
+}
+pub type GhosttyRenderStateImageIterator = *mut GhosttyRenderStateImageIteratorImpl;
 #[repr(C)]
 #[derive(Debug)]
 pub struct GhosttyFormatterImpl {
@@ -152,6 +170,9 @@ const _: () = {
     ["Offset of field: GhosttyAllocator::vtable"]
         [::std::mem::offset_of!(GhosttyAllocator, vtable) - 8usize];
 };
+unsafe extern "C" {
+    pub fn ghostty_alloc(allocator: *const GhosttyAllocator, len: usize) -> *mut u8;
+}
 unsafe extern "C" {
     pub fn ghostty_free(allocator: *const GhosttyAllocator, ptr: *mut u8, len: usize);
 }
@@ -664,6 +685,68 @@ const _: () = {
     ["Offset of field: GhosttySizeReportSize::cell_height"]
         [::std::mem::offset_of!(GhosttySizeReportSize, cell_height) - 8usize];
 };
+impl GhosttyKittyImageFormat {
+    pub const GHOSTTY_KITTY_IMAGE_FORMAT_RGB: GhosttyKittyImageFormat = GhosttyKittyImageFormat(0);
+    pub const GHOSTTY_KITTY_IMAGE_FORMAT_RGBA: GhosttyKittyImageFormat = GhosttyKittyImageFormat(1);
+    pub const GHOSTTY_KITTY_IMAGE_FORMAT_PNG: GhosttyKittyImageFormat = GhosttyKittyImageFormat(2);
+    pub const GHOSTTY_KITTY_IMAGE_FORMAT_GRAY_ALPHA: GhosttyKittyImageFormat =
+        GhosttyKittyImageFormat(3);
+    pub const GHOSTTY_KITTY_IMAGE_FORMAT_GRAY: GhosttyKittyImageFormat = GhosttyKittyImageFormat(4);
+    pub const GHOSTTY_KITTY_IMAGE_FORMAT_MAX_VALUE: GhosttyKittyImageFormat =
+        GhosttyKittyImageFormat(2147483647);
+}
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub struct GhosttyKittyImageFormat(pub ::std::os::raw::c_int);
+impl GhosttyKittyGraphicsImageData {
+    pub const GHOSTTY_KITTY_IMAGE_DATA_INVALID: GhosttyKittyGraphicsImageData =
+        GhosttyKittyGraphicsImageData(0);
+    pub const GHOSTTY_KITTY_IMAGE_DATA_ID: GhosttyKittyGraphicsImageData =
+        GhosttyKittyGraphicsImageData(1);
+    pub const GHOSTTY_KITTY_IMAGE_DATA_NUMBER: GhosttyKittyGraphicsImageData =
+        GhosttyKittyGraphicsImageData(2);
+    pub const GHOSTTY_KITTY_IMAGE_DATA_WIDTH: GhosttyKittyGraphicsImageData =
+        GhosttyKittyGraphicsImageData(3);
+    pub const GHOSTTY_KITTY_IMAGE_DATA_HEIGHT: GhosttyKittyGraphicsImageData =
+        GhosttyKittyGraphicsImageData(4);
+    pub const GHOSTTY_KITTY_IMAGE_DATA_FORMAT: GhosttyKittyGraphicsImageData =
+        GhosttyKittyGraphicsImageData(5);
+    pub const GHOSTTY_KITTY_IMAGE_DATA_COMPRESSION: GhosttyKittyGraphicsImageData =
+        GhosttyKittyGraphicsImageData(6);
+    pub const GHOSTTY_KITTY_IMAGE_DATA_DATA_PTR: GhosttyKittyGraphicsImageData =
+        GhosttyKittyGraphicsImageData(7);
+    pub const GHOSTTY_KITTY_IMAGE_DATA_DATA_LEN: GhosttyKittyGraphicsImageData =
+        GhosttyKittyGraphicsImageData(8);
+    pub const GHOSTTY_KITTY_IMAGE_DATA_GENERATION: GhosttyKittyGraphicsImageData =
+        GhosttyKittyGraphicsImageData(9);
+    pub const GHOSTTY_KITTY_IMAGE_DATA_MAX_VALUE: GhosttyKittyGraphicsImageData =
+        GhosttyKittyGraphicsImageData(2147483647);
+}
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub struct GhosttyKittyGraphicsImageData(pub ::std::os::raw::c_int);
+unsafe extern "C" {
+    pub fn ghostty_kitty_graphics_animation_tick(
+        graphics: GhosttyKittyGraphics,
+        now_ms: u64,
+        next_ms: *mut u64,
+    ) -> GhosttyResult;
+}
+unsafe extern "C" {
+    pub fn ghostty_kitty_graphics_image(
+        graphics: GhosttyKittyGraphics,
+        image_id: u32,
+    ) -> GhosttyKittyGraphicsImage;
+}
+unsafe extern "C" {
+    pub fn ghostty_kitty_graphics_image_get_multi(
+        image: GhosttyKittyGraphicsImage,
+        count: usize,
+        keys: *const GhosttyKittyGraphicsImageData,
+        values: *mut *mut ::std::os::raw::c_void,
+        out_written: *mut usize,
+    ) -> GhosttyResult;
+}
 impl GhosttyTerminalCompressionMode {
     pub const GHOSTTY_TERMINAL_COMPRESSION_MODE_INCREMENTAL: GhosttyTerminalCompressionMode =
         GhosttyTerminalCompressionMode(0);
@@ -1556,6 +1639,87 @@ impl GhosttyRenderStateOption {
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct GhosttyRenderStateOption(pub ::std::os::raw::c_int);
+impl GhosttyImageProtocol {
+    pub const GHOSTTY_IMAGE_PROTOCOL_KITTY: GhosttyImageProtocol = GhosttyImageProtocol(0);
+    pub const GHOSTTY_IMAGE_PROTOCOL_MAX_VALUE: GhosttyImageProtocol =
+        GhosttyImageProtocol(2147483647);
+}
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub struct GhosttyImageProtocol(pub ::std::os::raw::c_int);
+impl GhosttyRenderStateImageLayer {
+    pub const GHOSTTY_RENDER_STATE_IMAGE_LAYER_BELOW_BACKGROUND: GhosttyRenderStateImageLayer =
+        GhosttyRenderStateImageLayer(0);
+    pub const GHOSTTY_RENDER_STATE_IMAGE_LAYER_BELOW_TEXT: GhosttyRenderStateImageLayer =
+        GhosttyRenderStateImageLayer(1);
+    pub const GHOSTTY_RENDER_STATE_IMAGE_LAYER_ABOVE_TEXT: GhosttyRenderStateImageLayer =
+        GhosttyRenderStateImageLayer(2);
+    pub const GHOSTTY_RENDER_STATE_IMAGE_LAYER_MAX_VALUE: GhosttyRenderStateImageLayer =
+        GhosttyRenderStateImageLayer(2147483647);
+}
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub struct GhosttyRenderStateImageLayer(pub ::std::os::raw::c_int);
+impl GhosttyRenderStateKittyPlacementKind {
+    pub const GHOSTTY_RENDER_STATE_KITTY_PLACEMENT_KIND_VIRTUAL:
+        GhosttyRenderStateKittyPlacementKind = GhosttyRenderStateKittyPlacementKind(0);
+    pub const GHOSTTY_RENDER_STATE_KITTY_PLACEMENT_KIND_RELATIVE:
+        GhosttyRenderStateKittyPlacementKind = GhosttyRenderStateKittyPlacementKind(1);
+    pub const GHOSTTY_RENDER_STATE_KITTY_PLACEMENT_KIND_FIXED:
+        GhosttyRenderStateKittyPlacementKind = GhosttyRenderStateKittyPlacementKind(2);
+    pub const GHOSTTY_RENDER_STATE_KITTY_PLACEMENT_KIND_MAX_VALUE:
+        GhosttyRenderStateKittyPlacementKind = GhosttyRenderStateKittyPlacementKind(2147483647);
+}
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub struct GhosttyRenderStateKittyPlacementKind(pub ::std::os::raw::c_int);
+impl GhosttyRenderStateImageData {
+    pub const GHOSTTY_RENDER_STATE_IMAGE_DATA_INVALID: GhosttyRenderStateImageData =
+        GhosttyRenderStateImageData(0);
+    pub const GHOSTTY_RENDER_STATE_IMAGE_DATA_PROTOCOL: GhosttyRenderStateImageData =
+        GhosttyRenderStateImageData(1);
+    pub const GHOSTTY_RENDER_STATE_IMAGE_DATA_IMAGE_ID: GhosttyRenderStateImageData =
+        GhosttyRenderStateImageData(2);
+    pub const GHOSTTY_RENDER_STATE_IMAGE_DATA_IMAGE_GENERATION: GhosttyRenderStateImageData =
+        GhosttyRenderStateImageData(3);
+    pub const GHOSTTY_RENDER_STATE_IMAGE_DATA_LAYER: GhosttyRenderStateImageData =
+        GhosttyRenderStateImageData(4);
+    pub const GHOSTTY_RENDER_STATE_IMAGE_DATA_Z: GhosttyRenderStateImageData =
+        GhosttyRenderStateImageData(5);
+    pub const GHOSTTY_RENDER_STATE_IMAGE_DATA_VIEWPORT_COL: GhosttyRenderStateImageData =
+        GhosttyRenderStateImageData(6);
+    pub const GHOSTTY_RENDER_STATE_IMAGE_DATA_VIEWPORT_ROW: GhosttyRenderStateImageData =
+        GhosttyRenderStateImageData(7);
+    pub const GHOSTTY_RENDER_STATE_IMAGE_DATA_GRID_COLS: GhosttyRenderStateImageData =
+        GhosttyRenderStateImageData(8);
+    pub const GHOSTTY_RENDER_STATE_IMAGE_DATA_GRID_ROWS: GhosttyRenderStateImageData =
+        GhosttyRenderStateImageData(9);
+    pub const GHOSTTY_RENDER_STATE_IMAGE_DATA_CELL_OFFSET_X: GhosttyRenderStateImageData =
+        GhosttyRenderStateImageData(10);
+    pub const GHOSTTY_RENDER_STATE_IMAGE_DATA_CELL_OFFSET_Y: GhosttyRenderStateImageData =
+        GhosttyRenderStateImageData(11);
+    pub const GHOSTTY_RENDER_STATE_IMAGE_DATA_PIXEL_WIDTH: GhosttyRenderStateImageData =
+        GhosttyRenderStateImageData(12);
+    pub const GHOSTTY_RENDER_STATE_IMAGE_DATA_PIXEL_HEIGHT: GhosttyRenderStateImageData =
+        GhosttyRenderStateImageData(13);
+    pub const GHOSTTY_RENDER_STATE_IMAGE_DATA_SOURCE_X: GhosttyRenderStateImageData =
+        GhosttyRenderStateImageData(14);
+    pub const GHOSTTY_RENDER_STATE_IMAGE_DATA_SOURCE_Y: GhosttyRenderStateImageData =
+        GhosttyRenderStateImageData(15);
+    pub const GHOSTTY_RENDER_STATE_IMAGE_DATA_SOURCE_WIDTH: GhosttyRenderStateImageData =
+        GhosttyRenderStateImageData(16);
+    pub const GHOSTTY_RENDER_STATE_IMAGE_DATA_SOURCE_HEIGHT: GhosttyRenderStateImageData =
+        GhosttyRenderStateImageData(17);
+    pub const GHOSTTY_RENDER_STATE_IMAGE_DATA_KITTY_PLACEMENT_ID: GhosttyRenderStateImageData =
+        GhosttyRenderStateImageData(18);
+    pub const GHOSTTY_RENDER_STATE_IMAGE_DATA_KITTY_KIND: GhosttyRenderStateImageData =
+        GhosttyRenderStateImageData(19);
+    pub const GHOSTTY_RENDER_STATE_IMAGE_DATA_MAX_VALUE: GhosttyRenderStateImageData =
+        GhosttyRenderStateImageData(2147483647);
+}
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub struct GhosttyRenderStateImageData(pub ::std::os::raw::c_int);
 impl GhosttyRenderStateRowData {
     pub const GHOSTTY_RENDER_STATE_ROW_DATA_INVALID: GhosttyRenderStateRowData =
         GhosttyRenderStateRowData(0);
@@ -1747,6 +1911,29 @@ unsafe extern "C" {
 unsafe extern "C" {
     pub fn ghostty_render_state_row_cells_free(cells: GhosttyRenderStateRowCells);
 }
+unsafe extern "C" {
+    pub fn ghostty_render_state_image_iterator_new(
+        allocator: *const GhosttyAllocator,
+        out_iterator: *mut GhosttyRenderStateImageIterator,
+    ) -> GhosttyResult;
+}
+unsafe extern "C" {
+    pub fn ghostty_render_state_image_iterator_free(iterator: GhosttyRenderStateImageIterator);
+}
+unsafe extern "C" {
+    pub fn ghostty_render_state_image_iterator_next(
+        iterator: GhosttyRenderStateImageIterator,
+    ) -> bool;
+}
+unsafe extern "C" {
+    pub fn ghostty_render_state_image_get_multi(
+        iterator: GhosttyRenderStateImageIterator,
+        count: usize,
+        keys: *const GhosttyRenderStateImageData,
+        values: *mut *mut ::std::os::raw::c_void,
+        out_written: *mut usize,
+    ) -> GhosttyResult;
+}
 impl GhosttySgrUnderline {
     pub const GHOSTTY_SGR_UNDERLINE_NONE: GhosttySgrUnderline = GhosttySgrUnderline(0);
     pub const GHOSTTY_SGR_UNDERLINE_SINGLE: GhosttySgrUnderline = GhosttySgrUnderline(1);
@@ -1760,6 +1947,27 @@ impl GhosttySgrUnderline {
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct GhosttySgrUnderline(pub ::std::os::raw::c_int);
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct GhosttySysImage {
+    pub width: u32,
+    pub height: u32,
+    pub data: *mut u8,
+    pub data_len: usize,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of GhosttySysImage"][::std::mem::size_of::<GhosttySysImage>() - 24usize];
+    ["Alignment of GhosttySysImage"][::std::mem::align_of::<GhosttySysImage>() - 8usize];
+    ["Offset of field: GhosttySysImage::width"]
+        [::std::mem::offset_of!(GhosttySysImage, width) - 0usize];
+    ["Offset of field: GhosttySysImage::height"]
+        [::std::mem::offset_of!(GhosttySysImage, height) - 4usize];
+    ["Offset of field: GhosttySysImage::data"]
+        [::std::mem::offset_of!(GhosttySysImage, data) - 8usize];
+    ["Offset of field: GhosttySysImage::data_len"]
+        [::std::mem::offset_of!(GhosttySysImage, data_len) - 16usize];
+};
 impl GhosttySysLogLevel {
     pub const GHOSTTY_SYS_LOG_LEVEL_ERROR: GhosttySysLogLevel = GhosttySysLogLevel(0);
     pub const GHOSTTY_SYS_LOG_LEVEL_WARNING: GhosttySysLogLevel = GhosttySysLogLevel(1);

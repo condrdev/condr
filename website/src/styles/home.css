@@ -115,6 +115,74 @@ code { font-family: var(--mono); font-size: .875em; }
 .showcase h3 { margin-bottom: 12px; font-size: 1.5rem; font-weight: 700; line-height: 1.2; letter-spacing: -.02em; text-wrap: balance; }
 .showcase p { color: var(--grey); text-wrap: pretty; }
 .showcase strong { color: var(--ink); font-weight: 600; }
+/* The wide showcase: words above, the desk below across the whole grid. */
+.showcase-wide .showcase-text { grid-column: 1 / 6; }
+.showcase-wide .desk { grid-column: 1 / -1; grid-row: 2; margin-top: 48px; }
+
+/* Desk: two displays drawn in CSS, every length in cqw of the desk so the scene scales as one. A
+   display is 44 wide: a 1-wide black glass bezel round a 16:10 screen, a metal rim, a neck and a
+   foot. The Diff Tab's window lives on the right display's screen; in the opening state it sits
+   over the left display, centred, which is 25 to the right of its place. */
+.desk { position: relative; container-type: inline-size; aspect-ratio: 100 / 36.5; }
+.monitor { position: absolute; top: 1cqw; width: 44cqw; }
+.monitor-a { left: 3cqw; }
+.monitor-b { left: 53cqw; }
+.panel { position: relative; padding: 1cqw; border-radius: 1.3cqw; background: #050607; box-shadow: 0 0 0 .12cqw #4b4f58, 0 0 0 .2cqw #1d1f24, 0 1.5cqw 3cqw rgba(0, 0, 0, .45); }
+/* The glass catches a little light across its upper left. */
+.panel::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(118deg, rgba(255, 255, 255, .09), rgba(255, 255, 255, 0) 32%); pointer-events: none; }
+/* An empty screen shows the logo's dot matrix, faintly. */
+.display { position: relative; aspect-ratio: 16 / 10; overflow: hidden; border-radius: .35cqw; background: #0b0d12 radial-gradient(rgba(177, 198, 255, .14) 1px, transparent 1px) 0 0 / 10px 10px; }
+.display img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.neck { width: 6cqw; height: 4.4cqw; margin: 0 auto; background: linear-gradient(90deg, #26292f, #5d616a 45%, #3a3d44 55%, #1f2126); clip-path: polygon(12% 0, 88% 0, 100% 100%, 0 100%); }
+.foot { width: 17cqw; height: 1cqw; margin: 0 auto; border-radius: .5cqw .5cqw .3cqw .3cqw; background: linear-gradient(#6a6e77, #2d3036 70%); box-shadow: 0 .9cqw 1.8cqw rgba(0, 0, 0, .55); }
+.desk .window { position: absolute; top: 2cqw; left: 54cqw; width: 42cqw; height: auto; aspect-ratio: 16 / 10; display: block; border-radius: .35cqw; }
+
+/* The scene, once and again while in view (index.astro sets .playing), 12 seconds round: one display
+   with the Diff Tab in the main window; the Tab lifts out as a window of its own while the main
+   window goes back to its agents; the display moves aside for a second one and the window flies over
+   and lands; it rests, then lifts, flies back and drops into the main window. Exits are quicker
+   than arrivals. Without motion the desk rests on two displays. */
+@media (prefers-reduced-motion: no-preference) {
+  /* Longhands: the build's minifier turns a shorthand without a name into `animation: none`. */
+  .desk .monitor-a, .desk .monitor-b, .desk .window, .desk .shot-before { animation-duration: 12s; animation-iteration-count: infinite; animation-fill-mode: both; animation-play-state: paused; }
+  .desk.playing :is(.monitor-a, .monitor-b, .window, .shot-before) { animation-play-state: running; }
+  .desk .monitor-a { animation-name: desk-a; }
+  .desk .monitor-b { animation-name: desk-b; }
+  .desk .window { animation-name: desk-window; }
+  .desk .shot-before { animation-name: desk-before; }
+  /* The displays never overlap: the first is aside before the second arrives, and the second is gone
+     before the first comes back to the middle. */
+  @keyframes desk-a {
+    0%, 15% { translate: 25cqw 0; animation-timing-function: cubic-bezier(.65, 0, .35, 1); }
+    23%, 72% { translate: 0 0; animation-timing-function: cubic-bezier(.65, 0, .35, 1); }
+    80%, 100% { translate: 25cqw 0; }
+  }
+  @keyframes desk-b {
+    0%, 21% { opacity: 0; translate: 6cqw 0; animation-timing-function: cubic-bezier(.16, 1, .3, 1); }
+    28%, 69% { opacity: 1; translate: 0 0; animation-timing-function: cubic-bezier(.7, 0, .84, 0); }
+    73%, 100% { opacity: 0; translate: 6cqw 0; }
+  }
+  @keyframes desk-window {
+    0%, 10% { opacity: 0; translate: -25cqw 0; scale: 1; box-shadow: none; }
+    12% { opacity: 1; translate: -25cqw 0; scale: 1; box-shadow: none; animation-timing-function: cubic-bezier(.16, 1, .3, 1); }
+    15% { translate: -25cqw -1.5cqw; scale: .84; box-shadow: 0 2cqw 4cqw rgba(0, 0, 0, .6), 0 0 0 .08cqw rgba(255, 255, 255, .14); border-radius: .7cqw; animation-timing-function: cubic-bezier(.65, 0, .35, 1); }
+    25% { translate: 0 -1cqw; scale: .84; box-shadow: 0 2cqw 4cqw rgba(0, 0, 0, .6), 0 0 0 .08cqw rgba(255, 255, 255, .14); border-radius: .7cqw; animation-timing-function: cubic-bezier(.16, 1, .3, 1); }
+    30%, 63.3% { opacity: 1; translate: 0 0; scale: 1; box-shadow: none; border-radius: .35cqw; animation-timing-function: cubic-bezier(.16, 1, .3, 1); }
+    67.5% { translate: 0 -1.5cqw; scale: .84; box-shadow: 0 2cqw 4cqw rgba(0, 0, 0, .6), 0 0 0 .08cqw rgba(255, 255, 255, .14); border-radius: .7cqw; animation-timing-function: cubic-bezier(.65, 0, .35, 1); }
+    77.5% { translate: -25cqw -1cqw; scale: .84; box-shadow: 0 2cqw 4cqw rgba(0, 0, 0, .6), 0 0 0 .08cqw rgba(255, 255, 255, .14); border-radius: .7cqw; animation-timing-function: cubic-bezier(.16, 1, .3, 1); }
+    82.5% { opacity: 1; translate: -25cqw 0; scale: 1; box-shadow: none; border-radius: .35cqw; }
+    84.5%, 100% { opacity: 0; translate: -25cqw 0; scale: 1; box-shadow: none; }
+  }
+  @keyframes desk-before {
+    0%, 10% { opacity: 1; }
+    15%, 82.5% { opacity: 0; }
+    84.5%, 100% { opacity: 1; }
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .desk .shot-before { opacity: 0; }
+}
+
 /* Screenshots side by side at one height: each figure grows by its image's width over its height,
    times 100, since growth adding up to less than 1 leaves the rest of the row empty. */
 .shots { display: flex; gap: var(--gap); align-items: flex-start; }
@@ -239,6 +307,7 @@ code { font-family: var(--mono); font-size: .875em; }
   .showcase, .review { display: block; margin-top: 64px; }
   .showcase .shots, .review-shots { margin-top: 24px; }
   .shots { gap: 12px; }
+  .showcase-wide .desk { margin-top: 32px; }
   .features { margin-top: 64px; }
   /* Too narrow for the remote pair at one height: the file list goes under the Ports page, smaller. */
   .remote-shots { display: block; margin-top: 40px; }

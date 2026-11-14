@@ -23,6 +23,7 @@ gpui-pre-reqwest.workspace = true
 gpui-pre-http-client-tls.workspace = true
 futures-lite.workspace = true
 similar.workspace = true
+nucleo-matcher.workspace = true
 image = { workspace = true, features = ["gif", "webp"] }
 condr-core = { path = "../condr-core" }
 condr-client = { path = "../condr-client" }
@@ -43,6 +44,9 @@ keepawake = { version = "0.6", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 windows-registry.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-core-graphics.workspace = true
 
 [build-dependencies]
 embed-resource.workspace = true

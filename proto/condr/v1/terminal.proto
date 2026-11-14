@@ -75,6 +75,44 @@ message TerminalCells {
   repeated uint32 underline = 7;
 }
 
+// Unknown decodes to ABOVE_TEXT.
+enum TerminalImageLayer {
+  TERMINAL_IMAGE_LAYER_UNSPECIFIED = 0;
+  TERMINAL_IMAGE_LAYER_BELOW_BACKGROUND = 1;
+  TERMINAL_IMAGE_LAYER_BELOW_TEXT = 2;
+  TERMINAL_IMAGE_LAYER_ABOVE_TEXT = 3;
+}
+
+// One place a kitty graphics image shows in the viewport (ADR 0065), in the VT's pixels,
+// which the frame's TerminalSize names the cell size of. A Client fetches the image's
+// PNG by `image` over a Stream.
+message TerminalImagePlacement {
+  // The image's SHA-256, 32 bytes.
+  bytes image = 1;
+  uint32 image_width = 2;
+  uint32 image_height = 3;
+  TerminalImageLayer layer = 4;
+  sint32 z = 5;
+  // The top-left cell, negative when the image starts above or left of the viewport.
+  sint32 row = 6;
+  sint32 column = 7;
+  uint32 offset_x = 8;
+  uint32 offset_y = 9;
+  // The size to draw it at.
+  uint32 width = 10;
+  uint32 height = 11;
+  // The part of the image drawn, in its own pixels.
+  uint32 source_x = 12;
+  uint32 source_y = 13;
+  uint32 source_width = 14;
+  uint32 source_height = 15;
+}
+
+// In the order to draw them.
+message TerminalImages {
+  repeated TerminalImagePlacement placements = 1;
+}
+
 message TerminalView {
   uint64 revision = 1;
   TerminalSize size = 2;
@@ -85,6 +123,7 @@ message TerminalView {
   TerminalCells cells = 6;
   TerminalCursor cursor = 7;
   TerminalSelection selection = 8;
+  TerminalImages images = 9;
 }
 
 // Runs of changed cells, flattened: the cells of every run in one set of columns, run i
@@ -100,6 +139,8 @@ message TerminalViewDelta {
   repeated uint32 run_start = 8;
   repeated uint32 run_len = 9;
   TerminalCells cells = 10;
+  // Present, whole, only when the images changed.
+  TerminalImages images = 11;
 }
 
 message TerminalViewFrame {

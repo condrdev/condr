@@ -40,6 +40,7 @@ fn terminal_view(revision: u64, text: &str) -> TerminalView {
         mouse_tracking: TerminalMouseTracking::None,
         cells,
         cursor: None,
+        images: Vec::new(),
     }
 }
 
@@ -225,6 +226,7 @@ fn terminal_frame_batch_is_atomic_when_a_later_pane_has_a_gap() {
                     start: 0,
                     cells: vec![terminal_cell("x")],
                 }],
+                images: None,
             }),
         },
         PaneTerminalFrame {
@@ -240,6 +242,7 @@ fn terminal_frame_batch_is_atomic_when_a_later_pane_has_a_gap() {
                     start: 0,
                     cells: vec![terminal_cell("y")],
                 }],
+                images: None,
             }),
         },
     ];
@@ -279,6 +282,7 @@ fn terminal_frame_batch_bounds_hyperlinks_across_retained_deltas() {
                     start: 0,
                     cells: vec![linked],
                 }],
+                images: None,
             }),
         }],
     )
@@ -319,6 +323,7 @@ fn terminal_frame_batch_canonicalizes_links_across_retained_deltas() {
                     start: 1,
                     cells: vec![linked],
                 }],
+                images: None,
             }),
         }],
     )
@@ -356,6 +361,7 @@ fn visual_slot_composes_pending_deltas_into_one_signal() {
             start: 1,
             cells: vec![first_cell],
         }],
+        images: None,
     };
     let second = TerminalViewDelta {
         selection: None,
@@ -368,6 +374,7 @@ fn visual_slot_composes_pending_deltas_into_one_signal() {
             start: 2,
             cells: vec![second_cell],
         }],
+        images: None,
     };
 
     assert_eq!(
@@ -416,6 +423,7 @@ fn visual_slot_publish_is_atomic_across_panes() {
                 start: 0,
                 cells: vec![terminal_cell(text)],
             }],
+            images: None,
         })
     };
 
@@ -508,6 +516,7 @@ fn delta_composition_keeps_later_cell_values_and_latest_metadata() {
             start: 1,
             cells: vec![terminal_cell("A"), terminal_cell("B")],
         }],
+        images: None,
     };
     let next = TerminalViewDelta {
         selection: None,
@@ -520,6 +529,7 @@ fn delta_composition_keeps_later_cell_values_and_latest_metadata() {
             start: 2,
             cells: vec![terminal_cell("C")],
         }],
+        images: None,
     };
 
     let merged = merge_terminal_deltas(previous, next).unwrap();

@@ -1,3 +1,4 @@
+mod images;
 mod input;
 #[cfg(windows)]
 mod job;

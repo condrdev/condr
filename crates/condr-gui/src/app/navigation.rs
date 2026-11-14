@@ -98,6 +98,30 @@ impl Condr {
         cx.notify();
     }
 
+    /// Shows a Workspace, and a Tab of it, in whichever window draws it, and brings that
+    /// window forward among this Client's windows. Returns whether what is shown changed;
+    /// the caller rebuilds the Dock when it did.
+    pub(super) fn show_and_bring_forward(
+        &mut self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        tab_id: Option<TabId>,
+        cx: &mut App,
+    ) -> bool {
+        let changed = self.show_view(key, workspace_id, tab_id);
+        let shown_tab = tab_id.or_else(|| {
+            let connection = self.connection(key)?;
+            connection.viewed_tab_id(connection.session()?, workspace_id)
+        });
+        let home = self.home_window(key, Some(workspace_id), shown_tab);
+        // The window that shows it leaves its Ports page (ADR 0061).
+        if let Some(view) = self.windows.iter_mut().find(|view| view.handle == home) {
+            view.ports = None;
+        }
+        self.activate_window(home, cx);
+        changed
+    }
+
     /// A selection in the main window presents its Device there, even one another window
     /// draws: the main window then shows the page saying so (ADR 0043).
     fn present_in_main(&mut self, key: ConnectionKey, window: &Window) -> bool {

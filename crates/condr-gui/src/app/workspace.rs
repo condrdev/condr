@@ -54,6 +54,36 @@ pub(super) fn tab_label(tab_index: usize, name: &str) -> String {
 }
 
 impl Condr {
+    /// Moves `dragged` to the slot the insertion line shows in the strip of `key`'s
+    /// Workspace `workspace_id`, whose Tabs are `tab_ids`.
+    fn drop_tab(
+        &mut self,
+        dragged: &DraggedTab,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        tab_ids: &[TabId],
+    ) {
+        let Some(DropTarget::Tab { tab_id, after, .. }) = self.drop_target.take() else {
+            return;
+        };
+        if dragged.key != key || dragged.workspace_id != workspace_id {
+            return;
+        }
+        let place = |id| tab_ids.iter().position(|tab| *tab == id);
+        let (Some(source), Some(target)) = (place(dragged.tab_id), place(tab_id)) else {
+            return;
+        };
+        if let Some(index) = drop_index(source, target, after) {
+            self.send_layout_to(
+                key,
+                LayoutCommand::MoveTab {
+                    tab_id: dragged.tab_id,
+                    target_index: index as u32,
+                },
+            );
+        }
+    }
+
     /// The active Workspace as two pieces: its Tab strip, which the title bar hosts so
     /// the Panes get the full body height, and the body under it. No strip without a
     /// Workspace.
@@ -179,6 +209,7 @@ impl Condr {
         // row's children alternate Tab and separator, so Tab `i` is child `2i`. For the
         // last Tab, scroll to "New Tab" right behind it, so a just-created Tab does not
         // leave the button it came from half hidden.
+        let strip = &view.tab_strip_scroll;
         if view.last_scrolled_tab.replace(Some(active_tab)) != Some(active_tab)
             && let Some(index) = active_index
         {
@@ -187,15 +218,72 @@ impl Condr {
             } else {
                 2 * index
             };
-            view.tab_strip_scroll.scroll_to_item(item);
+            strip.scroll_to_item(item);
+        } else {
+            // A row that showed "New Tab" keeps showing it as its Tabs widen: a shell
+            // titling a new Tab's Pane must not push the button back out. A row scrolled
+            // away from it is left where it is.
+            let new_tab = 2 * tab_ids.len().saturating_sub(1) + 1;
+            let shown = strip.bounds_for_item(new_tab).is_some_and(|item| {
+                item.right() + strip.offset().x <= strip.bounds().right() + px(1.)
+            });
+            if shown {
+                strip.scroll_to_item(new_tab);
+            }
         }
         let tab_count = tab_ids.len();
         let separator_color = cx.theme().border;
         let transparent = cx.theme().transparent;
+        let muted = cx.theme().muted_foreground;
+        // An unnamed terminal Tab shows its focused Pane's title after its number.
+        let pane_titles = workspace
+            .tabs()
+            .iter()
+            .map(|tab| {
+                let pane = tab
+                    .name()
+                    .is_empty()
+                    .then(|| tab.focused_pane())
+                    .flatten()?;
+                self.connection(key)?.pane_title(pane.id())
+            })
+            .collect::<Vec<_>>();
+        // A Tab leads with the state of its Pane that most wants a person, as the sidebar
+        // ranks them.
+        let tab_statuses = workspace
+            .tabs()
+            .iter()
+            .map(|tab| {
+                let model = &self.connection(key)?.model;
+                let statuses = tab
+                    .panes()
+                    .iter()
+                    .filter_map(|pane| super::sidebar::pane_sidebar_status(model, pane.id()))
+                    // Unknown says nothing, here as on the Pane; the sidebar counts it idle.
+                    .filter(|status| status.key != "unknown");
+                let (status, _) = *super::sidebar::agent_status_summary(statuses).first()?;
+                let badge = super::sidebar::status_badge(status, cx)?;
+                let tab_id = tab.id();
+                Some(
+                    div()
+                        .debug_selector(move || format!("tab-status-{}", tab_id.as_u64()))
+                        .flex_shrink_0()
+                        .child(badge),
+                )
+            })
+            .collect::<Vec<_>>();
+        let mut tab_statuses = tab_statuses.into_iter();
+        // Between two Tabs: the strip's gap, the separator, and the gap again.
+        let tab_gap = rems(0.5).to_pixels(cx.theme().font_size) + px(1.);
         let tab_buttons = workspace.tabs().iter().enumerate().map(|(tab_index, tab)| {
             let tab_id = tab.id();
             let tab_name = tab.name().to_owned();
-            let tab_label = tab_label(tab_index, &tab_name);
+            let pane_title = pane_titles[tab_index].clone();
+            let tab_status = tab_statuses.next().flatten();
+            let tab_label = match &pane_title {
+                Some(title) => format!("{}  {title}", tab_index + 1),
+                None => tab_label(tab_index, &tab_name),
+            };
             // A Preview Tab's file can be downloaded from its menu (ADR 0061).
             let preview_file = tab.file().map(|file| file.path().to_relative_path_buf());
             let activate_owner = cx.weak_entity();
@@ -248,8 +336,6 @@ impl Condr {
                 // the Tab's own drag needs it.
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .when(can_mutate, |this| {
-                    let drop_owner = cx.weak_entity();
-                    let tab_ids = tab_ids.clone();
                     this.on_drag(
                         DraggedTab {
                             key,
@@ -257,39 +343,23 @@ impl Condr {
                             tab_id,
                             name: tab_label.clone().into(),
                         },
-                        move |drag, _, _, cx| {
+                        move |drag, offset, _, cx| {
                             cx.stop_propagation();
                             let name = drag.name.clone();
-                            cx.new(|_| DragPreview { icon: None, name })
+                            cx.new(|_| DragPreview {
+                                icon: None,
+                                name,
+                                offset,
+                            })
                         },
                     )
-                    .on_drop(move |dragged: &DraggedTab, _, cx| {
-                        let _ = drop_owner.update(cx, |this, _| {
-                            let after = this.take_drop_after(target);
-                            if dragged.key != key || dragged.workspace_id != workspace_id {
-                                return;
-                            }
-                            let Some(source) = tab_ids.iter().position(|id| *id == dragged.tab_id)
-                            else {
-                                return;
-                            };
-                            if let Some(index) = drop_index(source, tab_index, after) {
-                                this.send_layout_to(
-                                    key,
-                                    LayoutCommand::MoveTab {
-                                        tab_id: dragged.tab_id,
-                                        target_index: index as u32,
-                                    },
-                                );
-                            }
-                        });
-                    })
                 });
             let move_owner = cx.weak_entity();
             let tab_row = if can_mutate {
                 attach_drop_target::<DraggedTab, _>(
                     tab_row,
                     true,
+                    tab_gap,
                     self.drop_indicator_for(target, cx),
                     move |half, cx| {
                         let _ = move_owner
@@ -309,7 +379,18 @@ impl Condr {
                         .min_w(TAB_MIN_WIDTH)
                         .max_w(TAB_MAX_WIDTH)
                         .selected(tab_id == active_tab)
-                        .label(tab_label.clone())
+                        .child(h_flex().min_w_0().gap_2().children(tab_status).map(|row| {
+                            match pane_title {
+                                Some(title) => row
+                                    .child(
+                                        div().text_color(muted).child(format!("{}", tab_index + 1)),
+                                    )
+                                    .child(div().min_w_0().truncate().child(title)),
+                                None => {
+                                    row.child(div().min_w_0().truncate().child(tab_label.clone()))
+                                }
+                            }
+                        }))
                         .tooltip_with_action(
                             tab_label,
                             &ActivateTab { index: tab_index },
@@ -435,6 +516,16 @@ impl Condr {
                             .overflow_x_scroll()
                             .lock_scroll_axis()
                             .track_scroll(&view.tab_strip_scroll)
+                            // A Tab let go anywhere over the strip, gaps included, lands
+                            // where the insertion line shows.
+                            .when(can_mutate, |this| {
+                                let drop_owner = cx.weak_entity();
+                                this.on_drop(move |dragged: &DraggedTab, _, cx| {
+                                    let _ = drop_owner.update(cx, |this, _| {
+                                        this.drop_tab(dragged, key, workspace_id, &tab_ids)
+                                    });
+                                })
+                            })
                             // Chrome's cue between two idle Tabs: a hairline in the gap.
                             // Beside the active Tab it is drawn transparent rather than
                             // left out, so the child indices `scroll_to_item` counts on
@@ -801,7 +892,7 @@ impl Render for Condr {
             .child(body)
             .into_any_element();
         div()
-            .key_context("Condr")
+            .key_context(SHORTCUT_CONTEXT)
             .relative()
             .track_focus(&view.focus_handle)
             .on_key_down(cx.listener(Self::key_down))
@@ -841,6 +932,7 @@ impl Render for Condr {
             .on_action(cx.listener(Self::action_new_workspace))
             .on_action(cx.listener(Self::action_new_tab))
             .on_action(cx.listener(Self::action_open_settings))
+            .on_action(cx.listener(Self::action_open_command_palette))
             .on_action(|_: &MinimizeWindow, window, _| window.minimize_window())
             .on_action(|_: &ZoomWindow, window, _| window.zoom_window())
             .on_action(|_: &ToggleFullScreen, window, _| window.toggle_fullscreen())

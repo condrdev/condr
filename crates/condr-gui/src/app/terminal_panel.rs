@@ -126,6 +126,7 @@ impl Render for TerminalPanel {
             runtime_epoch,
             pane_title,
             agent_kind,
+            agent_status,
             attention,
             zoomed,
             pasting,
@@ -165,6 +166,9 @@ impl Render for TerminalPanel {
                     connection
                         .and_then(|connection| connection.model.agents.get(&self.pane_id))
                         .map(|agent| agent.kind),
+                    connection
+                        .and_then(|connection| connection.model.agent_display_state(self.pane_id))
+                        .map(super::sidebar::agent_sidebar_status),
                     connection.is_some_and(|connection| {
                         connection.model.attention.contains(&self.pane_id)
                     }),
@@ -191,6 +195,7 @@ impl Render for TerminalPanel {
                 None,
                 None,
                 SharedString::from("Terminal"),
+                None,
                 None,
                 false,
                 false,
@@ -265,6 +270,7 @@ impl Render for TerminalPanel {
             .flex_1()
             .min_h(px(0.))
             .overflow_hidden()
+            .rounded_b(INNER_RADIUS)
             // The gap between border and grid belongs to the terminal, so it is
             // painted in the terminal's background rather than the pane chrome.
             .p(px(5.))
@@ -371,15 +377,16 @@ impl Render for TerminalPanel {
             });
         let title_tooltip = pane_title.clone();
 
+        // A card in the Tab's gaps; the focused one of several is outlined in the accent.
         v_flex()
             .size_full()
             .overflow_hidden()
-            .when(!solo, |this| {
-                this.border_2().border_color(if active {
-                    rgb(ACTIVE_PANE_BORDER_RGB).into()
-                } else {
-                    cx.theme().border
-                })
+            .rounded(super::dock::PANE_RADIUS)
+            .border_1()
+            .border_color(if active && !solo {
+                cx.theme().primary
+            } else {
+                cx.theme().border
             })
             .child(
                 h_flex()
@@ -394,6 +401,7 @@ impl Render for TerminalPanel {
                     .border_b_1()
                     .border_color(cx.theme().border)
                     .bg(cx.theme().background)
+                    .rounded_t(INNER_RADIUS)
                     .occlude()
                     // The header has its own hitbox now that it can start a drag, so the
                     // tab group's focus-on-press no longer reaches through it. A click
@@ -417,10 +425,14 @@ impl Render for TerminalPanel {
                         let name = pane_title.clone();
                         this.on_drag(
                             AnyDrag::new(super::dock::DraggedPane { key, pane_id }),
-                            move |_, _, _, cx| {
+                            move |_, offset, _, cx| {
                                 cx.stop_propagation();
                                 let name = name.clone();
-                                cx.new(|_| super::sidebar::DragPreview { icon: None, name })
+                                cx.new(|_| super::sidebar::DragPreview {
+                                    icon: None,
+                                    name,
+                                    offset,
+                                })
                             },
                         )
                     })
@@ -431,6 +443,31 @@ impl Render for TerminalPanel {
                             .flex()
                             .items_center()
                             .gap_1()
+                            // The Agent's state leads the header, as it leads the Tab; the
+                            // bell says it instead while it rings.
+                            .when_some(agent_status.filter(|_| !attention), |header, status| {
+                                header.children(super::sidebar::status_badge(status, cx).map(
+                                    |badge| {
+                                        div()
+                                            .id(format!(
+                                                "terminal-pane-status-{key}-{}",
+                                                pane_id.as_u64()
+                                            ))
+                                            .debug_selector(move || {
+                                                format!("terminal-pane-status-{}", pane_id.as_u64())
+                                            })
+                                            .size_4()
+                                            .flex_shrink_0()
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .tooltip(move |window, cx| {
+                                                Tooltip::new(status.label).build(window, cx)
+                                            })
+                                            .child(badge)
+                                    },
+                                ))
+                            })
                             .when(attention, |header| {
                                 header.child(
                                     div()
@@ -506,6 +543,9 @@ impl Render for TerminalPanel {
             .child(body)
     }
 }
+/// What the card's contents round their corners to, inside its one-pixel border.
+const INNER_RADIUS: Pixels = px(7.);
+
 /// A program's progress (OSC 9;4, or a percentage in its OSC 7501 status) as a thin bar
 /// along the top of its terminal (ADR 0054), in the terminal colour scheme's own blue,
 /// red for an error and yellow for a pause, so it reads on any scheme's background; it

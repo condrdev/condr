@@ -44,6 +44,7 @@ class RendererTest {
       0x0D1117u,
       false,
       false,
+      emptyList(),
     )
 
   private fun draw(screen: TerminalScreen, rows: Int, columns: Int): Bitmap {

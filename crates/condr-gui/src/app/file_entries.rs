@@ -420,25 +420,23 @@ impl Condr {
         .into_iter()
         .fold(menu, |menu, (label, icon, kind)| {
             let (owner, parent) = (owner.clone(), parent.clone());
-            menu.item(
-                PopupMenuItem::new(label)
-                    .icon(icon)
-                    .on_click(move |_, window, cx| {
-                        let parent = parent.clone();
-                        let _ = owner.update(cx, |this, cx| {
-                            this.prompt_new_entry(
-                                key,
-                                workspace_id,
-                                parent,
-                                kind,
-                                String::new(),
-                                None,
-                                window,
-                                cx,
-                            )
-                        });
-                    }),
-            )
+            menu.item(PopupMenuItem::new(label).icon(menu_icon(icon)).on_click(
+                move |_, window, cx| {
+                    let parent = parent.clone();
+                    let _ = owner.update(cx, |this, cx| {
+                        this.prompt_new_entry(
+                            key,
+                            workspace_id,
+                            parent,
+                            kind,
+                            String::new(),
+                            None,
+                            window,
+                            cx,
+                        )
+                    });
+                },
+            ))
         })
     }
 
@@ -457,7 +455,7 @@ impl Condr {
         let rename_owner = owner.clone();
         menu.item(
             PopupMenuItem::new("Rename…")
-                .icon(Glyph::Pencil)
+                .icon(menu_icon(Glyph::Pencil))
                 .disabled(!exists)
                 .on_click(move |_, window, cx| {
                     let from = rename_path.clone();
@@ -478,7 +476,7 @@ impl Condr {
         )
         .item(
             PopupMenuItem::new("Delete…")
-                .icon(Glyph::Trash)
+                .icon(menu_icon(Glyph::Trash))
                 .disabled(!exists)
                 .on_click(move |_, window, cx| {
                     let path = delete_path.clone();

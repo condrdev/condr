@@ -194,7 +194,7 @@ impl Condr {
                 let copy_id = copy_id.clone();
                 menu.item(
                     PopupMenuItem::new("Copy Commit ID")
-                        .icon(Glyph::Copy)
+                        .icon(menu_icon(Glyph::Copy))
                         .on_click(move |_, _, cx| {
                             cx.write_to_clipboard(ClipboardItem::new_string(copy_id.clone()));
                         }),

@@ -92,10 +92,10 @@ _Avoid_: Active Workspace, active Tab, selection
 **Tab**:
 A Workspace's view, optionally named by the user: either a terminal layout that owns an arrangement of Panes and its current focus, or a viewer with no Panes at all (the Diff Tab, ADR 0017, and the Preview Tab, ADR 0018; at most one of each per Workspace). The GUI numbers open Tabs from 1 in their current Workspace order, recalculating after reordering or closing. An unnamed Tab displays only its centered number; a named Tab displays the number followed by its user-provided name. The number is derived presentation, not a stable identity or a persisted name.
 
-`Alt+1` through `Alt+9` (`Cmd+1` through `Cmd+9` on macOS) activate the corresponding displayed Tab number in the current Workspace. A missing number does nothing, and 9 means the ninth Tab, not the last. These GUI shortcuts are consumed before terminal input and do not switch Tabs while a modal dialog is open.
+`Alt+1` through `Alt+9` (`Cmd+1` through `Cmd+9` on macOS) activate the corresponding displayed Tab number in the current Workspace, unless `[client.keybindings]` gives `go-to-tab-1` through `go-to-tab-9` other keys (ADR 0063). A missing number does nothing, and 9 means the ninth Tab, not the last. These GUI shortcuts are consumed before terminal input and do not switch Tabs while a modal dialog is open.
 
 **Pane**:
-A terminal location and layout leaf within a terminal Tab. It may show a shell or an Agent running inside that shell.
+A terminal location and layout leaf within a terminal Tab. It may show a shell or an Agent running inside that shell. Programs in it can draw images through the kitty graphics protocol (ADR 0065).
 _Avoid_: Agent
 
 **Diff Tab**:
@@ -136,6 +136,10 @@ _Avoid_: Finished, Completed (as states)
 **Needs you**:
 The list of every `Blocked` or `Error` Agent on every connected Device, with its `detail`, at the top of the GUI's sidebar and on the Companion's first screen (ADR 0024, ADR 0044). Each Client builds it from state it already holds; it is not a Server feature, and choosing a row opens the Pane without answering anything.
 _Avoid_: inbox, queue
+
+**Command Palette**:
+The GUI's one overlay for running a window action or going to a place by typing part of its name, opened by pressing Shift twice (ADR 0064). Its pages are All, Actions and Go to: Actions lists every window action with its current key, greyed where it cannot run in that window; Go to lists every connected Device and its Workspaces, Tabs and Agents, the most urgent Agents first. It searches names, never terminal output or file contents, and is the Client's own: nothing is sent until a choice is made.
+_Avoid_: Search Everywhere, quick open, palette (alone, that word is the Color Scheme's)
 
 **Agent Conversation**:
 A conversation owned and stored by a native Agent CLI, identified by that CLI’s session ID. A Pane retains a reference to its running Agent Conversation so a replacement Server can reopen it.

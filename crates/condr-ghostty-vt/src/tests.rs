@@ -2,6 +2,10 @@ use super::*;
 use render::{Color, Underline};
 
 fn terminal(cols: u16, rows: u16) -> Terminal {
+    terminal_with_images(cols, rows, 0)
+}
+
+fn terminal_with_images(cols: u16, rows: u16, image_storage_bytes: u64) -> Terminal {
     Terminal::new(Options {
         cols,
         rows,
@@ -12,6 +16,8 @@ fn terminal(cols: u16, rows: u16) -> Terminal {
         terminfo_name: "xterm-256color".into(),
         resize_pulls_scrollback: true,
         colors: colors(0x0d1117),
+        image_storage_bytes,
+        image_temp_dir: String::new(),
     })
     .unwrap()
 }
@@ -369,12 +375,134 @@ fn the_librarys_log_reaches_tracing() {
 }
 
 #[test]
-fn kitty_graphics_and_glyph_queries_go_unanswered() {
+fn without_image_storage_kitty_graphics_and_glyph_queries_go_unanswered() {
     let mut terminal = terminal(20, 5);
     let replies = terminal
         .write(b"\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b_25a1;s\x1b\\")
         .into_iter()
         .filter(|event| matches!(event, Event::WritePty(_)))
         .count();
-    assert_eq!(replies, 0, "Condr shows neither images nor custom glyphs");
+    assert_eq!(
+        replies, 0,
+        "no storage turns kitty graphics off; glyphs are always off"
+    );
+}
+
+fn base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let word = chunk.iter().enumerate().fold(0u32, |word, (index, byte)| {
+            word | u32::from(*byte) << (16 - 8 * index)
+        });
+        for index in 0..4 {
+            out.push(if index <= chunk.len() {
+                ALPHABET[(word >> (18 - 6 * index) & 63) as usize] as char
+            } else {
+                '='
+            });
+        }
+    }
+    out
+}
+
+#[test]
+fn with_image_storage_a_graphics_query_is_answered_before_da1() {
+    let mut terminal = terminal_with_images(20, 5, 1 << 20);
+    let events = terminal.write(b"\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b[c");
+    let [Event::WritePty(reply)] = events.as_slice() else {
+        panic!("{events:?}")
+    };
+    assert_eq!(
+        String::from_utf8_lossy(reply),
+        "\x1b_Gi=31;OK\x1b\\\x1b[?62;22c"
+    );
+}
+
+#[test]
+fn a_placed_image_reports_its_pixels_and_where_it_is_drawn() {
+    let mut terminal = terminal_with_images(20, 5, 1 << 20);
+    let pixels = [255, 0, 0, 255, 0, 255, 0, 255];
+    terminal.write(b"\r\n  ");
+    terminal.write(format!("\x1b_Ga=T,q=2,f=32,s=2,v=1,i=7;{}\x1b\\", base64(&pixels)).as_bytes());
+    let mut render = RenderState::new().unwrap();
+    render.update(&terminal).unwrap();
+    let placements = render.image_placements();
+    let [placement] = placements.as_slice() else {
+        panic!("{placements:?}")
+    };
+    assert_eq!(
+        (placement.image_id, placement.column, placement.row),
+        (7, 2, 1)
+    );
+    assert_eq!((placement.width, placement.height), (2, 1));
+    assert_eq!(placement.layer, ImageLayer::AboveText);
+    assert_ne!(placement.generation, 0);
+    let image = terminal.image(7).unwrap();
+    assert_eq!(
+        (image.width, image.height, image.format),
+        (2, 1, ImageFormat::Rgba)
+    );
+    assert_eq!(image.pixels, pixels);
+}
+
+#[test]
+fn a_png_is_decoded_to_rgba() {
+    let mut png = Vec::new();
+    let mut encoder = png::Encoder::new(&mut png, 2, 1);
+    encoder.set_color(png::ColorType::Rgb);
+    let mut writer = encoder.write_header().unwrap();
+    writer.write_image_data(&[10, 20, 30, 40, 50, 60]).unwrap();
+    writer.finish().unwrap();
+    let mut terminal = terminal_with_images(20, 5, 1 << 20);
+    terminal.write(format!("\x1b_Ga=t,q=2,f=100,i=3;{}\x1b\\", base64(&png)).as_bytes());
+    let image = terminal.image(3).unwrap();
+    assert_eq!(
+        (image.width, image.height, image.format),
+        (2, 1, ImageFormat::Rgba)
+    );
+    assert_eq!(image.pixels, [10, 20, 30, 255, 40, 50, 60, 255]);
+}
+
+#[test]
+fn a_png_that_does_not_decode_is_refused() {
+    let mut terminal = terminal_with_images(20, 5, 1 << 20);
+    let events =
+        terminal.write(format!("\x1b_Ga=t,f=100,i=4;{}\x1b\\", base64(b"not a png")).as_bytes());
+    let [Event::WritePty(reply)] = events.as_slice() else {
+        panic!("{events:?}")
+    };
+    assert!(
+        String::from_utf8_lossy(reply).starts_with("\x1b_Gi=4;E"),
+        "{reply:?}"
+    );
+    assert!(terminal.image(4).is_none());
+}
+
+#[test]
+fn placeholder_cells_resolve_to_one_placement_per_row() {
+    let mut terminal = terminal_with_images(20, 5, 1 << 20);
+    let pixels = [255u8; 4 * 4];
+    terminal.write(
+        format!(
+            "\x1b_Ga=T,U=1,q=2,f=32,s=2,v=2,i=1,c=2,r=2;{}\x1b\\",
+            base64(&pixels)
+        )
+        .as_bytes(),
+    );
+    // Image 1 in the foreground colour; the diacritics name row 0 and row 1.
+    terminal
+        .write("\x1b[38;5;1m\u{10EEEE}\u{305}\u{10EEEE}\r\n\u{10EEEE}\u{30D}\u{10EEEE}".as_bytes());
+    let mut render = RenderState::new().unwrap();
+    render.update(&terminal).unwrap();
+    let placements = render.image_placements();
+    assert_eq!(placements.len(), 2, "{placements:?}");
+    assert!(placements.iter().all(|placement| placement.image_id == 1));
+    assert_eq!(
+        placements
+            .iter()
+            .map(|placement| placement.row)
+            .collect::<Vec<_>>(),
+        [0, 1]
+    );
 }

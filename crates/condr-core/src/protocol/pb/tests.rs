@@ -22,6 +22,7 @@ fn view(cells: TerminalCells, rows: u32, columns: u32) -> super::TerminalView {
         cells: Some(cells),
         cursor: None,
         selection: None,
+        images: None,
     }
 }
 
@@ -683,6 +684,7 @@ fn the_cell_columns_round_trip() {
         ],
         cursor: None,
         selection: None,
+        images: Vec::new(),
     };
     let encoded = super::TerminalView::from(&view);
     assert_eq!(TerminalView::try_from(encoded).unwrap(), view);

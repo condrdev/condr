@@ -4,6 +4,7 @@ mod client;
 mod clipboard_image;
 mod clones;
 mod config;
+mod images;
 mod layout;
 mod local;
 mod push;

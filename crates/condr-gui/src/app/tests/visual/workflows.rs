@@ -870,19 +870,40 @@ fn dragging_workspaces_and_tabs_reorders_them_without_changing_focus() {
         })
     }));
 
-    window.update(|window, cx| _ = window.draw(cx));
+    // Each Tab widens for its shell's title, which would move the drop target.
+    title_every_pane(window, &view, "runner@ci-host: ~/projects/condr");
     let tab = window
         .debug_bounds(tab_selector(first_tab))
         .expect("the non-active Tab should render");
     let tab_target = window
         .debug_bounds(tab_selector(active_tab))
         .expect("the drop target Tab should render");
+    let hover = |window: &mut VisualTestContext, at: gpui_kit::Point<gpui_kit::Pixels>| {
+        // The first move starts the drag; the next one reaches the target.
+        for _ in 0..2 {
+            window.simulate_mouse_move(at, MouseButton::Left, Modifiers::default());
+            window.run_until_parked();
+            window.update(|window, cx| _ = window.draw(cx));
+        }
+        window
+            .debug_bounds("drop-indicator")
+            .map(|line| line.center().x)
+    };
     window.simulate_mouse_down(tab.center(), MouseButton::Left, Modifiers::default());
-    window.simulate_mouse_move(tab_target.center(), MouseButton::Left, Modifiers::default());
-    window.run_until_parked();
-    window.update(|window, cx| _ = window.draw(cx));
-    window.simulate_mouse_move(tab_target.center(), MouseButton::Left, Modifiers::default());
-    window.simulate_mouse_up(tab_target.center(), MouseButton::Left, Modifiers::default());
+    // After the first Tab and before the second is one slot: one line, in the middle of
+    // the gap between them, whichever Tab the pointer is over.
+    let middle = (tab.right() + tab_target.left()) / 2.;
+    let near = |x: Option<gpui_kit::Pixels>| x.is_some_and(|x| (x - middle).abs() <= px(1.));
+    let before_second = hover(window, point(tab_target.left() + px(4.), tab.center().y));
+    let after_first = hover(window, point(tab.right() - px(4.), tab.center().y));
+    assert!(
+        near(before_second) && near(after_first),
+        "the line at {before_second:?} and {after_first:?} should sit at {middle:?}"
+    );
+    // Let go in the gap past the last Tab, where the line shows, the Tab still lands.
+    let past_last = point(tab_target.right() + px(2.), tab.center().y);
+    assert!(hover(window, past_last).is_some(), "the gap keeps the line");
+    window.simulate_mouse_up(past_last, MouseButton::Left, Modifiers::default());
     assert!(wait_until(window, |window| {
         window.read(|app| {
             view.read(app).active_session().is_some_and(|session| {

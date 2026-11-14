@@ -69,19 +69,21 @@ pub use terminal::{
     CELL_WIDE, CELL_WIDTH, CELL_WRAPPED, DEFAULT_ANSI_COLORS, DEFAULT_BACKGROUND_COLOR,
     DEFAULT_CURSOR_COLOR, DEFAULT_FOREGROUND_COLOR, DETECTED_LINK_FLAG, TerminalCell,
     TerminalCellRun, TerminalColor, TerminalColors, TerminalCommand, TerminalCursor,
-    TerminalCursorShape, TerminalFrameError, TerminalHyperlinkBudget, TerminalKey,
-    TerminalKeyEventKind, TerminalModifiers, TerminalMouseButton, TerminalMouseEvent,
-    TerminalMousePosition, TerminalMouseTracking, TerminalMouseWheel, TerminalPosition,
-    TerminalProgress, TerminalProgressState, TerminalScroll, TerminalSelection,
-    TerminalSelectionUnit, TerminalSide, TerminalSize, TerminalUpdate, TerminalView,
-    TerminalViewDelta, TerminalViewFrame, default_indexed_color,
+    TerminalCursorShape, TerminalFrameError, TerminalHyperlinkBudget, TerminalImageKey,
+    TerminalImageLayer, TerminalImagePlacement, TerminalKey, TerminalKeyEventKind,
+    TerminalModifiers, TerminalMouseButton, TerminalMouseEvent, TerminalMousePosition,
+    TerminalMouseTracking, TerminalMouseWheel, TerminalPosition, TerminalProgress,
+    TerminalProgressState, TerminalScroll, TerminalSelection, TerminalSelectionUnit, TerminalSide,
+    TerminalSize, TerminalUpdate, TerminalView, TerminalViewDelta, TerminalViewFrame,
+    default_indexed_color,
 };
 #[cfg(feature = "runtime")]
 pub use terminal::{
     CURSOR_POSITION_SETTLE, CommandBuilder, FinishedCommand, LONG_COMMAND, PaneEnvironment,
-    ShellReadiness, TERMINAL_IDLE_CHECK, TerminalAgentProbe, TerminalCwdProbe, TerminalLaunchProbe,
-    TerminalNoticeBatch, TerminalNoticeProbe, TerminalNotification, TerminalRuntime,
-    TerminalViewSource, clone_command, default_shell_program, install_shell_integration,
+    ShellReadiness, TERMINAL_IDLE_CHECK, TerminalAgentProbe, TerminalCwdProbe, TerminalImage,
+    TerminalLaunchProbe, TerminalNoticeBatch, TerminalNoticeProbe, TerminalNotification,
+    TerminalRuntime, TerminalViewSource, clone_command, default_shell_program,
+    install_shell_integration,
 };
 
 pub const APP_NAME: &str = "Condr";

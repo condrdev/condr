@@ -2,6 +2,7 @@ mod cache;
 mod colors;
 mod decoration;
 mod geometry;
+mod images;
 mod input;
 
 use crate::{Condr, ConnectionKey};
@@ -14,9 +15,9 @@ use condr_core::{
     CELL_UNDERLINE_DOTTED, CELL_UNDERLINE_DOUBLE, CELL_UNDERLINE_SINGLE, CELL_WIDE, CELL_WIDTH,
     DEFAULT_ANSI_COLORS, DEFAULT_BACKGROUND_COLOR, DEFAULT_CURSOR_COLOR, DEFAULT_FOREGROUND_COLOR,
     DETECTED_LINK_FLAG, PaneId, TerminalColor, TerminalColors, TerminalCursorShape,
-    TerminalModifiers, TerminalMouseButton, TerminalMouseEvent, TerminalMousePosition,
-    TerminalMouseTracking, TerminalMouseWheel, TerminalPosition, TerminalSelection, TerminalSide,
-    TerminalSize, TerminalView, default_indexed_color,
+    TerminalImageLayer, TerminalModifiers, TerminalMouseButton, TerminalMouseEvent,
+    TerminalMousePosition, TerminalMouseTracking, TerminalMouseWheel, TerminalPosition,
+    TerminalSelection, TerminalSide, TerminalSize, TerminalView, default_indexed_color,
 };
 pub(crate) use decoration::Decorations;
 #[cfg(test)]
@@ -27,9 +28,9 @@ use gpui_kit::{
     ElementInputHandler, Entity, FocusHandle, Font, Global, GlobalElementId, Hitbox,
     HitboxBehavior, Hsla, InputHandler, InspectorElementId, IntoElement, LayoutId,
     Modifiers as GpuiModifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    PaintQuad, Pixels, Point, ScrollDelta, ScrollEvent, ShapedLine, Size, StrikethroughStyle,
-    Style, TextAlign, TextInputConfiguration, TextRun, TextStyle, TouchPhase, UTF16Selection,
-    UnderlineStyle, Window, fill, outline, point, px, relative, rgb, size,
+    PaintQuad, Pixels, Point, RenderImage, ScrollDelta, ScrollEvent, ShapedLine, Size,
+    StrikethroughStyle, Style, TextAlign, TextInputConfiguration, TextRun, TextStyle, TouchPhase,
+    UTF16Selection, UnderlineStyle, Window, fill, outline, point, px, relative, rgb, size,
 };
 use input::{
     TerminalInputHandler, accumulated_wheel_steps, pointer_event_hits, terminal_modifiers,
@@ -43,7 +44,10 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 pub(crate) use cache::TerminalRenderCache;
-pub(crate) use colors::TerminalPalette;
+pub(crate) use colors::{TerminalPalette, rgb_value};
+pub(crate) use images::{
+    RETRY_AFTER as TERMINAL_IMAGE_RETRY, TerminalImages, release as release_terminal_images,
+};
 pub(crate) use input::link_at;
 
 pub(crate) struct TerminalElement {
@@ -74,10 +78,26 @@ pub(crate) struct HoveredTerminalLink {
     pub(crate) position: TerminalMousePosition,
 }
 
+/// One kitty graphics placement ready to paint (ADR 0065).
+pub(crate) struct PreparedImage {
+    pub(crate) layer: TerminalImageLayer,
+    pub(crate) destination: Bounds<Pixels>,
+    image_bounds: Bounds<Pixels>,
+    image: Arc<RenderImage>,
+}
+
 pub(crate) struct PrepaintState {
     hitbox: Hitbox,
     /// Bottom to top; tests read this to check layering.
     pub(crate) quads: Vec<PaintQuad>,
+    /// Where in `quads` the cell backgrounds, the selection and the block elements start:
+    /// images go below the backgrounds, between them and the selection, and above the
+    /// text, and the selection is painted again over the topmost, so no image hides it.
+    backgrounds_start: usize,
+    selection_start: usize,
+    blocks_start: usize,
+    /// In the order to paint them within each layer; tests read them.
+    pub(crate) images: Vec<PreparedImage>,
     cells: Vec<ShapedCell>,
     /// Painted after `cells`: the cursor block and the character or IME text
     /// repainted on top of it.
@@ -159,11 +179,15 @@ impl Element for TerminalElement {
             gpui_kit::underline_y_offset(line_height, measure.ascent, measure.descent);
         let rows = terminal_grid_extent(bounds.size.height, cell_size.height, 1);
         let columns = terminal_grid_extent(bounds.size.width, cell_size.width, 2);
+        // Device pixels, as kitty and Ghostty report them: a program sizes an image by the
+        // cells it covers times these, and logical points would halve it on a 2× display
+        // (ADR 0065).
+        let scale = window.scale_factor();
         let terminal_size = TerminalSize {
             rows,
             columns,
-            cell_width: cell_size.width.as_f32().round() as u16,
-            cell_height: cell_size.height.as_f32().round() as u16,
+            cell_width: (cell_size.width.as_f32() * scale).round() as u16,
+            cell_height: (cell_size.height.as_f32() * scale).round() as u16,
         };
         let view = self.view.clone();
         let connection_key = self.props.connection_key;
@@ -379,7 +403,9 @@ impl Element for TerminalElement {
         };
         // Bottom to top: cell backgrounds, the selection, then block elements, which
         // stand in for glyphs and must stay visible inside a selection like text does.
+        let backgrounds_start = quads.len();
         push_regions(&mut quads, background_regions);
+        let selection_start = quads.len();
         if let Some(selection) = self.props.selection {
             push_selection_quads(
                 &mut quads,
@@ -390,7 +416,45 @@ impl Element for TerminalElement {
                 palette.selection,
             );
         }
+        let blocks_start = quads.len();
         push_regions(&mut quads, block_regions);
+
+        let images = if self.props.terminal.images.is_empty() {
+            render_cache.images.clear();
+            Vec::new()
+        } else {
+            let cache = cx.default_global::<TerminalImages>();
+            let previous = std::mem::take(&mut render_cache.images);
+            let mut prepared = Vec::new();
+            for (index, placement) in self.props.terminal.images.iter().enumerate() {
+                let dimensions = (placement.image_width, placement.image_height);
+                let image = cache.draw(&placement.image).or_else(|| {
+                    let (size, image) = previous.get(index)?.as_ref()?;
+                    (*size == dimensions).then(|| Arc::clone(image))
+                });
+                render_cache
+                    .images
+                    .push(image.clone().map(|image| (dimensions, image)));
+                let (Some(image), Some((destination, image_bounds))) = (
+                    image,
+                    images::placement_bounds(
+                        placement,
+                        self.props.terminal.size,
+                        bounds.origin,
+                        cell_size,
+                    ),
+                ) else {
+                    continue;
+                };
+                prepared.push(PreparedImage {
+                    layer: placement.layer,
+                    destination,
+                    image_bounds,
+                    image,
+                });
+            }
+            prepared
+        };
 
         let mut overlay_quads = Vec::new();
         let mut overlay_cells = Vec::new();
@@ -499,6 +563,10 @@ impl Element for TerminalElement {
         PrepaintState {
             hitbox,
             quads,
+            backgrounds_start,
+            selection_start,
+            blocks_start,
+            images,
             cells,
             overlay_quads,
             overlay_cells,
@@ -532,8 +600,34 @@ impl Element for TerminalElement {
         window.set_cursor_style(cursor_style, &prepaint.hitbox);
 
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
+            let paint_images = |window: &mut Window, layer| {
+                for image in prepaint.images.iter().filter(|image| image.layer == layer) {
+                    window
+                        .paint_image(
+                            image.destination,
+                            image.image_bounds,
+                            Default::default(),
+                            Arc::clone(&image.image),
+                            0,
+                            false,
+                        )
+                        .ok();
+                }
+            };
             // Borrowed rather than drained so tests can inspect what was painted.
-            for quad in prepaint.quads.iter().cloned() {
+            let quads = &prepaint.quads;
+            for quad in quads[..prepaint.backgrounds_start].iter().cloned() {
+                window.paint_quad(quad);
+            }
+            paint_images(window, TerminalImageLayer::BelowBackground);
+            for quad in quads[prepaint.backgrounds_start..prepaint.selection_start]
+                .iter()
+                .cloned()
+            {
+                window.paint_quad(quad);
+            }
+            paint_images(window, TerminalImageLayer::BelowText);
+            for quad in quads[prepaint.selection_start..].iter().cloned() {
                 window.paint_quad(quad);
             }
             for cell in &prepaint.cells {
@@ -557,6 +651,19 @@ impl Element for TerminalElement {
             // The positioned cells are done; hand the allocation back for the next frame.
             self.props.render_cache.borrow_mut().scratch_cells =
                 std::mem::take(&mut prepaint.cells);
+            paint_images(window, TerminalImageLayer::AboveText);
+            for image in prepaint
+                .images
+                .iter()
+                .filter(|image| image.layer == TerminalImageLayer::AboveText)
+            {
+                for quad in &quads[prepaint.selection_start..prepaint.blocks_start] {
+                    let over = quad.bounds.intersect(&image.destination);
+                    if over.size.width > px(0.) && over.size.height > px(0.) {
+                        window.paint_quad(fill(over, quad.background));
+                    }
+                }
+            }
             for quad in prepaint.overlay_quads.iter().cloned() {
                 window.paint_quad(quad);
             }
@@ -944,6 +1051,7 @@ mod tests {
             mouse_tracking: TerminalMouseTracking::None,
             cells,
             cursor: None,
+            images: Vec::new(),
         };
         assert_eq!(
             link_at(&view, 0, 1),

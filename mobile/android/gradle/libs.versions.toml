@@ -1,10 +1,10 @@
 # Versions checked against Google Maven and Maven Central on 2026-10-22 (ADR 0048).
 [versions]
-agp = "9.4.1"
+agp = "9.5.1"
 kotlin = "2.4.21"
 # The beta BOM: the only line Material 3 Expressive lives on (ADR 0048). Pinned; moves
 # once, to the stable BOM that carries material3 1.5.0.
-composeBom = "2026.10.01"
+composeBom = "2026.11.00"
 activityCompose = "1.13.0"
 navigation3 = "1.2.0"
 lifecycle = "2.11.0"

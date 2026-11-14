@@ -1,6 +1,10 @@
 package dev.condr.companion.ui.terminal
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Paint
+import android.graphics.Rect
+import android.graphics.RectF
 import android.graphics.Typeface
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
@@ -26,7 +30,10 @@ import androidx.core.content.res.ResourcesCompat
 import dev.condr.companion.R
 import kotlin.math.abs
 import kotlin.math.floor
+import kotlin.math.roundToInt
 import uniffi.condr_mobile.ScreenCell
+import uniffi.condr_mobile.ScreenImage
+import uniffi.condr_mobile.ScreenImageLayer
 import uniffi.condr_mobile.TerminalScreen
 
 /** A cell's place on the grid. */
@@ -57,7 +64,10 @@ fun TerminalCanvas(
   fontSizeSp: Float,
   touches: TerminalTouches,
   modifier: Modifier = Modifier,
-  onGrid: (rows: Int, columns: Int) -> Unit,
+  /** A terminal image's PNG by its key, once fetched (ADR 0065). */
+  image: (String) -> ByteArray? = { null },
+  /** The grid at this size and font, and a cell in pixels. */
+  onGrid: (rows: Int, columns: Int, cellWidth: Int, cellHeight: Int) -> Unit,
 ) {
   val context = LocalContext.current
   val density = LocalDensity.current
@@ -70,6 +80,8 @@ fun TerminalCanvas(
   }
   val textSize = with(density) { fontSizeSp.sp.toPx() }
   val metrics = remember(textSize) { CellMetrics(faces.regular, textSize) }
+  // Each image decoded once while it stays on screen.
+  val bitmaps = remember { mutableMapOf<String, Bitmap>() }
   // The gestures outlive a composition: they act on the screen and handlers of the latest one.
   val latestScreen by rememberUpdatedState(screen)
   val latestMetrics by rememberUpdatedState(metrics)
@@ -79,7 +91,9 @@ fun TerminalCanvas(
     val height = with(density) { maxHeight.toPx() }
     val columns = floor(width / metrics.width).toInt().coerceAtLeast(1)
     val rows = floor(height / metrics.height).toInt().coerceAtLeast(1)
-    LaunchedEffect(rows, columns) { onGrid(rows, columns) }
+    LaunchedEffect(rows, columns, metrics) {
+      onGrid(rows, columns, metrics.width.roundToInt(), metrics.height.roundToInt())
+    }
 
     fun cell(at: Offset): Cell? {
       val screen = latestScreen ?: return null
@@ -151,8 +165,15 @@ fun TerminalCanvas(
         }
     ) {
       val screen = screen ?: return@Canvas
+      bitmaps.keys.retainAll(screen.images.map { it.key }.toSet())
+      for (placement in screen.images) {
+        if (placement.key in bitmaps) continue
+        val png = image(placement.key) ?: continue
+        BitmapFactory.decodeByteArray(png, 0, png.size)?.let { bitmaps[placement.key] = it }
+      }
       drawIntoCanvas { canvas ->
-        Renderer(faces, metrics, textSize).draw(canvas.nativeCanvas, screen, rows, columns)
+        Renderer(faces, metrics, textSize)
+          .draw(canvas.nativeCanvas, screen, rows, columns, bitmaps::get)
       }
     }
   }
@@ -205,15 +226,30 @@ private class Renderer(
     }
   private val builder = StringBuilder()
 
-  fun draw(canvas: android.graphics.Canvas, screen: TerminalScreen, rows: Int, columns: Int) {
+  private val pixels = Paint(Paint.FILTER_BITMAP_FLAG)
+
+  /**
+   * Images under the cell backgrounds, the backgrounds, images under the text, the text, images
+   * over it, then the cursor (ADR 0065).
+   */
+  fun draw(
+    canvas: android.graphics.Canvas,
+    screen: TerminalScreen,
+    rows: Int,
+    columns: Int,
+    bitmap: (String) -> Bitmap? = { null },
+  ) {
     val width = screen.columns.toInt()
     val visibleRows = minOf(screen.rows.toInt(), rows)
     val visibleColumns = minOf(width, columns)
     val cells = screen.cells
+    canvas.save()
+    canvas.clipRect(0f, 0f, visibleColumns * metrics.width, visibleRows * metrics.height)
+    images(canvas, screen, ScreenImageLayer.BELOW_BACKGROUND, bitmap)
     for (row in 0 until visibleRows) {
       val top = row * metrics.height
       val start = row * width
-      // Backgrounds first, as runs of one colour.
+      // Backgrounds as runs of one colour.
       var column = 0
       while (column < visibleColumns) {
         val index = start + column
@@ -235,9 +271,14 @@ private class Renderer(
         }
         column = end
       }
-      // Then the text, as runs of one style; a cell that is not plain ASCII is drawn on its own
-      // so the font's fallback for it cannot shift the cells after it.
-      column = 0
+    }
+    images(canvas, screen, ScreenImageLayer.BELOW_TEXT, bitmap)
+    for (row in 0 until visibleRows) {
+      val top = row * metrics.height
+      val start = row * width
+      // The text as runs of one style; a cell that is not plain ASCII is drawn on its own so the
+      // font's fallback for it cannot shift the cells after it.
+      var column = 0
       while (column < visibleColumns) {
         val index = start + column
         if (index >= cells.size) break
@@ -269,6 +310,8 @@ private class Renderer(
         column = end
       }
     }
+    images(canvas, screen, ScreenImageLayer.ABOVE_TEXT, bitmap)
+    canvas.restore()
     val cursor = screen.cursor
     if (
       cursor != null && cursor.row.toInt() < visibleRows && cursor.column.toInt() < visibleColumns
@@ -285,6 +328,35 @@ private class Renderer(
       }
     }
   }
+
+  private fun images(
+    canvas: android.graphics.Canvas,
+    screen: TerminalScreen,
+    layer: ScreenImageLayer,
+    bitmap: (String) -> Bitmap?,
+  ) {
+    for (placement in screen.images) {
+      if (placement.layer != layer) continue
+      val image = bitmap(placement.key) ?: continue
+      canvas.drawBitmap(image, source(placement, image), destination(placement), pixels)
+    }
+  }
+
+  private fun source(placement: ScreenImage, image: Bitmap) =
+    Rect(
+      (placement.sourceX * image.width).roundToInt(),
+      (placement.sourceY * image.height).roundToInt(),
+      ((placement.sourceX + placement.sourceWidth) * image.width).roundToInt(),
+      ((placement.sourceY + placement.sourceHeight) * image.height).roundToInt(),
+    )
+
+  private fun destination(placement: ScreenImage) =
+    RectF(
+      (placement.column * metrics.width).toFloat(),
+      (placement.row * metrics.height).toFloat(),
+      ((placement.column + placement.width) * metrics.width).toFloat(),
+      ((placement.row + placement.height) * metrics.height).toFloat(),
+    )
 
   private fun sameStyle(a: ScreenCell, b: ScreenCell) =
     a.foreground == b.foreground &&

@@ -22,10 +22,10 @@ The Settings window configures one Device at a time. Use the picker at the top t
 | Page | Applies to | Description |
 | :--- | :--- | :--- |
 | **General** | Device | **Status**: version, uptime, session metrics (Workspace and Pane counts) and recent errors. **Terminal**: default shell for new Panes (defaults to the system environment if left blank) and the **Shell integration** switch. **Restart Condr** below them |
-| **Appearance** | This machine | Theme (follow system, light or dark), terminal fonts and colors, syntax highlighting and font sizes for Preview and Diff |
+| **Appearance** | This machine | Theme (follow system, light or dark), terminal fonts, the terminal colors for dark and for light mode, which the whole interface takes its colors from, and syntax highlighting and font sizes for Preview and Diff |
 | **Notifications** | This machine | System notification toggle and test notification button |
 | **Power** | This machine | Keep display awake (mirrors the coffee cup icon in the sidebar footer) |
-| **Shortcuts** | This machine | Keyboard shortcuts reference (read-only) |
+| **Shortcuts** | This machine | Rebind or remove the window shortcuts, choose **Option as Meta** on macOS, and the terminal's own keys (read-only) |
 | **Network** | Device | Proxy settings for Peer-to-peer connections and update checks: **System**, **None** or **Manual** with a custom URL |
 | **Paired devices** | Device | **Pair**: click **Show pairing code** for a one-time code that Condr on a phone scans, with **Copy link** for another computer; the code expires after 10 minutes and the card names the device once it pairs. With both Peer-to-peer and TCP on, choose which the code uses; the TCP code uses an address this computer offers, picked from the field's list or typed. **Devices**: paired Devices with online ones first, each with **Revoke**. **Connections**: the **Peer-to-peer** and **TCP** switches, TCP's listen address, and **Restart Condr** while a change waits for a restart |
 | **Agent integrations** | Device | View hook status for each Agent, with one-click options to install, update or remove them |
@@ -77,14 +77,18 @@ fps_monitor = false
 [client.terminal]
 font_family = "JetBrains Mono"
 font_size = 13
-color_scheme = "Dracula"
+dark_color_scheme = "Dracula"
+light_color_scheme = "Catppuccin Latte"
+macos_option_as_meta = "left"
 ```
 
 | Key | Type / values | Default | Description |
 | --- | --- | --- | --- |
 | `font_family` | string | The interface theme's monospace font | The font terminals render with. Empty uses the interface's built-in default font |
 | `font_size` | 6 ~ 72 | The interface's base monospace size | In pixels. Fractions are rounded, and out-of-range values are clamped to the nearest bound |
-| `color_scheme` | string | Empty | A built-in iTerm2 scheme name, matching the **Appearance** dropdown exactly. Empty or unrecognized names use the default palette. Programs that ask the terminal for its colours (OSC 10/11, or whether it is dark or light) get this scheme; with several desktops on one Device, the last to connect or change its scheme decides |
+| `dark_color_scheme` | string | Empty | The terminal colours in dark mode: a built-in iTerm2 scheme name, matching the **Dark colors** dropdown exactly. The whole interface takes its colours from it while dark mode shows. Empty, unrecognized or light schemes use the default dark palette. Programs that ask the terminal for its colours (OSC 10/11, or whether it is dark or light) get the scheme of the mode showing; with several desktops on one Device, the last to connect, change its scheme or switch modes decides |
+| `light_color_scheme` | string | Empty | The same for light mode, from the **Light colors** dropdown. Empty, unrecognized or dark schemes use GitHub Light Default |
+| `macos_option_as_meta` | `off` / `left` / `right` / `both` | `off` | macOS only: which `Option` key sends Meta (`Esc` and the key) instead of typing a character. An invalid value counts as `off`. See [Option as Meta](/docs/reference/keybindings/#option-as-meta) |
 
 ### `[client.code]` code views (Preview / Diff)
 
@@ -98,6 +102,31 @@ font_size = 14
 | --- | --- | --- | --- |
 | `theme` | string | Empty | The syntax highlight theme, matching an **Appearance › Syntax** option. When empty or unrecognized, a light interface uses GitHub Light and a dark one uses GitHub Dark |
 | `font_size` | 6 ~ 72 | The interface's base monospace size | The font size of code views, with the same bounds and rounding as the terminal |
+
+### `[client.keybindings]` window shortcuts
+
+```toml
+[client.keybindings]
+split-right = ["cmd-d", "cmd-\\"]
+toggle-zoom = []
+```
+
+Each entry replaces one action's default keys on this platform; `[]` leaves it no key, and an action without an entry keeps its defaults. **Settings › Shortcuts** writes here, and only what differs from the defaults.
+
+* **Keys**: `cmd`, `ctrl`, `alt` and `shift` joined to a key with `-`, such as `cmd-shift-d`, `alt-shift-=` or `f6`. On Windows and Linux, `cmd` is the Windows or Super key.
+* **Taking a key**: an entry takes its keys from any action's defaults. When two entries name the same key, the one earlier in the list below keeps it.
+* **Left out**: a key that does not parse, has no `cmd`, `ctrl` or `alt` and is not an F-key, or is one of macOS's own (`cmd-q`, `cmd-h`, `cmd-alt-h`, `cmd-m`, `cmd-ctrl-f`). The rest of the entry still applies, and the Shortcuts page says why under the action. A value that is not a list keeps the defaults.
+* Restart the client after editing this table by hand.
+
+| Group | Names |
+| --- | --- |
+| Application | `open-settings`, `toggle-sidebar`, `toggle-changes`, `command-palette`, `go-to` |
+| Devices | `connect-remote-device`, `reconnect-device` |
+| Workspaces | `next-workspace`, `previous-workspace`, `new-workspace`, `rename-workspace`, `close-workspace` |
+| Tabs | `new-tab`, `next-tab`, `previous-tab`, `rename-tab`, `close-tab`, `go-to-tab-1` … `go-to-tab-9` |
+| Panes | `split-right`, `split-down`, `close-pane`, `toggle-zoom`, `focus-left`, `focus-right`, `focus-up`, `focus-down`, `resize-left`, `resize-right`, `resize-up`, `resize-down`, `swap-left`, `swap-right`, `swap-up`, `swap-down` |
+
+The Devices group, Rename and Close for Workspaces and Tabs, New workspace and the Pane swaps have no key until you give them one. `Shift` pressed twice, which opens the [Command Palette](/docs/reference/keybindings/#command-palette), is not in this table and cannot be changed.
 
 ### `[client.updates]` software updates
 

@@ -6,13 +6,15 @@
 uniffi::setup_scaffolding!();
 
 mod companion;
+mod images;
 mod input;
 mod views;
 
 pub use companion::Companion;
 pub use views::{
     AgentStatus, AgentView, Change, DeviceStatus, DeviceView, Event, Key, NeedsYouItem, PaneView,
-    SavedDevice, ScreenCell, ScreenCursor, TerminalScreen, WorkspaceView,
+    SavedDevice, ScreenCell, ScreenCursor, ScreenImage, ScreenImageLayer, TerminalScreen,
+    WorkspaceView,
 };
 
 use condr_client::DeviceKey;

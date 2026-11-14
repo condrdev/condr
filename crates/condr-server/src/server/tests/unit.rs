@@ -693,6 +693,7 @@ fn client_terminal_baseline_advances_only_for_an_accepted_render() {
         mouse_tracking: condr_core::TerminalMouseTracking::None,
         cells: Vec::new(),
         cursor: None,
+        images: Vec::new(),
     };
     let (writer, receiver) = ClientWriter::channel();
     let mut subscriber = ClientSubscriber {
@@ -820,6 +821,7 @@ fn retained_terminal_hyperlinks_stay_bounded_across_deltas() {
                 start: 1,
                 cells: (1..=LINK_COUNT).map(linked_cell).collect(),
             }],
+            images: None,
         }),
     );
     state.publish_terminal(
@@ -835,6 +837,7 @@ fn retained_terminal_hyperlinks_stay_bounded_across_deltas() {
                 start: 0,
                 cells: vec![linked_cell(0)],
             }],
+            images: None,
         }),
     );
 
@@ -880,6 +883,7 @@ fn retained_terminal_hyperlinks_stay_bounded_across_deltas() {
                     cells: vec![terminal_test_view(0, "x").cells.remove(0)],
                 },
             ],
+            images: None,
         }),
     );
     let latest = &state.terminal_views[&pane_id];
@@ -1482,5 +1486,6 @@ fn wide_view(revision: u64, bytes: usize) -> TerminalView {
             columns
         ],
         cursor: None,
+        images: Vec::new(),
     }
 }

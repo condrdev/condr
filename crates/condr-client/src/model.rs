@@ -330,6 +330,7 @@ mod tests {
                 mouse_tracking: TerminalMouseTracking::None,
                 cells: vec![cell()],
                 cursor: None,
+                images: Vec::new(),
             }),
         }
     }
@@ -348,6 +349,7 @@ mod tests {
                     start: 0,
                     cells: vec![cell()],
                 }],
+                images: None,
             }),
         }
     }

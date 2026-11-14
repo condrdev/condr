@@ -30,8 +30,8 @@ Manages Devices, project Workspaces and Agent state. Drag Devices or Workspaces 
 
 * **Needs you**: the list of things waiting for you. It appears at the top when an Agent needs confirmation or input; click a row to jump to its Pane.
 * **Devices and connections**:
-  * **Device groups**: Workspaces are grouped by Device (the local one shows as `Local`). The context menu connects and disconnects, and edits or deletes a remote Device.
-  * **Status icons**: 🔴 red means not connected (click to reconnect); ⚠️ an amber triangle means the Device runs a different Condr version from this window.
+  * **Device groups**: Workspaces are grouped by Device (the local one shows as `Local`). Click a Device to select it, and click the selected Device again to fold or unfold its Workspaces; hovering it shows the fold arrow too. The context menu connects and disconnects, and edits or deletes a remote Device.
+  * **Status icon**: before each Device's name. A green plug means connected; an amber plug that fades in and out, connecting; an amber plug with a spark, connected to a different Condr version than this window; a grey unplugged plug, not connected; a red one, the last connection failed. For a different version or a failed connection, a mark also appears at the heading's right end: an amber triangle or a red alert. Hover over it to read why; click it to dismiss the version notice or to reconnect.
   * **Connect Remote Device**: at the bottom; connects a remote Device over SSH, TCP or P2P.
 * **Workspaces**:
   * Show the project icon, name and Git branch (`no git` outside a repository).

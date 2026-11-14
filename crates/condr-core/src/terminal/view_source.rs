@@ -61,6 +61,26 @@ impl TerminalViewSource {
         self.revision.load(Ordering::Acquire)
     }
 
+    /// The kitty graphics images the Pane showed for the first time since the last call,
+    /// for the Server's image cache (ADR 0065).
+    pub fn take_images(&self) -> Vec<TerminalImage> {
+        lock_pane(&self.terminal)
+            .map(|mut terminal| terminal.take_images())
+            .unwrap_or_default()
+    }
+
+    /// Moves the Pane's playing animations on to the frame now due, for the next
+    /// `take_frame` to show, and returns how long until the one after; `None` when nothing
+    /// plays. A Pane no Client watches is not ticked (ADR 0065).
+    pub fn tick_animations(&self) -> Option<Duration> {
+        lock_pane(&self.terminal).ok()?.tick_animations()
+    }
+
+    /// How long until an animation's next frame is due, once one has ticked.
+    pub fn animation_wakeup(&self) -> Option<Duration> {
+        lock_pane(&self.terminal).ok()?.animation_remaining()
+    }
+
     /// A cursor move is being held back; `take_frame` after [`CURSOR_POSITION_SETTLE`]
     /// publishes it once it has stayed put.
     pub fn cursor_settle_pending(&self) -> bool {
@@ -94,12 +114,13 @@ impl TerminalViewSource {
         let mut view = terminal.view(size, revision, baseline.as_ref());
         drop(terminal);
         view.cursor = self.settled_cursor(view.cursor);
-        if baseline
-            .as_ref()
-            .is_some_and(|baseline| revision <= baseline.revision && baseline.cursor != view.cursor)
-        {
-            // Nothing new arrived from the PTY, but the settled cursor moved: give the
-            // cursor-only frame its own revision so clients accept it.
+        if baseline.as_ref().is_some_and(|baseline| {
+            revision <= baseline.revision
+                && (baseline.cursor != view.cursor || baseline.images != view.images)
+        }) {
+            // Nothing new arrived from the PTY, but the settled cursor moved or an
+            // animation turned a frame: give that frame its own revision so clients
+            // accept it.
             revision = self.revision.fetch_add(1, Ordering::AcqRel) + 1;
             view.revision = revision;
         }
@@ -127,5 +148,6 @@ fn blank_view(size: TerminalSize, revision: u64) -> TerminalView {
         cells: vec![super::view::blank_cell(); usize::from(size.columns) * usize::from(size.rows)],
         cursor: None,
         selection: None,
+        images: Vec::new(),
     }
 }

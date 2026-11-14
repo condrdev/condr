@@ -10,7 +10,6 @@ use shortcuts::shortcuts_page;
 
 pub(super) use appearance::*;
 pub(super) use server::*;
-pub(super) use shortcuts::SHORTCUT_CONTEXT;
 pub(super) use text_field::*;
 
 // Sized in rems so the window zooms with the base font, resolved against the main
@@ -120,7 +119,8 @@ impl Condr {
 pub(super) struct SettingsWindow {
     owner: WeakEntity<Condr>,
     focus_handle: FocusHandle,
-    pub(super) color_scheme: Entity<ColorSchemeSelect>,
+    pub(super) dark_color_scheme: Entity<ColorSchemeSelect>,
+    pub(super) light_color_scheme: Entity<ColorSchemeSelect>,
     /// The Preview Tab's theme, the same kind of Select.
     pub(super) code_theme: Entity<ColorSchemeSelect>,
     /// The font as last committed from this window. `Condr` only ever holds the
@@ -173,6 +173,12 @@ pub(super) struct SettingsWindow {
     /// Re-asks the selected Server for its `Status` while this window is open, so uptime
     /// and recent errors on the General page stay current. Dropped with the window.
     _status_refresh: Task<()>,
+    /// The shortcut whose row waits for a key to add (ADR 0063).
+    pub(super) recording: Option<usize>,
+    /// Why the last key pressed for that row was refused, shown under it.
+    pub(super) refusal: Option<(usize, SharedString)>,
+    /// Takes keys before any binding while a row records.
+    _recorder: Subscription,
 }
 
 /// How often the General page's health figures are refreshed while Settings is open.
@@ -215,27 +221,32 @@ const LICENSES: &str = include_str!("../../assets/licenses.md");
 
 impl SettingsWindow {
     fn new(owner: WeakEntity<Condr>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let current = owner
-            .upgrade()
-            .map(|owner| owner.read(cx).terminal_color_scheme.clone())
-            .unwrap_or_default();
         let open_on_update = owner
             .upgrade()
             .is_some_and(|owner| owner.read(cx).updates.pending());
-        let color_scheme = scheme_select(crate::color_scheme::names(), &current, window, cx);
-        cx.subscribe(
-            &color_scheme,
-            |this, _, event: &SelectEvent<SearchableVec<SharedString>>, cx| {
-                let SelectEvent::Confirm(Some(label)) = event else {
-                    return;
-                };
-                let name = color_scheme_name(label);
-                let _ = this
-                    .owner
-                    .update(cx, |owner, cx| owner.set_terminal_color_scheme(name, cx));
-            },
-        )
-        .detach();
+        let [dark_color_scheme, light_color_scheme] =
+            [ThemeMode::Dark, ThemeMode::Light].map(|mode| {
+                let current = owner
+                    .upgrade()
+                    .map(|owner| owner.read(cx).color_scheme(mode).clone())
+                    .unwrap_or_default();
+                let names = crate::color_scheme::names_of(!mode.is_dark());
+                let select = scheme_select(names, &current, window, cx);
+                cx.subscribe(
+                    &select,
+                    move |this, _, event: &SelectEvent<SearchableVec<SharedString>>, cx| {
+                        let SelectEvent::Confirm(Some(label)) = event else {
+                            return;
+                        };
+                        let name = color_scheme_name(label);
+                        let _ = this
+                            .owner
+                            .update(cx, |owner, cx| owner.set_color_scheme(mode, name, cx));
+                    },
+                )
+                .detach();
+                select
+            });
         let current = selected_code_theme(cx);
         let code_theme = scheme_select(crate::app::syntax::theme_names(), &current, window, cx);
         cx.subscribe(
@@ -354,7 +365,8 @@ impl SettingsWindow {
         Self {
             owner,
             focus_handle: cx.focus_handle(),
-            color_scheme,
+            dark_color_scheme,
+            light_color_scheme,
             code_theme,
             font_draft,
             selected_server,
@@ -378,6 +390,9 @@ impl SettingsWindow {
             server_labels,
             licenses,
             autostart: server::autostart_registered(),
+            recording: None,
+            refusal: None,
+            _recorder: shortcuts::key_recorder(window, cx),
             _status_refresh: cx.spawn(async move |this, cx| {
                 loop {
                     // Every second while a code shows: its countdown ticks, and a device
@@ -539,10 +554,16 @@ impl Render for SettingsWindow {
         }
         if local {
             pages.extend([
-                appearance_page(&self.owner, &settings, &self.color_scheme, &self.code_theme),
+                appearance_page(
+                    &self.owner,
+                    &settings,
+                    &self.dark_color_scheme,
+                    &self.light_color_scheme,
+                    &self.code_theme,
+                ),
                 notifications_page(&self.owner),
                 power_page(&self.owner),
-                shortcuts_page(),
+                shortcuts_page(&self.owner, &settings, cx),
             ]);
         }
         if connected {
@@ -1031,25 +1052,26 @@ mod tests {
         }
     }
 
-    /// A listed action without a binding would render an empty row.
+    /// Every default reaches the keymap, so a row that has one shows it.
     #[cfg(feature = "test-support")]
     #[gpui_kit::test]
-    fn every_listed_shortcut_has_a_binding_on_this_platform(cx: &mut gpui_kit::TestAppContext) {
+    fn every_default_shortcut_has_a_binding_on_this_platform(cx: &mut gpui_kit::TestAppContext) {
         cx.update(super::super::startup::bind_keys);
         let window = cx.add_empty_window();
         window.update(|window, _| {
-            for (_, rows) in super::shortcuts::SHORTCUTS {
-                for (label, action) in *rows {
-                    assert!(
-                        gpui_kit::component::kbd::Kbd::binding_for_action(
-                            *action,
-                            Some(super::shortcuts::SHORTCUT_CONTEXT),
-                            window
-                        )
-                        .is_some(),
-                        "{label} has no binding"
-                    );
-                }
+            for shortcut in
+                crate::app::keymap::all().filter(|shortcut| !shortcut.defaults.is_empty())
+            {
+                assert!(
+                    gpui_kit::component::kbd::Kbd::binding_for_action(
+                        shortcut.action,
+                        Some(crate::app::keymap::SHORTCUT_CONTEXT),
+                        window
+                    )
+                    .is_some(),
+                    "{} has no binding",
+                    shortcut.label
+                );
             }
         });
     }
