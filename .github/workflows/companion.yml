@@ -1,9 +1,10 @@
 name: Companion
 
 # Pushing an immutable `companion-v*` tag ships the Companion, apart from the desktop
-# (ADR 0049): the Android APK on a GitHub release of its own, never marked Latest, and the
-# iPhone build uploaded to TestFlight. Run on demand, on any ref, it builds and signs both and
-# publishes nothing, which checks the secrets before a tag needs them.
+# (ADR 0049): the Android APK on a GitHub release of its own, never marked Latest, the same
+# build's bundle on Google Play's internal testing track, and the iPhone build uploaded to
+# TestFlight. Run on demand, on any ref, it builds and signs both and publishes nothing, which
+# checks the secrets before a tag needs them.
 
 on:
   push:
@@ -263,6 +264,38 @@ jobs:
             --notes-file release-notes.md \
             --verify-tag \
             --latest=false
+
+  # Its own job, so a failed upload is re-run without the GitHub release, which a second run
+  # refuses. The service account may only release to testing tracks (ADR 0048).
+  play:
+    name: Release the bundle to Google Play's internal testing
+    needs: [check, android, ios]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: condr-companion-bundle
+          path: bundle
+      - name: Write what's new
+        # Play takes 500 characters a language; the GitHub release holds the notes.
+        env:
+          CONDR_VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          mkdir whatsnew
+          echo "Condr Companion $CONDR_VERSION: https://github.com/$GITHUB_REPOSITORY/releases/tag/$GITHUB_REF_NAME" \
+            > whatsnew/whatsnew-en-US
+      # A third party's action holds the Play key, so it is pinned to a commit.
+      - uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1.1.5
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT }}
+          packageName: dev.condr.companion
+          releaseFiles: bundle/condr-companion-*.aab
+          releaseName: ${{ needs.check.outputs.version }}
+          track: internal
+          status: completed
+          whatsNewDirectory: whatsnew
 
   website:
     name: Point condr.dev/download at the APK

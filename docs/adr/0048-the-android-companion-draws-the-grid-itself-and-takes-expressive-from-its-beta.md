@@ -23,3 +23,5 @@ Tests: on the JVM, `Session` re-reading only the scopes `take_changes()` named, 
 > ADR 0049 moves the APK out of `build.yml` into the Companion's own release, `companion.yml`, and takes its version and `versionCode` from `mobile/version.xcconfig` instead of the workflow's run number.
 
 > 2026-10-28: the Play app exists, unpublished until the first stable release. The upload key became its Play App Signing key too, uploaded through Google's PEPK, so the APK on GitHub and the build from Google Play carry one signature and a phone moves from one to the other without losing its pairings. `companion.yml` builds the app bundle Play takes beside the APK and keeps it as an artifact, which is uploaded in Play Console by hand.
+
+> 2026-11-14: `companion.yml` releases the bundle to the internal testing track itself, from 0.2.4 on, signed in as a service account that may release to testing tracks and nothing more; production stays a person's step at the first stable release. docs/releases.md says how the account is set up.
