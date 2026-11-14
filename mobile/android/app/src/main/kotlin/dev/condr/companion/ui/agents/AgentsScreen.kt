@@ -153,7 +153,7 @@ private fun LazyListScope.group(title: String, items: List<AgentItem>, open: (Ag
     Column(
       Modifier.animateItem()
         .clip(RoundedCornerShape(top, top, bottom, bottom))
-        .background(CardDefaults.cardColors().containerColor)
+        .background(CardDefaults.cardColors().containerColor),
     ) {
       if (index > 0) HorizontalDivider(Modifier.padding(start = 72.dp))
       AgentRow(item) { open(item) }
@@ -205,7 +205,7 @@ private fun StatusBarFade() {
   Box(
     Modifier.fillMaxWidth()
       .height(top + 10.dp)
-      .background(Brush.verticalGradient(0f to page, 0.55f to page, 1f to page.copy(alpha = 0f)))
+      .background(Brush.verticalGradient(0f to page, 0.55f to page, 1f to page.copy(alpha = 0f))),
   )
 }
 
@@ -346,7 +346,7 @@ private fun BlockedOnView(detail: BlockedOn) {
 @Composable
 private fun AgentRow(item: AgentItem, open: () -> Unit) {
   Box(
-    Modifier.fillMaxWidth().clickable(onClick = open).padding(horizontal = 16.dp, vertical = 12.dp)
+    Modifier.fillMaxWidth().clickable(onClick = open).padding(horizontal = 16.dp, vertical = 12.dp),
   ) {
     AgentHeading(item, side = 40.dp, titleStyle = MaterialTheme.typography.bodyLarge)
   }
@@ -360,7 +360,7 @@ private fun AllClear(working: Int, modifier: Modifier = Modifier) {
       supportingContent = {
         Text(
           if (working > 0) "Condr brings an agent here the moment it waits for you."
-          else "Every agent is at rest."
+          else "Every agent is at rest.",
         )
       },
       leadingContent = {

@@ -140,7 +140,7 @@ fun Score(fold: Float, modifier: Modifier = Modifier) {
     modifier.edgeToEdge(16.dp).fillMaxWidth().semantics {
       contentDescription = "Agents"
       heading()
-    }
+    },
   ) {
     Row(
       horizontalArrangement = Arrangement.spacedBy(24.dp),
@@ -252,7 +252,7 @@ fun Score(fold: Float, modifier: Modifier = Modifier) {
               Icon(
                 painterResource(
                   if (device.status is DeviceStatus.Revoked) R.drawable.ic_key
-                  else R.drawable.ic_bolt
+                  else R.drawable.ic_bolt,
                 ),
                 contentDescription = null,
                 tint = color,
@@ -318,7 +318,7 @@ private fun Modifier.edgeToEdge(margin: Dp) = layout { measurable, constraints -
       constraints.copy(
         minWidth = constraints.minWidth + extra,
         maxWidth = constraints.maxWidth + extra,
-      )
+      ),
     )
   layout(wide.width - extra, wide.height) { wide.place(-extra / 2, 0) }
 }

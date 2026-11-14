@@ -125,7 +125,7 @@ class Preferences private constructor(private val store: DataStore<Prefs>, initi
         object : DataStore<Prefs> {
           private val state =
             kotlinx.coroutines.flow.MutableStateFlow(
-              androidx.datastore.preferences.core.emptyPreferences()
+              androidx.datastore.preferences.core.emptyPreferences(),
             )
           override val data: kotlinx.coroutines.flow.Flow<Prefs> = state
 

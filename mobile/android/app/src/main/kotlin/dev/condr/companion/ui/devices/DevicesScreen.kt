@@ -298,7 +298,7 @@ fun DeviceScreen(address: String) {
                 context
                   .getSystemService(ClipboardManager::class.java)
                   .setPrimaryClip(ClipData.newPlainText("Condr", status.reason))
-              }
+              },
             ) {
               Text("Copy error")
             }
@@ -347,7 +347,7 @@ fun DeviceScreen(address: String) {
       title = { Text("Forget ${device.label}?") },
       text = {
         Text(
-          "This phone stops connecting to it. To revoke this phone as well, remove it under Paired devices in Condr's Settings on ${device.label}."
+          "This phone stops connecting to it. To revoke this phone as well, remove it under Paired devices in Condr's Settings on ${device.label}.",
         )
       },
       confirmButton = {
@@ -355,7 +355,7 @@ fun DeviceScreen(address: String) {
           onClick = {
             forgetting = false
             session.forget(address)
-          }
+          },
         ) {
           Text("Forget", color = MaterialTheme.colorScheme.error)
         }

@@ -177,9 +177,9 @@ fun StatusGlyph(
       .graphicsLayer(
         compositingStrategy =
           if (status == AgentStatus.UNKNOWN) CompositingStrategy.Offscreen
-          else CompositingStrategy.Auto
+          else CompositingStrategy.Auto,
       )
-      .semantics { contentDescription = status.title }
+      .semantics { contentDescription = status.title },
   ) {
     val radius = this.size.minDimension / 2
     if (rippling) {

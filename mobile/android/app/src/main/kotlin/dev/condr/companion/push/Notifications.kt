@@ -89,7 +89,7 @@ object Notifications {
             tag.hashCode(),
             open,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-          )
+          ),
         )
         .build()
     context.getSystemService(NotificationManager::class.java).notify(tag, 0, notification)

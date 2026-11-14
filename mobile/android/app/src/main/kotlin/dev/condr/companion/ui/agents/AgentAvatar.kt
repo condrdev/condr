@@ -80,7 +80,7 @@ fun AgentAvatar(
         Modifier.align(Alignment.BottomEnd)
           .offset(side * 0.12f, side * 0.12f)
           .background(surface, CircleShape)
-          .padding(side * 0.06f)
+          .padding(side * 0.06f),
       ) {
         StatusGlyph(status, side * 0.27f, ripple = ripple)
       }
