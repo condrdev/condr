@@ -268,10 +268,10 @@ object DemoWorld {
                       if (agent?.status == AgentStatus.BLOCKED) {
                         pane.copy(agent = agent.copy(status = AgentStatus.WORKING, detail = null))
                       } else pane
-                    }
+                    },
                 )
               }
-            }
+            },
         )
     }
     if (scene == DemoScene.BANNER) {
@@ -281,7 +281,7 @@ object DemoWorld {
         panes[1] =
           panes[1].copy(
             agent =
-              agent("claude", AgentStatus.BLOCKED, "Bash: pnpm prisma migrate dev --name passkeys")
+              agent("claude", AgentStatus.BLOCKED, "Bash: pnpm prisma migrate dev --name passkeys"),
           )
         list[0] = list[0].copy(panes = panes)
         world = world.copy(workspaces = world.workspaces + (JPDEV to list))
@@ -389,7 +389,7 @@ object DemoScreens {
         for (character in span.text) {
           if (column >= COLUMNS) break
           cells.add(
-            ScreenCell(character.toString(), span.color, BACKGROUND, span.bold, false, false, null)
+            ScreenCell(character.toString(), span.color, BACKGROUND, span.bold, false, false, null),
           )
           column += 1
         }

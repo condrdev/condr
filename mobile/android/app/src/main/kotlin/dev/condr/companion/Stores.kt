@@ -98,7 +98,7 @@ class Stores(
         DemoScene.TERMINAL_ERROR -> {
           router.agentsPath.add(DeviceRoute.Pane(macmini1))
           alerts.report(
-            "Couldn't send to macmini: the connection closed. Your reply is still in the field."
+            "Couldn't send to macmini: the connection closed. Your reply is still in the field.",
           )
         }
         DemoScene.QUESTION -> router.agentsPath.add(DeviceRoute.Pane(PaneRef(DemoWorld.JPDEV, 11u)))
@@ -119,7 +119,7 @@ class Stores(
               kind = "claude",
               title = "Claude needs you",
               detail = "Migrate auth to passkeys · jpdev",
-            )
+            ),
           )
         }
         else -> {}

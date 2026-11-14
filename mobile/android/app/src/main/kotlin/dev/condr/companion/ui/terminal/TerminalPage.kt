@@ -327,7 +327,7 @@ fun TerminalPage(ref: PaneRef) {
                 maxLines = 5,
                 textStyle =
                   MaterialTheme.typography.bodyLarge.copy(
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = MaterialTheme.colorScheme.onSurface,
                   ),
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                 keyboardOptions =
@@ -449,7 +449,7 @@ fun TerminalPage(ref: PaneRef) {
               onClick = {
                 session.copySelection()
                 copyAt = null
-              }
+              },
             ) {
               Icon(
                 painterResource(R.drawable.ic_copy),

@@ -149,7 +149,7 @@ class Session(
           title = title,
           detail = "${item.pane.name(item.agent.label)} · ${place(item.workspace, item.device)}",
           quiet = router.showsHome,
-        )
+        ),
       )
     }
     statuses = seen

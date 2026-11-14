@@ -162,7 +162,7 @@ fun TerminalCanvas(
               cell(change.position)?.let { latestTouches.wheel(it, lines) }
             }
           }
-        }
+        },
     ) {
       val screen = screen ?: return@Canvas
       bitmaps.keys.retainAll(screen.images.map { it.key }.toSet())

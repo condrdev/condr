@@ -121,7 +121,7 @@ fun App(stores: Stores) {
     Box(Modifier.fillMaxSize()) {
       // Under the lock or the shield, TalkBack reads only them.
       Box(
-        Modifier.fillMaxSize().then(if (covered) Modifier.clearAndSetSemantics {} else Modifier)
+        Modifier.fillMaxSize().then(if (covered) Modifier.clearAndSetSemantics {} else Modifier),
       ) {
         Crossfade(onboarding, animationSpec = tween(600), label = "onboarding") { welcome ->
           if (welcome) {
@@ -175,11 +175,12 @@ private fun MainTabs() {
           Icon(Icons.Filled.Settings, contentDescription = null)
         }
       }
-    }
+    },
   ) { insets ->
     // A Pane's page draws to the bottom edge and keeps its own insets.
     Box(
-      Modifier.fillMaxSize().padding(bottom = if (inPane) 0.dp else insets.calculateBottomPadding())
+      Modifier.fillMaxSize()
+        .padding(bottom = if (inPane) 0.dp else insets.calculateBottomPadding()),
     ) {
       // Each tab keeps its screens' state, scroll included, while another shows.
       tabs.SaveableStateProvider(router.tab.name) {
@@ -368,7 +369,7 @@ private fun Cover(content: @Composable () -> Unit) {
   Box(
     Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).pointerInput(Unit) {
       awaitPointerEventScope { while (true) awaitPointerEvent().changes.forEach { it.consume() } }
-    }
+    },
   ) {
     content()
   }

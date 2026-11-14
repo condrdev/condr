@@ -331,7 +331,7 @@ private fun Welcome(next: () -> Unit) {
             fontWeight = FontWeight.SemiBold,
           )
         }
-      }
+      },
     )
   }
 }
@@ -646,7 +646,7 @@ private fun NameStep(name: String, onName: (String) -> Unit, back: () -> Unit, n
           ) {
             Text("Continue", style = MaterialTheme.typography.titleMedium)
           }
-        }
+        },
       )
     },
   ) { insets ->
@@ -822,7 +822,7 @@ private fun ConnectingStep(
                   style = MaterialTheme.typography.titleMedium,
                 )
               }
-            }
+            },
           )
         is Pairing.Phase.Failed ->
           StepFooter(
@@ -838,7 +838,7 @@ private fun ConnectingStep(
           )
         Pairing.Phase.Pairing -> {}
       }
-    }
+    },
   ) { insets ->
     Column(
       Modifier.fillMaxSize()
@@ -909,7 +909,7 @@ private fun ConnectingStep(
                       item.agent.status,
                       item.agent.detail,
                       kind = true,
-                    )
+                    ),
                   )
                 },
                 leadingContent = {
@@ -1027,7 +1027,7 @@ private fun Rising(statuses: List<uniffi.condr_mobile.AgentStatus>, shown: Int, 
           else dev.condr.companion.ui.theme.tintOf(status)
         Box(
           Modifier.size(width = 24.dp, height = height.dp)
-            .background(color, RoundedCornerShape(5.dp))
+            .background(color, RoundedCornerShape(5.dp)),
         )
       }
     }

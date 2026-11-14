@@ -200,7 +200,7 @@ fun SettingsScreen() {
           lock.enabled ->
             "Condr asks for your ${lock.method} when it opens and after five minutes away."
           else -> "Anyone who can open this phone can open Condr and reach your computers."
-        }
+        },
       )
 
       Spacer(Modifier.height(8.dp))
@@ -228,7 +228,7 @@ fun SettingsScreen() {
               .heightIn(min = 56.dp)
               .clickable {
                 context.startActivity(
-                  Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://condr.dev"))
+                  Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://condr.dev")),
                 )
               }
               .padding(horizontal = 16.dp),
@@ -360,7 +360,10 @@ private fun TextSize(preferences: Preferences) {
             buildAnnotatedString {
               withStyle(SpanStyle(color = Color(TerminalPalette.GREEN))) { append("● ") }
               withStyle(
-                SpanStyle(color = Color(TerminalPalette.BRIGHT_WHITE), fontWeight = FontWeight.Bold)
+                SpanStyle(
+                  color = Color(TerminalPalette.BRIGHT_WHITE),
+                  fontWeight = FontWeight.Bold,
+                ),
               ) {
                 append("Bash")
               }
@@ -375,7 +378,7 @@ private fun TextSize(preferences: Preferences) {
               withStyle(SpanStyle(color = Color(TerminalPalette.GRAY))) { append("  ⎿  ") }
               append("test result: ")
               withStyle(
-                SpanStyle(color = Color(TerminalPalette.GREEN), fontWeight = FontWeight.Bold)
+                SpanStyle(color = Color(TerminalPalette.GREEN), fontWeight = FontWeight.Bold),
               ) {
                 append("ok")
               }
@@ -431,7 +434,7 @@ fun PhoneNameScreen() {
           }
         },
       )
-    }
+    },
   ) { insets ->
     OutlinedTextField(
       value = draft,
@@ -467,7 +470,7 @@ fun LostPhoneScreen() {
           }
         },
       )
-    }
+    },
   ) { insets ->
     Column(
       Modifier.fillMaxSize().padding(insets).verticalScroll(rememberScrollState()).padding(24.dp),

@@ -165,7 +165,7 @@ fun ErrorToast(modifier: Modifier = Modifier) {
             context
               .getSystemService(ClipboardManager::class.java)
               .setPrimaryClip(ClipData.newPlainText("Condr", shown))
-          }
+          },
         ) {
           Text("Copy")
         }

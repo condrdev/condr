@@ -53,7 +53,7 @@ class CompanionApplication : Application() {
             val session = stores?.takeIf { it.scene == null }?.session ?: return
             scope.launch { session.suspend() }
           }
-        }
+        },
       )
   }
 
