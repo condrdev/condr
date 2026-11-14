@@ -144,7 +144,7 @@ jobs:
       - run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim
       # SwiftPM resolves the library's xcframework before Xcode's pre-build phase runs.
       - run: script/build-mobile.sh ios
-      - uses: jdx/mise-action@v4
+      - uses: jdx/mise-action@v5
         with:
           install: false
       - name: Generate the app's project
