@@ -4,23 +4,6 @@
 
 按优先级排列。每项写清为什么、做到哪、什么时候停。
 
-### 终端里的图片（kitty 图形协议）
-
-**状态**：六个切片已在 main 上完成（ADR 0065），自动测试通过。2026-11-14 在 macOS 上用离屏渲染（2× 窗口）验过：direct 分块、文件、临时文件（读后删除）三种传输，Unicode 占位符，文字画在 z<0 的图上，固定图滚出视口被裁剪，`clear` 和离开备用屏后不残留，两帧动画循环，以及 yazi 26.9 识别 `ghostty` 后用占位符画出预览、退出后不残留。剩下的手工验收：其他程序实测（OpenCode、`kitten icat`、viu、ratatui-image、image.nvim、mpv、Claude Code）、跨 DPI 拖动、本机 / TCP / Peer-to-peer 的带宽实测、Windows 上的 ConPTY 表现和帧率观察，以及两个手机 App 在真机上的绘制。
-
-**为什么**：ADR 0051 让 kitty 图形保持关闭，程序探测不到支持，只能退回文字，或者画出一排占位方块。逐个读源码的结论（ADR 0065“Who draws”）：OpenCode、yazi、`kitten icat`、viu、ranger、image.nvim、mpv、ratatui-image 等程序会画；Claude Code、yazi 的占位符驱动、snacks.nvim、timg 还要看 XTVERSION 是不是 Ghostty。
-
-**做到哪**（ADR 0065，按切片在 main 上做，第 3 步之前存储上限保持 0、XTVERSION 不变）：
-
-1. Server：绑定图片相关的 C 函数，用 `png` crate 解码，从 render state 读摆放，清空占位符 cell，按内容 SHA-256 去重、编码成 PNG 放进 128 MiB 的缓存。
-2. 协议：视觉帧带摆放（变了才发），像素通过 Stream 的 `image` 目标按哈希拉取；图片打开的 Stream 连接保持到终端连接结束。
-3. GUI：按层画图（选区和光标在最上面），256 MiB 解码缓存；cell 尺寸改报设备像素；同一个提交里打开每个 screen 64 MiB 的存储、四种传输方式，XTVERSION 改答 `ghostty (Condr <version>)`。
-4. 动画：Server 只给有 Client 在看的 Pane tick。
-5. Companion 报真实的 cell 尺寸。
-6. Companion 画图，随它自己的版本发布。
-
-**停在哪**：不做 Sixel 和 iTerm2 的图片协议（libghostty-vt 没有实现）；Server 重启后图片不保留，随终端内容持久化另写 ADR；不设关闭图片或调存储上限的开关；不设 `TERM_PROGRAM`，所以 Codex、chafa 这类只看环境变量的程序不画；Windows 上 ConPTY 吞掉 `a=q` 的应答，等微软的修复发布后再升级 ConPTY。
-
 ### 移动端 Companion（iOS 与 Android）
 
 **状态**：1–7 步已在 iOS 完成，推送随桌面 0.1.14 与 TestFlight 0.1 (4) 发布。Android（第 8 步）已按 ADR 0048 实现：配对、Agents / Devices / Settings、自绘终端、锁与推送都在模拟器上走通，APK 随 Companion 自己的版本发布（ADR 0049）。剩下的是 Android 真机验证和 FCM：Firebase 项目建好之前，发布的 APK 收不到推送。
