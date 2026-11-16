@@ -22,6 +22,9 @@ pub(super) struct ServerConnection {
     pub(super) label: String,
     pub(super) endpoint: Endpoint,
     pub(super) status: ConnectionStatus,
+    /// Whether the GUI connects this Device at launch: Disconnect turns it off and
+    /// Connect back on, and `[[client.servers]]` keeps it (ADR 0020).
+    pub(super) auto_connect: bool,
     /// This Device's forwards and their Stream connection (ADR 0061).
     pub(super) forwards: super::ports::DeviceForwards,
     /// This Client's downloads and uploads to this Device (ADR 0061).
@@ -189,6 +192,7 @@ impl ServerConnection {
             label,
             endpoint,
             status: ConnectionStatus::Disconnected,
+            auto_connect: true,
             forwards: super::ports::DeviceForwards::default(),
             transfers: Vec::new(),
             image_fetches: 0,

@@ -57,7 +57,8 @@ struct SavedWorkspaceEditor {
 pub(super) struct LoadedConfig {
     pub path: Option<PathBuf>,
     pub device_key: Option<DeviceKey>,
-    pub servers: Vec<(String, Endpoint)>,
+    /// Each Device's name, address and whether it connects at launch.
+    pub servers: Vec<(String, Endpoint, bool)>,
     pub servers_error: Option<String>,
     pub error: Option<String>,
     pub appearance: Appearance,
@@ -125,7 +126,7 @@ impl LoadedConfig {
                     .into_iter()
                     .filter(|server| device_key.is_some() || !server.is_tcp())
                     .filter_map(|server| match server.endpoint(device_key.as_ref()) {
-                        Ok(endpoint) => Some((server.name, endpoint)),
+                        Ok(endpoint) => Some((server.name, endpoint, server.auto_connect)),
                         Err(error) => {
                             skipped.push(format!("{} ({}): {error}", server.name, server.address));
                             None
@@ -280,7 +281,12 @@ impl Condr {
             .connections
             .iter()
             .filter_map(|connection| {
-                SavedServer::from_endpoint(connection.label.clone(), &connection.endpoint)
+                SavedServer::from_endpoint(connection.label.clone(), &connection.endpoint).map(
+                    |server| SavedServer {
+                        auto_connect: connection.auto_connect,
+                        ..server
+                    },
+                )
             })
             .collect::<Vec<_>>();
         self.save_config(cx, move |path| {
@@ -573,7 +579,7 @@ mod tests {
             "[client]\nappearance = 7\nfps_monitor = true\nnotifications = 'broken'\nworkspace_editors = false\n\
              [client.terminal]\nfont_family = 'Cascadia Mono'\nfont_size = 'broken'\n\
              [client.updates]\nauto_check = 'broken'\n\
-             [[client.servers]]\nname = 'Build'\naddress = 'ssh://alice@build'\n\
+             [[client.servers]]\nname = 'Build'\naddress = 'ssh://alice@build'\nauto_connect = false\n\
              [[client.editors]]\nname = 'Missing command'\n",
         )
         .unwrap();
@@ -588,6 +594,10 @@ mod tests {
         assert!(config.workspace_editors.is_empty());
         assert!(config.custom_editors.is_empty());
         assert_eq!(config.servers.len(), 1);
+        assert!(
+            !config.servers[0].2,
+            "a Device left disconnected stays so at launch"
+        );
         assert!(config.servers_error.is_none());
         assert!(config.error.unwrap().contains("[[client.editors]]"));
         fs::remove_dir_all(directory).unwrap();
@@ -631,6 +641,7 @@ mod tests {
             [SavedServer {
                 name: "Linux".into(),
                 address: format!("tcp://{}@127.0.0.1:4242", "0".repeat(64)),
+                auto_connect: true,
             }],
         )
         .unwrap();
@@ -994,6 +1005,7 @@ address = 'tcp://AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA@127.0.0.1:4242'
             [SavedServer {
                 name: "Linux".into(),
                 address: format!("tcp://{}@127.0.0.1:4242", "0".repeat(64)),
+                auto_connect: true,
             }],
         )
         .unwrap();

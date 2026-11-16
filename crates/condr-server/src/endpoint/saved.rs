@@ -19,6 +19,15 @@ pub struct SavedServer {
     pub name: String,
     /// `tcp://<id>@host:port`, `ssh://[user@]host[:port]` or `p2p://<id>`; never an invite.
     pub address: String,
+    /// Whether the GUI connects the Device when it starts. Disconnect turns it off and
+    /// Connect back on, so a launch leaves the Device as the person last left it. Written
+    /// only when off.
+    #[serde(default = "connects_at_launch")]
+    pub auto_connect: bool,
+}
+
+fn connects_at_launch() -> bool {
+    true
 }
 
 impl SavedServer {
@@ -33,6 +42,7 @@ impl SavedServer {
         Some(Self {
             name: name.into(),
             address,
+            auto_connect: true,
         })
     }
 
@@ -67,6 +77,9 @@ pub fn save_saved_servers(
         let mut table = toml_edit::Table::new();
         table["name"] = toml_edit::value(server.name);
         table["address"] = toml_edit::value(server.address);
+        if !server.auto_connect {
+            table["auto_connect"] = toml_edit::value(false);
+        }
         saved.push(table);
     }
     condr_core::update_config_values(
@@ -116,12 +129,26 @@ mod tests {
         let address = format!("tcp://{}@127.0.0.1:4242", "0".repeat(64));
         save_saved_servers(
             &path,
-            [SavedServer {
-                name: "Linux".into(),
-                address: address.clone(),
-            }],
+            [
+                SavedServer {
+                    name: "Linux".into(),
+                    address: address.clone(),
+                    auto_connect: true,
+                },
+                SavedServer {
+                    name: "Parked".into(),
+                    address: address.clone(),
+                    auto_connect: false,
+                },
+            ],
         )
         .unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            text.matches("auto_connect").count(),
+            1,
+            "only the Device that does not connect at launch says so: {text}"
+        );
 
         assert_eq!(
             condr_core::read_config_value(&path, &["server"], "listen")
@@ -130,10 +157,12 @@ mod tests {
             Some("127.0.0.1:4242".to_owned())
         );
         let servers = load_saved_servers(&path).unwrap();
-        assert_eq!(servers.len(), 1);
+        assert_eq!(servers.len(), 2);
         assert_eq!(servers[0].name, "Linux");
         assert_eq!(servers[0].address, address);
         assert!(servers[0].is_tcp());
+        assert!(servers[0].auto_connect);
+        assert!(!servers[1].auto_connect);
         fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
 }

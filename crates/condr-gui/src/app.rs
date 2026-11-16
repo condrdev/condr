@@ -447,8 +447,10 @@ impl Condr {
             language,
         } = config;
         let mut connections = vec![connection];
-        for (index, (name, endpoint)) in saved_servers.into_iter().enumerate() {
-            connections.push(ServerConnection::new(index as u64 + 2, name, endpoint));
+        for (index, (name, endpoint, auto_connect)) in saved_servers.into_iter().enumerate() {
+            let mut connection = ServerConnection::new(index as u64 + 2, name, endpoint);
+            connection.auto_connect = auto_connect;
+            connections.push(connection);
         }
         let next_connection_key = connections.len() as u64 + 1;
 
@@ -641,8 +643,14 @@ impl Condr {
         if connect_local {
             _ = this.start_connect(1);
         }
+        // A Device the person disconnected waits on its page for Connect.
         for key in 2..this.next_connection_key {
-            _ = this.start_connect(key);
+            if this
+                .connection(key)
+                .is_some_and(|connection| connection.auto_connect)
+            {
+                _ = this.start_connect(key);
+            }
         }
 
         let owner = cx.weak_entity();

@@ -160,6 +160,7 @@ address = "tcp://<device key>@192.168.1.20:2637"
 
 * `name`：设备在侧边栏中的名称，同时作为 `condr --device <name>` 的路由参数。
 * `address`：连接 URI，格式需以 `ssh://`、`tcp://` 或 `p2p://` 开头（不含一次性 Invite 密钥）。各协议格式要求参见[远程连接规范](/zh-cn/docs/using/remote/)。
+* `auto_connect`：GUI 启动时是否连接该设备，省略时为 `true`。断开设备会写入 `auto_connect = false`，下次启动时它保持断开；再次连接会删除这一项。
 
 > 该列表由 GUI 自动持久化管理；CLI 仅具备只读权限。若某个设备的 URI 解析失败，Condr 会跳过该项并提示错误，其余设备照常连接。
 

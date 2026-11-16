@@ -93,11 +93,29 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.set_auto_connect(key, true, cx);
         if self.start_connect(key) {
             self.refresh_target_pane(self.input_connection());
             self.rebuild_dock(window, cx);
         }
         cx.notify();
+    }
+
+    /// The user's Connect and Disconnect decide whether the next launch connects the
+    /// Device too; this machine's Device is not saved and always connects.
+    pub(super) fn set_auto_connect(
+        &mut self,
+        key: ConnectionKey,
+        auto_connect: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(connection) = self.connection_mut(key) else {
+            return;
+        };
+        if connection.auto_connect != auto_connect {
+            connection.auto_connect = auto_connect;
+            self.save_servers(cx);
+        }
     }
 
     /// While a reconnect deadline stands, retry until the device is back or the deadline

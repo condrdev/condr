@@ -160,6 +160,7 @@ An array of tables manages the remote Devices:
 
 * `name`: the Device's name in the sidebar, which `condr --device <name>` also uses to route a command.
 * `address`: the connection URI, starting with `ssh://`, `tcp://` or `p2p://` (without the one-time invite secret). See [Remote connections](/docs/using/remote/) for each protocol's format.
+* `auto_connect`: whether the GUI connects the Device when it starts, `true` when absent. Disconnecting a Device writes `auto_connect = false`, so the next launch leaves it disconnected; connecting it again removes the key.
 
 > The GUI maintains and persists this list; the CLI only reads it. When one entry's URI fails to parse, Condr skips it and reports an error, and the other Devices connect as usual.
 

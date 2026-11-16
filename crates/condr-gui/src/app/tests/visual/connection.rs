@@ -732,6 +732,59 @@ fn unreadable_saved_server_is_skipped_reported_and_kept_on_disk() {
 }
 
 #[test]
+fn a_device_left_disconnected_stays_so_at_launch_until_connected() {
+    let _serial_guard = acquire_visual_test_lock();
+    let directory = TestDirectory::new("auto-connect-config");
+    let config_path = directory.0.join("config.toml");
+    std::fs::write(
+        &config_path,
+        "[[client.servers]]\nname = 'Parked'\naddress = 'ssh://parked-box'\nauto_connect = false\n",
+    )
+    .unwrap();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let view_holder = Rc::new(RefCell::new(None));
+    let holder = view_holder.clone();
+    let (_root, window) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| {
+            Condr::new(
+                Endpoint::local(directory.0.join("unused.sock")),
+                Some(Err("offline for config test".into())),
+                config::LoadedConfig::read(Some(config_path.clone())),
+                gui_state::LoadedState::default(),
+                window,
+                cx,
+            )
+        });
+        holder.borrow_mut().replace(view.clone());
+        Root::new(view, window, cx)
+    });
+    let view = view_holder.borrow_mut().take().unwrap();
+    window.read(|app| {
+        let connection = view.read(app).connection(2).unwrap();
+        assert!(connection.status == ConnectionStatus::Disconnected);
+        assert!(
+            connection.error.is_none(),
+            "nothing failed: it was never started"
+        );
+    });
+
+    let saved = |window: &mut VisualTestContext, auto_connect| {
+        window.update(|_, cx| {
+            view.update(cx, |this, cx| this.set_auto_connect(2, auto_connect, cx));
+        });
+        window.run_until_parked();
+        std::fs::read_to_string(&config_path).unwrap()
+    };
+    let connected = saved(window, true);
+    assert!(
+        !connected.contains("auto_connect") && connected.contains("ssh://parked-box"),
+        "Connect drops the mark and keeps the Device: {connected}"
+    );
+    assert!(saved(window, false).contains("auto_connect = false"));
+}
+
+#[test]
 fn disconnect_and_drop_cancel_pending_connection_attempts() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();

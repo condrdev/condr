@@ -690,6 +690,7 @@ impl Condr {
                                     let _ = connection_owner.update(cx, |this, cx| {
                                         match status {
                                             ConnectionStatus::Connected => {
+                                                this.set_auto_connect(key, false, cx);
                                                 if this.disconnect_server(key) {
                                                     this.refresh_target_pane(
                                                         this.input_connection(),
