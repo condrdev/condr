@@ -20,7 +20,7 @@ Condr 的快捷键分为两层逻辑：
 | 打开设置 | `Cmd + ,` | `Ctrl + ,` |
 | 关闭设置 | `Esc` | `Esc` |
 | 切换左侧栏显示状态 | `Cmd + B` | `Ctrl + Shift + B` |
-| 切换右侧栏（Changes & Files） | `Cmd + Option + B` | `Ctrl + Alt + B` |
+| 切换右侧栏“变更与文件”（Changes & Files） | `Cmd + Option + B` | `Ctrl + Alt + B` |
 
 ---
 
@@ -29,13 +29,13 @@ Condr 的快捷键分为两层逻辑：
 | 操作 | macOS | Windows / Linux |
 | :--- | :--- | :--- |
 | 打开命令面板 | 连按两次 `Shift` | 连按两次 `Shift` |
-| 打开到 Actions 页 | `Cmd + Shift + P` | `Ctrl + Shift + P` |
-| 打开到 Go to 页 | `Cmd + P` | `Ctrl + Shift + K` |
+| 打开到操作（Actions）页 | `Cmd + Shift + P` | `Ctrl + Shift + P` |
+| 打开到前往（Go to）页 | `Cmd + P` | `Ctrl + Shift + K` |
 | 下一页 / 上一页 | `Tab` / `Shift + Tab` | `Tab` / `Shift + Tab` |
 | 执行选中的行 | `Enter` | `Enter` |
 | 关闭 | `Esc` 或打开它的按键 | `Esc` 或打开它的按键 |
 
-* **三页**：**All** 列出匹配的地点和动作，各最多五条；**Actions** 列出全部窗口动作及其快捷键，在当前窗口无法执行的显示为灰色；**Go to** 列出每个已连接的设备及其 Workspace、Tab 和 Agent，需要你处理的 Agent 排在最前。
+* **三页**：**全部**（All）列出匹配的地点和动作，各最多五条；**操作**（Actions）列出全部窗口动作及其快捷键，在当前窗口无法执行的显示为灰色；**前往**（Go to）列出每个已连接的设备及其 Workspace、Tab 和 Agent，需要你处理的 Agent 排在最前。
 * **匹配**：按顺序输入名字里的字母即可，不必连续；用空格分开的几个词都要匹配。只搜名字，不搜终端输出和文件内容。
 * **连按两次 `Shift`**：一秒内按下并松开 `Shift` 两次，中间不按别的键。它不能修改，另外两个可以。
 * 左侧栏底部的放大镜按钮也能打开它。
@@ -98,7 +98,7 @@ Condr 的快捷键分为两层逻辑：
 ### 按键透传机制
 
 * **选区生命周期**：复制动作触发后自动清空当前选中高亮。
-* **复制提示**：经过 Condr 的复制会显示“Copied to clipboard”。来源可以是 Condr 自己的选区，也可以是程序（如 Claude Code）复制的内容。程序自行调用系统剪贴板的复制不经过 Condr，不会有提示；例如 Codex 会复制到它所在机器的剪贴板，在远程 Device 上请改用 `Shift + 拖动` 让 Condr 来复制。
+* **复制提示**：经过 Condr 的复制会显示“已复制到剪贴板”（Copied to clipboard）。来源可以是 Condr 自己的选区，也可以是程序（如 Claude Code）复制的内容。程序自行调用系统剪贴板的复制不经过 Condr，不会有提示；例如 Codex 会复制到它所在机器的剪贴板，在远程 Device 上请改用 `Shift + 拖动` 让 Condr 来复制。
 * **macOS 无选区时的 `Cmd + C`**：按键会交给前台程序。支持的程序（如 Claude Code）会复制自己的选区，Shell 等其他程序收不到任何输入。在 Windows Device 上，只要 Condr 已识别出 Pane 里的 Claude Code，`Cmd + C` 同样会送达它。
 * **Windows 平台的冲突处理**：
   * 无选区时按 `Ctrl + C`，按键透传至前台应用，通常用于中断当前命令。
@@ -151,7 +151,7 @@ Condr 的快捷键分为两层逻辑：
 
 上面 Window、命令面板、Workspace、Tab 与 Pane 各表中的快捷键都可以改绑或删除，连按两次 `Shift` 除外。没有默认按键的动作，如关闭 Tab、重命名 Workspace 或交换 Pane，也可以绑定按键。终端自身的按键（复制粘贴、图片投递、跳转 prompt 与鼠标）保持不变。
 
-* **在 Settings 中**：打开 **Shortcuts**，点击动作旁的 **+** 后按下新按键，按 `Esc` 取消。**×** 删除一个按键，重置按钮恢复默认。修改立即生效。
+* **在设置（Settings）中**：打开 **快捷键**（Shortcuts），点击动作旁的 **+** 后按下新按键，按 `Esc` 取消。**×** 删除一个按键，重置按钮恢复默认。修改立即生效。
 * **在 `config.toml` 中**：[`[client.keybindings]`](/zh-cn/docs/reference/configuration/#clientkeybindings-窗口快捷键) 列出了每个动作的名称。手动编辑后需重启 Condr。
 * **规则**：
   * 快捷键必须带 `Cmd`、`Ctrl` 或 `Option`（Windows 和 Linux 上为 `Ctrl` 或 `Alt`），F 键除外：其余按键都留给打字。
@@ -159,13 +159,13 @@ Condr 的快捷键分为两层逻辑：
   * macOS 上 `Cmd + Q`、`Cmd + H`、`Cmd + Option + H`、`Cmd + M` 与 `Cmd + Ctrl + F` 属于系统，不能占用。
   * 每个快捷键只能是一个按键组合，不支持 tmux 前缀键那样的按键序列。
   * 快捷键会先于终端被 Condr 拦截，即使是程序需要的按键（如 `Ctrl + C`）也一样。
-  * Condr 无法使用的按键会被忽略，原因显示在 Shortcuts 页对应动作的下方。
+  * Condr 无法使用的按键会被忽略，原因显示在快捷键（Shortcuts）页对应动作的下方。
 
 ---
 
 ## Option 作为 Meta
 
-**仅限 macOS。** 在 **Settings > Shortcuts > Option as Meta** 中，选择哪个 `Option` 键向终端发送 Meta（`Esc` 后跟该键），而不是输入字符：**Left Option**、**Right Option** 或 **Both**。只设置一侧时，按这一侧的 `Option + B` 可以在 Shell 中后退一个单词，另一侧的 `Option` 仍然输入 `å`、`é`，或某些键盘布局放在那里的 `@`。作为 Meta 的 `Option` 也不会再触发 `Option + E` 这类重音组合。对应配置项是 [`[client.terminal]`](/zh-cn/docs/reference/configuration/#clientterminal-终端显示) 中的 `macos_option_as_meta`。
+**仅限 macOS。** 在 **设置 > 快捷键 > 将 Option 用作 Meta 键**（Settings > Shortcuts > Option as Meta）中，选择哪个 `Option` 键向终端发送 Meta（`Esc` 后跟该键），而不是输入字符：**左 Option**（Left Option）、**右 Option**（Right Option）或 **两侧**（Both）。只设置一侧时，按这一侧的 `Option + B` 可以在 Shell 中后退一个单词，另一侧的 `Option` 仍然输入 `å`、`é`，或某些键盘布局放在那里的 `@`。作为 Meta 的 `Option` 也不会再触发 `Option + E` 这类重音组合。对应配置项是 [`[client.terminal]`](/zh-cn/docs/reference/configuration/#clientterminal-终端显示) 中的 `macos_option_as_meta`。
 
 Windows 与 Linux 上，`Alt` 始终就是 Meta。
 

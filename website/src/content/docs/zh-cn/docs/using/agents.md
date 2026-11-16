@@ -21,7 +21,7 @@ Condr 从进程识别此类 Agent：运行时侧边栏会显示其图标，退�
 
 对这类 Agent 运行 `condr agent wait` 与 `condr agent prompt --wait` 时，会直接返回 `agent_reports_no_state` 报错，不会等待超时。不带 `--wait` 的 `condr agent prompt` 则可以正常发送指令。
 
-目前仅 Kimi Code 属于这一级，因为它的 Hook 无法区分主 Agent 与子 Agent 的 Stop 事件。在 **Settings › Agent integrations** 中，它被标为 Recognition only。
+目前仅 Kimi Code 属于这一级，因为它的 Hook 无法区分主 Agent 与子 Agent 的 Stop 事件。在 **设置 › Agent 集成**（Settings › Agent integrations）中，它被标为“仅识别”（Recognition only）。
 
 ## 准备与检查 Agent
 
@@ -36,7 +36,7 @@ Condr 从进程识别此类 Agent：运行时侧边栏会显示其图标，退�
 传统的终端管理工具依赖屏幕文本正则匹配，容易因输出变动导致误判。Condr 只采信 Agent 自己说的话。支持终端 [Program Status Protocol](https://www.superlogical.com/rex/docs/build/program-status)（OSC 7501）的 Agent 会直接向 Condr 的终端上报状态，无需任何安装：Claude Code 2.1.295、Codex 0.163、Pi 1.1、Oh My Pi 18.8.7、Grok Build 1.0.52、Antigravity CLI 1.4 及更新版本都支持。Hook 仍然有用：它记录 Server 重启后恢复会话所需的会话 ID，负责其余 Agent 的状态上报；在 Windows Server 上，Claude Code 和 Pi 对该协议的探测会失败，由 Hook 顶上。
 
 - **一键安装 Hook**：执行命令 `condr agent hooks install <agent>`（例如 `condr agent hooks install claude`）。
-- **图形化管理界面**：前往 **Settings › Agent integrations** 直接安装。
+- **图形化管理界面**：前往 **设置 › Agent 集成**（Settings › Agent integrations）直接安装。
 - **查看与卸载**：使用 `condr agent hooks status <agent>` 查看状态；如需移除，执行 `condr agent hooks uninstall <agent>`。
 
 ## Agent 状态指示

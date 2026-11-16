@@ -27,7 +27,7 @@ Condr 将官方支持更多常用的 Agent CLI，并按[支持级别](/zh-cn/doc
 
 ### 端口探测
 
-Agent 在 Workspace 中启动 dev server 后，Condr 会在对应的 Pane 和 **Ports** 页面上列出其监听的端口。对于远程设备，点击端口即可转发至本机。
+Agent 在 Workspace 中启动 dev server 后，Condr 会在对应的 Pane 和 **端口**（Ports）页面上列出其监听的端口。对于远程设备，点击端口即可转发至本机。
 
 ### GitHub 集成
 
@@ -41,11 +41,11 @@ Workspace 将展示当前分支关联的 GitHub PR、PR 状态及 CI 检查结�
 
 ### 把 WSL 发行版作为设备
 
-在 Windows 上，WSL 2 发行版可以作为独立的设备连接，其中运行的 Agent 能被识别并上报状态，Git 也在 Linux 一侧照常工作。**Connect Remote Device** 会列出本机已安装的发行版。
+在 Windows 上，WSL 2 发行版可以作为独立的设备连接，其中运行的 Agent 能被识别并上报状态，Git 也在 Linux 一侧照常工作。**连接远程设备**（Connect Remote Device）会列出本机已安装的发行版。
 
 ### 多仓库的改动
 
-在包含多个仓库的父目录上打开 Workspace 时，Changes 和 History 会按仓库分组，列出下一层每个仓库的改动与提交。
+在包含多个仓库的父目录上打开 Workspace 时，变更（Changes）和历史（History）会按仓库分组，列出下一层每个仓库的改动与提交。
 
 ---
 
@@ -66,7 +66,7 @@ Workspace 将展示当前分支关联的 GitHub PR、PR 状态及 CI 检查结�
 | 事项 | 启动条件 |
 | :--- | :--- |
 | 团队协作与权限管理 | 出现多人共用同一个 Server 的真实需求 |
-| 编辑器 | 审查改动时经常需要顺手修改代码，而远程设备上的文件无法通过 Open in 在本机编辑器中打开 |
+| 编辑器 | 审查改动时经常需要顺手修改代码，而远程设备上的文件无法通过“在 … 中打开”（Open in）在本机编辑器中打开 |
 | 内置浏览器 | 为查看转发的端口在系统浏览器和 Condr 之间来回切换，仍是常见的不便 |
 | 任务看板 | 同时进行的任务多到侧栏和 Needs you 列表已经看不过来 |
 

@@ -90,7 +90,7 @@ Server 运行于守护进程模式，关闭当前终端不影响其运行。
 condr server autostart on
 ```
 
-`condr server autostart off` 取消。桌面应用的 Settings › General 里也有同样的开关。Linux 上会注册一个 systemd 用户 unit 并开启 linger，可能需要输入密码；macOS 上会添加一个 LaunchAgent，系统会弹出一条后台项目的通知。Server 崩溃后会自动重新启动。
+`condr server autostart off` 取消。桌面应用的设置 › 通用（Settings › General）里也有同样的开关。Linux 上会注册一个 systemd 用户 unit 并开启 linger，可能需要输入密码；macOS 上会添加一个 LaunchAgent，系统会弹出一条后台项目的通知。Server 崩溃后会自动重新启动。
 
 ### 3. 高级安装与环境配置
 
@@ -124,12 +124,12 @@ $env:CONDR_INSTALL_ARGS = '--force'; irm https://condr.dev/install.ps1 | iex
 
 ## 版本发布通道
 
-Condr 默认每 5 小时在后台自动检测一次通道更新。可在客户端通过 **Settings › About › Updates** 查看版本状态。
+Condr 默认每 5 小时在后台自动检测一次通道更新。可在客户端通过 **设置 › 关于 › 更新**（Settings › About › Updates）查看版本状态。
 
 | 渠道 | 特性 | 适用受众 |
 | :--- | :--- | :--- |
-| **Stable** | 经过测试的标准稳定发行版（默认） | 绝大多数生产与日常场景 |
-| **Nightly** | 每日由 `main` 分支自动构建，包含最新特性 | 尝鲜用户、功能测试与 Bug 验证 |
+| **稳定版**（Stable） | 经过测试的标准稳定发行版（默认） | 绝大多数生产与日常场景 |
+| **Nightly 版**（Nightly） | 每日由 `main` 分支自动构建，包含最新特性 | 尝鲜用户、功能测试与 Bug 验证 |
 
 ---
 
@@ -142,7 +142,7 @@ Condr 默认每 5 小时在后台自动检测一次通道更新。可在客户�
 直接下载新版本覆盖安装。旧 Server 的迁移策略如下：
 
 - **Windows**：安装程序自动停止旧版 Server，并在启动新版客户端时同步升级启动新 Server。
-- **macOS / Linux**：安装后旧版 Server 仍维持运行，新版客户端启动时会提示重启服务；亦可稍后在 **Settings › General** 中手动点击 **Restart Condr**。
+- **macOS / Linux**：安装后旧版 Server 仍维持运行，新版客户端启动时会提示重启服务；亦可稍后在 **设置 › 通用**（Settings › General）中手动点击 **重启 Condr**（Restart Condr）。
 
 ### Headless Server 升级
 

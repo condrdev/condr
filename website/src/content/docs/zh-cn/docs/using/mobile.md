@@ -34,9 +34,9 @@ description: 在 iPhone 上安装 Condr，与你的电脑配对，离开工位�
 
 ## 配对电脑
 
-1. 在电脑端的 Condr 中打开 **Settings › Paired devices**。
-2. 如果 **Add a phone or computer** 提示其他设备尚无法连接，点击 **Allow connections**，然后点击 **Restart**。这会开启适用于各种网络环境的 Peer-to-peer；重启会停止该电脑上的所有 Pane 与 Agent。若手机能直接访问电脑的 IP 地址，也可以改为在 **Connections** 下开启 **TCP**。
-3. 点击 **Show pairing code**。
+1. 在电脑端的 Condr 中打开 **设置 › 已配对设备**（Settings › Paired devices）。
+2. 如果 **添加手机或电脑**（Add a phone or computer）提示其他设备尚无法连接，点击 **允许连接**（Allow connections），然后点击 **重启**（Restart）。这会开启适用于各种网络环境的 Peer-to-peer；重启会停止该电脑上的所有 Pane 与 Agent。若手机能直接访问电脑的 IP 地址，也可以改为在 **连接**（Connections）下开启 **TCP**。
+3. 点击 **显示配对码**（Show pairing code）。
 4. 在手机上轻点 **Pair with Your Computer**，然后轻点 **Scan Code**，并为该电脑设置一个名称。
 
 配对码仅限单次使用，10 分钟后失效。对于未安装桌面应用的电脑，可运行 `condr server invite`，并在手机上轻点 **Paste a Link Instead**；在命令行开启 Peer-to-peer 或 TCP 的具体方法，请参见[远程连接](/zh-cn/docs/using/remote/)。
@@ -64,4 +64,4 @@ description: 在 iPhone 上安装 Condr，与你的电脑配对，离开工位�
 
 ## 手机丢了怎么办
 
-在曾经配对过的每台电脑上打开 **Settings › Paired devices**，点击手机旁边的 **Revoke**，或者运行 `condr server revoke <fingerprint 或前缀>`。更换新手机后，需作为新设备重新进行配对。
+在曾经配对过的每台电脑上打开 **设置 › 已配对设备**（Settings › Paired devices），点击手机旁边的 **撤销**（Revoke），或者运行 `condr server revoke <fingerprint 或前缀>`。更换新手机后，需作为新设备重新进行配对。

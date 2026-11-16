@@ -22,7 +22,7 @@ Condr 没有账号，也没有统计分析。桌面端、Server 与手机端都�
   * **存储的内容**：对每台允许通知的手机，保存它的 Device 标识、推送令牌、哪些 Device 可以向它推送及你在 App 中为它们设置的名称，以及它最近一次注册的时间。不保存任何通知。超过 90 天未更新的注册会被删除；Apple 或 Google 报告令牌失效时，该令牌会立即删除。
   * **推送中可见的内容**：Condr Cloud 及运行它的 Cloudflare、Apple 与 Google 能看到 Agent 的名称和状态、Workspace、Agent 给出的简短说明（如有）、终端标题、Server 的名称及你在 App 中为它设置的名称，以及双方的 Device 标识，但看不到终端内容。推送是明文，没有端到端加密。
   * **没有账号**：每个请求都用 Device 密钥签名。
-* **更新检查**：桌面端每 5 小时读取一次 `https://condr.dev/version.txt`（若跟随 nightly 渠道则查询 GitHub API），以确认是否有新版本。该请求不会携带任何能够识别你个人或当前安装实例的信息。你可以在 **Settings › About** 中关闭自动更新检查。
+* **更新检查**：桌面端每 5 小时读取一次 `https://condr.dev/version.txt`（若跟随 nightly 渠道则查询 GitHub API），以确认是否有新版本。该请求不会携带任何能够识别你个人或当前安装实例的信息。你可以在 **设置 › 关于**（Settings › About）中关闭自动更新检查。
 * **网站**（`condr.dev`）：托管于 Cloudflare Pages，不包含任何统计分析代码，亦不设置 Cookie。页面字体从 Google Fonts 加载。与其他网页请求一样，Cloudflare 与 Google 会在请求过程中收到你的 IP 地址。
 
 ---

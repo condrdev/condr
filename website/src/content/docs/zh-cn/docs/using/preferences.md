@@ -26,7 +26,7 @@ Condr 的界面有英文和简体中文两种。默认跟随系统的首选语�
 
 ## 自定义外部编辑器 (Open in Editor)
 
-在文件列表（Files）或改动列表（Changes）中右键点击文件，可以调用外部 IDE 或编辑器直接打开对应文件。标题栏的 **Open in** 按钮则打开整个 Workspace 根目录。两者都只对本机 Device 有效。
+在文件列表（Files）或变更列表（Changes）中右键点击文件，可以调用外部 IDE 或编辑器直接打开对应文件。标题栏的 **在 … 中打开**（Open in）按钮则打开整个 Workspace 根目录。两者都只对本机 Device 有效。
 
 Condr 会自动找到已安装的 Zed、VS Code、Cursor 和 IntelliJ IDEA。如果默认列表中没有你常用的编辑器，可以在配置文件 `config.toml` 中添加 `[[client.editors]]` 配置：
 
@@ -41,7 +41,7 @@ command = ["code-insiders", "--reuse-window"]
 ```
 
 ### 参数说明
-- `name`：显示在 Open in 菜单中的名称。
+- `name`：显示在“在 … 中打开”（Open in）菜单中的名称。
 - `command`：程序和它的前置参数，Condr 会把要打开的路径追加为最后一个参数。
 - 手改配置文件后要重启窗口才生效。Condr 会把每个仓库上次选的编辑器记在 `[[client.workspace_editors]]` 里，这一项不要手改。
 
@@ -76,14 +76,14 @@ command = ["code-insiders", "--reuse-window"]
 | 程序开启鼠标模式时选择文本 | Shift+拖动 | Shift+拖动 |
 | 打开终端里的链接 | Cmd+点击 | Ctrl+点击 |
 
-以上是默认按键。要修改快捷键，或在 macOS 上让 `Option` 作为 Meta，请打开 **Settings > Shortcuts**；完整列表与规则见[快捷键速查](/zh-cn/docs/reference/keybindings/#修改快捷键)。
+以上是默认按键。要修改快捷键，或在 macOS 上让 `Option` 作为 Meta，请打开 **设置 > 快捷键**（Settings > Shortcuts）；完整列表与规则见[快捷键速查](/zh-cn/docs/reference/keybindings/#修改快捷键)。
 
 ## 设置终端默认 Shell
 
 默认情况下，新建分屏会使用系统的默认 Shell。你可以通过以下方式修改：
 
 ### 在界面中修改
-前往 **Settings › General**，在 **Terminal** 区域的 Shell 框中输入目标 Shell 的路径（例如 `/bin/zsh` 或 `/opt/homebrew/bin/fish`）。
+前往 **设置 › 通用**（Settings › General），在 **终端**（Terminal）区域的 Shell 框中输入目标 Shell 的路径（例如 `/bin/zsh` 或 `/opt/homebrew/bin/fish`）。
 
 ### 在配置文件中修改
 在 `config.toml` 中写入：
@@ -102,4 +102,4 @@ Condr 会给新 Pane 启动的 zsh、bash 或 fish 加载一段小脚本，标�
 
 你自己的启动文件照常加载：Condr 的脚本与它们并存，不改你的提示符和设置。4.4 之前的 bash（包括 macOS 自带的版本）无法标出命令开始，所以不加载集成；用 Homebrew 装的 bash 可以。
 
-在 **Settings › General › Shell integration** 里可以关闭，也可以在 `[server.terminal]` 下写 `shell_integration = false`。修改对之后新建的 Pane 生效。Windows 上的 Device 暂时没有任何 shell 支持，包括 PowerShell。
+在 **设置 › 通用 › Shell 集成**（Settings › General › Shell integration）里可以关闭，也可以在 `[server.terminal]` 下写 `shell_integration = false`。修改对之后新建的 Pane 生效。Windows 上的 Device 暂时没有任何 shell 支持，包括 PowerShell。

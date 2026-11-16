@@ -15,25 +15,25 @@ Condr 采用分层配置架构：
 ## 图形设置界面
 
 * **快捷键**：macOS 为 `Cmd + ,`，Windows / Linux 为 `Ctrl + ,`。
-* **自动保存**：设置项变更会立即同步至 `config.toml`。文本输入框失焦、回车或点击 **Save** 时触发写入。
+* **自动保存**：设置项变更会立即同步至 `config.toml`。文本输入框失焦、回车或点击 **保存**（Save）时触发写入。
 
 设置窗口一次只配置一台设备。顶部选择器可切换设备（默认选中本机），并显示连接方式与在线状态。本机显示所有页面；远程设备仅显示下表中标有 **设备** 的页面；未连接的设备在连上之前不会显示页面。
 
 | 页面 | 作用于 | 说明 |
 | :--- | :--- | :--- |
-| **General** | 设备 | **Status**：版本、运行时间、会话指标（Workspace 和 Pane 数量）以及最近错误日志。**Terminal**：新 Pane 启动的默认 Shell（留空则继承系统环境）和 **Shell integration** 开关。最下方是 **Restart Condr** |
-| **Appearance** | 本机 | 外观主题（跟随系统、浅色、深色）、终端字体、深色与浅色模式各自的终端配色（整个界面的颜色都从它推导），以及 Preview 和 Diff 的语法高亮与字号 |
-| **Notifications** | 本机 | 系统通知总开关及测试通知按钮 |
-| **Power** | 本机 | 保持屏幕常亮（与侧边栏底部的咖啡杯图标联动） |
-| **Shortcuts** | 本机 | 改绑或删除窗口级快捷键，macOS 上选择 **Option as Meta**，并列出终端自身的按键（只读） |
-| **Network** | 设备 | 该设备用于 Peer-to-peer 连接和检查更新的代理：**System**、**None**，或选择 **Manual** 并填写 URL |
-| **Paired devices** | 设备 | **Pair**：点击 **Show pairing code** 显示一次性配对码，用手机上的 Condr 扫描；另一台电脑可点击 **Copy link** 复制链接。配对码 10 分钟后过期，设备配对成功后卡片会显示它的名字。同时开启 Peer-to-peer 和 TCP 时，可选择配对码使用哪一种；TCP 配对码使用这台电脑提供的地址，可从输入框的列表中选择，也可以自行输入。**Devices**：已配对设备，在线设备排在前面，每行都有 **Revoke**。**Connections**：**Peer-to-peer** 和 **TCP** 两个开关，以及 TCP 的监听地址；有修改等待重启时会出现 **Restart Condr** |
-| **Agent integrations** | 设备 | 查看各 Agent 的 Hook 状态，支持一键安装、更新或卸载 |
-| **Developer** | 本机 | 帧率监控开关，以及快速打开应用、配置、数据、状态和日志目录的按钮 |
-| **Licenses** | 本机 | 第三方开源依赖及开源协议 |
-| **About** | 本机 | 版本信息、更新通道选择、手动检查更新及自动检查开关 |
+| **通用**（General） | 设备 | **状态**（Status）：版本、运行时间、会话指标（Workspace 和 Pane 数量）以及最近错误日志。**终端**（Terminal）：新 Pane 启动的默认 Shell（留空则继承系统环境）和 **Shell 集成**（Shell integration）开关。最下方是 **重启 Condr**（Restart Condr） |
+| **外观**（Appearance） | 本机 | 外观主题（跟随系统、浅色、深色）、终端字体、深色与浅色模式各自的终端配色（整个界面的颜色都从它推导），以及 Preview 和 Diff 的语法高亮与字号 |
+| **通知**（Notifications） | 本机 | 系统通知总开关及测试通知按钮 |
+| **电源**（Power） | 本机 | 保持屏幕常亮（与侧边栏底部的咖啡杯图标联动） |
+| **快捷键**（Shortcuts） | 本机 | 改绑或删除窗口级快捷键，macOS 上选择 **将 Option 用作 Meta 键**（Option as Meta），并列出终端自身的按键（只读） |
+| **网络**（Network） | 设备 | 该设备用于 Peer-to-peer 连接和检查更新的代理：**系统**（System）、**不使用**（None），或选择 **手动**（Manual）并填写 URL |
+| **已配对设备**（Paired devices） | 设备 | **配对**（Pair）：点击 **显示配对码**（Show pairing code）显示一次性配对码，用手机上的 Condr 扫描；另一台电脑可点击 **复制链接**（Copy link）复制链接。配对码 10 分钟后过期，设备配对成功后卡片会显示它的名字。同时开启 Peer-to-peer 和 TCP 时，可选择配对码使用哪一种；TCP 配对码使用这台电脑提供的地址，可从输入框的列表中选择，也可以自行输入。**设备**（Devices）：已配对设备，在线设备排在前面，每行都有 **撤销**（Revoke）。**连接**（Connections）：**Peer-to-peer** 和 **TCP** 两个开关，以及 TCP 的监听地址；有修改等待重启时会出现 **重启 Condr**（Restart Condr） |
+| **Agent 集成**（Agent integrations） | 设备 | 查看各 Agent 的 Hook 状态，支持一键安装、更新或卸载 |
+| **开发者**（Developer） | 本机 | 帧率监控开关，以及快速打开应用、配置、数据、状态和日志目录的按钮 |
+| **许可证**（Licenses） | 本机 | 第三方开源依赖及开源协议 |
+| **关于**（About） | 本机 | 版本信息、更新通道选择、手动检查更新及自动检查开关 |
 
-> **权限限制**：通过 TCP 或 P2P 连接时，决定其他设备如何连入这台设备的设置（`Network` 中的代理，以及 `Paired devices` 页 **Connections** 中的所有项，包括 **Restart Condr**）会置灰禁用，以防止改动导致当前连接中断；悬停可查看说明。如需修改，请在该设备上操作或通过 SSH 连接修改。其余设置均可正常调整，包括 **Show pairing code**，以及对当前所用设备之外的任意设备执行 **Remove**。
+> **权限限制**：通过 TCP 或 P2P 连接时，决定其他设备如何连入这台设备的设置（`网络`（Network）中的代理，以及 `已配对设备`（Paired devices）页 **连接**（Connections）中的所有项，包括 **重启 Condr**（Restart Condr））会置灰禁用，以防止改动导致当前连接中断；悬停可查看说明。如需修改，请在该设备上操作或通过 SSH 连接修改。其余设置均可正常调整，包括 **显示配对码**（Show pairing code），以及对当前所用设备之外的任意设备执行 **Remove**。
 
 ---
 
@@ -43,7 +43,7 @@ GUI 客户端、后台 Server 与 `condr` CLI 共用位于配置目录下的 `co
 
 * **写入机制**：Condr 写入配置时使用文件锁规避并发竞争，并完整保留文件内的自定义注释与排版结构。
 * **生效规则**：
-  * 在图形界面修改的设置通常立即生效，但 `Paired devices` 页 **Connections** 中的设置和 Peer-to-peer 代理除外。
+  * 在图形界面修改的设置通常立即生效，但 `已配对设备`（Paired devices）页 **连接**（Connections）中的设置和 Peer-to-peer 代理除外。
   * 手动编辑 `[client]` 及其子表后，重启 GUI 窗口生效。
   * 手动编辑 `[server]` 及其子表后，需在终端运行 `condr server restart` 重启 Server。
   * 手动编辑 `[network]` 后，上述两项操作均需执行。
@@ -71,7 +71,7 @@ fps_monitor = false
 | `notifications` | bool | `true` | Agent 任务完成或需介入确认、程序请求通知（OSC 9 或 777），以及你没在看的 Pane 里长命令结束时的系统通知 |
 | `keep_awake` | bool | `false` | 保持屏幕常亮，并阻止系统因空闲而休眠 |
 | `fps_monitor` | bool | `false` | 在界面叠加显示实时帧率与资源占用 |
-| `editor` | string | 空 | 上次通过 **Open in** 调用的编辑器名称，亦作为全局默认值（由 Condr 内部维护写入） |
+| `editor` | string | 空 | 上次通过 **在 … 中打开**（Open in）调用的编辑器名称，亦作为全局默认值（由 Condr 内部维护写入） |
 
 ### `[client.terminal]` 终端显示
 
@@ -88,8 +88,8 @@ macos_option_as_meta = "left"
 | --- | --- | --- | --- |
 | `font_family` | string | 界面主题等宽字体 | 终端渲染字体。留空时使用界面内置默认字体 |
 | `font_size` | 6 ~ 72 | 界面等宽基准字号 | 像素单位。浮点数自动四舍五入，溢出范围截断至边界值 |
-| `dark_color_scheme` | string | 空 | 深色模式下的终端配色：内置 iTerm2 主题标识，需与 **Dark colors** 下拉项严格一致。深色模式下整个界面的颜色都从它推导。缺省、无法识别或是浅色配色时，使用默认深色调色板。程序向终端查询颜色（OSC 10/11，或问终端是深色还是浅色）时，得到的是当前模式的配色；多台桌面端连同一个 Device 时，以最后连上、最后改配色或最后切换模式的那台为准 |
-| `light_color_scheme` | string | 空 | 浅色模式下的终端配色，对应 **Light colors** 下拉项。缺省、无法识别或是深色配色时，使用 GitHub Light Default |
+| `dark_color_scheme` | string | 空 | 深色模式下的终端配色：内置 iTerm2 主题标识，需与 **深色配色**（Dark colors）下拉项严格一致。深色模式下整个界面的颜色都从它推导。缺省、无法识别或是浅色配色时，使用默认深色调色板。程序向终端查询颜色（OSC 10/11，或问终端是深色还是浅色）时，得到的是当前模式的配色；多台桌面端连同一个 Device 时，以最后连上、最后改配色或最后切换模式的那台为准 |
+| `light_color_scheme` | string | 空 | 浅色模式下的终端配色，对应 **浅色配色**（Light colors）下拉项。缺省、无法识别或是深色配色时，使用 GitHub Light Default |
 | `macos_option_as_meta` | `off` / `left` / `right` / `both` | `off` | 仅 macOS：哪个 `Option` 键发送 Meta（`Esc` 加该键），而不是输入字符。非法值按 `off` 处理。见 [Option 作为 Meta](/zh-cn/docs/reference/keybindings/#option-作为-meta) |
 
 ### `[client.code]` 代码视图（Preview / Diff）
@@ -102,7 +102,7 @@ font_size = 14
 
 | 键 | 类型 / 可选值 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `theme` | string | 空 | 语法高亮主题，需匹配 **Appearance › Syntax** 选项。缺省或无法识别时，浅色界面使用 GitHub Light，深色界面使用 GitHub Dark |
+| `theme` | string | 空 | 语法高亮主题，需匹配 **外观 › 语法高亮**（Appearance › Syntax）选项。缺省或无法识别时，浅色界面使用 GitHub Light，深色界面使用 GitHub Dark |
 | `font_size` | 6 ~ 72 | 界面等宽基准字号 | 代码视图字号，边界与取整逻辑同终端配置 |
 
 ### `[client.keybindings]` 窗口快捷键
@@ -113,22 +113,22 @@ split-right = ["cmd-d", "cmd-\\"]
 toggle-zoom = []
 ```
 
-每一项整体替换一个动作在本平台的默认按键；`[]` 表示不留任何按键；没有写的动作保持默认。**Settings › Shortcuts** 也写在这里，并且只写与默认不同的部分。
+每一项整体替换一个动作在本平台的默认按键；`[]` 表示不留任何按键；没有写的动作保持默认。**设置 › 快捷键**（Settings › Shortcuts）也写在这里，并且只写与默认不同的部分。
 
 * **按键写法**：`cmd`、`ctrl`、`alt`、`shift` 用 `-` 连接一个键，例如 `cmd-shift-d`、`alt-shift-=` 或 `f6`。Windows 和 Linux 上 `cmd` 指 Windows 键或 Super 键。
 * **抢占按键**：一项写到的按键会从任何动作的默认按键中拿走。两项写了同一个键时，在下表中排在前面的动作保留它。
-* **被忽略的按键**：无法解析的、既不带 `cmd`、`ctrl`、`alt` 也不是 F 键的，以及 macOS 自身占用的（`cmd-q`、`cmd-h`、`cmd-alt-h`、`cmd-m`、`cmd-ctrl-f`）。同一项里的其余按键照常生效，Shortcuts 页会在该动作下方说明原因。值不是列表时保持默认。
+* **被忽略的按键**：无法解析的、既不带 `cmd`、`ctrl`、`alt` 也不是 F 键的，以及 macOS 自身占用的（`cmd-q`、`cmd-h`、`cmd-alt-h`、`cmd-m`、`cmd-ctrl-f`）。同一项里的其余按键照常生效，快捷键（Shortcuts）页会在该动作下方说明原因。值不是列表时保持默认。
 * 手动编辑此表后需重启客户端。
 
 | 分组 | 名称 |
 | --- | --- |
-| Application | `open-settings`、`toggle-sidebar`、`toggle-changes`、`command-palette`、`go-to` |
-| Devices | `connect-remote-device`、`reconnect-device` |
+| 应用（Application） | `open-settings`、`toggle-sidebar`、`toggle-changes`、`command-palette`、`go-to` |
+| 设备（Devices） | `connect-remote-device`、`reconnect-device` |
 | Workspaces | `next-workspace`、`previous-workspace`、`new-workspace`、`rename-workspace`、`close-workspace` |
 | Tabs | `new-tab`、`next-tab`、`previous-tab`、`rename-tab`、`close-tab`、`go-to-tab-1` … `go-to-tab-9` |
 | Panes | `split-right`、`split-down`、`close-pane`、`toggle-zoom`、`focus-left`、`focus-right`、`focus-up`、`focus-down`、`resize-left`、`resize-right`、`resize-up`、`resize-down`、`swap-left`、`swap-right`、`swap-up`、`swap-down` |
 
-Devices 组、Workspace 与 Tab 的重命名和关闭、New workspace 以及 Pane 的交换默认没有按键，需要时自己绑定。打开[命令面板](/zh-cn/docs/reference/keybindings/#命令面板)的双击 `Shift` 不在这张表里，不能修改。
+设备（Devices）组、Workspace 与 Tab 的重命名和关闭、新建 Workspace（New workspace）以及 Pane 的交换默认没有按键，需要时自己绑定。打开[命令面板](/zh-cn/docs/reference/keybindings/#命令面板)的双击 `Shift` 不在这张表里，不能修改。
 
 ### `[client.updates]` 软件更新
 
@@ -170,7 +170,7 @@ name = "Helix"
 command = ["hx"]
 ```
 
-向右键 **Open in** 级联菜单注册外部可执行程序：
+向右键 **在 … 中打开**（Open in）级联菜单注册外部可执行程序：
 
 * `name`：菜单中渲染的项目展示名。
 * `command`：可执行程序及前置参数。Condr 在拉起进程时会将目标文件/目录路径作为末尾参数传入。
@@ -239,7 +239,7 @@ shell_integration = true
 | `shell` | path | 空 | 新 Pane 派生进程的可执行路径。缺省状态下，Unix-like 系统读取 `$SHELL`，Windows 依序探测 `pwsh.exe`、`powershell.exe` 与 `%ComSpec%` |
 | `shell_integration` | bool | `true` | 给 zsh、bash 和 fish 加载 Condr 的 [Shell 集成](/zh-cn/docs/using/preferences/#shell-集成)。对之后新建的 Pane 生效 |
 
-若在 **Settings › General** 界面中修改 Shell，系统将直接热更新：后续新建的 Pane 立即生效，无须重启 Server。
+若在 **设置 › 通用**（Settings › General）界面中修改 Shell，系统将直接热更新：后续新建的 Pane 立即生效，无须重启 Server。
 
 ---
 
@@ -278,7 +278,7 @@ url = "http://user:password@proxy:8080"
 | `CONDR_INSTALL_DIR` | 安装脚本与 `condr server install` 部署二进制文件的目标目录 |
 | `CONDR_INSTALL_ARGS` | Windows 安装脚本透传给 `condr server install` 的扩展入参（如 `--force`） |
 
-> **进程上下文继承**：Server 会完整继承启动它的进程环境，不会自行读取 Shell 配置文件。例如在终端执行 `CONDR_LOG=debug condr server restart` 即可重启 Server 并开启 Debug 日志。修改 `.zshrc` / `.bashrc` 后，需在已加载新配置的终端中执行 `condr server restart`；设置界面的 **Restart Condr** 会沿用旧 Server 的环境变量。
+> **进程上下文继承**：Server 会完整继承启动它的进程环境，不会自行读取 Shell 配置文件。例如在终端执行 `CONDR_LOG=debug condr server restart` 即可重启 Server 并开启 Debug 日志。修改 `.zshrc` / `.bashrc` 后，需在已加载新配置的终端中执行 `condr server restart`；设置界面的 **重启 Condr**（Restart Condr）会沿用旧 Server 的环境变量。
 
 每个 Pane 会话自动挂载的环境变量见 [Agent 自动化指南](/zh-cn/docs/using/automation/)。
 
@@ -298,7 +298,7 @@ url = "http://user:password@proxy:8080"
 | **二进制** (`condr` 核心程序) | `~/.local/opt/condr` | `~/.local/opt/condr` | `%LOCALAPPDATA%\Programs\Condr` |
 
 * **XDG 兼容**：Linux 平台严格遵循 `XDG_CONFIG_HOME`、`XDG_DATA_HOME` 与 `XDG_STATE_HOME` 规范。未指定 `XDG_RUNTIME_DIR` 时自动回退至 `~/.local/share/condr/runtime`。
-* **快速访问**：UI 界面可在 **Settings › Developer › Locations** 点击对应按钮直达目标路径。
+* **快速访问**：UI 界面可在 **设置 › 开发者 › 位置**（Settings › Developer › Locations）点击对应按钮直达目标路径。
 
 ### 核心运行时文件
 

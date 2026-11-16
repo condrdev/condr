@@ -21,7 +21,7 @@ condr server status
 * **JSON 输出格式**：追加 `--json` 参数可直接输出结构化 JSON 数据，便于随 Issue 提交反馈。
 * **退出状态码**：若 Server 处于未运行状态，命令将以退出码 1 终止并打印失败原因。
 
-如需查看远程设备状态，请在 **Settings** 顶部选中该设备并打开 **General**。
+如需查看远程设备状态，请在 **设置**（Settings）顶部选中该设备并打开 **通用**（General）。
 
 ---
 
@@ -33,7 +33,7 @@ condr server status
 | 窗口日志 | `condr-gui.<date>.log` | 按天切分，自动保留最近 7 个日志文件 |
 | Server 标准错误输出 | `condr-server-<id>.stderr` | 捕获后台 Server 进程的 stdout 与 stderr。用于诊断 Server 启动失败或异常崩溃问题，该文件不执行轮转 |
 
-默认日志存储目录请查阅[配置与设置](/zh-cn/docs/reference/configuration/)。亦可在界面通过 **Settings › Developer › Locations**，定位到 Logs 一栏并点击 **Open** 直达对应目录。
+默认日志存储目录请查阅[配置与设置](/zh-cn/docs/reference/configuration/)。亦可在界面通过 **设置 › 开发者 › 位置**（Settings › Developer › Locations），定位到日志（Logs）一栏并点击 **打开**（Open）直达对应目录。
 
 ### 提高日志详细程度
 
@@ -80,7 +80,7 @@ Condr's own server could not start on this device. Connect tries again.
 * **本机 Server 滞后于窗口**：完成 Condr 升级后，窗口客户端将弹出提示询问是否重启本机 Server。执行重启将销毁所有终端运行进程，随后重新载入当前的 Workspace 拓扑与 Agent 对话状态。
 * **协议底层不兼容**：连接将被远端阻断，连接面板呈现 `Condr there and here speak different protocol versions`，CLI 端同步抛出 `protocol_mismatch` 错误代码。该状态不可通过重试恢复，必须将两端程序版本升级至匹配状态。
 
-在两端均更新至匹配版本后，请转至目标设备并在外部终端执行 `condr server restart`，或在 GUI 的 **Settings** 顶部选中该设备、打开 **General** 并点击 **Restart Condr**。该操作按钮仅在本地会话或底层通过 SSH 建立连接时可用。
+在两端均更新至匹配版本后，请转至目标设备并在外部终端执行 `condr server restart`，或在 GUI 的 **设置**（Settings）顶部选中该设备、打开 **通用**（General）并点击 **重启 Condr**（Restart Condr）。该操作按钮仅在本地会话或底层通过 SSH 建立连接时可用。
 
 ---
 
@@ -88,7 +88,7 @@ Condr's own server could not start on this device. Connect tries again.
 
 Agent 状态只来自 Agent 自身。支持 Program Status Protocol 的 Agent 无需额外安装即可直接上报（支持的版本见[安装 Hook 监听精准状态](/zh-cn/docs/using/agents/#安装-hook-监听精准状态)）；其余 Agent 以及 Windows Server 上的 Claude Code 和 Pi 均通过 Hook 上报。对于后者，请依次排查：
 
-1. **检查 Hook 状态**：运行 `condr agent hooks status <agent>`（例如 `condr agent hooks status claude`）。显示 `missing` 时需要安装；显示 `outdated` 时需要重新安装；显示 `unsupported` 表示该 Agent 仅识别，Condr 不会为其安装 Hook，状态会保持 Unknown，详见[支持级别](/zh-cn/docs/using/agents/#支持级别)。对于远程设备，请在 **Settings** 顶部选择该设备并打开 **Agent integrations** 查看；命令行 `agent hooks` 仅对本机生效。
+1. **检查 Hook 状态**：运行 `condr agent hooks status <agent>`（例如 `condr agent hooks status claude`）。显示 `missing` 时需要安装；显示 `outdated` 时需要重新安装；显示 `unsupported` 表示该 Agent 仅识别，Condr 不会为其安装 Hook，状态会保持 Unknown，详见[支持级别](/zh-cn/docs/using/agents/#支持级别)。对于远程设备，请在 **设置**（Settings）顶部选择该设备并打开 **Agent 集成**（Agent integrations）查看；命令行 `agent hooks` 仅对本机生效。
 2. **确认运行环境位于 Condr Pane 内部**：Hook 仅在环境变量预注入 `CONDR_ENV=1` 的终端会话中触发上报。Condr 无法监视外部独立终端中运行的 Agent 进程。
 3. **识别特定 Agent 的初始上报行为**：Codex、Copilot 及 Antigravity 在收到首次 prompt 输入前不发送状态；Cursor 在执行会话恢复（Resume）期间亦不触发上报，此阶段状态将始终显示为 Unknown。
 4. **验证 Codex 的 Hook 信任授权**：Codex 要求必须开启 hooks 特性开关并显式授予信任。执行 Condr Hook 安装流程时会尝试自动配置；若配置失败，需手动在 Codex 的 `config.toml` 内追加 `[features] hooks = true`，随后进入 Codex 终端执行 `/hooks` 命令完成信任授权确认。
@@ -134,13 +134,13 @@ Condr 以纯非交互模式执行底层 `ssh` 进程，期间无法提供交互�
 * **远端功能未启用**：在远端设备执行 `condr server status`，确认 Peer-to-peer 标志位已置为开启。
 * **邀请凭据失效**：诊断原因显示 `invite unknown, used or expired` 时，表明邀请码已过期或已被消耗，必须在服务端重新生成凭据。
 * **本机中转 Server 未运行**：P2P 会话需借由本机 Server 发起通信路由。诊断日志若提示 `this machine's Server is unreachable`，请先确保本机的 Server 处于正常运行状态。
-* **网络只能通过代理上网**：在 **Settings › Network** 中配置代理。**System**（默认）优先读取 `HTTPS_PROXY` 或 `ALL_PROXY`，再回退到 Windows 或 macOS 的系统代理；**Manual** 支持手动填写代理 URL，例如 `http://user:password@proxy:8080`。当 Server 作为服务运行时，无法读取 shell 环境变量，此时建议使用 **Manual**。Peer-to-peer 仅在 Server 启动时加载代理，修改后请点击 **Restart to apply**。Server 日志中的 `p2p endpoint bound` 会显示当前生效的代理。这类网络通常无法打洞直连，连接会持续通过 relay 转发。
+* **网络只能通过代理上网**：在 **设置 › 网络**（Settings › Network）中配置代理。**系统**（System，默认）优先读取 `HTTPS_PROXY` 或 `ALL_PROXY`，再回退到 Windows 或 macOS 的系统代理；**手动**（Manual）支持手动填写代理 URL，例如 `http://user:password@proxy:8080`。当 Server 作为服务运行时，无法读取 shell 环境变量，此时建议使用 **手动**（Manual）。Peer-to-peer 仅在 Server 启动时加载代理，修改后请点击 **重启以应用**（Restart to apply）。Server 日志中的 `p2p endpoint bound` 会显示当前生效的代理。这类网络通常无法打洞直连，连接会持续通过 relay 转发。
 
 ---
 
 ## 自动重连的规则
 
-* **冷启动初次建连失败**：系统不触发自动重试机制。需在设备管理面板手动点击 **Connect**。
+* **冷启动初次建连失败**：系统不触发自动重试机制。需在设备管理面板手动点击 **连接**（Connect）。
 * **通信链路异常中断**：系统将启动每隔 0.5 秒一次的重连循环，重连上限持续 45 秒。断线告警 UI 会在重连持续 2 秒后对外呈现。
 * **系统自休眠中唤醒**：若心跳探测连续 10 秒缺失应答，窗口客户端判定连接超时失效并切入自动重连流水线。
 * **远端协议版本超前**：若对端设备持续向本机推送本地无法解析的新结构消息，窗口将主动断开链路并停止后续重试，上报错误：`this Device sends messages this build cannot read; update it`。
@@ -152,14 +152,14 @@ Condr 以纯非交互模式执行底层 `ssh` 进程，期间无法提供交互�
 * **Windows SmartScreen 拦截提示**：点击弹窗中的 **更多信息** → **仍要运行**。预览版本安装二进制尚未集成机构代码签名证书。
 * **Linux AppImage 缺少依赖无法启动**：AppImage 打包规范强依赖 FUSE 用户态文件系统支持。若运行环境缺失 FUSE，需追加 `--appimage-extract-and-run` 参数启动程序。
 * **重复执行启动无任何窗口弹出**：Condr 强制实施单实例互斥锁，多余的派生实例将静默退出，不会唤醒当前已存在的窗口句柄。请检索系统任务栏或其余虚拟桌面确认主实例是否已在后台运行。
-* **代理环境下检查更新失败**：检查更新会走 **Settings › Network** 中配置的代理（stable 通道访问 `condr.dev`，nightly 通道访问 `api.github.com`）。如果代理屏蔽了 GitHub，则只有 stable 通道能正常检查更新。
+* **代理环境下检查更新失败**：检查更新会走 **设置 › 网络**（Settings › Network）中配置的代理（stable 通道访问 `condr.dev`，nightly 通道访问 `api.github.com`）。如果代理屏蔽了 GitHub，则只有 stable 通道能正常检查更新。
 * **Windows Pane 运行异常报错 448**：例如 pnpm 工具链抛出 `untrusted mount point`。此问题系 Server 继承了其父进程的 Redirection Guard 隔离限制，并下发至内部所有子 Pane 进程。请妥善保存 Pane 中的当前改动，随后于外部标准系统终端中运行 `condr server restart`，使 Server 在不受限的上下文环境中重新生成。
 
 ---
 
 ## 配置修改没有生效
 
-* **手动修改配置后生效方式**：修改 `[client]` 及其子表后，重启 GUI 窗口；修改 `[server]` 及其子表后，在终端运行 `condr server restart`；修改 `[network]` 后，两项操作都需要执行。在图形界面中修改的设置通常立即生效，但 Paired devices 页 Connections 中的设置和 Peer-to-peer 代理除外。
+* **手动修改配置后生效方式**：修改 `[client]` 及其子表后，重启 GUI 窗口；修改 `[server]` 及其子表后，在终端运行 `condr server restart`；修改 `[network]` 后，两项操作都需要执行。在图形界面中修改的设置通常立即生效，但“已配对设备”（Paired devices）页“连接”（Connections）中的设置和 Peer-to-peer 代理除外。
 * **配置文件语法损毁**：若 TOML 语法存在错误，窗口启动将拦截报错：`Failed to load … Device list changes are disabled; fix the file and restart Condr.`。此时系统回退至初始默认配置且禁止变更设备列表。修复格式后重启窗口即可恢复。
 * **Windows 系统外部编辑器变动告警**：在第三方编辑器抢占 `config.toml` 文件句柄时，若 Condr 触发了全量覆盖写入，外部编辑器通常会触发外部文件改动同步警报。
 
@@ -169,7 +169,7 @@ Condr 以纯非交互模式执行底层 `ssh` 进程，期间无法提供交互�
 
 请统一在 [GitHub Issues](https://github.com/condrdev/condr/issues) 渠道跟踪反馈，工单需完整附带下列要素：
 
-1. **版本信息**：窗口客户端版本号可在 **Settings › About** 查询。当前运行态 Server 版本以 `condr server status` 报告的 Version 字段为准；执行 `condr --version` 仅反映当前可执行文件版本，可能与常驻运行态 Server 存在偏差。
+1. **版本信息**：窗口客户端版本号可在 **设置 › 关于**（Settings › About）查询。当前运行态 Server 版本以 `condr server status` 报告的 Version 字段为准；执行 `condr --version` 仅反映当前可执行文件版本，可能与常驻运行态 Server 存在偏差。
 2. **状态快照**：附带 `condr server status --json` 的控制台输出。
 3. **关键日志**：附带故障发生节点前后的日志片段（推荐事先上调日志详细度复现异常后抓取）。
 4. **稳定复现步骤**：清晰的操作路径说明。
