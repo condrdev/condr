@@ -2,6 +2,7 @@ use super::sidebar::{CondrIconName, DragPreview, DropTarget, attach_drop_target,
 use super::*;
 use gpui_fps::fps_monitor;
 use gpui_kit::component::InteractiveElementExt as _;
+use rust_i18n::t;
 
 #[derive(Clone)]
 struct DraggedTab {
@@ -431,7 +432,7 @@ impl Condr {
                             .xsmall()
                             .ghost()
                             .icon(Icon::new(IconName::Close).size_3())
-                            .tooltip("Close Tab")
+                            .tooltip(t!("workspace.tab.close"))
                             .disabled(!can_mutate)
                             // Neither a window move nor a Tab drag may start here.
                             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -450,7 +451,7 @@ impl Condr {
                     let detach_owner = menu_owner.clone();
                     let rename_name = tab_name.clone();
                     menu.item(
-                        PopupMenuItem::new("Rename Tab")
+                        PopupMenuItem::new(t!("workspace.tab.rename"))
                             .disabled(!can_mutate)
                             .on_click(move |_, window, cx| {
                                 let name = rename_name.clone();
@@ -459,24 +460,32 @@ impl Condr {
                                 });
                             }),
                     )
-                    .item(PopupMenuItem::new("Open in New Window").on_click(
-                        move |_, window, cx| {
-                            let _ = detach_owner.update(cx, |this, cx| {
-                                this.open_in_new_window(WindowScope::Tab(key, tab_id), window, cx)
-                            });
-                        },
-                    ))
+                    .item(
+                        PopupMenuItem::new(t!("workspace.tab.open_in_new_window")).on_click(
+                            move |_, window, cx| {
+                                let _ = detach_owner.update(cx, |this, cx| {
+                                    this.open_in_new_window(
+                                        WindowScope::Tab(key, tab_id),
+                                        window,
+                                        cx,
+                                    )
+                                });
+                            },
+                        ),
+                    )
                     .when_some(preview_file.clone(), |menu, path| {
                         let download_owner = menu_owner.clone();
-                        menu.item(PopupMenuItem::new("Download…").on_click(move |_, _, cx| {
-                            let _ = download_owner.update(cx, |this, cx| {
-                                this.download_file(key, workspace_id, path.clone(), cx)
-                            });
-                        }))
+                        menu.item(PopupMenuItem::new(t!("workspace.tab.download")).on_click(
+                            move |_, _, cx| {
+                                let _ = download_owner.update(cx, |this, cx| {
+                                    this.download_file(key, workspace_id, path.clone(), cx)
+                                });
+                            },
+                        ))
                     })
                     .separator()
                     .item(
-                        PopupMenuItem::new("Close Tab")
+                        PopupMenuItem::new(t!("workspace.tab.close"))
                             .disabled(!can_mutate)
                             .on_click(move |_, window, cx| {
                                 let _ = close_owner.update(cx, |this, cx| {
@@ -554,7 +563,11 @@ impl Condr {
                                     .ghost()
                                     .small()
                                     .icon(IconName::Plus)
-                                    .tooltip_with_action("New Tab", &NewTab, Some(SHORTCUT_CONTEXT))
+                                    .tooltip_with_action(
+                                        t!("workspace.new_tab"),
+                                        &NewTab,
+                                        Some(SHORTCUT_CONTEXT),
+                                    )
                                     .disabled(!can_mutate)
                                     // Like the Tab rows: inside the title bar an unclaimed
                                     // press starts a window move on Windows, and the move
@@ -598,7 +611,7 @@ const WELCOME_COLUMN_WIDTH: Rems = rems(25.);
 
 /// One welcome row. A Button centers its content, so the trailing spacer takes the
 /// leftover width and leaves the icons and labels on one left spine.
-fn welcome_row(id: &'static str, icon: impl Into<Icon>, label: &'static str) -> Button {
+fn welcome_row(id: &'static str, icon: impl Into<Icon>, label: impl Into<SharedString>) -> Button {
     Button::new(id)
         .debug_selector(move || id.into())
         .ghost()
@@ -609,7 +622,7 @@ fn welcome_row(id: &'static str, icon: impl Into<Icon>, label: &'static str) -> 
 }
 
 /// A footer link on the welcome page: muted text that opens `url` in the browser.
-fn welcome_link(id: &'static str, label: &'static str, url: &'static str) -> Button {
+fn welcome_link(id: &'static str, label: impl Into<SharedString>, url: &'static str) -> Button {
     Button::new(id)
         .debug_selector(move || id.into())
         .link()
@@ -651,16 +664,17 @@ impl Condr {
                     .child(
                         v_flex()
                             .child(
-                                div()
-                                    .text_xl()
-                                    .child(format!("Welcome to {}", condr_core::APP_NAME)),
+                                div().text_xl().child(t!(
+                                    "workspace.welcome.title",
+                                    app = condr_core::APP_NAME
+                                )),
                             )
                             .child(
                                 div()
                                     .text_sm()
                                     .italic()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child("Agents that never hang up"),
+                                    .child(t!("workspace.welcome.tagline")),
                             ),
                     ),
             )
@@ -677,18 +691,22 @@ impl Condr {
                                 div()
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child("GET STARTED"),
+                                    .child(t!("workspace.welcome.get_started")),
                             )
                             .child(Separator::horizontal().flex_1()),
                     )
                     .child(
-                        welcome_row("open-project", IconName::FolderOpen, "Open Project")
-                            .disabled(!can_mutate)
-                            .on_click(move |_, window, cx| {
-                                let _ = open_owner.update(cx, |this, cx| {
-                                    this.choose_workspace_directory_on(key, window, cx)
-                                });
-                            }),
+                        welcome_row(
+                            "open-project",
+                            IconName::FolderOpen,
+                            t!("new_workspace.way.open_project"),
+                        )
+                        .disabled(!can_mutate)
+                        .on_click(move |_, window, cx| {
+                            let _ = open_owner.update(cx, |this, cx| {
+                                this.choose_workspace_directory_on(key, window, cx)
+                            });
+                        }),
                     )
                     .child(way_row(NewWorkspaceWay::CloneRepository))
                     .child(way_row(NewWorkspaceWay::NewDirectory))
@@ -696,7 +714,7 @@ impl Condr {
                         welcome_row(
                             "connect-remote-device",
                             CondrIconName::ServerPlus,
-                            "Connect Remote Device",
+                            t!("workspace.welcome.connect_remote_device"),
                         )
                         .dropdown_menu(move |menu, _, _| {
                             Condr::add_server_menu(menu, connect_owner.clone())
@@ -711,7 +729,11 @@ impl Condr {
                     .text_color(cx.theme().muted_foreground)
                     .child(welcome_link("welcome-github", "GitHub", REPOSITORY_URL))
                     .child("·")
-                    .child(welcome_link("welcome-docs", "Docs", DOCS_URL)),
+                    .child(welcome_link(
+                        "welcome-docs",
+                        t!("workspace.welcome.docs"),
+                        DOCS_URL,
+                    )),
             )
             .into_any_element()
     }
@@ -719,13 +741,13 @@ impl Condr {
 
 /// The drawn title bar every Condr window uses: logo, title, and the theme's flat
 /// title-bar color rather than the Kit's default gradient.
-pub(super) fn title_bar(title: &'static str, cx: &App) -> TitleBar {
+pub(super) fn title_bar(title: impl Into<SharedString>, cx: &App) -> TitleBar {
     TitleBar::new().bg(cx.theme().title_bar).child(
         h_flex()
             .gap_2()
             .items_center()
             .child(img(APP_LOGO).size_4().flex_shrink_0())
-            .child(title),
+            .child(title.into()),
     )
 }
 
@@ -765,9 +787,9 @@ fn workspace_title_bar(
         sidebar_width
     };
     let toggle_label = if sidebar_collapsed {
-        "Expand Sidebar"
+        t!("workspace.expand_sidebar")
     } else {
-        "Collapse Sidebar"
+        t!("workspace.collapse_sidebar")
     };
     let toggle_icon = if sidebar_collapsed {
         IconName::PanelLeftOpen
@@ -823,7 +845,7 @@ fn workspace_title_bar(
                                 .small()
                                 .icon(Icon::new(toggle_icon))
                                 .tooltip_with_action(
-                                    toggle_label,
+                                    toggle_label.clone(),
                                     &ToggleSidebar,
                                     Some(SHORTCUT_CONTEXT),
                                 )
@@ -1102,7 +1124,7 @@ fn bring_back_button(owner: WeakEntity<Condr>) -> AnyElement {
                 .ghost()
                 .small()
                 .icon(Icon::new(gpui_kit::assets::IconName::SquareArrowDownLeft))
-                .label("Bring Back")
+                .label(t!("workspace.bring_back"))
                 .on_click(move |_, window, cx| {
                     let _ = owner.update(cx, |this, cx| this.bring_back_and_close(window, cx));
                 }),
@@ -1138,11 +1160,11 @@ impl Condr {
         handle: AnyWindowHandle,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let what = match scope {
-            WindowScope::Main => "This",
-            WindowScope::Device(_) => "This Device",
-            WindowScope::Workspace(..) => "This Workspace",
-            WindowScope::Tab(..) => "This Tab",
+        let shown_elsewhere = match scope {
+            WindowScope::Main => t!("workspace.shown_elsewhere.main"),
+            WindowScope::Device(_) => t!("workspace.shown_elsewhere.device"),
+            WindowScope::Workspace(..) => t!("workspace.shown_elsewhere.workspace"),
+            WindowScope::Tab(..) => t!("workspace.shown_elsewhere.tab"),
         };
         let owner = cx.weak_entity();
         v_flex()
@@ -1154,7 +1176,7 @@ impl Condr {
             .child(
                 div()
                     .text_color(cx.theme().muted_foreground)
-                    .child(format!("{what} is shown in another window.")),
+                    .child(shown_elsewhere),
             )
             .child(
                 h_flex()
@@ -1163,7 +1185,7 @@ impl Condr {
                         Button::new("go-to-window")
                             .debug_selector(|| "go-to-window".into())
                             .primary()
-                            .label("Go to Window")
+                            .label(t!("workspace.go_to_window"))
                             .on_click(move |_, _, cx| {
                                 let _ = handle.update(cx, |_, window, _| window.activate_window());
                             }),
@@ -1172,7 +1194,7 @@ impl Condr {
                         Button::new("bring-back")
                             .debug_selector(|| "bring-back".into())
                             .icon(Icon::new(gpui_kit::assets::IconName::SquareArrowDownLeft))
-                            .label("Bring Back")
+                            .label(t!("workspace.bring_back"))
                             .on_click(move |_, _, cx| {
                                 let owner = owner.clone();
                                 let _ = handle.update(cx, |_, window, cx| {

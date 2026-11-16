@@ -43,8 +43,8 @@ impl Condr {
                 count => format!("{count} transfers are running"),
             },
             description: "Quitting cancels it and leaves nothing half-written behind.".into(),
-            ok: "Quit",
-            cancel: "Keep Going",
+            ok: "Quit".into(),
+            cancel: "Keep Going".into(),
         };
         let quit = std::cell::Cell::new(Some(quit));
         confirm_danger(

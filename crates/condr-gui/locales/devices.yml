@@ -1,0 +1,118 @@
+_version: 2
+devices:
+  add:
+    pairing_link:
+      en: Pairing link
+      zh-CN: 配对链接
+    pair_title:
+      en: Pair a Device
+      zh-CN: 配对设备
+    link_placeholder:
+      en: Paste the tcp://… or p2p://… link
+      zh-CN: 粘贴 tcp://… 或 p2p://… 链接
+    ssh_title:
+      en: Connect over SSH
+      zh-CN: 通过 SSH 连接
+    ssh_address:
+      en: SSH address
+      zh-CN: SSH 地址
+    title:
+      en: Connect Remote Device
+      zh-CN: 连接远程设备
+    address:
+      en: Address
+      zh-CN: 地址
+    address_placeholder:
+      en: ssh://user@host, tcp://… or p2p://… link
+      zh-CN: ssh://user@host、tcp://… 或 p2p://… 链接
+    enter_address:
+      en: Enter an address
+      zh-CN: 请输入地址
+    paste_link:
+      en: Paste the link
+      zh-CN: 请粘贴链接
+    connect:
+      en: Connect
+      zh-CN: 连接
+    wrong_link:
+      en: Paste a tcp:// or p2p:// link
+      zh-CN: 请粘贴 tcp:// 或 p2p:// 链接
+    already_added:
+      en: This device is already added
+      zh-CN: 这台设备已经添加过了
+  invalid_address:
+    en: 'Invalid address: %{error}'
+    zh-CN: '地址无效：%{error}'
+  edit:
+    title:
+      en: Edit Remote Device
+      zh-CN: 编辑远程设备
+    save:
+      en: Save
+      zh-CN: 保存
+    host_placeholder:
+      en: host or IP
+      zh-CN: 主机名或 IP
+    port_placeholder:
+      en: port
+      zh-CN: 端口
+    port_placeholder_ssh:
+      en: SSH config
+      zh-CN: SSH 配置
+    name:
+      en: Name
+      zh-CN: 名称
+    address:
+      en: Address
+      zh-CN: 地址
+    host:
+      en: Host
+      zh-CN: 主机
+    port:
+      en: Port
+      zh-CN: 端口
+    fingerprint:
+      en: Fingerprint
+      zh-CN: 指纹
+    needs_name:
+      en: The device needs a name
+      zh-CN: 设备需要一个名称
+    address_taken:
+      en: Another device already uses this address
+      zh-CN: 另一台设备已在使用这个地址
+  update_restart:
+    title:
+      en: Restart Condr to finish updating?
+      zh-CN: 重启 Condr 以完成更新？
+    description:
+      en: 'This device still runs Condr %{server}; this window is %{this}. Programs in its terminals end; Workspaces and Agent conversations reopen.'
+      zh-CN: '这台设备仍在运行 Condr %{server}，而这个窗口是 %{this}。它终端里的程序会结束；Workspace 和 Agent 会话会重新打开。'
+    ok:
+      en: Restart
+      zh-CN: 重启
+    cancel:
+      en: Later
+      zh-CN: 稍后
+  delete:
+    title:
+      en: 'Delete “%{name}”?'
+      zh-CN: '删除“%{name}”？'
+    description:
+      en: This removes the device from Condr. Its terminals keep running.
+      zh-CN: 这会把这台设备从 Condr 中移除。它的终端会继续运行。
+    ok:
+      en: Delete
+      zh-CN: 删除
+  build_notice:
+    stale:
+      en: '%{device} still runs Condr %{server}; this window is %{this}. Restart Condr on %{device} to switch.'
+      zh-CN: '%{device} 仍在运行 Condr %{server}，而这个窗口是 %{this}。在 %{device} 上重启 Condr 即可切换。'
+    other_older:
+      en: '%{device} runs Condr %{server}; this window is %{this}. Update Condr on %{device}.'
+      zh-CN: '%{device} 运行的是 Condr %{server}，而这个窗口是 %{this}。请在 %{device} 上更新 Condr。'
+    other_newer:
+      en: '%{device} runs Condr %{server}; this window is %{this}. Update Condr on this device.'
+      zh-CN: '%{device} 运行的是 Condr %{server}，而这个窗口是 %{this}。请在这台设备上更新 Condr。'
+    different_commit:
+      en: '%{device} runs a different Condr build (%{server}); this window is %{this}. Update both to the same version.'
+      zh-CN: '%{device} 运行的是另一个 Condr 构建（%{server}），而这个窗口是 %{this}。请把两端更新到同一版本。'

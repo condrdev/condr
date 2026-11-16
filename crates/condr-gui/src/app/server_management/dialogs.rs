@@ -3,6 +3,8 @@ use crate::app::dialogs::{
     DangerConfirm, TextPrompt, confirm_danger, field_error, host_text_is_plausible,
     open_form_dialog, port_text_is_plausible,
 };
+use rust_i18n::t;
+use std::borrow::Cow;
 
 /// The part of an Edit Remote Device form a refusal is about, so it shows under that field.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -27,7 +29,7 @@ impl Condr {
                 }),
         );
         menu.item(
-            PopupMenuItem::new("Pairing link")
+            PopupMenuItem::new(t!("devices.add.pairing_link"))
                 .icon(menu_icon(Icon::new(gpui_kit::assets::IconName::Link)))
                 .on_click(move |_, window, cx| {
                     let _ = owner.update(cx, |this, cx| this.prompt_add_server_link(window, cx));
@@ -42,9 +44,9 @@ impl Condr {
         cx: &mut Context<Self>,
     ) {
         self.prompt_add_server_input(
-            "Pair a Device",
-            "Pairing link",
-            "Paste the tcp://… or p2p://… link",
+            t!("devices.add.pair_title"),
+            t!("devices.add.pairing_link"),
+            t!("devices.add.link_placeholder"),
             &["tcp://", "p2p://"],
             None,
             window,
@@ -58,9 +60,9 @@ impl Condr {
         cx: &mut Context<Self>,
     ) {
         self.prompt_add_server_input(
-            "Connect over SSH",
-            "SSH address",
-            "user@host[:port]",
+            t!("devices.add.ssh_title"),
+            t!("devices.add.ssh_address"),
+            "user@host[:port]".into(),
             &[],
             Some("ssh://"),
             window,
@@ -76,9 +78,9 @@ impl Condr {
         // Kept as the direct address prompt for the start page and keyboard workflow.
         // The sidebar exposes SSH and a pairing link through its PopupMenu.
         self.prompt_add_server_input(
-            "Connect Remote Device",
-            "Address",
-            "ssh://user@host, tcp://… or p2p://… link",
+            t!("devices.add.title"),
+            t!("devices.add.address"),
+            t!("devices.add.address_placeholder"),
             &[],
             None,
             window,
@@ -89,9 +91,9 @@ impl Condr {
     #[allow(clippy::too_many_arguments)]
     fn prompt_add_server_input(
         &mut self,
-        title: &'static str,
-        field_label: &'static str,
-        placeholder: &'static str,
+        title: Cow<'static, str>,
+        field_label: Cow<'static, str>,
+        placeholder: Cow<'static, str>,
         // Any of these, or anything when empty.
         expected_schemes: &'static [&'static str],
         prefix: Option<&'static str>,
@@ -107,11 +109,11 @@ impl Condr {
             placeholder: Some(placeholder.into()),
             prefix,
             empty: if expected_schemes.is_empty() {
-                "Enter an address"
+                t!("devices.add.enter_address").into()
             } else {
-                "Paste the link"
+                t!("devices.add.paste_link").into()
             },
-            ..TextPrompt::new(title, "Connect", String::new())
+            ..TextPrompt::new(title, t!("devices.add.connect"), String::new())
         };
         self.prompt_text_input(
             prompt,
@@ -122,7 +124,9 @@ impl Condr {
                         .iter()
                         .any(|scheme| lower.starts_with(scheme))
                 {
-                    return Err(format!("Paste a {} link", expected_schemes.join(" or ")));
+                    // shortcut: the message names tcp:// and p2p://, the only schemes a
+                    // prompt expects; word it from `expected_schemes` if one is added.
+                    return Err(t!("devices.add.wrong_link").into_owned());
                 }
                 this.add_server_from_address(&value, cx)
             },
@@ -143,7 +147,7 @@ impl Condr {
                     .iter()
                     .any(|c| c.endpoint.to_string() == endpoint.to_string())
                 {
-                    return Err("This device is already added".into());
+                    return Err(t!("devices.add.already_added").into_owned());
                 }
                 let key = self.next_connection_key;
                 self.next_connection_key += 1;
@@ -161,7 +165,7 @@ impl Condr {
                 _ = self.start_connect(key);
                 Ok(())
             }
-            Err(error) => Err(format!("Invalid address: {error}")),
+            Err(error) => Err(t!("devices.invalid_address", error = error).into_owned()),
         }
     }
 
@@ -202,25 +206,33 @@ impl Condr {
             InputState::new(window, cx)
                 .default_value(host_value)
                 .placeholder(if ssh {
-                    "ssh://user@host?bin=/opt/condr"
+                    "ssh://user@host?bin=/opt/condr".into()
                 } else {
-                    "host or IP"
+                    t!("devices.edit.host_placeholder")
                 })
                 .validate(move |text, _| ssh || host_text_is_plausible(text))
         });
         let port = cx.new(|cx| {
             InputState::new(window, cx)
                 .default_value(port_value)
-                .placeholder(if ssh { "SSH config" } else { "port" })
+                .placeholder(if ssh {
+                    t!("devices.edit.port_placeholder_ssh")
+                } else {
+                    t!("devices.edit.port_placeholder")
+                })
                 .validate(|text, _| port_text_is_plausible(text))
         });
         let fields = [
-            (SharedString::from("Name"), name),
+            (SharedString::from(t!("devices.edit.name")), name),
             (
-                SharedString::from(if ssh { "Address" } else { "Host" }),
+                SharedString::from(if ssh {
+                    t!("devices.edit.address")
+                } else {
+                    t!("devices.edit.host")
+                }),
                 host,
             ),
-            (SharedString::from("Port"), port),
+            (SharedString::from(t!("devices.edit.port")), port),
         ];
         // The fingerprint is shown in a read-only field: one line that scrolls sideways
         // and can be selected to compare against `condr server status`.
@@ -271,7 +283,7 @@ impl Condr {
                         form.child(
                             v_flex()
                                 .gap_1()
-                                .child(div().text_sm().child("Fingerprint"))
+                                .child(div().text_sm().child(t!("devices.edit.fingerprint")))
                                 .child(Input::new(&fingerprint).readonly(true).w_full()),
                         )
                     })
@@ -296,8 +308,8 @@ impl Condr {
         };
         window.defer(cx, move |window, cx| {
             open_form_dialog(
-                "Edit Remote Device".into(),
-                "Save",
+                t!("devices.edit.title").into(),
+                t!("devices.edit.save").into(),
                 error,
                 content,
                 submit,
@@ -345,18 +357,21 @@ impl Condr {
         let endpoint = match endpoint {
             Ok(endpoint) => endpoint,
             Err(error) => {
-                return Err((EditField::Address, format!("Invalid address: {error}")));
+                return Err((
+                    EditField::Address,
+                    t!("devices.invalid_address", error = error).into_owned(),
+                ));
             }
         };
         if name.is_empty() {
-            return Err((EditField::Name, "The device needs a name".into()));
+            return Err((EditField::Name, t!("devices.edit.needs_name").into_owned()));
         }
         if self.connections.iter().any(|connection| {
             connection.key != key && connection.endpoint.to_string() == endpoint.to_string()
         }) {
             return Err((
                 EditField::Address,
-                "Another device already uses this address".into(),
+                t!("devices.edit.address_taken").into_owned(),
             ));
         }
         let Some(connection) = self.connection_mut(key) else {
@@ -395,18 +410,18 @@ impl Condr {
         connection.update_restart_offered = true;
         let server = connection.server_build.clone().unwrap_or_default();
         let confirm = DangerConfirm::new(
-            "Restart Condr to finish updating?",
-            format!(
-                "This device still runs Condr {server}; this window is {}. Programs in its \
-                 terminals end; Workspaces and Agent conversations reopen.",
-                condr_core::build_identity()
+            t!("devices.update_restart.title"),
+            t!(
+                "devices.update_restart.description",
+                server = server,
+                this = condr_core::build_identity()
             ),
-            "Restart",
+            t!("devices.update_restart.ok"),
         );
         confirm_danger(
             cx.weak_entity(),
             DangerConfirm {
-                cancel: "Later",
+                cancel: t!("devices.update_restart.cancel").into(),
                 ..confirm
             },
             move |this, _, cx| this.restart_server(key, cx),
@@ -425,9 +440,9 @@ impl Condr {
         confirm_danger(
             cx.weak_entity(),
             DangerConfirm::new(
-                format!("Delete “{name}”?"),
-                "This removes the device from Condr. Its terminals keep running.",
-                "Delete",
+                t!("devices.delete.title", name = name),
+                t!("devices.delete.description"),
+                t!("devices.delete.ok"),
             ),
             move |this, window, cx| {
                 this.confirm_unsaved(

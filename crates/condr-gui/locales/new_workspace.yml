@@ -1,0 +1,81 @@
+_version: 2
+new_workspace:
+  way:
+    open_project:
+      en: Open Project
+      zh-CN: 打开项目
+    clone_repository:
+      en: Clone Repository
+      zh-CN: 克隆仓库
+    new_directory:
+      en: New Directory
+      zh-CN: 新建目录
+  title:
+    chooser:
+      en: 'New Workspace on %{device}'
+      zh-CN: '在 %{device} 上新建 Workspace'
+    open_project:
+      en: 'Open Project on %{device}'
+      zh-CN: '在 %{device} 上打开项目'
+    clone_repository:
+      en: 'Clone Repository on %{device}'
+      zh-CN: '在 %{device} 上克隆仓库'
+    new_directory:
+      en: 'New Directory on %{device}'
+      zh-CN: '在 %{device} 上新建目录'
+  description:
+    open_project:
+      en: 'Choose a directory on %{device}'
+      zh-CN: '在 %{device} 上选择一个目录'
+    clone_repository:
+      en: 'Clone a Git repository into a new directory on %{device}'
+      zh-CN: '把 Git 仓库克隆到 %{device} 上的新目录'
+    new_directory:
+      en: 'Create an empty directory on %{device}'
+      zh-CN: '在 %{device} 上创建一个空目录'
+  choose_parent:
+    en: 'Choose Where on %{device}'
+    zh-CN: '选择 %{device} 上的位置'
+  choose:
+    en: Choose
+    zh-CN: 选择
+  name_taken:
+    en: A directory with this name is already here
+    zh-CN: 这里已有同名目录
+  parent_missing:
+    en: Choose where to create it
+    zh-CN: 请选择创建位置
+  hint:
+    navigate:
+      en: Navigate
+      zh-CN: 移动
+    select:
+      en: Select
+      zh-CN: 选择
+    close:
+      en: Close
+      zh-CN: 关闭
+  back:
+    en: Back
+    zh-CN: 返回
+  clone:
+    en: Clone
+    zh-CN: 克隆
+  create:
+    en: Create
+    zh-CN: 创建
+  looking_up:
+    en: Looking it up…
+    zh-CN: 正在查找…
+  repository_url:
+    en: Repository URL
+    zh-CN: 仓库 URL
+  location:
+    en: Location
+    zh-CN: 位置
+  change:
+    en: Change…
+    zh-CN: 更改…
+  name:
+    en: Name
+    zh-CN: 名称

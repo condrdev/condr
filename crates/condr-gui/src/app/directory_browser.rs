@@ -4,6 +4,7 @@
 
 use super::*;
 use gpui_kit::component::scroll::ScrollableElement as _;
+use rust_i18n::t;
 use std::ops::Range;
 
 actions!(
@@ -380,7 +381,7 @@ pub(super) fn render_directory_browser(
     };
     // A path still being typed does not exist yet: that is not an error, so it is muted.
     let (listed, browsed) = match &browser.listing {
-        None => return Some(note("Loading…".into())),
+        None => return Some(note(t!("directory.loading").into())),
         Some((_, Err(reason))) => return Some(note(reason.clone())),
         Some((listed, Ok(browsed))) => (listed, browsed),
     };
@@ -393,7 +394,7 @@ pub(super) fn render_directory_browser(
         let (id, label): (String, AnyElement) = match &row {
             Row::Current(_) => (
                 "directory-browser-current".into(),
-                "This directory".into_any_element(),
+                t!("directory.this_directory").into_any_element(),
             ),
             Row::Parent(_) => ("directory-browser-parent".into(), "..".into_any_element()),
             Row::Directory { name, matched, .. } => (
@@ -458,9 +459,9 @@ pub(super) fn render_directory_browser(
                     .children(row_elements)
                     .when(empty, |list| {
                         list.child(note(if filter.is_empty() {
-                            "No subdirectories".into()
+                            t!("directory.no_subdirectories").into()
                         } else {
-                            "No matching directories".into()
+                            t!("directory.no_matches").into()
                         }))
                     })
                     .when(browsed.listing.truncated, |list| {

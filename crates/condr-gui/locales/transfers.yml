@@ -1,0 +1,92 @@
+_version: 2
+transfers:
+  upload:
+    en: Upload
+    zh-CN: 上传
+  folder_refused:
+    en: '“%{name}” is a folder. Only files can be uploaded; archive it first.'
+    zh-CN: '“%{name}”是文件夹。只能上传文件，请先把它打包。'
+  replace:
+    title_in_root:
+      one:
+        en: '“%{name}” already exists in the Root Directory'
+        zh-CN: '根目录中已有“%{name}”'
+      other:
+        en: '%{count} files already exist in the Root Directory'
+        zh-CN: '根目录中已有 %{count} 个同名文件'
+    title:
+      one:
+        en: '“%{name}” already exists in %{directory}'
+        zh-CN: '%{directory} 中已有“%{name}”'
+      other:
+        en: '%{count} files already exist in %{directory}'
+        zh-CN: '%{directory} 中已有 %{count} 个同名文件'
+    description:
+      one:
+        en: "%{names}\n\nReplacing overwrites it on the Device. This cannot be undone."
+        zh-CN: "%{names}\n\n替换会覆盖设备上的这个文件，且无法撤销。"
+      other:
+        en: "%{names}\n\nReplacing overwrites them on the Device. This cannot be undone."
+        zh-CN: "%{names}\n\n替换会覆盖设备上的这些文件，且无法撤销。"
+    ok:
+      en: Replace
+      zh-CN: 替换
+    skip:
+      one:
+        en: Skip
+        zh-CN: 跳过
+      other:
+        en: Skip These
+        zh-CN: 跳过这些
+  not_connected:
+    en: '%{device} is not connected'
+    zh-CN: '%{device} 未连接'
+  disconnected:
+    en: '%{device} disconnected'
+    zh-CN: '%{device} 已断开连接'
+  download_failed:
+    en: 'Could not download %{name} on %{device}: %{error}'
+    zh-CN: '无法下载 %{device} 上的 %{name}：%{error}'
+  upload_failed:
+    en: 'Could not upload %{name} on %{device}: %{error}'
+    zh-CN: '无法上传 %{name} 到 %{device}：%{error}'
+  downloaded:
+    en: 'Downloaded %{name}'
+    zh-CN: '已下载 %{name}'
+  strip:
+    finished:
+      one:
+        en: '⇅ %{count} finished'
+        zh-CN: '⇅ %{count} 个已完成'
+      other:
+        en: '⇅ %{count} finished'
+        zh-CN: '⇅ %{count} 个已完成'
+    running:
+      one:
+        en: '⇅ %{count} transfer · %{percent}%'
+        zh-CN: '⇅ %{count} 个传输 · %{percent}%'
+      other:
+        en: '⇅ %{count} transfers · %{percent}%'
+        zh-CN: '⇅ %{count} 个传输 · %{percent}%'
+    clear:
+      en: Clear
+      zh-CN: 清除
+    cancel:
+      en: Cancel
+      zh-CN: 取消
+  state:
+    waiting:
+      en: waiting
+      zh-CN: 等待中
+    downloaded:
+      en: downloaded
+      zh-CN: 已下载
+    uploaded:
+      en: uploaded
+      zh-CN: 已上传
+    failed:
+      en: failed
+      zh-CN: 失败
+    cancelled:
+      en: cancelled
+      zh-CN: 已取消

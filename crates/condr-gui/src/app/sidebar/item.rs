@@ -1,5 +1,6 @@
 use super::*;
 use crate::app::change_tree::row_highlight;
+use rust_i18n::t;
 
 pub(super) type SidebarClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
@@ -229,9 +230,9 @@ impl CondrSidebarTreeItem {
                             .when(is_open, |icon| icon.rotate(percentage(90. / 360.))),
                     );
                 let toggle_tooltip = if is_open {
-                    format!("Collapse {label}")
+                    t!("sidebar.collapse", name = label)
                 } else {
-                    format!("Expand {label}")
+                    t!("sidebar.expand", name = label)
                 };
                 let open_state = open_state
                     .clone()
@@ -321,8 +322,8 @@ impl CondrSidebarTreeItem {
                         .ghost()
                         .tab_stop(false)
                         .icon(IconName::EllipsisVertical)
-                        .tooltip("Actions")
-                        .accessibility_label("Actions")
+                        .tooltip(t!("sidebar.actions"))
+                        .accessibility_label(t!("sidebar.actions"))
                         .dropdown_menu(move |menu, window, cx| context_menu(menu, window, cx))
                 });
                 this.child(
@@ -593,9 +594,9 @@ impl SidebarItem for CondrSidebarSection {
                         .when(!folded, |icon| icon.rotate(percentage(90. / 360.))),
                 )
                 .tooltip(if folded {
-                    format!("Expand {label}")
+                    t!("sidebar.expand", name = label)
                 } else {
-                    format!("Collapse {label}")
+                    t!("sidebar.collapse", name = label)
                 })
                 .on_click(move |event, window, cx| {
                     cx.stop_propagation();

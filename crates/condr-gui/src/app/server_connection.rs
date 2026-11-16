@@ -1,4 +1,5 @@
 use super::*;
+use rust_i18n::t;
 
 pub(super) struct ConnectionResult {
     pub(super) key: ConnectionKey,
@@ -127,26 +128,40 @@ impl ServerConnection {
         }
         let server = self.server_build.as_deref()?;
         let this = condr_core::build_identity();
-        let label = &self.label;
+        let device = &self.label;
         if local_server_is_stale(&self.endpoint, this, server) {
-            return Some(format!(
-                "{label} still runs Condr {server}; this window is {this}. \
-                 Restart Condr on {label} to switch."
-            ));
+            return Some(
+                t!(
+                    "devices.build_notice.stale",
+                    device = device,
+                    server = server,
+                    this = this
+                )
+                .into_owned(),
+            );
         }
-        Some(match condr_core::compare_builds(this, server) {
+        let notice = match condr_core::compare_builds(this, server) {
             condr_core::BuildComparison::Same => return None,
-            condr_core::BuildComparison::OtherOlder => format!(
-                "{label} runs Condr {server}; this window is {this}. Update Condr on {label}."
+            condr_core::BuildComparison::OtherOlder => t!(
+                "devices.build_notice.other_older",
+                device = device,
+                server = server,
+                this = this
             ),
-            condr_core::BuildComparison::OtherNewer => format!(
-                "{label} runs Condr {server}; this window is {this}. Update Condr on this device."
+            condr_core::BuildComparison::OtherNewer => t!(
+                "devices.build_notice.other_newer",
+                device = device,
+                server = server,
+                this = this
             ),
-            condr_core::BuildComparison::DifferentCommit => format!(
-                "{label} runs a different Condr build ({server}); this window is {this}. \
-                 Update both to the same version."
+            condr_core::BuildComparison::DifferentCommit => t!(
+                "devices.build_notice.different_commit",
+                device = device,
+                server = server,
+                this = this
             ),
-        })
+        };
+        Some(notice.into_owned())
     }
 
     /// Whether to ask, once, to restart this machine's Server into this window's build.

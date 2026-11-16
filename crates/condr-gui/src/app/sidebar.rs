@@ -5,6 +5,7 @@ mod item;
 use super::*;
 use gpui_kit::component::kbd::Kbd;
 use item::*;
+use rust_i18n::t;
 
 pub(super) use drag_drop::*;
 pub(super) use icon::*;
@@ -91,13 +92,13 @@ fn device_mark(
             "build-notice",
             Glyph::TriangleAlert,
             cx.theme().warning,
-            format!("{}\nClick to dismiss.", build_notice?),
+            t!("sidebar.build_notice_tooltip", notice = build_notice?),
         ),
         ConnectionStatus::Disconnected => (
             "connect-indicator",
             Glyph::CircleAlert,
             cx.theme().danger,
-            format!("Not connected: {}\nClick to connect.", failure?),
+            t!("sidebar.not_connected_tooltip", reason = failure?),
         ),
         ConnectionStatus::Connecting => return None,
     };
@@ -285,9 +286,11 @@ impl Condr {
                                 // Every Workspace gets its second line, `detached` and no
                                 // repository included, so the rows keep one height.
                                 let detail = git.map_or_else(
-                                    || "no git".to_owned(),
+                                    || t!("sidebar.no_git").into_owned(),
                                     |git| {
-                                        git.branch.clone().unwrap_or_else(|| "detached".to_owned())
+                                        git.branch
+                                            .clone()
+                                            .unwrap_or_else(|| t!("sidebar.detached").into_owned())
                                     },
                                 );
                                 let upstream =
@@ -414,7 +417,7 @@ impl Condr {
                                     let open_name = workspace_name.clone();
                                     let remove_name = workspace_name.clone();
                                     let menu = menu.item(
-                                        PopupMenuItem::new("Rename Workspace")
+                                        PopupMenuItem::new(t!("sidebar.workspace_menu.rename"))
                                             .icon(menu_icon(Glyph::Pencil))
                                             .disabled(!connected)
                                             .on_click(move |_, window, cx| {
@@ -430,12 +433,13 @@ impl Condr {
                                                 });
                                             }),
                                     );
-                                    let menu =
-                                        if supports_worktrees {
-                                            menu.separator()
-                                        .item(
-                                            PopupMenuItem::new("Create Worktree")
-.icon(menu_icon(Glyph::GitBranchPlus))
+                                    let menu = if supports_worktrees {
+                                        menu.separator()
+                                            .item(
+                                                PopupMenuItem::new(t!(
+                                                    "sidebar.workspace_menu.create_worktree"
+                                                ))
+                                                .icon(menu_icon(Glyph::GitBranchPlus))
                                                 .disabled(!connected)
                                                 .on_click(move |_, window, cx| {
                                                     let name = create_name.clone();
@@ -449,10 +453,12 @@ impl Condr {
                                                         )
                                                     });
                                                 }),
-                                        )
-                                        .item(
-                                            PopupMenuItem::new("Open Existing Worktree")
-.icon(menu_icon(Glyph::FolderGit2))
+                                            )
+                                            .item(
+                                                PopupMenuItem::new(t!(
+                                                    "sidebar.workspace_menu.open_worktree"
+                                                ))
+                                                .icon(menu_icon(Glyph::FolderGit2))
                                                 .disabled(!connected)
                                                 .on_click(move |_, window, cx| {
                                                     let name = open_name.clone();
@@ -466,33 +472,35 @@ impl Condr {
                                                         )
                                                     });
                                                 }),
-                                        )
-                                        } else {
-                                            menu
-                                        };
+                                            )
+                                    } else {
+                                        menu
+                                    };
                                     let menu = if managed_worktree {
                                         menu.separator().item(
-                                            PopupMenuItem::new("Remove Worktree")
-                                                .icon(menu_icon(Glyph::GitBranchMinus))
-                                                .disabled(!connected)
-                                                .on_click(move |_, window, cx| {
-                                                    let name = remove_name.clone();
-                                                    let _ = remove_owner.update(cx, |this, cx| {
-                                                        this.confirm_remove_worktree_on(
-                                                            key,
-                                                            workspace_id,
-                                                            name,
-                                                            window,
-                                                            cx,
-                                                        )
-                                                    });
-                                                }),
+                                            PopupMenuItem::new(t!(
+                                                "sidebar.workspace_menu.remove_worktree"
+                                            ))
+                                            .icon(menu_icon(Glyph::GitBranchMinus))
+                                            .disabled(!connected)
+                                            .on_click(move |_, window, cx| {
+                                                let name = remove_name.clone();
+                                                let _ = remove_owner.update(cx, |this, cx| {
+                                                    this.confirm_remove_worktree_on(
+                                                        key,
+                                                        workspace_id,
+                                                        name,
+                                                        window,
+                                                        cx,
+                                                    )
+                                                });
+                                            }),
                                         )
                                     } else {
                                         menu
                                     };
                                     menu.item(
-                                        PopupMenuItem::new("Open in New Window")
+                                        PopupMenuItem::new(t!("sidebar.open_in_new_window"))
                                             .icon(menu_icon(Glyph::AppWindow))
                                             .on_click(move |_, window, cx| {
                                                 let _ = detach_owner.update(cx, |this, cx| {
@@ -506,7 +514,7 @@ impl Condr {
                                     )
                                     .separator()
                                     .item(
-                                        PopupMenuItem::new("Close Workspace")
+                                        PopupMenuItem::new(t!("sidebar.workspace_menu.close"))
                                             .icon(menu_icon(IconName::Close))
                                             .disabled(!connected)
                                             .on_click(move |_, window, cx| {
@@ -569,7 +577,7 @@ impl Condr {
                     format!("server-heading-{key}"),
                     move |_, cx| {
                         let owner = new_workspace_owner.clone();
-                        let tooltip = format!("New Workspace on {new_workspace_label}");
+                        let tooltip = t!("sidebar.new_workspace_on", device = new_workspace_label);
                         h_flex()
                             .gap_1()
                             .items_center()
@@ -641,9 +649,15 @@ impl Condr {
                     let detach_owner = server_menu_owner.clone();
                     let delete_name = server_name.clone();
                     let (connection_label, connection_icon, connection_disabled) = match status {
-                        ConnectionStatus::Connected => ("Disconnect", Glyph::Unplug, false),
-                        ConnectionStatus::Disconnected => ("Connect", Glyph::Plug, false),
-                        ConnectionStatus::Connecting => ("Connecting…", Glyph::Plug, true),
+                        ConnectionStatus::Connected => {
+                            (t!("sidebar.device_menu.disconnect"), Glyph::Unplug, false)
+                        }
+                        ConnectionStatus::Disconnected => {
+                            (t!("sidebar.device_menu.connect"), Glyph::Plug, false)
+                        }
+                        ConnectionStatus::Connecting => {
+                            (t!("sidebar.device_menu.connecting"), Glyph::Plug, true)
+                        }
                     };
                     // The Local Server is this machine's own: nothing to edit, nothing to
                     // delete, only its connection to toggle.
@@ -651,7 +665,7 @@ impl Condr {
                         menu
                     } else {
                         menu.item(
-                            PopupMenuItem::new("Edit")
+                            PopupMenuItem::new(t!("sidebar.device_menu.edit"))
                                 .icon(menu_icon(Glyph::Pencil))
                                 .on_click(move |_, window, cx| {
                                     let _ = edit_owner.update(cx, |this, cx| {
@@ -686,7 +700,7 @@ impl Condr {
                                 }),
                         )
                         .item(
-                            PopupMenuItem::new("Open in New Window")
+                            PopupMenuItem::new(t!("sidebar.open_in_new_window"))
                                 .icon(menu_icon(Glyph::AppWindow))
                                 .on_click(move |_, window, cx| {
                                     let _ = detach_owner.update(cx, |this, cx| {
@@ -702,7 +716,7 @@ impl Condr {
                         menu
                     } else {
                         menu.separator().item(
-                            PopupMenuItem::new("Delete")
+                            PopupMenuItem::new(t!("sidebar.device_menu.delete"))
                                 .icon(menu_icon(Glyph::Trash))
                                 .on_click(move |_, window, cx| {
                                     let name = delete_name.clone();
@@ -736,7 +750,7 @@ impl Condr {
             // Every Blocked agent on every Device, first (ADR 0024); absent when none.
             .children((!needs_you.is_empty()).then(|| {
                 CondrSidebarSection::new(
-                    "Needs you",
+                    t!("sidebar.needs_you"),
                     "needs-you-heading",
                     |_, _| div().into_any_element(),
                     needs_you,
@@ -768,7 +782,7 @@ impl Condr {
                                         Kbd::new(Keystroke::parse("shift").expect("a key"))
                                             .appearance(false)
                                     };
-                                    h_flex().gap_3().child("Command Palette").child(
+                                    h_flex().gap_3().child(t!("sidebar.command_palette")).child(
                                         h_flex()
                                             .gap_1()
                                             .text_xs()
@@ -785,7 +799,7 @@ impl Condr {
                                     .ghost()
                                     .small()
                                     .icon(Glyph::Command)
-                                    .accessibility_label("Command Palette")
+                                    .accessibility_label(t!("sidebar.command_palette"))
                                     .on_click(move |_, window, cx| {
                                         let _ = palette_owner.update(cx, |this, cx| {
                                             let all = command_palette::OpenCommandPalette {
@@ -803,8 +817,8 @@ impl Condr {
                             .ghost()
                             .small()
                             .icon(Icon::new(CondrIconName::ServerPlus))
-                            .tooltip("Connect Remote Device")
-                            .accessibility_label("Connect Remote Device")
+                            .tooltip(t!("sidebar.connect_remote_device"))
+                            .accessibility_label(t!("sidebar.connect_remote_device"))
                             .dropdown_menu(move |menu, _, _| {
                                 Condr::add_server_menu(menu, add_owner.clone())
                             })
@@ -824,11 +838,15 @@ impl Condr {
             .ghost()
             .small()
             .icon(IconName::Settings)
-            .tooltip_with_action("Settings", &OpenSettings, Some(SHORTCUT_CONTEXT))
+            .tooltip_with_action(
+                t!("sidebar.settings"),
+                &OpenSettings,
+                Some(SHORTCUT_CONTEXT),
+            )
             .accessibility_label(if update {
-                "Settings, update available"
+                t!("sidebar.settings_update_available")
             } else {
-                "Settings"
+                t!("sidebar.settings")
             })
             .on_click(move |_, window, cx| {
                 let _ = owner.update(cx, |this, cx| this.open_settings(window, cx));

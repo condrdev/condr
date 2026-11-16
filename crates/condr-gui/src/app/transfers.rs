@@ -7,6 +7,7 @@ use super::dialogs::{DangerConfirm, confirm_danger};
 use super::*;
 use condr_client::{StreamConnection, StreamLink, TransferCancel};
 use condr_core::protocol::{StreamError, StreamFile};
+use rust_i18n::t;
 use std::sync::{Arc, Mutex, PoisonError};
 
 /// Transfers to one Device that run at once; the rest wait in the strip.
@@ -98,7 +99,7 @@ impl Condr {
             files: true,
             directories: false,
             multiple: true,
-            prompt: Some("Upload".into()),
+            prompt: Some(t!("transfers.upload").into()),
         });
         let owner = cx.weak_entity();
         window
@@ -130,10 +131,7 @@ impl Condr {
         let (folders, files): (Vec<_>, Vec<_>) = paths.into_iter().partition(|path| path.is_dir());
         for folder in folders {
             let name = folder.file_name().unwrap_or_default().to_string_lossy();
-            self.report_error(
-                format!("“{name}” is a folder. Only files can be uploaded; archive it first."),
-                cx,
-            );
+            self.report_error(t!("transfers.folder_refused", name = name), cx);
         }
         let listed: HashSet<String> = self
             .connection(key)
@@ -186,29 +184,39 @@ impl Condr {
             return;
         }
         let names: Vec<String> = clashing.iter().filter_map(named).collect();
-        let place = if directory.as_str().is_empty() {
-            "the Root Directory".to_owned()
+        let count = names.len();
+        let root = directory.as_str().is_empty();
+        let title = match (names.as_slice(), root) {
+            ([one], true) => t!("transfers.replace.title_in_root.one", name = one),
+            (_, true) => t!("transfers.replace.title_in_root.other", count = count),
+            ([one], false) => t!(
+                "transfers.replace.title.one",
+                name = one,
+                directory = directory
+            ),
+            (_, false) => t!(
+                "transfers.replace.title.other",
+                count = count,
+                directory = directory
+            ),
+        };
+        let names = names.join(", ");
+        let (description, cancel) = if count == 1 {
+            (
+                t!("transfers.replace.description.one", names = names),
+                t!("transfers.replace.skip.one"),
+            )
         } else {
-            directory.to_string()
+            (
+                t!("transfers.replace.description.other", names = names),
+                t!("transfers.replace.skip.other"),
+            )
         };
-        let title = match names.as_slice() {
-            [one] => format!("“{one}” already exists in {place}"),
-            many => format!("{} files already exist in {place}", many.len()),
-        };
-        let description = format!(
-            "{}\n\nReplacing overwrites {} on the Device. This cannot be undone.",
-            names.join(", "),
-            if names.len() == 1 { "it" } else { "them" }
-        );
         let confirm = DangerConfirm {
-            title,
-            description,
-            ok: "Replace",
-            cancel: if names.len() == 1 {
-                "Skip"
-            } else {
-                "Skip These"
-            },
+            title: title.into_owned(),
+            description: description.into_owned(),
+            ok: t!("transfers.replace.ok").into(),
+            cancel: cancel.into(),
         };
         confirm_danger(
             cx.weak_entity(),
@@ -260,7 +268,7 @@ impl Condr {
         };
         // The Stream connection lives only while the terminal connection is up (ADR 0061).
         if connection.status != ConnectionStatus::Connected {
-            let error = format!("{} is not connected", connection.label);
+            let error = t!("transfers.not_connected", device = connection.label);
             return self.report_error(error, cx);
         }
         connection.transfers.push(Transfer {
@@ -284,7 +292,7 @@ impl Condr {
         };
         // Lost meanwhile: what waits would dial a Device that is not there.
         if connection.status != ConnectionStatus::Connected {
-            let reason = format!("{} disconnected", connection.label);
+            let reason = t!("transfers.disconnected", device = connection.label).into_owned();
             for transfer in &mut connection.transfers {
                 if transfer.state == TransferState::Queued {
                     transfer.state = TransferState::Failed(reason.clone());
@@ -399,12 +407,22 @@ impl Condr {
             }
             Err(failure) if failure.error == StreamError::Cancelled => {}
             Err(failure) => {
-                let verb = if downloaded.is_some() {
-                    "download"
+                let message = if downloaded.is_some() {
+                    t!(
+                        "transfers.download_failed",
+                        name = name,
+                        device = label,
+                        error = failure
+                    )
                 } else {
-                    "upload"
+                    t!(
+                        "transfers.upload_failed",
+                        name = name,
+                        device = label,
+                        error = failure
+                    )
                 };
-                self.report_error(format!("Could not {verb} {name} on {label}: {failure}"), cx);
+                self.report_error(message, cx);
             }
         }
         self.start_transfers(key, cx);
@@ -414,7 +432,7 @@ impl Condr {
     /// A finished download's toast, with the reveal action of ADR 0045.
     pub(super) fn report_downloaded(&self, name: &str, destination: PathBuf, cx: &mut App) {
         struct DownloadToast;
-        let message: SharedString = format!("Downloaded {name}").into();
+        let message: SharedString = t!("transfers.downloaded", name = name).into();
         let handle = self.active_view().handle;
         cx.defer(move |cx| {
             let _ = handle.update(cx, |_, window, cx| {
@@ -528,12 +546,27 @@ impl Condr {
                 (done + bytes, total + size.unwrap_or(bytes))
             });
         let headline = if live.is_empty() {
-            format!("⇅ {} finished", transfers.len())
+            let count = transfers.len();
+            if count == 1 {
+                t!("transfers.strip.finished.one", count = count)
+            } else {
+                t!("transfers.strip.finished.other", count = count)
+            }
         } else {
             let percent = (done * 100).checked_div(total).unwrap_or(0);
-            match live.len() {
-                1 => format!("⇅ 1 transfer · {percent}%"),
-                count => format!("⇅ {count} transfers · {percent}%"),
+            let count = live.len();
+            if count == 1 {
+                t!(
+                    "transfers.strip.running.one",
+                    count = count,
+                    percent = percent
+                )
+            } else {
+                t!(
+                    "transfers.strip.running.other",
+                    count = count,
+                    percent = percent
+                )
             }
         };
         let open = self.transfer_strip_open;
@@ -563,7 +596,7 @@ impl Condr {
                                 .ghost()
                                 .xsmall()
                                 .icon(Glyph::BrushCleaning)
-                                .tooltip("Clear")
+                                .tooltip(t!("transfers.strip.clear"))
                                 .on_click(move |_, _, cx| {
                                     cx.stop_propagation();
                                     let _ = clear_owner.update(cx, |this, cx| {
@@ -605,14 +638,14 @@ impl Condr {
         let id = transfer.id;
         let owner = cx.weak_entity();
         let status = match &transfer.state {
-            TransferState::Queued => Some("waiting".to_owned()),
+            TransferState::Queued => Some(t!("transfers.state.waiting")),
             TransferState::Running => None,
             TransferState::Done => Some(match transfer.direction {
-                Direction::Download { .. } => "downloaded".to_owned(),
-                Direction::Upload { .. } => "uploaded".to_owned(),
+                Direction::Download { .. } => t!("transfers.state.downloaded"),
+                Direction::Upload { .. } => t!("transfers.state.uploaded"),
             }),
-            TransferState::Failed(_) => Some("failed".to_owned()),
-            TransferState::Cancelled => Some("cancelled".to_owned()),
+            TransferState::Failed(_) => Some(t!("transfers.state.failed")),
+            TransferState::Cancelled => Some(t!("transfers.state.cancelled")),
         };
         let fraction = total
             .filter(|total| *total > 0)
@@ -659,7 +692,7 @@ impl Condr {
                         .ghost()
                         .xsmall()
                         .icon(IconName::Close)
-                        .tooltip("Cancel")
+                        .tooltip(t!("transfers.strip.cancel"))
                         .on_click(move |_, _, cx| {
                             let _ = owner.update(cx, |this, cx| this.cancel_transfer(key, id, cx));
                         }),

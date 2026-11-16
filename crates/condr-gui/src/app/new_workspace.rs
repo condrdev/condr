@@ -5,6 +5,8 @@ use super::dialogs::field_error;
 use super::sidebar::CondrIconName;
 use super::*;
 use gpui_kit::component::kbd::Kbd;
+use rust_i18n::t;
+use std::borrow::Cow;
 use std::collections::HashSet;
 
 actions!(new_workspace, [ChoosePrevious, ChooseNext]);
@@ -39,21 +41,33 @@ impl NewWorkspaceWay {
         }
     }
 
-    pub(super) fn title(self) -> &'static str {
+    pub(super) fn title(self) -> Cow<'static, str> {
         match self {
-            Self::OpenProject => "Open Project",
-            Self::CloneRepository => "Clone Repository",
-            Self::NewDirectory => "New Directory",
+            Self::OpenProject => t!("new_workspace.way.open_project"),
+            Self::CloneRepository => t!("new_workspace.way.clone_repository"),
+            Self::NewDirectory => t!("new_workspace.way.new_directory"),
         }
     }
 
-    fn description(self, device: &str) -> String {
+    /// The dialog's title once it shows this way's form.
+    fn title_on(self, device: &str) -> Cow<'static, str> {
         match self {
-            Self::OpenProject => format!("Choose a directory on {device}"),
+            Self::OpenProject => t!("new_workspace.title.open_project", device = device),
+            Self::CloneRepository => t!("new_workspace.title.clone_repository", device = device),
+            Self::NewDirectory => t!("new_workspace.title.new_directory", device = device),
+        }
+    }
+
+    fn description(self, device: &str) -> Cow<'static, str> {
+        match self {
+            Self::OpenProject => t!("new_workspace.description.open_project", device = device),
             Self::CloneRepository => {
-                format!("Clone a Git repository into a new directory on {device}")
+                t!(
+                    "new_workspace.description.clone_repository",
+                    device = device
+                )
             }
-            Self::NewDirectory => format!("Create an empty directory on {device}"),
+            Self::NewDirectory => t!("new_workspace.description.new_directory", device = device),
         }
     }
 
@@ -289,8 +303,8 @@ impl Condr {
         };
         self.prompt_directory_on(
             key,
-            format!("Choose Where on {device}"),
-            "Choose",
+            t!("new_workspace.choose_parent", device = device).into_owned(),
+            t!("new_workspace.choose"),
             move |this, parent, _, cx| {
                 let Some(dialog) = this
                     .new_workspace
@@ -350,7 +364,7 @@ impl Condr {
         let name = dialog.name.read(cx).value().trim().to_owned();
         let named = condr_core::validate_directory_name(&name).and_then(|()| match &dialog.taken {
             Some(taken) if taken.contains(&name) => {
-                Err("A directory with this name is already here".to_owned())
+                Err(t!("new_workspace.name_taken").into_owned())
             }
             _ => Ok(()),
         });
@@ -358,7 +372,7 @@ impl Condr {
             dialog.name_error = Some(reason.clone());
         }
         if dialog.parent.is_none() {
-            dialog.parent_error = Some("Choose where to create it".into());
+            dialog.parent_error = Some(t!("new_workspace.parent_missing").into_owned());
         }
         let (Ok(clone_url), Ok(()), Some(parent)) = (clone_url, named, dialog.parent.clone())
         else {
@@ -408,8 +422,8 @@ fn open_new_workspace_dialog(owner: WeakEntity<Condr>, window: &mut Window, cx: 
             return dialog;
         };
         let title = match state.form {
-            None => format!("New Workspace on {}", state.device),
-            Some(way) => format!("{} on {}", way.title(), state.device),
+            None => t!("new_workspace.title.chooser", device = state.device),
+            Some(way) => way.title_on(&state.device),
         };
         let footer = match state.form {
             None => chooser_footer(cx).into_any_element(),
@@ -443,7 +457,7 @@ fn open_new_workspace_dialog(owner: WeakEntity<Condr>, window: &mut Window, cx: 
 }
 
 fn chooser_footer(cx: &App) -> impl IntoElement {
-    let hint = |keys: &'static [&'static str], label: &'static str| {
+    let hint = |keys: &'static [&'static str], label: Cow<'static, str>| {
         h_flex()
             .gap_1()
             .items_center()
@@ -459,9 +473,9 @@ fn chooser_footer(cx: &App) -> impl IntoElement {
         .gap_4()
         .text_xs()
         .text_color(cx.theme().muted_foreground)
-        .child(hint(&["up", "down"], "Navigate"))
-        .child(hint(&["enter"], "Select"))
-        .child(hint(&["escape"], "Close"))
+        .child(hint(&["up", "down"], t!("new_workspace.hint.navigate")))
+        .child(hint(&["enter"], t!("new_workspace.hint.select")))
+        .child(hint(&["escape"], t!("new_workspace.hint.close")))
 }
 
 fn form_footer(way: NewWorkspaceWay) -> DialogFooter {
@@ -469,7 +483,7 @@ fn form_footer(way: NewWorkspaceWay) -> DialogFooter {
         .child(
             Button::new("dialog-cancel")
                 .debug_selector(|| "dialog-cancel".into())
-                .label("Back")
+                .label(t!("new_workspace.back"))
                 .on_click(|_, window, cx| window.dispatch_action(Box::new(Cancel), cx)),
         )
         .child(
@@ -477,8 +491,8 @@ fn form_footer(way: NewWorkspaceWay) -> DialogFooter {
                 .debug_selector(|| "dialog-primary-action".into())
                 .primary()
                 .label(match way {
-                    NewWorkspaceWay::CloneRepository => "Clone",
-                    _ => "Create",
+                    NewWorkspaceWay::CloneRepository => t!("new_workspace.clone"),
+                    _ => t!("new_workspace.create"),
                 })
                 .on_click(|_, window, cx| {
                     window.dispatch_action(Box::new(Confirm { secondary: false }), cx)
@@ -563,19 +577,19 @@ fn render_form(
     cx: &App,
 ) -> AnyElement {
     let theme = cx.theme();
-    let label = |text: &'static str| div().text_sm().child(text);
+    let label = |text: Cow<'static, str>| div().text_sm().child(text);
     let name = state.name.read(cx).value().trim().to_owned();
     let name_error = state.name_error.clone().or_else(|| {
         state
             .taken
             .as_ref()
             .filter(|taken| taken.contains(&name))
-            .map(|_| "A directory with this name is already here".to_owned())
+            .map(|_| t!("new_workspace.name_taken").into_owned())
     });
     let parent = match (&state.parent, &state.parent_error) {
         (Some(parent), _) => parent.display().to_string(),
         (None, Some(_)) => String::new(),
-        (None, None) => "Looking it up…".into(),
+        (None, None) => t!("new_workspace.looking_up").into_owned(),
     };
     let change = owner.clone();
     v_flex()
@@ -584,7 +598,7 @@ fn render_form(
             form.child(
                 v_flex()
                     .gap_1()
-                    .child(label("Repository URL"))
+                    .child(label(t!("new_workspace.repository_url")))
                     .child(
                         div()
                             .debug_selector(|| "new-workspace-url".into())
@@ -596,7 +610,7 @@ fn render_form(
         .child(
             v_flex()
                 .gap_1()
-                .child(label("Location"))
+                .child(label(t!("new_workspace.location")))
                 .child(
                     h_flex()
                         .gap_2()
@@ -618,7 +632,7 @@ fn render_form(
                             Button::new("new-workspace-change-parent")
                                 .debug_selector(|| "new-workspace-change-parent".into())
                                 .small()
-                                .label("Change…")
+                                .label(t!("new_workspace.change"))
                                 .on_click(move |_, window, cx| {
                                     let _ = change.update(cx, |this, cx| {
                                         this.change_new_workspace_parent(window, cx)
@@ -631,7 +645,7 @@ fn render_form(
         .child(
             v_flex()
                 .gap_1()
-                .child(label("Name"))
+                .child(label(t!("new_workspace.name")))
                 .child(
                     div()
                         .debug_selector(|| "new-workspace-name".into())

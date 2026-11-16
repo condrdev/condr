@@ -1,4 +1,5 @@
 use super::*;
+use rust_i18n::t;
 
 /// What the Host field lets you type: host-name and IP characters, at most 253 of them.
 /// Brackets allow a literal IPv6 address; completeness is judged on Save.
@@ -21,21 +22,21 @@ pub(in crate::app) struct DangerConfirm {
     pub(in crate::app) title: String,
     pub(in crate::app) description: String,
     /// The red button, named for the action: "Delete", not "OK".
-    pub(in crate::app) ok: &'static str,
-    pub(in crate::app) cancel: &'static str,
+    pub(in crate::app) ok: SharedString,
+    pub(in crate::app) cancel: SharedString,
 }
 
 impl DangerConfirm {
     pub(in crate::app) fn new(
         title: impl Into<String>,
         description: impl Into<String>,
-        ok: &'static str,
+        ok: impl Into<SharedString>,
     ) -> Self {
         Self {
             title: title.into(),
             description: description.into(),
-            ok,
-            cancel: "Cancel",
+            ok: ok.into(),
+            cancel: t!("dialogs.cancel").into(),
         }
     }
 }
@@ -58,9 +59,9 @@ pub(in crate::app) fn confirm_danger(
                 .confirm()
                 .title(confirm.title.clone())
                 .description(confirm.description.clone())
-                .ok_text(confirm.ok)
+                .ok_text(confirm.ok.clone())
                 .ok_variant(ButtonVariant::Danger)
-                .cancel_text(confirm.cancel)
+                .cancel_text(confirm.cancel.clone())
                 .on_ok(move |_, window, cx| {
                     let _ = owner.update(cx, |this, cx| on_ok(this, window, cx));
                     true
@@ -73,7 +74,7 @@ pub(in crate::app) fn confirm_danger(
 /// label, trimmed, everything selected.
 pub(in crate::app) struct TextPrompt {
     pub(in crate::app) title: SharedString,
-    pub(in crate::app) ok_text: &'static str,
+    pub(in crate::app) ok_text: SharedString,
     pub(in crate::app) initial: String,
     pub(in crate::app) label: Option<SharedString>,
     pub(in crate::app) placeholder: Option<SharedString>,
@@ -88,18 +89,18 @@ pub(in crate::app) struct TextPrompt {
     /// Shown under the field as it opens: why the value it reopens with was refused.
     pub(in crate::app) error: Option<String>,
     /// Shown under the field when the value is blank.
-    pub(in crate::app) empty: &'static str,
+    pub(in crate::app) empty: SharedString,
 }
 
 impl TextPrompt {
     pub(in crate::app) fn new(
         title: impl Into<SharedString>,
-        ok_text: &'static str,
+        ok_text: impl Into<SharedString>,
         initial: String,
     ) -> Self {
         Self {
             title: title.into(),
-            ok_text,
+            ok_text: ok_text.into(),
             initial,
             label: None,
             placeholder: None,
@@ -108,7 +109,7 @@ impl TextPrompt {
             browse: None,
             selected: None,
             error: None,
-            empty: "Enter a name",
+            empty: t!("dialogs.enter_name").into(),
         }
     }
 }
@@ -118,7 +119,7 @@ impl TextPrompt {
 /// `content` shows under the field it is about.
 pub(in crate::app) fn open_form_dialog<E: 'static>(
     title: SharedString,
-    ok_text: &'static str,
+    ok_text: SharedString,
     error: Entity<Option<E>>,
     content: impl Fn(&mut Window, &mut App) -> AnyElement + 'static,
     submit: impl Fn(&mut Window, &mut App) -> Result<(), E> + 'static,
@@ -129,6 +130,7 @@ pub(in crate::app) fn open_form_dialog<E: 'static>(
     let submit = Rc::new(submit);
     window.open_dialog(cx, move |dialog, _, _| {
         let (content, submit, error) = (content.clone(), submit.clone(), error.clone());
+        let ok_text = ok_text.clone();
         dialog
             .title(title.clone())
             .content(move |body, window, cx| body.child(content(window, cx)))
@@ -137,7 +139,7 @@ pub(in crate::app) fn open_form_dialog<E: 'static>(
                     .child(
                         Button::new("dialog-cancel")
                             .debug_selector(|| "dialog-cancel".into())
-                            .label("Cancel")
+                            .label(t!("dialogs.cancel"))
                             .on_click(|_, window, cx| window.dispatch_action(Box::new(Cancel), cx)),
                     )
                     .child(
@@ -193,7 +195,7 @@ impl Condr {
                     .action(move |_, _, _| {
                         let text = copied.clone();
                         Button::new("copy-error")
-                            .label("Copy")
+                            .label(t!("dialogs.copy"))
                             .small()
                             .ghost()
                             .on_click(move |_, _, cx| {
@@ -207,8 +209,8 @@ impl Condr {
 
     pub(super) fn prompt_text(
         &mut self,
-        title: &'static str,
-        ok_text: &'static str,
+        title: impl Into<SharedString>,
+        ok_text: impl Into<SharedString>,
         initial: String,
         apply: impl Fn(&mut Condr, String, &mut Window, &mut Context<Condr>) -> Result<(), String>
         + 'static,
@@ -223,7 +225,7 @@ impl Condr {
         &mut self,
         key: ConnectionKey,
         title: String,
-        ok_text: &'static str,
+        ok_text: impl Into<SharedString>,
         apply: impl Fn(&mut Condr, String, &mut Window, &mut Context<Condr>) -> Result<(), String>
         + 'static,
         window: &mut Window,
@@ -231,11 +233,11 @@ impl Condr {
     ) {
         self.prompt_text_input(
             TextPrompt {
-                label: Some("Root directory".into()),
-                placeholder: Some("Absolute path on the device".into()),
+                label: Some(t!("dialogs.root_directory").into()),
+                placeholder: Some(t!("dialogs.absolute_path").into()),
                 trim: false,
                 browse: Some(key),
-                empty: "Enter a path",
+                empty: t!("dialogs.enter_path").into(),
                 ..TextPrompt::new(title, ok_text, String::new())
             },
             apply,
@@ -248,11 +250,12 @@ impl Condr {
         &mut self,
         key: ConnectionKey,
         title: String,
-        ok_text: &'static str,
+        ok_text: impl Into<SharedString>,
         apply: impl Fn(&mut Condr, PathBuf, &mut Window, &mut Context<Condr>) + 'static,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let ok_text: SharedString = ok_text.into();
         let Some(local_endpoint) = self
             .connection(key)
             .map(|connection| connection.endpoint.as_local_path().is_some())
@@ -288,7 +291,7 @@ impl Condr {
                 let picked = match paths.await {
                     Ok(Ok(picked)) => Ok(picked),
                     Ok(Err(error)) => Err(error.to_string()),
-                    Err(_) => Err("The folder picker closed without a result".to_string()),
+                    Err(_) => Err(t!("dialogs.folder_picker_closed").into_owned()),
                 };
                 cx.update(|window, cx| {
                     owner.update(cx, |this, cx| match picked {
@@ -382,7 +385,7 @@ impl Condr {
             move |window: &mut Window, cx: &mut App| {
                 let value = input.read(cx).value().to_string();
                 let Some(value) = accepted_text_input(value, trim) else {
-                    return Err(empty.to_owned());
+                    return Err(empty.to_string());
                 };
                 let value = match prefix {
                     Some(prefix) => {
@@ -441,8 +444,8 @@ impl Condr {
         cx: &mut Context<Self>,
     ) {
         self.prompt_text(
-            "Rename Workspace",
-            "Save",
+            t!("dialogs.rename_workspace"),
+            t!("dialogs.save"),
             name,
             move |this, name, _, _| {
                 this.send_layout_to(key, LayoutCommand::RenameWorkspace { workspace_id, name });
@@ -463,10 +466,10 @@ impl Condr {
     ) {
         self.prompt_text_input(
             TextPrompt {
-                empty: "Enter a branch name",
+                empty: t!("dialogs.enter_branch").into(),
                 ..TextPrompt::new(
-                    "Create Worktree",
-                    "Create",
+                    t!("dialogs.create_worktree"),
+                    t!("dialogs.create"),
                     default_worktree_branch(&workspace_name),
                 )
             },
@@ -497,8 +500,8 @@ impl Condr {
     ) {
         self.prompt_directory_on(
             key,
-            format!("Open Existing Worktree from {workspace_name}"),
-            "Open",
+            t!("dialogs.open_worktree_from", workspace = workspace_name).into_owned(),
+            t!("dialogs.open"),
             move |this, root_directory, window, cx| {
                 this.send_presenting_layout_to(
                     key,
@@ -526,10 +529,9 @@ impl Condr {
         confirm_danger(
             cx.weak_entity(),
             DangerConfirm::new(
-                format!("Remove worktree “{workspace_name}”?"),
-                "The worktree directory will be deleted. Modified or untracked files prevent \
-                 removal; the branch is kept.",
-                "Remove",
+                t!("dialogs.remove_worktree.title", workspace = workspace_name),
+                t!("dialogs.remove_worktree.description"),
+                t!("dialogs.remove_worktree.ok"),
             ),
             move |this, _, _| {
                 this.send_layout_to(key, LayoutCommand::RemoveWorktree { workspace_id });
@@ -558,8 +560,8 @@ impl Condr {
         cx: &mut Context<Self>,
     ) {
         self.prompt_text(
-            "Rename Tab",
-            "Save",
+            t!("dialogs.rename_tab"),
+            t!("dialogs.save"),
             name,
             move |this, name, _, _| {
                 this.send_layout_to(key, LayoutCommand::RenameTab { tab_id, name });

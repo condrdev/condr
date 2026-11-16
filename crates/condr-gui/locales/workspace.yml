@@ -1,0 +1,59 @@
+_version: 2
+workspace:
+  tab:
+    close:
+      en: Close Tab
+      zh-CN: 关闭 Tab
+    rename:
+      en: Rename Tab
+      zh-CN: 重命名 Tab
+    open_in_new_window:
+      en: Open in New Window
+      zh-CN: 在新窗口中打开
+    download:
+      en: Download…
+      zh-CN: 下载…
+  new_tab:
+    en: New Tab
+    zh-CN: 新建 Tab
+  welcome:
+    title:
+      en: 'Welcome to %{app}'
+      zh-CN: '欢迎使用 %{app}'
+    tagline:
+      en: Agents that never hang up
+      zh-CN: 永不挂断的 Agent
+    get_started:
+      en: GET STARTED
+      zh-CN: 开始使用
+    connect_remote_device:
+      en: Connect Remote Device
+      zh-CN: 连接远程设备
+    docs:
+      en: Docs
+      zh-CN: 文档
+  expand_sidebar:
+    en: Expand Sidebar
+    zh-CN: 展开侧边栏
+  collapse_sidebar:
+    en: Collapse Sidebar
+    zh-CN: 折叠侧边栏
+  bring_back:
+    en: Bring Back
+    zh-CN: 移回主窗口
+  shown_elsewhere:
+    main:
+      en: This is shown in another window.
+      zh-CN: 它正显示在另一个窗口中。
+    device:
+      en: This Device is shown in another window.
+      zh-CN: 这台设备正显示在另一个窗口中。
+    workspace:
+      en: This Workspace is shown in another window.
+      zh-CN: 这个 Workspace 正显示在另一个窗口中。
+    tab:
+      en: This Tab is shown in another window.
+      zh-CN: 这个 Tab 正显示在另一个窗口中。
+  go_to_window:
+    en: Go to Window
+    zh-CN: 前往该窗口

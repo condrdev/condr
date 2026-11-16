@@ -7,6 +7,8 @@
 use super::sidebar::CondrIconName;
 use super::*;
 use condr_client::{Forward, LinkStatus, LocalPort, StreamLink, StreamOpener};
+use rust_i18n::t;
+use std::borrow::Cow;
 use std::sync::{Arc, Mutex};
 
 /// Width of the page's Device column.
@@ -148,8 +150,10 @@ impl Condr {
         cx: &mut Context<Self>,
     ) {
         if self.ports_form.is_none() {
-            let port = cx.new(|cx| InputState::new(window, cx).placeholder("e.g. 3000"));
-            let local = cx.new(|cx| InputState::new(window, cx).placeholder("Same"));
+            let port =
+                cx.new(|cx| InputState::new(window, cx).placeholder(t!("ports.port_placeholder")));
+            let local =
+                cx.new(|cx| InputState::new(window, cx).placeholder(t!("ports.local_placeholder")));
             for input in [&port, &local] {
                 cx.subscribe(input, |this, _, event: &InputEvent, cx| {
                     if matches!(event, InputEvent::Change)
@@ -220,14 +224,14 @@ impl Condr {
             cx.notify();
         };
         let Some(remote) = parse(&port_text) else {
-            return refuse(self, "Enter a port from 1 to 65535".into(), cx);
+            return refuse(self, t!("ports.enter_port").into_owned(), cx);
         };
         let local = if local_text.is_empty() {
             LocalPort::Near
         } else {
             match parse(&local_text) {
                 Some(port) => LocalPort::Exact(port),
-                None => return refuse(self, "Enter a local port from 1 to 65535".into(), cx),
+                None => return refuse(self, t!("ports.enter_local_port").into_owned(), cx),
             }
         };
         let events = self.ports_events(cx);
@@ -235,7 +239,7 @@ impl Condr {
             return;
         };
         if connection.status != ConnectionStatus::Connected {
-            let error = format!("{} is not connected", connection.label);
+            let error = t!("ports.not_connected", device = connection.label).into_owned();
             return refuse(self, error, cx);
         }
         if connection
@@ -244,7 +248,12 @@ impl Condr {
             .iter()
             .any(|entry| entry.forward.remote_port() == remote)
         {
-            let error = format!("Port {remote} on {} is already forwarded", connection.label);
+            let error = t!(
+                "ports.already_forwarded",
+                port = remote,
+                device = connection.label
+            )
+            .into_owned();
             return refuse(self, error, cx);
         }
         let link = connection
@@ -281,7 +290,8 @@ impl Condr {
                             Ok((forward, retained)) => {
                                 let local = forward.local_port();
                                 let note = (local != remote).then(|| {
-                                    format!("localhost:{remote} was in use, so {local} is used")
+                                    t!("ports.local_port_taken", remote = remote, local = local)
+                                        .into_owned()
                                 });
                                 if let Some(connection) = this.connection_mut(key) {
                                     connection.forwards.entries.push(ForwardEntry {
@@ -329,7 +339,7 @@ impl Condr {
             .items_center()
             .px_2()
             .child(Icon::new(CondrIconName::ArrowLeftRight).size_4())
-            .child(div().text_sm().child("Ports"))
+            .child(div().text_sm().child(t!("ports.title")))
             .text_color(cx.theme().foreground)
             .into_any_element()
     }
@@ -354,10 +364,10 @@ impl Condr {
             .gap_3()
             .px_5()
             .py_3()
-            .child(div().text_lg().child("Ports"))
+            .child(div().text_lg().child(t!("ports.title")))
             .child(
                 div().text_sm().text_color(muted).child(match scope {
-                    PortsScope::All => "All Devices".to_owned(),
+                    PortsScope::All => t!("ports.all_devices").into_owned(),
                     PortsScope::Device(key) => self
                         .connection(key)
                         .map_or_else(String::new, |connection| connection.label.clone()),
@@ -370,7 +380,7 @@ impl Condr {
                     .ghost()
                     .small()
                     .icon(IconName::Close)
-                    .tooltip("Back to the Workspace")
+                    .tooltip(t!("ports.back_to_workspace"))
                     .on_click(move |_, window, cx| {
                         let _ = close_owner.update(cx, |this, cx| this.close_ports(window, cx));
                     }),
@@ -382,7 +392,7 @@ impl Condr {
             .p_2()
             .child(self.ports_scope_row(
                 PortsScope::All,
-                "All Devices".into(),
+                t!("ports.all_devices").into_owned(),
                 total,
                 None,
                 scope,
@@ -394,7 +404,7 @@ impl Condr {
             };
             let state = match connection.status {
                 ConnectionStatus::Connected => None,
-                _ => Some("reconnecting…".to_owned()),
+                _ => Some(t!("ports.reconnecting").into_owned()),
             };
             list = list.child(self.ports_scope_row(
                 PortsScope::Device(*key),
@@ -421,7 +431,7 @@ impl Condr {
                     .pt_3()
                     .text_sm()
                     .font_medium()
-                    .child("Forwarded Ports"),
+                    .child(t!("ports.forwarded")),
             );
         let mut any = false;
         for key in &shown {
@@ -438,7 +448,7 @@ impl Condr {
                 div()
                     .text_sm()
                     .text_color(muted)
-                    .child("Nothing forwarded yet."),
+                    .child(t!("ports.nothing_forwarded")),
             );
         }
         v_flex()
@@ -508,13 +518,15 @@ impl Condr {
             return div().into_any_element();
         };
         let muted = cx.theme().muted_foreground;
-        let heading =
-            v_flex()
-                .gap_0p5()
-                .child(div().text_sm().font_medium().child("Forward a Port"))
-                .child(div().text_sm().text_color(muted).child(
-                    "Reach a service running on a remote Device at localhost on this machine.",
-                ));
+        let heading = v_flex()
+            .gap_0p5()
+            .child(div().text_sm().font_medium().child(t!("ports.form.title")))
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(muted)
+                    .child(t!("ports.form.description")),
+            );
         let device = match scope {
             PortsScope::Device(key) => Some(key),
             // A choice since removed falls back, to a Device that can forward now first.
@@ -540,11 +552,11 @@ impl Condr {
                     div()
                         .text_sm()
                         .text_color(muted)
-                        .child("Connect a remote Device to forward its ports."),
+                        .child(t!("ports.form.no_device")),
                 )
                 .into_any_element();
         };
-        let field = |label: String, control: AnyElement| {
+        let field = |label: Cow<'static, str>, control: AnyElement| {
             v_flex()
                 .gap_1()
                 .child(div().text_sm().text_color(muted).child(label))
@@ -579,7 +591,7 @@ impl Condr {
                         )
                     })
                 });
-            field("Device".into(), button.into_any_element())
+            field(t!("ports.form.device"), button.into_any_element())
         });
         let owner = cx.weak_entity();
         v_flex()
@@ -591,7 +603,7 @@ impl Condr {
                     .items_end()
                     .children(chooser)
                     .child(field(
-                        format!("Port on {device_label}"),
+                        t!("ports.form.device_port", device = device_label),
                         div()
                             .w(PORT_FIELD_WIDTH)
                             .child(Input::new(&form.port).small())
@@ -605,7 +617,7 @@ impl Condr {
                             .child(Icon::new(IconName::ArrowRight).size_4().text_color(muted)),
                     )
                     .child(field(
-                        "Port on this machine".into(),
+                        t!("ports.form.local_port"),
                         div()
                             .w(PORT_FIELD_WIDTH)
                             .child(Input::new(&form.local).small())
@@ -616,7 +628,7 @@ impl Condr {
                             .debug_selector(|| "forward-port".into())
                             .primary()
                             .small()
-                            .label("Forward")
+                            .label(t!("ports.form.forward"))
                             .loading(form.pending)
                             .on_click(move |_, window, cx| {
                                 let _ = owner
@@ -645,10 +657,10 @@ impl Condr {
         let waiting = match (connection.status, connection.forwards.status()) {
             (ConnectionStatus::Connected, LinkStatus::Connected | LinkStatus::Idle) => None,
             (ConnectionStatus::Connected, LinkStatus::Reconnecting(reason)) => {
-                Some(format!("reconnecting: {reason}"))
+                Some(t!("ports.card.reconnecting", reason = reason).into_owned())
             }
             (ConnectionStatus::Connected, LinkStatus::Refused(reason)) => Some(reason),
-            _ => Some(format!("waiting for {}", connection.label)),
+            _ => Some(t!("ports.card.waiting", device = connection.label).into_owned()),
         };
         let connections = entry.forward.connections();
         let open_url = url.clone();
@@ -672,13 +684,19 @@ impl Condr {
                         div()
                             .text_sm()
                             .text_color(muted)
-                            .child(format!("on {}", connection.label)),
+                            .child(t!("ports.card.on_device", device = connection.label)),
                     )
                     .child(div().flex_1())
-                    .child(div().text_xs().text_color(muted).child(match connections {
-                        1 => "1 connection".to_owned(),
-                        count => format!("{count} connections"),
-                    })),
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(muted)
+                            .child(if connections == 1 {
+                                t!("ports.card.connections.one", count = connections)
+                            } else {
+                                t!("ports.card.connections.other", count = connections)
+                            }),
+                    ),
             )
             .child(
                 div()
@@ -694,9 +712,12 @@ impl Condr {
                 card.child(div().text_xs().text_color(cx.theme().warning).child(note))
             })
             .when(entry.forward.last_refused(), |card| {
-                card.child(div().text_xs().text_color(muted).child(format!(
-                    "The last connection was refused: nothing listens on port {remote}."
-                )))
+                card.child(
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .child(t!("ports.card.refused", port = remote)),
+                )
             })
             .when_some(waiting, |card, waiting| {
                 card.child(div().text_xs().text_color(muted).child(waiting))
@@ -709,14 +730,14 @@ impl Condr {
                         Button::new(("forward-open", id))
                             .small()
                             .primary()
-                            .label("Open in Browser")
+                            .label(t!("ports.card.open_in_browser"))
                             .on_click(move |_, _, cx| cx.open_url(&open_url)),
                     )
                     .child(
                         Button::new(("forward-copy", id))
                             .small()
                             .ghost()
-                            .label("Copy Address")
+                            .label(t!("ports.card.copy_address"))
                             .on_click(move |_, _, cx| {
                                 cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()))
                             }),
@@ -726,7 +747,7 @@ impl Condr {
                             .debug_selector(move || format!("forward-stop-{key}-{remote}"))
                             .small()
                             .ghost()
-                            .label("Stop")
+                            .label(t!("ports.card.stop"))
                             .on_click(move |_, _, cx| {
                                 let _ = stop_owner
                                     .update(cx, |this, cx| this.stop_forward(key, remote, cx));
@@ -749,8 +770,8 @@ impl Condr {
             .ghost()
             .small()
             .icon(Icon::new(CondrIconName::ArrowLeftRight))
-            .tooltip("Ports")
-            .accessibility_label("Ports")
+            .tooltip(t!("ports.title"))
+            .accessibility_label(t!("ports.title"))
             .when(view.ports == Some(PortsScope::All), |button| {
                 button.selected(true)
             })

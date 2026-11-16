@@ -1,0 +1,76 @@
+_version: 2
+sidebar:
+  build_notice_tooltip:
+    en: "%{notice}\nClick to dismiss."
+    zh-CN: "%{notice}\n点击忽略。"
+  not_connected_tooltip:
+    en: "Not connected: %{reason}\nClick to connect."
+    zh-CN: "未连接：%{reason}\n点击连接。"
+  no_git:
+    en: no git
+    zh-CN: 无 Git
+  detached:
+    en: detached
+    zh-CN: 分离 HEAD
+  workspace_menu:
+    rename:
+      en: Rename Workspace
+      zh-CN: 重命名 Workspace
+    create_worktree:
+      en: Create Worktree
+      zh-CN: 创建 Worktree
+    open_worktree:
+      en: Open Existing Worktree
+      zh-CN: 打开已有 Worktree
+    remove_worktree:
+      en: Remove Worktree
+      zh-CN: 移除 Worktree
+    close:
+      en: Close Workspace
+      zh-CN: 关闭 Workspace
+  open_in_new_window:
+    en: Open in New Window
+    zh-CN: 在新窗口中打开
+  new_workspace_on:
+    en: 'New Workspace on %{device}'
+    zh-CN: '在 %{device} 上新建 Workspace'
+  device_menu:
+    disconnect:
+      en: Disconnect
+      zh-CN: 断开连接
+    connect:
+      en: Connect
+      zh-CN: 连接
+    connecting:
+      en: Connecting…
+      zh-CN: 正在连接…
+    edit:
+      en: Edit
+      zh-CN: 编辑
+    delete:
+      en: Delete
+      zh-CN: 删除
+  needs_you:
+    en: Needs you
+    zh-CN: Needs you
+  command_palette:
+    en: Command Palette
+    zh-CN: 命令面板
+  connect_remote_device:
+    en: Connect Remote Device
+    zh-CN: 连接远程设备
+  settings:
+    en: Settings
+    zh-CN: 设置
+  settings_update_available:
+    en: Settings, update available
+    zh-CN: 设置，有可用更新
+  collapse:
+    en: 'Collapse %{name}'
+    zh-CN: '折叠 %{name}'
+  expand:
+    en: 'Expand %{name}'
+    zh-CN: '展开 %{name}'
+  actions:
+    en: Actions
+    zh-CN: 操作

@@ -1,0 +1,92 @@
+_version: 2
+ports:
+  port_placeholder:
+    en: e.g. 3000
+    zh-CN: 例如 3000
+  local_placeholder:
+    en: Same
+    zh-CN: 相同
+  enter_port:
+    en: Enter a port from 1 to 65535
+    zh-CN: 请输入 1 到 65535 之间的端口
+  enter_local_port:
+    en: Enter a local port from 1 to 65535
+    zh-CN: 请输入 1 到 65535 之间的本地端口
+  not_connected:
+    en: '%{device} is not connected'
+    zh-CN: '%{device} 未连接'
+  already_forwarded:
+    en: 'Port %{port} on %{device} is already forwarded'
+    zh-CN: '%{device} 的端口 %{port} 已经转发'
+  local_port_taken:
+    en: 'localhost:%{remote} was in use, so %{local} is used'
+    zh-CN: 'localhost:%{remote} 已被占用，因此改用 %{local}'
+  title:
+    en: Ports
+    zh-CN: 端口
+  all_devices:
+    en: All Devices
+    zh-CN: 所有设备
+  back_to_workspace:
+    en: Back to the Workspace
+    zh-CN: 返回 Workspace
+  reconnecting:
+    en: reconnecting…
+    zh-CN: 正在重新连接…
+  forwarded:
+    en: Forwarded Ports
+    zh-CN: 已转发的端口
+  nothing_forwarded:
+    en: Nothing forwarded yet.
+    zh-CN: 还没有端口转发。
+  form:
+    title:
+      en: Forward a Port
+      zh-CN: 转发端口
+    description:
+      en: Reach a service running on a remote Device at localhost on this machine.
+      zh-CN: 通过这台机器的 localhost 访问远程设备上运行的服务。
+    no_device:
+      en: Connect a remote Device to forward its ports.
+      zh-CN: 连接一台远程设备，即可转发它的端口。
+    device:
+      en: Device
+      zh-CN: 设备
+    device_port:
+      en: 'Port on %{device}'
+      zh-CN: '%{device} 上的端口'
+    local_port:
+      en: Port on this machine
+      zh-CN: 这台机器上的端口
+    forward:
+      en: Forward
+      zh-CN: 转发
+  card:
+    reconnecting:
+      en: 'reconnecting: %{reason}'
+      zh-CN: '正在重新连接：%{reason}'
+    waiting:
+      en: 'waiting for %{device}'
+      zh-CN: '正在等待 %{device}'
+    on_device:
+      en: 'on %{device}'
+      zh-CN: '位于 %{device}'
+    connections:
+      one:
+        en: '%{count} connection'
+        zh-CN: '%{count} 个连接'
+      other:
+        en: '%{count} connections'
+        zh-CN: '%{count} 个连接'
+    refused:
+      en: 'The last connection was refused: nothing listens on port %{port}.'
+      zh-CN: '上一个连接被拒绝：端口 %{port} 上没有服务在监听。'
+    open_in_browser:
+      en: Open in Browser
+      zh-CN: 在浏览器中打开
+    copy_address:
+      en: Copy Address
+      zh-CN: 复制地址
+    stop:
+      en: Stop
+      zh-CN: 停止

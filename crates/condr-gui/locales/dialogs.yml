@@ -1,0 +1,57 @@
+_version: 2
+dialogs:
+  cancel:
+    en: Cancel
+    zh-CN: 取消
+  enter_name:
+    en: Enter a name
+    zh-CN: 请输入名称
+  copy:
+    en: Copy
+    zh-CN: 复制
+  root_directory:
+    en: Root directory
+    zh-CN: 根目录
+  absolute_path:
+    en: Absolute path on the device
+    zh-CN: 设备上的绝对路径
+  enter_path:
+    en: Enter a path
+    zh-CN: 请输入路径
+  folder_picker_closed:
+    en: The folder picker closed without a result
+    zh-CN: 文件夹选择器关闭了，没有返回结果
+  rename_workspace:
+    en: Rename Workspace
+    zh-CN: 重命名 Workspace
+  save:
+    en: Save
+    zh-CN: 保存
+  enter_branch:
+    en: Enter a branch name
+    zh-CN: 请输入分支名
+  create_worktree:
+    en: Create Worktree
+    zh-CN: 创建 Worktree
+  create:
+    en: Create
+    zh-CN: 创建
+  open_worktree_from:
+    en: 'Open Existing Worktree from %{workspace}'
+    zh-CN: '从 %{workspace} 打开已有 Worktree'
+  open:
+    en: Open
+    zh-CN: 打开
+  remove_worktree:
+    title:
+      en: 'Remove worktree “%{workspace}”?'
+      zh-CN: '移除 Worktree“%{workspace}”？'
+    description:
+      en: The worktree directory will be deleted. Modified or untracked files prevent removal; the branch is kept.
+      zh-CN: Worktree 目录会被删除。有已修改或未跟踪的文件时无法移除；分支会保留。
+    ok:
+      en: Remove
+      zh-CN: 移除
+  rename_tab:
+    en: Rename Tab
+    zh-CN: 重命名 Tab
