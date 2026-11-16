@@ -27,6 +27,8 @@ pub(super) const AGENT_WAIT: Duration = Duration::from_secs(30);
 pub(super) enum AgentRequest {
     Hooks,
     Available,
+    /// Install from the Start half, whose failure is a toast there (ADR 0020).
+    InstallHooks,
 }
 
 /// What a Task request was for, so its answer lands where it belongs.
@@ -38,8 +40,11 @@ pub(super) enum TaskRequest {
     /// behind, deleted once this one exists.
     Create {
         moved_from: Option<(ConnectionKey, TaskId)>,
+        title: String,
     },
-    Edit,
+    Edit {
+        title: String,
+    },
     /// The old copy of a Task the form moved to another Device.
     DeleteMoved {
         title: String,
@@ -250,6 +255,15 @@ pub(super) struct StartChoice {
     pub(super) request: Option<u64>,
 }
 
+/// Where a refusal of the form shows (ADR 0020).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum FormField {
+    Title,
+    Description,
+    /// Under the form's buttons, for what no one field caused.
+    Form,
+}
+
 /// The form in the interaction area's left half, for a To do Task or a new one; nothing
 /// is kept until Save (ADR 0068).
 pub(super) struct TaskForm {
@@ -258,12 +272,20 @@ pub(super) struct TaskForm {
     /// The Device chosen in the form.
     pub(super) device: ConnectionKey,
     pub(super) repository: Option<PathBuf>,
+    /// The repository chosen on each Device the form left, given back on returning.
+    pub(super) repositories: HashMap<ConnectionKey, Option<PathBuf>>,
     pub(super) title: Entity<InputState>,
     pub(super) description: Entity<TextareaState>,
     pub(super) saved: Option<SavedTask>,
     pub(super) description_request: Option<u64>,
+    /// Why the description could not be fetched; Retry asks again.
+    pub(super) description_error: Option<String>,
     /// The save in flight, by Device and request.
     pub(super) saving: Option<(ConnectionKey, u64)>,
+    /// Where the leave dialog's Save was going, once that save is in.
+    pub(super) after_save: Option<Continuation>,
+    /// The last save's refusal, under the field it is about.
+    pub(super) error: Option<(FormField, String)>,
     pub(super) start: StartChoice,
 }
 
@@ -294,12 +316,47 @@ impl TaskForm {
 
     /// A title, and for a saved Task its description fetched, so a save never blanks it.
     fn can_save(&self, cx: &App) -> bool {
-        !self.title_text(cx).is_empty()
-            && self.changed(cx)
-            && self
-                .saved
-                .as_ref()
-                .is_none_or(|saved| saved.description.is_some())
+        !self.title_text(cx).is_empty() && self.changed(cx) && self.description_loaded()
+    }
+
+    /// A new Task's description is there from the start; a saved one's once fetched.
+    pub(super) fn description_loaded(&self) -> bool {
+        self.saved
+            .as_ref()
+            .is_none_or(|saved| saved.description.is_some())
+    }
+
+    fn error_for(&self, field: FormField) -> Option<String> {
+        self.error
+            .as_ref()
+            .filter(|(at, _)| *at == field)
+            .map(|(_, message)| message.clone())
+    }
+}
+
+/// What the Server would refuse in a form, said under its field before anything is sent.
+fn form_refusal(title: &str, description: &str) -> Option<(FormField, String)> {
+    if title.chars().any(char::is_control) {
+        Some((
+            FormField::Title,
+            t!("tasks.form.title_one_line").into_owned(),
+        ))
+    } else if title.len() > condr_core::MAX_TASK_TITLE_BYTES {
+        Some((
+            FormField::Title,
+            t!(
+                "tasks.form.title_too_long",
+                bytes = condr_core::MAX_TASK_TITLE_BYTES
+            )
+            .into_owned(),
+        ))
+    } else if description.len() > condr_core::MAX_TASK_DESCRIPTION_BYTES {
+        Some((
+            FormField::Description,
+            t!("tasks.form.description_too_long").into_owned(),
+        ))
+    } else {
+        None
     }
 }
 
@@ -378,12 +435,9 @@ impl Condr {
                     t!("tasks.form.save"),
                     ChoiceStyle::Primary,
                     can_save,
-                    move |this, window, cx| {
-                        this.save_task_form(cx);
-                        this.task_form = None;
-                        cx.notify();
+                    move |this, _, cx| {
                         if let Some(then) = save.borrow_mut().take() {
-                            then(this, window, cx);
+                            this.save_then_leave(then, cx);
                         }
                     },
                 ),
@@ -515,8 +569,12 @@ impl Condr {
                     })
             }),
             saved,
+            repositories: HashMap::new(),
             description_request: None,
+            description_error: None,
             saving: None,
+            after_save: None,
+            error: None,
             start: StartChoice {
                 place: None,
                 workspace: None,
@@ -535,7 +593,9 @@ impl Condr {
             return;
         };
         let asked = |request| connection.device_tasks.agent_requests.contains(&request);
-        let ask_hooks = connection.hooks.is_empty() && !asked(AgentRequest::Hooks);
+        let ask_hooks = connection.hooks.is_empty()
+            && !asked(AgentRequest::Hooks)
+            && !asked(AgentRequest::InstallHooks);
         if connection.device_tasks.available.is_none() && !asked(AgentRequest::Available) {
             connection.send_agents_available();
         }
@@ -560,7 +620,7 @@ impl Condr {
         };
         self.clear_task_selection(window, cx);
         let branch = default_branch(&task);
-        let mut form = self.make_task_form(
+        let form = self.make_task_form(
             Some((key, task_id)),
             key,
             task.repository.clone(),
@@ -574,13 +634,22 @@ impl Condr {
             window,
             cx,
         );
-        form.description_request = self.connection_mut(key).and_then(|connection| {
-            connection.send_task(
-                TaskCommand::Get { task: task_id },
-                TaskRequest::Get(task_id),
-            )
-        });
         self.task_form = Some(form);
+        self.fetch_form_description(cx);
+        if let Some(form) = self
+            .task_form
+            .as_mut()
+            .filter(|form| form.description_request.is_none())
+        {
+            let label = self
+                .connections
+                .iter()
+                .find(|connection| connection.key == key)
+                .map(|connection| connection.label.clone())
+                .unwrap_or_default();
+            form.description_error =
+                Some(t!("tasks.band.not_connected", device = label).into_owned());
+        }
         self.ask_task_agents(key);
         cx.notify();
     }
@@ -618,21 +687,47 @@ impl Condr {
         );
     }
 
+    /// Whether the form's save is still on its way.
+    fn save_in_flight(&self) -> bool {
+        self.task_form.as_ref().is_some_and(|form| {
+            form.saving.is_some_and(|(key, request)| {
+                self.connection(key)
+                    .is_some_and(|connection| connection.device_tasks.asked(Some(request)))
+            })
+        })
+    }
+
+    /// The leave dialog's Save: the form goes once its save is in, and stays with the
+    /// refusal when the save is refused or cannot be sent.
+    fn save_then_leave(&mut self, then: Continuation, cx: &mut Context<Self>) {
+        if !self.save_in_flight() && !self.save_task_form(cx) {
+            return;
+        }
+        if let Some(form) = &mut self.task_form {
+            form.after_save = Some(then);
+        }
+    }
+
     /// Save, and `Cmd+S` in the form: creates a new Task, edits a saved one, or moves a
-    /// To do Task to the chosen Device by creating it there and deleting it here.
-    pub(super) fn save_task_form(&mut self, cx: &mut Context<Self>) {
-        let Some(form) = &self.task_form else {
-            return;
+    /// To do Task to the chosen Device by creating it there and deleting it here. Says
+    /// whether the save went out; what stopped it shows in the form.
+    pub(super) fn save_task_form(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.save_in_flight() {
+            return false;
+        }
+        let Some(form) = &mut self.task_form else {
+            return false;
         };
-        let saving = form.saving.is_some_and(|(key, request)| {
-            self.connection(key)
-                .is_some_and(|connection| connection.device_tasks.asked(Some(request)))
-        });
-        if saving || !form.can_save(cx) {
-            return;
+        if !form.can_save(cx) {
+            return false;
         }
         let title = form.title_text(cx);
         let description = form.description_text(cx);
+        form.error = form_refusal(&title, &description);
+        if form.error.is_some() {
+            cx.notify();
+            return false;
+        }
         let (device, repository, home) = (form.device, form.repository.clone(), form.home);
         let edit = match (home, &form.saved) {
             (Some((home_key, task)), Some(saved)) if home_key == device => {
@@ -647,36 +742,140 @@ impl Condr {
             _ => None,
         };
         let (command, request) = match edit {
-            Some(edit) => (edit, TaskRequest::Edit),
+            Some(edit) => (
+                edit,
+                TaskRequest::Edit {
+                    title: title.clone(),
+                },
+            ),
             None => (
                 TaskCommand::Create {
                     title: title.clone(),
                     description,
                     repository,
                 },
-                TaskRequest::Create { moved_from: home },
+                TaskRequest::Create {
+                    moved_from: home,
+                    title,
+                },
             ),
         };
         let Some(connection) = self.connection_mut(device) else {
-            return;
+            return false;
         };
         let label = connection.label.clone();
-        match connection.send_task(command, request) {
-            Some(request) => {
-                if let Some(form) = &mut self.task_form {
-                    form.saving = Some((device, request));
+        let sent = connection.send_task(command, request);
+        if let Some(form) = &mut self.task_form {
+            match sent {
+                Some(request) => form.saving = Some((device, request)),
+                None => {
+                    form.error = Some((
+                        FormField::Form,
+                        t!("tasks.band.not_connected", device = label).into_owned(),
+                    ))
                 }
             }
-            None => self.report_error(
-                t!(
-                    "tasks.form.save_failed",
-                    title = title,
-                    error = t!("tasks.band.not_connected", device = label)
-                ),
-                cx,
-            ),
         }
         cx.notify();
+        sent.is_some()
+    }
+
+    /// The form's save is in: where the leave dialog's Save was going, it goes now,
+    /// asking again only about changes made since.
+    fn leave_after_save(&mut self, cx: &mut Context<Self>) {
+        let Some(then) = self
+            .task_form
+            .as_mut()
+            .and_then(|form| form.after_save.take())
+        else {
+            return;
+        };
+        self.in_main_window(cx, move |this, window, cx| {
+            this.leave_task_form(then, window, cx)
+        });
+    }
+
+    /// Fetches the description of the form's Task again, unless a fetch is on its way.
+    pub(super) fn fetch_form_description(&mut self, cx: &mut Context<Self>) {
+        let Some(form) = &self.task_form else {
+            return;
+        };
+        let (Some((key, task_id)), asked) = (form.home, form.description_request) else {
+            return;
+        };
+        let Some(connection) = self.connection_mut(key) else {
+            return;
+        };
+        if connection.device_tasks.asked(asked) {
+            return;
+        }
+        let request = connection.send_task(
+            TaskCommand::Get { task: task_id },
+            TaskRequest::Get(task_id),
+        );
+        if let Some(form) = &mut self.task_form {
+            form.description_request = request;
+            if request.is_some() {
+                form.description_error = None;
+            }
+        }
+        cx.notify();
+    }
+
+    /// The Server's copy of the form's Task, with its description: fields the person has
+    /// not touched follow it, so a save never takes back another Client's change.
+    fn resync_task_form(&mut self, key: ConnectionKey, task: TaskRecord, cx: &mut Context<Self>) {
+        let Some(form) = self
+            .task_form
+            .as_mut()
+            .filter(|form| form.home == Some((key, task.id)))
+        else {
+            return;
+        };
+        let old = form.saved.take();
+        let (title_now, description_now) = (form.title_text(cx), form.description_text(cx));
+        let title_untouched = old.as_ref().is_none_or(|old| title_now == old.title);
+        let loading = old.as_ref().is_some_and(|old| old.description.is_none());
+        let description_untouched = old
+            .as_ref()
+            .and_then(|old| old.description.as_ref())
+            .is_none_or(|old| *old == description_now);
+        if form.device == key
+            && old
+                .as_ref()
+                .is_none_or(|old| form.repository == old.repository)
+        {
+            form.repository = task.repository.clone();
+        }
+        let description = task
+            .description
+            .clone()
+            .or_else(|| old.and_then(|old| old.description));
+        form.saved = Some(SavedTask {
+            title: task.title.clone(),
+            description: description.clone(),
+            repository: task.repository.clone(),
+        });
+        let title = (title_untouched && title_now != task.title).then(|| task.title.clone());
+        let description = description
+            .filter(|description| description_untouched && *description != description_now);
+        let (title_input, description_input) = (form.title.clone(), form.description.clone());
+        if title.is_none() && description.is_none() && !loading {
+            return;
+        }
+        self.in_main_window(cx, move |_, window, cx| {
+            if let Some(title) = title {
+                title_input.update(cx, |input, cx| input.set_value(title, window, cx));
+            }
+            description_input.update(cx, |input, cx| {
+                if loading {
+                    input.set_placeholder(t!("tasks.form.description_placeholder"), window, cx);
+                }
+                if let Some(description) = description {
+                    input.set_value(description, window, cx);
+                }
+            });
+        });
     }
 
     /// A Task request's answer.
@@ -695,45 +894,64 @@ impl Condr {
         };
         match (request, result) {
             (TaskRequest::Get(task_id), Ok(TaskResponse::Task(task))) => {
-                let Some(form) = self
+                if let Some(form) = self
                     .task_form
                     .as_mut()
                     .filter(|form| form.home == Some((key, task_id)))
-                else {
-                    return;
-                };
-                let description = task.description.unwrap_or_default();
-                if let Some(saved) = &mut form.saved {
-                    saved.description = Some(description.clone());
+                {
+                    form.description_error = None;
                 }
-                let input = form.description.clone();
-                self.in_main_window(cx, move |_, window, cx| {
-                    input.update(cx, |input, cx| {
-                        input.set_placeholder(t!("tasks.form.description_placeholder"), window, cx);
-                        input.set_value(description, window, cx);
-                    });
-                });
+                self.resync_task_form(key, task, cx);
+            }
+            (TaskRequest::Get(task_id), Err(error)) => {
+                if let Some(form) = self
+                    .task_form
+                    .as_mut()
+                    .filter(|form| form.home == Some((key, task_id)))
+                {
+                    form.description_error = Some(error.message);
+                }
             }
             (TaskRequest::ListArchived, Ok(TaskResponse::Tasks(tasks))) => {
                 connection.device_tasks.archived = Some(tasks);
             }
-            (TaskRequest::Create { moved_from }, Ok(TaskResponse::Task(task))) => {
+            (TaskRequest::Create { moved_from, .. }, Ok(TaskResponse::Task(task))) => {
                 if let Some((old_key, old_task)) = moved_from {
                     let device = connection.label.clone();
                     let title = task.title.clone();
-                    if let Some(old) = self.connection_mut(old_key) {
-                        old.send_task(
-                            TaskCommand::Delete { task: old_task },
-                            TaskRequest::DeleteMoved { title, device },
+                    let request = TaskRequest::DeleteMoved {
+                        title: title.clone(),
+                        device: device.clone(),
+                    };
+                    let sent = self.connection_mut(old_key).and_then(|old| {
+                        old.send_task(TaskCommand::Delete { task: old_task }, request)
+                    });
+                    // Both copies stay; the person is told (ADR 0068).
+                    if sent.is_none() {
+                        let old = self
+                            .connection(old_key)
+                            .map(|old| old.label.clone())
+                            .unwrap_or_default();
+                        let error = t!("tasks.band.not_connected", device = old);
+                        self.report_error(
+                            t!(
+                                "tasks.form.move_failed",
+                                title = title,
+                                device = device,
+                                old = old,
+                                error = error
+                            ),
+                            cx,
                         );
                     }
                 }
-                if let Some(form) = self
+                let ours = self
                     .task_form
-                    .as_mut()
-                    .filter(|form| form.saving == Some((key, request_id)))
-                {
+                    .as_ref()
+                    .is_some_and(|form| form.saving == Some((key, request_id)));
+                if ours && let Some(form) = &mut self.task_form {
                     form.saving = None;
+                    form.error = None;
                     form.home = Some((key, task.id));
                     form.device = key;
                     form.saved = Some(saved_task(&task));
@@ -743,16 +961,20 @@ impl Condr {
                     self.in_main_window(cx, move |_, window, cx| {
                         input.update(cx, |input, cx| input.set_value(branch, window, cx));
                     });
+                    self.ask_task_agents(key);
+                    self.leave_after_save(cx);
                 }
             }
-            (TaskRequest::Edit, Ok(TaskResponse::Task(task))) => {
-                if let Some(form) = self
-                    .task_form
-                    .as_mut()
-                    .filter(|form| form.home == Some((key, task.id)))
-                {
-                    form.saving = None;
-                    form.saved = Some(saved_task(&task));
+            (TaskRequest::Edit { .. }, Ok(TaskResponse::Task(task))) => {
+                let ours = self.task_form.as_mut().and_then(|form| {
+                    (form.saving == Some((key, request_id))).then(|| {
+                        form.saving = None;
+                        form.error = None;
+                    })
+                });
+                self.resync_task_form(key, task, cx);
+                if ours.is_some() {
+                    self.leave_after_save(cx);
                 }
             }
             (TaskRequest::Start(task_id), result) => {
@@ -771,24 +993,28 @@ impl Condr {
                     cx,
                 );
             }
-            (TaskRequest::Create { .. } | TaskRequest::Edit, Err(error)) => {
-                let title = self
+            // A refusal stays in the form it is about, which stays open; with the form
+            // gone, a toast names the Task.
+            (TaskRequest::Create { title, .. } | TaskRequest::Edit { title }, Err(error)) => {
+                match self
                     .task_form
                     .as_mut()
                     .filter(|form| form.saving == Some((key, request_id)))
-                    .map(|form| {
+                {
+                    Some(form) => {
                         form.saving = None;
-                        form.title_text(cx)
-                    })
-                    .unwrap_or_default();
-                self.report_error(
-                    t!(
-                        "tasks.form.save_failed",
-                        title = title,
-                        error = error.message
+                        form.after_save = None;
+                        form.error = Some((FormField::Form, error.message));
+                    }
+                    None => self.report_error(
+                        t!(
+                            "tasks.form.save_failed",
+                            title = title,
+                            error = error.message
+                        ),
+                        cx,
                     ),
-                    cx,
-                );
+                }
             }
             (_, Err(error)) => {
                 self.report_error(t!("tasks.request_failed", error = error.message), cx)
@@ -838,11 +1064,24 @@ impl Condr {
             }
         }
         let (id, started) = (task.id, task.workspace.is_some() && !task.archived);
+        if !started {
+            // Back in To do: a later Start waits afresh.
+            connection.device_tasks.waiting.remove(&id);
+        }
         connection.model.apply_task(task);
         if started && !was_started {
             self.watch_task_start(key, id, false, cx);
         }
         self.reconcile_task_form(cx);
+        // Another Client may have changed what the form shows, and an event carries no
+        // description: the form fetches the Task again.
+        if self
+            .task_form
+            .as_ref()
+            .is_some_and(|form| form.home == Some((key, id)) && form.description_loaded())
+        {
+            self.fetch_form_description(cx);
+        }
     }
 
     pub(super) fn task_removed(
@@ -865,6 +1104,25 @@ impl Condr {
     /// with the old stream is fetched again, and an unfolded Archived list too.
     pub(super) fn tasks_bootstrapped(&mut self, key: ConnectionKey, cx: &mut Context<Self>) {
         self.reconcile_task_form(cx);
+        // Answers lost with the old stream, or to writer lag, never come.
+        if let (Some(form), Some(connection)) = (
+            &mut self.task_form,
+            self.connections
+                .iter()
+                .find(|connection| connection.key == key),
+        ) {
+            let lost = |request: u64| !connection.device_tasks.asked(Some(request));
+            if form
+                .saving
+                .is_some_and(|(at, request)| at == key && lost(request))
+            {
+                form.saving = None;
+                form.after_save = None;
+            }
+            if form.home.is_some_and(|(at, _)| at == key) && form.start.request.is_some_and(lost) {
+                form.start.request = None;
+            }
+        }
         if self
             .task_form
             .as_ref()
@@ -924,10 +1182,17 @@ impl Condr {
                 self.task_form = None;
                 cx.notify();
             }
-            Some(task) if task.workspace.is_some() => {
+            // A form with changes stays for the person to save or leave; it follows the
+            // Task once it has none.
+            Some(task)
+                if task.workspace.is_some()
+                    && !self.task_form.as_ref().is_some_and(|form| form.changed(cx)) =>
+            {
                 self.task_form = None;
                 self.in_main_window(cx, move |this, window, cx| {
-                    this.select_started_task(key, task_id, false, window, cx);
+                    if this.task_form.is_none() {
+                        this.select_started_task(key, task_id, false, window, cx);
+                    }
                 });
                 cx.notify();
             }
@@ -1036,13 +1301,20 @@ impl Condr {
             *mine |= own;
             return;
         }
-        connection
-            .device_tasks
-            .waiting
-            .insert(task, (Instant::now(), own));
+        let started = Instant::now();
+        connection.device_tasks.waiting.insert(task, (started, own));
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(AGENT_WAIT).await;
-            let _ = this.update(cx, |this, cx| this.task_start_settled(key, task, cx));
+            let _ = this.update(cx, |this, cx| {
+                // Only this Start's wait: the Task may have gone back and started again.
+                let current = this
+                    .connection(key)
+                    .and_then(|connection| connection.device_tasks.waiting.get(&task))
+                    .map(|(at, _)| *at);
+                if current == Some(started) {
+                    this.task_start_settled(key, task, cx);
+                }
+            });
         })
         .detach();
     }
@@ -1145,20 +1417,29 @@ impl Condr {
         result: Result<TaskResponse, TaskError>,
         cx: &mut Context<Self>,
     ) {
+        if let Ok(TaskResponse::Started { pane_id, .. }) = result {
+            self.watch_task_start(key, task_id, true, cx);
+            // The started Task's card takes the area only from a form that loses nothing
+            // by it: none, or this Task's own without changes.
+            let follow = self
+                .task_form
+                .as_ref()
+                .is_none_or(|form| form.home == Some((key, task_id)) && !form.changed(cx));
+            if follow {
+                self.task_form = None;
+                self.in_main_window(cx, move |this, window, cx| {
+                    if this.task_form.is_none() {
+                        this.select_card(key, pane_id, Some(task_id), true, window, cx);
+                    }
+                });
+            }
+            return;
+        }
         let form = self
             .task_form
             .as_mut()
             .filter(|form| form.home == Some((key, task_id)));
         match result {
-            Ok(TaskResponse::Started { pane_id, .. }) => {
-                if form.is_some() {
-                    self.task_form = None;
-                }
-                self.watch_task_start(key, task_id, true, cx);
-                self.in_main_window(cx, move |this, window, cx| {
-                    this.select_card(key, pane_id, Some(task_id), true, window, cx);
-                });
-            }
             Ok(_) => {}
             Err(error) if error.code == task_error::BRANCH_CHECKED_OUT && form.is_some() => {
                 let form = form.expect("checked above");
@@ -1434,10 +1715,14 @@ impl Condr {
         if let Some(form) = &mut self.task_form
             && form.device != device
         {
+            // Each Device's repository is its own; coming back gives the choice back.
+            let left = form.repository.take();
+            form.repositories.insert(form.device, left);
+            form.repository = form.repositories.remove(&device).flatten();
             form.device = device;
-            form.repository = None;
             cx.notify();
         }
+        self.ask_task_agents(device);
     }
 
     pub(super) fn choose_task_repository(
@@ -1484,7 +1769,10 @@ impl Condr {
         });
         let blocked = if form.changed(cx) {
             Some(t!("tasks.start.save_first").into_owned())
-        } else if task.starting || connection.device_tasks.asked(form.start.request) {
+        } else if task.starting
+            || task.workspace.is_some()
+            || connection.device_tasks.asked(form.start.request)
+        {
             Some(t!("tasks.todo.starting").into_owned())
         } else if place.is_none() {
             Some(t!("tasks.start.nowhere", device = connection.label).into_owned())
@@ -1793,7 +2081,9 @@ impl Condr {
             .id("task-form")
             .debug_selector(|| "task-form".into())
             .key_context("CondrTaskForm")
-            .on_action(cx.listener(|this, _: &SaveFile, _, cx| this.save_task_form(cx)))
+            .on_action(cx.listener(|this, _: &SaveFile, _, cx| {
+                this.save_task_form(cx);
+            }))
             .flex_1()
             .min_w_0()
             .gap_2()
@@ -1803,6 +2093,10 @@ impl Condr {
                     .debug_selector(|| "task-form-title".into())
                     .child(Input::new(&form.title).small()),
             )
+            .children(super::dialogs::field_error(
+                form.error_for(FormField::Title),
+                cx,
+            ))
             .child(
                 h_flex()
                     .gap_1()
@@ -1817,8 +2111,35 @@ impl Condr {
             .child(
                 div()
                     .debug_selector(|| "task-form-description".into())
-                    .child(Textarea::new(&form.description)),
+                    // Typing before it arrives would be overwritten.
+                    .child(Textarea::new(&form.description).disabled(!form.description_loaded())),
             )
+            .children(super::dialogs::field_error(
+                form.error_for(FormField::Description),
+                cx,
+            ))
+            .children(form.description_error.clone().map(|error| {
+                let retry_owner = owner.clone();
+                h_flex()
+                    .debug_selector(|| "task-form-description-error".into())
+                    .gap_2()
+                    .items_center()
+                    .children(super::dialogs::field_error(
+                        Some(t!("tasks.form.load_failed", error = error).into_owned()),
+                        cx,
+                    ))
+                    .child(
+                        Button::new("task-form-retry")
+                            .debug_selector(|| "task-form-retry".into())
+                            .ghost()
+                            .xsmall()
+                            .label(t!("tasks.form.retry"))
+                            .on_click(move |_, _, cx| {
+                                let _ = retry_owner
+                                    .update(cx, |this, cx| this.fetch_form_description(cx));
+                            }),
+                    )
+            }))
             .child(
                 h_flex()
                     .gap_3()
@@ -1840,6 +2161,10 @@ impl Condr {
                     ),
             )
             .child(buttons)
+            .children(super::dialogs::field_error(
+                form.error_for(FormField::Form),
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -2074,7 +2399,13 @@ impl Condr {
                         .label(t!("tasks.start.install"))
                         .on_click(move |_, _, cx| {
                             let _ = hooks_owner.update(cx, |this, cx| {
-                                this.set_agent_hooks(key, agent, HooksAction::Install);
+                                if let Some(connection) = this.connection_mut(key) {
+                                    connection.send_hooks_request(
+                                        agent,
+                                        HooksAction::Install,
+                                        AgentRequest::InstallHooks,
+                                    );
+                                }
                                 cx.notify();
                             });
                         }),

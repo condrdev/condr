@@ -144,6 +144,21 @@ tasks:
     delete:
       en: Delete
       zh-CN: 删除
+    title_one_line:
+      en: A title is one line of text.
+      zh-CN: 标题只能是一行文字。
+    title_too_long:
+      en: A title is at most %{bytes} bytes.
+      zh-CN: 标题最多 %{bytes} 字节。
+    description_too_long:
+      en: A description is at most 64 KiB.
+      zh-CN: 描述最多 64 KiB。
+    load_failed:
+      en: "Couldn't load the description: %{error}"
+      zh-CN: "无法载入描述：%{error}"
+    retry:
+      en: Retry
+      zh-CN: 重试
     save_to_start:
       en: Save the task to start it.
       zh-CN: 保存 Task 之后才能开始。
@@ -229,6 +244,9 @@ tasks:
     install:
       en: Install
       zh-CN: 安装
+    install_failed:
+      en: "Couldn't install the hooks: %{error}"
+      zh-CN: "无法安装 Hook：%{error}"
     button:
       en: Start %{agent}
       zh-CN: 用 %{agent} 开始

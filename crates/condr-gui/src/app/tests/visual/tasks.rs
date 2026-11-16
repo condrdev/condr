@@ -966,7 +966,9 @@ fn a_new_task_saves_with_the_shortcut_and_unsaved_changes_ask_before_they_go() {
     window.simulate_input("!");
     click(window, "tasks-area-close");
     click(window, "file-choice-save");
-    assert!(window.read(|app| view.read(app).task_form.is_none()));
+    // The form goes once its save is in.
+    assert!(wait_until(window, |window| window
+        .read(|app| view.read(app).task_form.is_none())));
     assert!(wait_until(window, |window| gui_tasks(window, &view)
         [&other]
         .title
@@ -1561,8 +1563,19 @@ fn a_new_device_for_a_to_do_task_creates_it_there_and_deletes_it_here() {
         "a move is a change to save before Start"
     );
     click(window, "task-form-save");
-    let (request_id, title, description) = box_sent
-        .try_iter()
+    let to_box: Vec<ClientMessage> = box_sent.try_iter().collect();
+    assert!(
+        to_box.iter().any(|message| matches!(
+            message,
+            ClientMessage::Agent {
+                command: condr_core::protocol::AgentCommand::Available,
+                ..
+            }
+        )),
+        "the Device the Task moves to is asked for its Agents"
+    );
+    let (request_id, title, description) = to_box
+        .into_iter()
         .find_map(|message| match message {
             ClientMessage::Task {
                 request_id,
@@ -1619,25 +1632,661 @@ fn a_new_device_for_a_to_do_task_creates_it_there_and_deletes_it_here() {
         "then the old Device deletes its copy"
     );
 
-    // A delete that fails leaves both copies and says so.
-    window.update(|_, cx| {
-        view.update(cx, |this, _| {
-            this.connection_mut(2).unwrap().device_tasks.pending.insert(
-                900,
-                super::super::super::task_form::TaskRequest::DeleteMoved {
-                    title: "Fix the login redirect".into(),
-                    device: "Local".into(),
-                },
-            );
+    // From a Device whose delete fails: both copies stay, and a toast says so.
+    let stay = |window: &mut VisualTestContext, id: u64| {
+        let mut task = moved_task(id);
+        task.description = None;
+        window.update(|_, cx| {
+            view.update(cx, |this, _| {
+                this.connection_mut(2).unwrap().model.apply_task(task);
+            })
+        });
+        window.update(|window, cx| {
+            view.update(cx, |this, cx| {
+                this.open_task_form(2, TaskId::from_u64(id), window, cx)
+            })
+        });
+        let get = box_sent
+            .try_iter()
+            .find_map(|message| match message {
+                ClientMessage::Task {
+                    request_id,
+                    command: TaskCommand::Get { .. },
+                    ..
+                } => Some(request_id),
+                _ => None,
+            })
+            .expect("the form fetches its description");
+        answer(window, get, Ok(TaskResponse::Task(moved_task(id))));
+        window.update(|_, cx| view.update(cx, |this, cx| this.choose_task_device(1, cx)));
+    };
+    stay(window, 7);
+    click(window, "task-form-save");
+    assert!(wait_until(window, |window| gui_tasks(window, &view).len() == 1));
+    let delete = box_sent
+        .try_iter()
+        .find_map(|message| match message {
+            ClientMessage::Task {
+                request_id,
+                command: TaskCommand::Delete { task },
+                ..
+            } if task == TaskId::from_u64(7) => Some(request_id),
+            _ => None,
         })
-    });
+        .expect("the old Device is asked to delete its copy");
     answer(
         window,
-        900,
+        delete,
         Err(condr_core::TaskError::new(
             condr_core::task_error::TASK_STARTED,
-            "Task 5 is started; archive it first",
+            "Task 7 is started; archive it first",
         )),
     );
     assert!(window.read(|app| view.read(app).last_error.is_some()));
+    let both = window.read(|app| {
+        view.read(app)
+            .connection(2)
+            .unwrap()
+            .model
+            .tasks
+            .as_ref()
+            .unwrap()
+            .contains_key(&TaskId::from_u64(7))
+    });
+    assert!(both, "the old copy stays beside the new one");
+
+    // An old Device gone before the new copy exists: nothing to delete it on, said so.
+    window.update(|_, cx| view.update(cx, |this, _| this.last_error = None));
+    stay(window, 8);
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.connection_mut(2).unwrap().status = ConnectionStatus::Disconnected;
+        })
+    });
+    click(window, "task-form-save");
+    assert!(wait_until(window, |window| gui_tasks(window, &view).len() == 2));
+    window.run_until_parked();
+    assert!(window.read(|app| view.read(app).last_error.is_some()));
+}
+
+/// A Task on the test's own second Device.
+fn moved_task(id: u64) -> condr_core::Task {
+    condr_core::Task {
+        id: TaskId::from_u64(id),
+        title: format!("Moved {id}"),
+        description: Some("Fix the login redirect, described".into()),
+        repository: None,
+        order: 0,
+        archived: false,
+        workspace: None,
+        made_workspace: false,
+        starting: false,
+        last: None,
+    }
+}
+
+/// Opens a To do Task's form and waits for its description.
+fn open_form(window: &mut VisualTestContext, view: &Entity<Condr>, task: TaskId) {
+    click(window, todo_card(task));
+    assert!(wait_until(window, |window| window.read(|app| {
+        view.read(app)
+            .task_form
+            .as_ref()
+            .is_some_and(|form| form.description_loaded())
+    })));
+    draw(window);
+}
+
+fn form_text(window: &mut VisualTestContext, view: &Entity<Condr>) -> (String, String) {
+    window.read(|app| {
+        let form = view.read(app).task_form.as_ref().unwrap();
+        (
+            form.title.read(app).value().to_string(),
+            form.description.read(app).value().to_string(),
+        )
+    })
+}
+
+fn set_title(window: &mut VisualTestContext, view: &Entity<Condr>, title: &str) {
+    let input = window.read(|app| view.read(app).task_form.as_ref().unwrap().title.clone());
+    let title = title.to_owned();
+    window.update(|window, cx| input.update(cx, |input, cx| input.set_value(title, window, cx)));
+    draw(window);
+}
+
+fn form_error(
+    window: &mut VisualTestContext,
+    view: &Entity<Condr>,
+) -> Option<super::super::super::task_form::FormField> {
+    window.read(|app| {
+        view.read(app)
+            .task_form
+            .as_ref()
+            .and_then(|form| form.error.as_ref())
+            .map(|(field, _)| *field)
+    })
+}
+
+#[test]
+fn a_start_answer_never_takes_a_form_that_would_lose_text() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    let (view, window, _server, mut cli) = tasks_gui(&mut cx);
+    // Two Workspaces, one for each Start.
+    for index in 0..2 {
+        let root_directory = std::env::temp_dir().join(format!("condr-tasks-answer-{index}"));
+        std::fs::create_dir_all(&root_directory).unwrap();
+        window.update(|_, cx| {
+            view.update(cx, |this, _| {
+                this.send_layout(LayoutCommand::CreateWorkspace {
+                    name: None,
+                    root_directory,
+                });
+            });
+        });
+        assert!(wait_until(window, |window| window.read(|app| {
+            view.read(app)
+                .active_session()
+                .is_some_and(|session| session.workspaces().len() > index)
+        })));
+    }
+    let workspaces = window.read(|app| {
+        view.read(app)
+            .active_session()
+            .unwrap()
+            .workspaces()
+            .iter()
+            .map(|workspace| workspace.id())
+            .collect::<Vec<_>>()
+    });
+    let started = create_task(&mut cli, "Fix the login redirect", None);
+    let other = create_task(&mut cli, "Write the release notes", None);
+    let own = create_task(&mut cli, "Update the changelog", None);
+    assert!(wait_until(window, |window| gui_tasks(window, &view).len() == 3));
+    window.update(|window, cx| view.update(cx, |this, cx| this.toggle_tasks(window, cx)));
+    draw(window);
+    let sent = capture(window, &view);
+    // The form's description, answered by hand since the Server no longer hears it.
+    let open = |window: &mut VisualTestContext, task: TaskId| {
+        click(window, todo_card(task));
+        let request_id = sent
+            .try_iter()
+            .find_map(|message| match message {
+                ClientMessage::Task {
+                    request_id,
+                    command: TaskCommand::Get { .. },
+                    ..
+                } => Some(request_id),
+                _ => None,
+            })
+            .expect("the form fetches its description");
+        let mut full = gui_tasks(window, &view)[&task].clone();
+        full.description = Some(String::new());
+        incoming(
+            window,
+            &view,
+            ServerMessage::Task {
+                request_id,
+                result: Ok(TaskResponse::Task(full)),
+            },
+        );
+    };
+    let start = |window: &mut VisualTestContext, task: TaskId| {
+        open(window, task);
+        window.update(|_, cx| {
+            view.update(cx, |this, cx| {
+                this.connection_mut(1).unwrap().device_tasks.available =
+                    Some(vec![AgentKind::Claude]);
+                cx.notify();
+            })
+        });
+        draw(window);
+        click(window, "task-start-button");
+        sent.try_iter()
+            .find_map(|message| match message {
+                ClientMessage::Task {
+                    request_id,
+                    command: TaskCommand::Start { .. },
+                    ..
+                } => Some(request_id),
+                _ => None,
+            })
+            .expect("Start is sent")
+    };
+    let started_answer = |window: &mut VisualTestContext,
+                          task: TaskId,
+                          workspace_id: WorkspaceId,
+                          request_id: u64| {
+        let mut record = gui_tasks(window, &view)[&task].clone();
+        record.workspace = Some(workspace_id);
+        event(window, &view, SessionEvent::TaskChanged(record));
+        let (tab_id, pane_id) = window.read(|app| {
+            let tab = &view
+                .read(app)
+                .active_session()
+                .unwrap()
+                .workspace(workspace_id)
+                .unwrap()
+                .tabs()[0];
+            (tab.id(), tab.panes()[0].id())
+        });
+        incoming(
+            window,
+            &view,
+            ServerMessage::Task {
+                request_id,
+                result: Ok(TaskResponse::Started {
+                    workspace_id,
+                    tab_id,
+                    pane_id,
+                }),
+            },
+        );
+    };
+
+    // Another Task's form, with text typed, outlives the Start's answer.
+    let request = start(window, started);
+    open(window, other);
+    set_title(window, &view, "Write the release notes today");
+    started_answer(window, started, workspaces[0], request);
+    assert_eq!(form_home(window, &view), Some((1, other)));
+    assert_eq!(form_text(window, &view).0, "Write the release notes today");
+    assert!(window.read(|app| view.read(app).main_view().tasks_selection.is_none()));
+    assert!(window.read(|app| view.read(app).task_starting(1, started)));
+
+    // As does the started Task's own form with a change: it stays to be saved, and
+    // Start says it is under way.
+    set_title(window, &view, "Write the release notes");
+    let request = start(window, own);
+    set_title(window, &view, "Update the changelog for 0.3");
+    started_answer(window, own, workspaces[1], request);
+    assert_eq!(form_home(window, &view), Some((1, own)));
+    assert_eq!(form_text(window, &view).0, "Update the changelog for 0.3");
+    assert!(window.debug_bounds("task-start-blocked").is_some());
+}
+
+#[test]
+fn the_leave_dialogs_save_keeps_the_form_until_its_save_is_in() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    let (view, window, _server, mut cli) = tasks_gui(&mut cx);
+    let task = create_task(&mut cli, "Fix the login redirect", None);
+    assert!(wait_until(window, |window| gui_tasks(window, &view).len() == 1));
+    window.update(|window, cx| view.update(cx, |this, cx| this.toggle_tasks(window, cx)));
+    draw(window);
+    open_form(window, &view, task);
+    let sent = capture(window, &view);
+    use super::super::super::task_form::FormField;
+
+    // Saved on the way out and refused: the form stays, with the refusal, where it was.
+    set_title(window, &view, "Fix the login redirect!");
+    click(window, "tasks-area-close");
+    click(window, "file-choice-save");
+    assert_eq!(
+        form_home(window, &view),
+        Some((1, task)),
+        "waiting for the answer"
+    );
+    let request_id = sent
+        .try_iter()
+        .find_map(|message| match message {
+            ClientMessage::Task {
+                request_id,
+                command: TaskCommand::Edit { .. },
+                ..
+            } => Some(request_id),
+            _ => None,
+        })
+        .expect("the save is sent");
+    incoming(
+        window,
+        &view,
+        ServerMessage::Task {
+            request_id,
+            result: Err(condr_core::TaskError::new(
+                condr_core::task_error::INVALID_TASK,
+                "no repository Workspace is open at /src/api",
+            )),
+        },
+    );
+    assert_eq!(form_home(window, &view), Some((1, task)));
+    assert_eq!(form_text(window, &view).0, "Fix the login redirect!");
+    assert_eq!(form_error(window, &view), Some(FormField::Form));
+    assert!(inside(window, "field-error", "task-form"));
+    assert!(window.read(|app| view.read(app).last_error.is_none()));
+
+    // What the Server would refuse in a title shows under it, and nothing is sent.
+    set_title(window, &view, "Fix the\u{7}login redirect");
+    click(window, "task-form-save");
+    assert_eq!(form_error(window, &view), Some(FormField::Title));
+    assert!(sent.try_iter().next().is_none());
+
+    // A Device that is not connected keeps the form too.
+    set_title(window, &view, "Fix the login redirect!");
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.connection_mut(1).unwrap().status = ConnectionStatus::Disconnected;
+        })
+    });
+    click(window, "task-form-save");
+    assert_eq!(form_error(window, &view), Some(FormField::Form));
+    assert_eq!(form_home(window, &view), Some((1, task)));
+
+    // With the form gone, a refusal is a toast that names the Task.
+    window.update(|_, cx| {
+        view.update(cx, |this, cx| {
+            this.task_form = None;
+            this.connection_mut(1).unwrap().device_tasks.pending.insert(
+                900,
+                super::super::super::task_form::TaskRequest::Edit {
+                    title: "Fix the login redirect".into(),
+                },
+            );
+            cx.notify();
+        })
+    });
+    incoming(
+        window,
+        &view,
+        ServerMessage::Task {
+            request_id: 900,
+            result: Err(condr_core::TaskError::new(
+                condr_core::task_error::TASK_NOT_FOUND,
+                "no Task 1",
+            )),
+        },
+    );
+    assert!(
+        window
+            .read(|app| view.read(app).last_error.clone())
+            .is_some_and(|error| error.contains("Fix the login redirect"))
+    );
+}
+
+#[test]
+fn a_form_loads_its_description_before_typing_and_follows_the_server_where_untouched() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    let (view, window, _server, mut cli) = tasks_gui(&mut cx);
+    let task = create_task(&mut cli, "Fix the login redirect", None);
+    assert!(wait_until(window, |window| gui_tasks(window, &view).len() == 1));
+    window.update(|window, cx| view.update(cx, |this, cx| this.toggle_tasks(window, cx)));
+    draw(window);
+
+    // A fetch that fails says so and can be asked again; till then nothing is typed.
+    let sent = capture(window, &view);
+    click(window, todo_card(task));
+    let get = |sent: &std::sync::mpsc::Receiver<ClientMessage>| {
+        sent.try_iter()
+            .find_map(|message| match message {
+                ClientMessage::Task {
+                    request_id,
+                    command: TaskCommand::Get { .. },
+                    ..
+                } => Some(request_id),
+                _ => None,
+            })
+            .expect("the form fetches its description")
+    };
+    let request_id = get(&sent);
+    let loaded = |window: &mut VisualTestContext| {
+        window.read(|app| {
+            view.read(app)
+                .task_form
+                .as_ref()
+                .unwrap()
+                .description_loaded()
+        })
+    };
+    assert!(!loaded(window), "the description waits disabled");
+    incoming(
+        window,
+        &view,
+        ServerMessage::Task {
+            request_id,
+            result: Err(condr_core::TaskError::new(
+                condr_core::task_error::INTERNAL_ERROR,
+                "the store is busy",
+            )),
+        },
+    );
+    assert!(window.debug_bounds("task-form-description-error").is_some());
+    click(window, "task-form-retry");
+    let request_id = get(&sent);
+    let mut full = gui_tasks(window, &view)[&task].clone();
+    full.description = Some("Users land on /home.".into());
+    incoming(
+        window,
+        &view,
+        ServerMessage::Task {
+            request_id,
+            result: Ok(TaskResponse::Task(full.clone())),
+        },
+    );
+    assert!(loaded(window));
+    assert!(window.debug_bounds("task-form-description-error").is_none());
+    assert_eq!(form_text(window, &view).1, "Users land on /home.");
+
+    // Another Client's change follows into the untouched description, and a title
+    // saved after it leaves that change alone.
+    full.description = Some("Users land on /home after signing in.".into());
+    event(window, &view, SessionEvent::TaskChanged(full.clone()));
+    let request_id = get(&sent);
+    incoming(
+        window,
+        &view,
+        ServerMessage::Task {
+            request_id,
+            result: Ok(TaskResponse::Task(full.clone())),
+        },
+    );
+    assert_eq!(
+        form_text(window, &view).1,
+        "Users land on /home after signing in."
+    );
+    set_title(window, &view, "Fix the login redirect on Safari");
+    click(window, "task-form-save");
+    let edit = sent.try_iter().find_map(|message| match message {
+        ClientMessage::Task {
+            command: TaskCommand::Edit {
+                title, description, ..
+            },
+            ..
+        } => Some((title, description)),
+        _ => None,
+    });
+    assert_eq!(
+        edit,
+        Some((Some("Fix the login redirect on Safari".into()), None)),
+        "only the title is sent"
+    );
+
+    // A repository chosen on one Device comes back with it.
+    window.update(|_, cx| {
+        view.update(cx, |this, cx| {
+            this.choose_task_repository(Some("/src/api".into()), cx);
+            this.choose_task_device(99, cx);
+        })
+    });
+    let repository = |window: &mut VisualTestContext| {
+        window.read(|app| {
+            view.read(app)
+                .task_form
+                .as_ref()
+                .unwrap()
+                .repository
+                .clone()
+        })
+    };
+    assert_eq!(repository(window), None);
+    window.update(|_, cx| view.update(cx, |this, cx| this.choose_task_device(1, cx)));
+    assert_eq!(repository(window), Some("/src/api".into()));
+}
+
+#[test]
+fn a_task_started_again_waits_afresh_for_its_agent() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    let (view, window, _server, mut cli) = tasks_gui(&mut cx);
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                root_directory: std::env::temp_dir(),
+            });
+        });
+    });
+    assert!(wait_until(window, |window| presented(window, &view).is_some()));
+    let (workspace_id, _) = presented(window, &view).unwrap();
+    let task = create_task(&mut cli, "Fix the login redirect", None);
+    assert!(wait_until(window, |window| gui_tasks(window, &view).len() == 1));
+    let _sent = capture(window, &view);
+    let mut record = gui_tasks(window, &view)[&task].clone();
+    let waiting = |window: &mut VisualTestContext| {
+        window.read(|app| {
+            view.read(app)
+                .connection(1)
+                .unwrap()
+                .device_tasks
+                .waiting
+                .contains_key(&task)
+        })
+    };
+    record.workspace = Some(workspace_id);
+    event(window, &view, SessionEvent::TaskChanged(record.clone()));
+    assert!(waiting(window));
+    // Its Workspace closed: back in To do, and the wait is over.
+    record.workspace = None;
+    event(window, &view, SessionEvent::TaskChanged(record.clone()));
+    assert!(!waiting(window));
+    window.executor().advance_clock(Duration::from_secs(20));
+    record.workspace = Some(workspace_id);
+    event(window, &view, SessionEvent::TaskChanged(record));
+    // The first Start's thirty seconds pass; the second's have not.
+    window.executor().advance_clock(Duration::from_secs(15));
+    window.run_until_parked();
+    assert!(
+        waiting(window),
+        "the first Start's timer leaves the second's wait"
+    );
+    window.executor().advance_clock(Duration::from_secs(20));
+    window.run_until_parked();
+    assert!(!waiting(window));
+}
+
+#[test]
+fn a_recovery_bootstrap_forgets_answers_it_dropped_and_asks_again() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    let (view, window, _server, mut cli) = tasks_gui(&mut cx);
+    let task = create_task(&mut cli, "Fix the login redirect", None);
+    assert!(wait_until(window, |window| gui_tasks(window, &view).len() == 1));
+    window.update(|window, cx| view.update(cx, |this, cx| this.toggle_tasks(window, cx)));
+    draw(window);
+    open_form(window, &view, task);
+    set_title(window, &view, "Fix the login redirect!");
+    // A save whose answer, and an Agent request whose answer, writer lag dropped.
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            let connection = this.connection_mut(1).unwrap();
+            connection.device_tasks.pending.insert(
+                900,
+                super::super::super::task_form::TaskRequest::Edit {
+                    title: "Fix the login redirect!".into(),
+                },
+            );
+            connection
+                .device_tasks
+                .agent_requests
+                .push_front(super::super::super::task_form::AgentRequest::Hooks);
+            connection.recover_after_bootstrap = true;
+            connection.request_snapshot();
+            this.task_form.as_mut().unwrap().saving = Some((1, 900));
+        })
+    });
+    assert!(wait_until(window, |window| window.read(|app| {
+        !view
+            .read(app)
+            .connection(1)
+            .unwrap()
+            .device_tasks
+            .pending
+            .contains_key(&900)
+    })));
+    assert!(window.read(|app| {
+        let view = view.read(app);
+        view.task_form.as_ref().unwrap().saving.is_none()
+            && !view
+                .connection(1)
+                .unwrap()
+                .device_tasks
+                .agent_requests
+                .contains(&super::super::super::task_form::AgentRequest::Hooks)
+    }));
+    // Save works again, and the Agents are asked for again.
+    click(window, "task-form-save");
+    assert!(wait_until(window, |window| gui_tasks(window, &view)[&task]
+        .title
+        .ends_with('!')));
+    assert!(wait_until(window, |window| window.read(|app| {
+        view.read(app)
+            .connection(1)
+            .unwrap()
+            .device_tasks
+            .available
+            .is_some()
+    })));
+}
+
+#[test]
+fn agent_answers_land_where_they_were_asked() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    let (view, window, _server, _cli) = tasks_gui(&mut cx);
+    let _sent = capture(window, &view);
+    use super::super::super::task_form::AgentRequest;
+    let answer = |window: &mut VisualTestContext, request: AgentRequest| {
+        window.update(|_, cx| {
+            view.update(cx, |this, cx| {
+                let connection = this.connection_mut(1).unwrap();
+                connection.device_tasks.agent_requests.clear();
+                connection.device_tasks.agent_requests.push_back(request);
+                connection.hooks_error = None;
+                this.last_error = None;
+                cx.notify();
+            })
+        });
+        incoming(
+            window,
+            &view,
+            ServerMessage::AgentResult {
+                result: Err(condr_core::protocol::AgentError {
+                    code: "io".into(),
+                    message: "permission denied".into(),
+                }),
+            },
+        );
+        window.read(|app| {
+            let view = view.read(app);
+            (
+                view.last_error.is_some(),
+                view.connection(1).unwrap().hooks_error.is_some(),
+            )
+        })
+    };
+    assert_eq!(
+        answer(window, AgentRequest::Available),
+        (true, false),
+        "the Agents on PATH: a toast"
+    );
+    assert_eq!(
+        answer(window, AgentRequest::Hooks),
+        (false, true),
+        "Settings' hooks: its page"
+    );
+    assert_eq!(
+        answer(window, AgentRequest::InstallHooks),
+        (true, false),
+        "Start's Install: a toast"
+    );
 }

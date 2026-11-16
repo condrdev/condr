@@ -86,6 +86,8 @@ impl Condr {
                     // Layout responses may have been lost to writer lag; this Bootstrap is
                     // the authoritative layout, so nothing stays pending against it.
                     _ = self.clear_pending_projections_for(key);
+                    // Task and Agent answers too: `tasks_bootstrapped` asks again.
+                    self.connections[index].device_tasks.connection_closed();
                 }
 
                 let bootstrap_sequence = self.connections[index].model.sequence;
@@ -887,6 +889,13 @@ impl Condr {
                     Err(error) if request == Some(super::task_form::AgentRequest::Available) => {
                         connection.device_tasks.available = Some(Vec::new());
                         self.report_error(error.message, cx);
+                    }
+                    // Installed from a Task's Start, which has no place for it but a toast.
+                    Err(error) if request == Some(super::task_form::AgentRequest::InstallHooks) => {
+                        self.report_error(
+                            rust_i18n::t!("tasks.start.install_failed", error = error.message),
+                            cx,
+                        );
                     }
                     Ok(AgentResponse::Hooks(report)) => {
                         connection.hooks_error = None;

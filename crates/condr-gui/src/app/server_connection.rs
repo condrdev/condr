@@ -443,6 +443,16 @@ impl ServerConnection {
     /// Asks the Server to install, remove or report one agent's hooks on its machine.
     /// The reply comes back as an `AgentResult` and replaces that agent's row.
     pub(super) fn send_agent_hooks(&mut self, agent: AgentKind, action: HooksAction) {
+        self.send_hooks_request(agent, action, super::task_form::AgentRequest::Hooks);
+    }
+
+    /// A hooks request, remembered as `request` so its answer lands where it was asked.
+    pub(super) fn send_hooks_request(
+        &mut self,
+        agent: AgentKind,
+        action: HooksAction,
+        request: super::task_form::AgentRequest,
+    ) {
         let (Some(server_id), Some(session_id)) = (self.model.server_id, self.model.session_id)
         else {
             return;
@@ -452,9 +462,7 @@ impl ServerConnection {
             session_id,
             command: AgentCommand::Hooks { agent, action },
         }) {
-            self.device_tasks
-                .agent_requests
-                .push_back(super::task_form::AgentRequest::Hooks);
+            self.device_tasks.agent_requests.push_back(request);
         }
     }
 
