@@ -8,6 +8,20 @@ impl Condr {
         incoming: Incoming,
         cx: &mut Context<Self>,
     ) -> IncomingEffect {
+        let effect = self.apply_incoming(key, generation, incoming, cx);
+        if effect.notify || effect.rebuild || effect.rebuild_active {
+            self.unfold_needs_you_for_arrivals(cx);
+        }
+        effect
+    }
+
+    fn apply_incoming(
+        &mut self,
+        key: ConnectionKey,
+        generation: u64,
+        incoming: Incoming,
+        cx: &mut Context<Self>,
+    ) -> IncomingEffect {
         let Some(index) = self
             .connections
             .iter()

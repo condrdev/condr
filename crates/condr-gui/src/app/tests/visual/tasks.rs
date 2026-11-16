@@ -160,6 +160,8 @@ fn tasks_mode_takes_the_window_sorts_agents_into_columns_and_leaves_the_view() {
             on: true,
             layout: super::super::super::tasks::TasksLayout::List,
             density: super::super::super::tasks::TasksDensity::Compact,
+            scope: Default::default(),
+            folded: 0,
         },
         "the state file keeps the mode, the layout and the density"
     );
@@ -228,4 +230,145 @@ fn the_sidebar_enters_tasks_mode_where_layout_actions_do_nothing() {
     window.simulate_click(icon.center(), Modifiers::default());
     draw(window);
     assert!(window.debug_bounds("tasks-mode").is_some());
+}
+
+#[test]
+fn columns_fold_needs_you_unfolds_for_an_arrival_and_the_scope_takes_in_worktrees() {
+    let _serial_guard = acquire_visual_test_lock();
+    let directory = TestDirectory::new("tasks-scope");
+    let mut session = Session::new();
+    let repository = session.create_workspace(directory.0.clone()).unwrap();
+    let worktree = session.create_workspace(directory.0.clone()).unwrap();
+    let other = session.create_workspace(directory.0.clone()).unwrap();
+    let snapshot_path = directory.0.join("session.snapshot");
+    std::fs::write(&snapshot_path, session.snapshot().to_bytes().unwrap()).unwrap();
+    let endpoint = Endpoint::local(directory.0.join("server.sock"));
+    let server = start_server_with_config(
+        ServerConfig::ephemeral(endpoint.as_local_path().unwrap())
+            .with_snapshot_path(snapshot_path),
+    );
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr_with(&mut cx, server, endpoint);
+    let pane = |window: &mut VisualTestContext, workspace_id: WorkspaceId| {
+        window.read(|app| {
+            let session = view.read(app).connection(1)?.session()?;
+            Some(session.workspace(workspace_id)?.tabs()[0].panes()[0].id())
+        })
+    };
+    assert!(wait_until(window, |window| pane(window, other).is_some()));
+    let [in_repository, in_worktree, in_other] =
+        [repository, worktree, other].map(|workspace_id| pane(window, workspace_id).unwrap());
+    // The test Server's directory is no Git worktree, so the Client is told it is one.
+    window.update(|_, cx| {
+        view.update(cx, |this, cx| {
+            let connection = this.connection(1).unwrap();
+            let mut session = connection.session().unwrap().clone();
+            assert!(session.associate_worktree(
+                worktree,
+                repository,
+                directory.0.clone(),
+                true,
+                None
+            ));
+            let message = ServerMessage::Event {
+                server_id: connection.model.server_id.unwrap(),
+                session_id: connection.model.session_id.unwrap(),
+                sequence: connection.model.sequence + 1,
+                event: SessionEvent::LayoutChanged {
+                    snapshot: session.snapshot(),
+                    zoomed_panes: Vec::new(),
+                },
+            };
+            let generation = connection.connect_generation;
+            this.handle_incoming(1, generation, Incoming::Message(message), cx);
+        });
+    });
+    for (pane_id, state) in [
+        (in_repository, AgentState::Idle),
+        (in_worktree, AgentState::Working),
+        (in_other, AgentState::Working),
+    ] {
+        agent_changed(
+            window,
+            &view,
+            pane_id,
+            Some(AgentSnapshot {
+                session_id: None,
+                kind: AgentKind::Claude,
+                state,
+                detail: None,
+            }),
+        );
+    }
+    window.update(|window, cx| view.update(cx, |this, cx| this.toggle_tasks(window, cx)));
+    draw(window);
+    let card = |pane_id: PaneId| leaked_selector(format!("tasks-card-1-{}", pane_id.as_u64()));
+
+    // A folded column is a strip that a click unfolds.
+    let heading = window.debug_bounds("tasks-heading-working").unwrap();
+    window.simulate_click(heading.center(), Modifiers::default());
+    draw(window);
+    assert!(window.debug_bounds("tasks-strip-working").is_some());
+    assert!(window.debug_bounds(card(in_worktree)).is_none());
+    let strip = window.debug_bounds("tasks-strip-working").unwrap();
+    window.simulate_click(strip.center(), Modifiers::default());
+    draw(window);
+    assert!(inside(window, card(in_worktree), "tasks-column-working"));
+
+    // Folded, Needs you unfolds when an Agent arrives in it.
+    let heading = window.debug_bounds("tasks-heading-needs-you").unwrap();
+    window.simulate_click(heading.center(), Modifiers::default());
+    draw(window);
+    assert!(window.debug_bounds("tasks-strip-needs-you").is_some());
+    agent_changed(
+        window,
+        &view,
+        in_other,
+        Some(AgentSnapshot {
+            session_id: None,
+            kind: AgentKind::Claude,
+            state: AgentState::Blocked,
+            detail: Some("Bash: cargo test".into()),
+        }),
+    );
+    draw(window);
+    assert!(window.debug_bounds("tasks-strip-needs-you").is_none());
+    assert!(inside(window, card(in_other), "tasks-column-needs-you"));
+
+    // A repository's scope takes in its worktree; the worktree's is just itself.
+    let server = window.read(|app| {
+        view.read(app)
+            .connection(1)
+            .unwrap()
+            .model
+            .server_id
+            .unwrap()
+    });
+    let scope = |window: &mut VisualTestContext, scope| {
+        window.update(|_, cx| view.update(cx, |this, cx| this.set_tasks_scope(scope, cx)));
+        draw(window);
+    };
+    use super::super::super::tasks::TasksScope;
+    scope(window, TasksScope::Workspace(server, repository));
+    assert!(window.debug_bounds(card(in_repository)).is_some());
+    assert!(window.debug_bounds(card(in_worktree)).is_some());
+    assert!(window.debug_bounds(card(in_other)).is_none());
+    scope(window, TasksScope::Workspace(server, worktree));
+    assert!(window.debug_bounds(card(in_worktree)).is_some());
+    assert!(window.debug_bounds(card(in_repository)).is_none());
+    scope(window, TasksScope::Device(server));
+    for pane_id in [in_repository, in_worktree, in_other] {
+        assert!(window.debug_bounds(card(pane_id)).is_some());
+    }
+    assert_eq!(
+        window.read(|app| view.read(app).collect_state(app).tasks.scope),
+        TasksScope::Device(server)
+    );
+    // A Workspace the Device no longer has falls back to All.
+    scope(
+        window,
+        TasksScope::Workspace(server, WorkspaceId::from_u64(999)),
+    );
+    assert!(window.debug_bounds(card(in_other)).is_some());
 }

@@ -289,6 +289,9 @@ pub(crate) struct Condr {
     /// How many times the sidebar was built, for the test that frames leave it alone.
     #[cfg(feature = "test-support")]
     sidebar_render_count: std::cell::Cell<usize>,
+    /// The Agents that needed the person when last looked, so a folded Needs you unfolds
+    /// for one that arrives (ADR 0068).
+    tasks_needs_you: HashSet<(ConnectionKey, PaneId)>,
     /// How many times Tasks mode's card area was built (ADR 0068).
     #[cfg(feature = "test-support")]
     tasks_board_render_count: std::cell::Cell<usize>,
@@ -539,6 +542,7 @@ impl Condr {
             dock_rebuild_count: 0,
             #[cfg(feature = "test-support")]
             sidebar_render_count: std::cell::Cell::new(0),
+            tasks_needs_you: HashSet::new(),
             #[cfg(feature = "test-support")]
             tasks_board_render_count: std::cell::Cell::new(0),
             panels: HashMap::new(),

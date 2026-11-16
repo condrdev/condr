@@ -250,7 +250,7 @@ impl GuiState {
 /// `proto/`: nothing else reads it. A value this build does not know is dropped, which
 /// costs a window position or a sidebar choice at most.
 mod wire {
-    use super::super::tasks::{TasksDensity, TasksLayout, TasksPrefs};
+    use super::super::tasks::{TasksDensity, TasksLayout, TasksPrefs, TasksScope};
     use super::{DetachedWindowState, SavedScope, SidebarView, WindowRect, WindowState};
     use condr_core::protocol::ServerId;
     use condr_core::{TabId, WorkspaceId};
@@ -291,6 +291,14 @@ mod wire {
         list: bool,
         #[prost(bool, tag = "3")]
         compact: bool,
+        /// One bit per column, in Tasks mode's column order.
+        #[prost(uint32, tag = "4")]
+        folded: u32,
+        /// A Device's or a Workspace's scope; neither is All.
+        #[prost(uint64, optional, tag = "5")]
+        scope_server: Option<u64>,
+        #[prost(uint64, optional, tag = "6")]
+        scope_workspace: Option<u64>,
     }
 
     /// `kind` 1 Device, 2 Workspace, 3 Tab; `id` names the Workspace or the Tab.
@@ -404,10 +412,22 @@ mod wire {
                 sidebar_collapsed: state.sidebar_collapsed,
                 agents_height: state.agents_height,
                 agents_collapsed: state.agents_collapsed,
-                tasks: Some(Tasks {
-                    on: state.tasks.on,
-                    list: state.tasks.layout == TasksLayout::List,
-                    compact: state.tasks.density == TasksDensity::Compact,
+                tasks: Some({
+                    let (scope_server, scope_workspace) = match state.tasks.scope {
+                        TasksScope::All => (None, None),
+                        TasksScope::Device(server) => (Some(server.0), None),
+                        TasksScope::Workspace(server, workspace_id) => {
+                            (Some(server.0), Some(workspace_id.as_u64()))
+                        }
+                    };
+                    Tasks {
+                        on: state.tasks.on,
+                        list: state.tasks.layout == TasksLayout::List,
+                        compact: state.tasks.density == TasksDensity::Compact,
+                        folded: state.tasks.folded.into(),
+                        scope_server,
+                        scope_workspace,
+                    }
                 }),
                 changes_width: state.changes_width,
                 diff_unified: state.diff_unified,
@@ -486,6 +506,15 @@ mod wire {
                         } else {
                             TasksDensity::Cards
                         },
+                        scope: match (tasks.scope_server, tasks.scope_workspace) {
+                            (Some(server), Some(workspace_id)) => TasksScope::Workspace(
+                                ServerId(server),
+                                WorkspaceId::from_u64(workspace_id),
+                            ),
+                            (Some(server), None) => TasksScope::Device(ServerId(server)),
+                            _ => TasksScope::All,
+                        },
+                        folded: u8::try_from(tasks.folded).unwrap_or_default(),
                     }),
                 changes_width: state.changes_width,
                 diff_unified: state.diff_unified,
@@ -798,6 +827,11 @@ mod tests {
                 on: true,
                 layout: super::super::tasks::TasksLayout::List,
                 density: super::super::tasks::TasksDensity::Compact,
+                scope: super::super::tasks::TasksScope::Workspace(
+                    ServerId(7),
+                    WorkspaceId::from_u64(3),
+                ),
+                folded: 0b0101,
             },
             changes_width: Some(300.),
             diff_unified: true,

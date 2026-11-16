@@ -25,12 +25,32 @@ pub(super) enum TasksDensity {
     Compact,
 }
 
+/// What Tasks mode shows: every Agent, one Device's, or one Workspace's together with
+/// the Managed Worktrees made from it. A Device is kept by its Server's id, which
+/// outlives connection order and restarts.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum TasksScope {
+    #[default]
+    All,
+    Device(ServerId),
+    Workspace(ServerId, WorkspaceId),
+}
+
 /// The main window's Tasks mode as the GUI state file keeps it (ADR 0023).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct TasksPrefs {
     pub(super) on: bool,
     pub(super) layout: TasksLayout,
     pub(super) density: TasksDensity,
+    pub(super) scope: TasksScope,
+    /// One bit per column, by `TasksColumn::bit`.
+    pub(super) folded: u8,
+}
+
+impl TasksPrefs {
+    pub(super) fn is_folded(self, column: TasksColumn) -> bool {
+        self.folded & column.bit() != 0
+    }
 }
 
 /// The columns, in their one order (ADR 0068). To do joins them with tasks.
@@ -54,6 +74,13 @@ impl TasksColumn {
             "working" => Self::Working,
             _ => Self::Idle,
         }
+    }
+
+    pub(super) fn bit(self) -> u8 {
+        1 << Self::ALL
+            .iter()
+            .position(|column| *column == self)
+            .expect("every column is listed")
     }
 
     fn selector(self) -> &'static str {
@@ -185,6 +212,84 @@ impl Condr {
             .into_any_element()
     }
 
+    fn toggle_tasks_column(&mut self, column: TasksColumn, cx: &mut Context<Self>) {
+        self.main_view_mut().tasks.folded ^= column.bit();
+        self.schedule_state_save(cx);
+        cx.notify();
+    }
+
+    pub(super) fn set_tasks_scope(&mut self, scope: TasksScope, cx: &mut Context<Self>) {
+        self.main_view_mut().tasks.scope = scope;
+        self.schedule_state_save(cx);
+        cx.notify();
+    }
+
+    /// Unfolds a folded Needs you when an Agent that was not in it arrives; the other
+    /// columns only count theirs (ADR 0068).
+    pub(super) fn unfold_needs_you_for_arrivals(&mut self, cx: &mut Context<Self>) {
+        let mut now = HashSet::new();
+        for connection in &self.connections {
+            for pane_id in connection.model.agents.keys() {
+                if pane_sidebar_status(&connection.model, *pane_id)
+                    .is_some_and(|status| TasksColumn::of(status) == TasksColumn::NeedsYou)
+                {
+                    now.insert((connection.key, *pane_id));
+                }
+            }
+        }
+        let arrived = now
+            .iter()
+            .any(|agent| !self.tasks_needs_you.contains(agent));
+        self.tasks_needs_you = now;
+        let tasks = &mut self.main_view_mut().tasks;
+        if arrived && tasks.is_folded(TasksColumn::NeedsYou) {
+            tasks.folded &= !TasksColumn::NeedsYou.bit();
+            self.schedule_state_save(cx);
+        }
+    }
+
+    /// The scope to show: a Workspace a connected Device no longer has, or a Device no
+    /// longer configured, falls back to All. A Device that is only disconnected keeps it.
+    pub(super) fn effective_tasks_scope(&self, scope: TasksScope) -> TasksScope {
+        let connection = |server: ServerId| {
+            self.connections
+                .iter()
+                .find(|connection| connection.model.server_id == Some(server))
+        };
+        match scope {
+            TasksScope::All => scope,
+            TasksScope::Device(server) if connection(server).is_some() => scope,
+            TasksScope::Workspace(server, workspace_id) => match connection(server) {
+                Some(connection) => match connection.presented_session() {
+                    Some(session) if session.workspace(workspace_id).is_none() => TasksScope::All,
+                    _ => scope,
+                },
+                None => TasksScope::All,
+            },
+            TasksScope::Device(_) => TasksScope::All,
+        }
+    }
+
+    /// Whether `scope` shows `workspace` on `connection`: a repository's scope takes in
+    /// the Managed Worktrees made from it, a worktree's only itself.
+    fn tasks_scope_shows(
+        scope: TasksScope,
+        connection: &ServerConnection,
+        workspace: &Workspace,
+    ) -> bool {
+        match scope {
+            TasksScope::All => true,
+            TasksScope::Device(server) => connection.model.server_id == Some(server),
+            TasksScope::Workspace(server, workspace_id) => {
+                connection.model.server_id == Some(server)
+                    && (workspace.id() == workspace_id
+                        || workspace.worktree().is_some_and(|association| {
+                            association.parent_workspace_id() == workspace_id
+                        }))
+            }
+        }
+    }
+
     fn set_tasks_layout(&mut self, layout: TasksLayout, cx: &mut Context<Self>) {
         self.main_view_mut().tasks.layout = layout;
         self.schedule_state_save(cx);
@@ -197,8 +302,8 @@ impl Condr {
         cx.notify();
     }
 
-    /// Every Agent on a connected Device, by column, each column by urgency.
-    pub(super) fn task_cards(&self) -> Vec<(TasksColumn, Vec<TaskCard>)> {
+    /// Every Agent on a connected Device in `scope`, by column, each column by urgency.
+    pub(super) fn task_cards(&self, scope: TasksScope) -> Vec<(TasksColumn, Vec<TaskCard>)> {
         let mut columns: Vec<(TasksColumn, Vec<TaskCard>)> = TasksColumn::ALL
             .iter()
             .map(|column| (*column, Vec::new()))
@@ -208,6 +313,9 @@ impl Condr {
                 continue;
             };
             for workspace in session.workspaces() {
+                if !Self::tasks_scope_shows(scope, connection, workspace) {
+                    continue;
+                }
                 for pane in workspace.tabs().iter().flat_map(|tab| tab.panes()) {
                     let Some(status) = pane_sidebar_status(&connection.model, pane.id()) else {
                         continue;
@@ -306,16 +414,100 @@ impl Condr {
                     .pr_2()
                     .items_center()
                     .child(back)
-                    .child(
-                        div()
-                            .font_semibold()
-                            .text_sm()
-                            .child(t!("tasks.title").into_owned()),
-                    )
+                    .child(self.render_scope_menu(prefs.scope, cx))
                     .child(div().flex_1())
                     .children(density)
                     .child(layout),
             )
+    }
+
+    /// `Tasks › MacBook › api-server ▾`: the scope as a breadcrumb that opens a tree of
+    /// All, the Devices and their Workspaces, worktrees under their repository, each
+    /// with its Agent count.
+    fn render_scope_menu(&self, scope: TasksScope, cx: &mut Context<Self>) -> AnyElement {
+        let scope = self.effective_tasks_scope(scope);
+        let count = |scope| -> usize {
+            self.task_cards(scope)
+                .iter()
+                .map(|(_, cards)| cards.len())
+                .sum()
+        };
+        let mut crumbs = vec![t!("tasks.title").into_owned()];
+        let mut options = vec![(t!("tasks.scope.all").into_owned(), TasksScope::All)];
+        for connection in &self.connections {
+            let Some(server) = connection.model.server_id else {
+                continue;
+            };
+            options.push((connection.label.clone(), TasksScope::Device(server)));
+            if scope == TasksScope::Device(server) {
+                crumbs.push(connection.label.clone());
+            }
+            let Some(session) = connection.presented_session() else {
+                continue;
+            };
+            let parent_of = |workspace: &Workspace| {
+                workspace
+                    .worktree()
+                    .map(|association| association.parent_workspace_id())
+                    .filter(|parent| session.workspace(*parent).is_some())
+            };
+            for repository in session
+                .workspaces()
+                .iter()
+                .filter(|each| parent_of(each).is_none())
+            {
+                let repository_scope = TasksScope::Workspace(server, repository.id());
+                options.push((format!("\u{2003}{}", repository.name()), repository_scope));
+                if scope == repository_scope {
+                    crumbs.extend([connection.label.clone(), repository.name().to_owned()]);
+                }
+                for worktree in session
+                    .workspaces()
+                    .iter()
+                    .filter(|each| parent_of(each) == Some(repository.id()))
+                {
+                    let worktree_scope = TasksScope::Workspace(server, worktree.id());
+                    options.push((
+                        format!("\u{2003}\u{2003}└ {}", worktree.name()),
+                        worktree_scope,
+                    ));
+                    if scope == worktree_scope {
+                        crumbs.extend([
+                            connection.label.clone(),
+                            repository.name().to_owned(),
+                            worktree.name().to_owned(),
+                        ]);
+                    }
+                }
+            }
+        }
+        if scope == TasksScope::All {
+            crumbs.push(t!("tasks.scope.all").into_owned());
+        }
+        let options: Vec<(String, TasksScope)> = options
+            .into_iter()
+            .map(|(name, each)| (format!("{name}  {}", count(each)), each))
+            .collect();
+        let owner = cx.weak_entity();
+        Button::new("tasks-scope")
+            .debug_selector(|| "tasks-scope".into())
+            .ghost()
+            .small()
+            .label(crumbs.join(" › "))
+            .dropdown_caret(true)
+            .dropdown_menu(move |menu, _, _| {
+                options.iter().fold(menu, |menu, (name, each)| {
+                    let (owner, each) = (owner.clone(), *each);
+                    menu.item(
+                        PopupMenuItem::new(name.clone())
+                            .checked(each == scope)
+                            .on_click(move |_, _, cx| {
+                                let _ = owner.update(cx, |this, cx| this.set_tasks_scope(each, cx));
+                            }),
+                    )
+                })
+            })
+            .into_any_element()
     }
 
     /// The card area, which `TasksBoard` caches (ADR 0068).
@@ -324,19 +516,20 @@ impl Condr {
         view: &WindowView,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let columns = self.task_cards();
+        let columns = self.task_cards(self.effective_tasks_scope(view.tasks.scope));
         match view.tasks.layout {
-            TasksLayout::Board => self.render_tasks_board(&columns, view.tasks.density, cx),
-            TasksLayout::List => self.render_tasks_list(&columns, cx),
+            TasksLayout::Board => self.render_tasks_board(&columns, view.tasks, cx),
+            TasksLayout::List => self.render_tasks_list(&columns, view.tasks, cx),
         }
     }
 
     fn render_tasks_board(
         &self,
         columns: &[(TasksColumn, Vec<TaskCard>)],
-        density: TasksDensity,
+        prefs: TasksPrefs,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let density = prefs.density;
         let theme = cx.theme().clone();
         h_flex()
             .id("tasks-board")
@@ -348,6 +541,9 @@ impl Condr {
             .overflow_x_scroll()
             .children(columns.iter().map(|(column, cards)| {
                 let column = *column;
+                if prefs.is_folded(column) {
+                    return self.render_strip(column, cards.len(), cx);
+                }
                 v_flex()
                     .id(column.selector())
                     .debug_selector(move || format!("tasks-column-{}", column.selector()))
@@ -355,7 +551,7 @@ impl Condr {
                     .min_w(rems(14.))
                     .h_full()
                     .gap_2()
-                    .child(column_heading(column, cards.len(), &theme))
+                    .child(self.column_heading(column, cards.len(), &theme, cx))
                     .child(
                         v_flex()
                             .id(SharedString::from(format!(
@@ -377,13 +573,86 @@ impl Condr {
                                 }
                             }),
                     )
+                    .into_any_element()
             }))
             .into_any_element()
+    }
+
+    /// A folded column: its count over its name, one letter a line, since GPUI does not
+    /// rotate text; a click unfolds it.
+    fn render_strip(
+        &self,
+        column: TasksColumn,
+        count: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let owner = cx.weak_entity();
+        let theme = cx.theme();
+        v_flex()
+            .id(SharedString::from(format!(
+                "tasks-strip-{}",
+                column.selector()
+            )))
+            .debug_selector(move || format!("tasks-strip-{}", column.selector()))
+            .flex_none()
+            .w(rems(2.25))
+            .h_full()
+            .items_center()
+            .gap_1()
+            .py_2()
+            .rounded(theme.radius)
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.sidebar)
+            .text_xs()
+            .text_color(theme.muted_foreground)
+            .cursor_pointer()
+            .child(div().font_semibold().child(count.to_string()))
+            .children(
+                column
+                    .label()
+                    .chars()
+                    .filter(|letter| !letter.is_whitespace())
+                    .map(|letter| div().child(letter.to_string())),
+            )
+            .on_click(move |_, _, cx| {
+                let _ = owner.update(cx, |this, cx| this.toggle_tasks_column(column, cx));
+            })
+            .into_any_element()
+    }
+
+    /// A column's or group's name and count; a click folds it.
+    fn column_heading(
+        &self,
+        column: TasksColumn,
+        count: usize,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let owner = cx.weak_entity();
+        h_flex()
+            .id(SharedString::from(format!(
+                "tasks-heading-{}",
+                column.selector()
+            )))
+            .debug_selector(move || format!("tasks-heading-{}", column.selector()))
+            .gap_1()
+            .px_1()
+            .text_xs()
+            .font_semibold()
+            .text_color(theme.muted_foreground)
+            .cursor_pointer()
+            .child(column.label())
+            .child(div().font_normal().child(count.to_string()))
+            .on_click(move |_, _, cx| {
+                let _ = owner.update(cx, |this, cx| this.toggle_tasks_column(column, cx));
+            })
     }
 
     fn render_tasks_list(
         &self,
         columns: &[(TasksColumn, Vec<TaskCard>)],
+        prefs: TasksPrefs,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = cx.theme().clone();
@@ -401,12 +670,20 @@ impl Condr {
         .text_color(theme.muted_foreground);
         let mut rows = vec![header.into_any_element()];
         for (column, cards) in columns {
+            let folded = prefs.is_folded(*column);
             rows.push(
-                column_heading(*column, cards.len(), &theme)
+                self.column_heading(*column, cards.len(), &theme, cx)
                     .pt_2()
+                    .child(
+                        Icon::new(IconName::ChevronRight)
+                            .size_3()
+                            .when(!folded, |icon| icon.rotate(percentage(90. / 360.))),
+                    )
                     .into_any_element(),
             );
-            rows.extend(cards.iter().map(|card| self.render_list_row(card, cx)));
+            if !folded {
+                rows.extend(cards.iter().map(|card| self.render_list_row(card, cx)));
+            }
         }
         v_flex()
             .id("tasks-list")
@@ -611,18 +888,6 @@ struct CardFacts {
     deleted: u32,
     ahead: u32,
     detail: Option<String>,
-}
-
-fn column_heading(column: TasksColumn, count: usize, theme: &Theme) -> Div {
-    h_flex()
-        .debug_selector(move || format!("tasks-heading-{}", column.selector()))
-        .gap_1()
-        .px_1()
-        .text_xs()
-        .font_semibold()
-        .text_color(theme.muted_foreground)
-        .child(column.label())
-        .child(div().font_normal().child(count.to_string()))
 }
 
 fn nothing_here(theme: &Theme) -> Div {

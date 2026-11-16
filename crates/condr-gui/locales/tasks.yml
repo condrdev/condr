@@ -3,6 +3,10 @@ tasks:
   title:
     en: Tasks
     zh-CN: Tasks
+  scope:
+    all:
+      en: All
+      zh-CN: 全部
   back:
     en: Workspaces
     zh-CN: Workspace
