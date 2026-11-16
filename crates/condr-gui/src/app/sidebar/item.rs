@@ -23,6 +23,9 @@ pub(in crate::app) struct CondrSidebarTreeItem {
     pub(super) label_selector: SharedString,
     pub(super) toggle_selector: Option<SharedString>,
     pub(super) label: SharedString,
+    /// Muted text at the label line's end, at most the width given; the label truncates
+    /// first and the detail line below keeps the row's whole width.
+    pub(super) label_end: Option<(SharedString, Pixels)>,
     /// A muted second line under the label; the row grows to hold it.
     pub(super) detail: Option<SharedString>,
     pub(super) icon: Option<CondrSidebarIcon>,
@@ -61,6 +64,7 @@ impl CondrSidebarTreeItem {
             label_selector: label_selector.into(),
             toggle_selector: None,
             label: label.into(),
+            label_end: None,
             detail: None,
             icon: None,
             handler: Rc::new(|_, _, _| {}),
@@ -96,6 +100,15 @@ impl CondrSidebarTreeItem {
 
     pub(in crate::app) fn icon(mut self, icon: CondrSidebarIcon) -> Self {
         self.icon = Some(icon);
+        self
+    }
+
+    pub(in crate::app) fn label_end(
+        mut self,
+        text: impl Into<SharedString>,
+        max_width: Pixels,
+    ) -> Self {
+        self.label_end = Some((text.into(), max_width));
         self
     }
 
@@ -168,6 +181,7 @@ impl CondrSidebarTreeItem {
             label_selector,
             toggle_selector,
             label,
+            label_end,
             detail,
             icon,
             handler,
@@ -285,18 +299,35 @@ impl CondrSidebarTreeItem {
                     .min_w_0()
                     .flex_1()
                     .justify_center()
-                    .child(
-                        div()
+                    .child({
+                        let label = div()
                             .debug_selector(move || label_debug_selector.to_string())
                             .when(detail.is_some(), |this| {
                                 this.h(DETAIL_LINE_HEIGHTS.0)
                                     .line_height(DETAIL_LINE_HEIGHTS.0)
                             })
                             .min_w_0()
-                            .w_full()
                             .truncate()
-                            .child(label),
-                    )
+                            .child(label);
+                        match label_end {
+                            None => label.w_full().into_any_element(),
+                            Some((text, max_width)) => h_flex()
+                                .w_full()
+                                .min_w_0()
+                                .gap_2()
+                                .child(label.flex_1())
+                                .child(
+                                    div()
+                                        .flex_none()
+                                        .max_w(max_width)
+                                        .truncate()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(text),
+                                )
+                                .into_any_element(),
+                        }
+                    })
                     .when_some(detail, |this, detail| {
                         this.child(
                             div()

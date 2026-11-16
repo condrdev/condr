@@ -38,6 +38,7 @@ Manages Devices, project Workspaces and Agent state. Drag Devices or Workspaces 
   * Status: when the branch is ahead of or behind upstream, the commit counts show as `↑N ↓N`.
   * Context menu: rename, create a Git worktree or close the Workspace.
 * **Agent rows**: every Agent listed under its Workspace, with a badge on its icon for its live state.
+* **Agents**: a section at the bottom of the sidebar listing every Agent across all Workspaces and Devices, the most urgent first (Blocked and Error, then a Done you have not seen, then Working, then Idle). Each row shows the Agent's task with its Workspace on the right, and below it the branch, or what the Agent waits for. Click a row to jump to its Pane; the row you picked stays in place until you pick another. Drag the line above the heading to resize the section, and click the heading to fold it down to its heading, which then counts the Agents by state. `Cmd + ]` / `Cmd + [` (`Alt + ]` / `Alt + [` on Windows and Linux) step through it.
 * **Utilities**:
   * Coffee cup at the bottom: keeps the screen awake with one click.
   * Gear at the bottom: Settings (a red dot appears when a new version is available).
@@ -69,7 +70,7 @@ Manages Devices, project Workspaces and Agent state. Drag Devices or Workspaces 
 
 ## Agent state indicators
 
-Agent state shows in the **badges in the left sidebar**, the **Workspace counters** and the **Needs you** list.
+Agent state shows in the **badges in the left sidebar**, the **Workspace counters**, the **Needs you** list and the **Agents** section.
 
 | State | Meaning |
 | :--- | :--- |

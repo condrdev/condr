@@ -54,6 +54,19 @@ Condr 的快捷键分为两层逻辑：
 
 ---
 
+## Agent
+
+| 操作 | macOS | Windows / Linux |
+| :--- | :--- | :--- |
+| 切换至上一个 Agent | `Cmd + [` | `Alt + [` |
+| 切换至下一个 Agent | `Cmd + ]` | `Alt + ]` |
+
+* **轮转逻辑**：遵循侧栏 Agent 分段的顺序，最需要处理的在前，跨设备遍历，到达边界后自动循环。
+* **初始行为**：当前聚焦的 Pane 没有运行 Agent 时，下一个跳到第一个 Agent，上一个跳到最后一个。
+* 在 Windows 和 Linux 上，终端里的程序将收不到 `Alt + [`；如有需要，可以[改绑](#修改快捷键)这两个快捷键。
+
+---
+
 ## Tab
 
 | 操作 | macOS | Windows / Linux |
@@ -149,7 +162,7 @@ Condr 的快捷键分为两层逻辑：
 
 ## 修改快捷键
 
-上面 Window、命令面板、Workspace、Tab 与 Pane 各表中的快捷键都可以改绑或删除，连按两次 `Shift` 除外。没有默认按键的动作，如关闭 Tab、重命名 Workspace 或交换 Pane，也可以绑定按键。终端自身的按键（复制粘贴、图片投递、跳转 prompt 与鼠标）保持不变。
+上面 Window、命令面板、Workspace、Agent、Tab 与 Pane 各表中的快捷键都可以改绑或删除，连按两次 `Shift` 除外。没有默认按键的动作，如关闭 Tab、重命名 Workspace 或交换 Pane，也可以绑定按键。终端自身的按键（复制粘贴、图片投递、跳转 prompt 与鼠标）保持不变。
 
 * **在设置（Settings）中**：打开 **快捷键**（Shortcuts），点击动作旁的 **+** 后按下新按键，按 `Esc` 取消。**×** 删除一个按键，重置按钮恢复默认。修改立即生效。
 * **在 `config.toml` 中**：[`[client.keybindings]`](/zh-cn/docs/reference/configuration/#clientkeybindings-窗口快捷键) 列出了每个动作的名称。手动编辑后需重启 Condr。

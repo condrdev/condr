@@ -125,6 +125,7 @@ Each entry replaces one action's default keys on this platform; `[]` leaves it n
 | Application | `open-settings`, `toggle-sidebar`, `toggle-changes`, `command-palette`, `go-to` |
 | Devices | `connect-remote-device`, `reconnect-device` |
 | Workspaces | `next-workspace`, `previous-workspace`, `new-workspace`, `rename-workspace`, `close-workspace` |
+| Agents | `next-agent`, `previous-agent` |
 | Tabs | `new-tab`, `next-tab`, `previous-tab`, `rename-tab`, `close-tab`, `go-to-tab-1` … `go-to-tab-9` |
 | Panes | `split-right`, `split-down`, `close-pane`, `toggle-zoom`, `focus-left`, `focus-right`, `focus-up`, `focus-down`, `resize-left`, `resize-right`, `resize-up`, `resize-down`, `swap-left`, `swap-right`, `swap-up`, `swap-down` |
 

@@ -195,6 +195,8 @@ actions!(
         ToggleChanges,
         NextWorkspace,
         PreviousWorkspace,
+        NextAgent,
+        PreviousAgent,
         TerminalTab,
         TerminalBackTab,
         QuitApp,
@@ -237,6 +239,8 @@ const MIN_SIDEBAR_WIDTH: Pixels = px(150.);
 const MAX_SIDEBAR_WIDTH: Pixels = px(360.);
 const COLLAPSED_SIDEBAR_WIDTH: Pixels = px(48.);
 const SIDEBAR_RESIZE_HANDLE_WIDTH: Pixels = px(6.);
+/// The Agents section's heading and one row, the least its handle leaves it (ADR 0067).
+const MIN_AGENTS_HEIGHT: Pixels = px(80.);
 /// The main window's title bar hosts the Tab strip, so it takes the strip's old height
 /// rather than the Kit's default; the Tabs keep the same room above and below.
 const WORKSPACE_TITLE_BAR_HEIGHT: Pixels = px(36.);
@@ -317,6 +321,10 @@ pub(crate) struct Condr {
     sidebar_workspace_open: HashMap<(ConnectionKey, WorkspaceId), Entity<bool>>,
     /// Devices folded in the left sidebar, their Workspaces hidden under the heading.
     sidebar_folded_devices: HashSet<ConnectionKey>,
+    /// The Agent last selected and how urgent it was then: the Agents section keeps its
+    /// row at that rank until another is selected, so a Done seen does not drop away
+    /// under the pointer (ADR 0067).
+    agents_anchor: Option<((ConnectionKey, PaneId), usize)>,
     terminal_font: TerminalFont,
     /// `[client.keybindings]` as last read or written; `keymap` is what it comes to.
     keybindings: toml::Table,
@@ -449,6 +457,10 @@ impl Condr {
             main_view.sidebar_width = px(width).max(MIN_SIDEBAR_WIDTH).min(MAX_SIDEBAR_WIDTH);
         }
         main_view.sidebar_collapsed = restored_state.sidebar_collapsed;
+        main_view.agents_height = restored_state
+            .agents_height
+            .map(|height| px(height).max(MIN_AGENTS_HEIGHT));
+        main_view.agents_collapsed = restored_state.agents_collapsed;
         if let Some(width) = restored_state.changes_width {
             main_view.changes_width = px(width).max(MIN_CHANGES_WIDTH).min(MAX_CHANGES_WIDTH);
         }
@@ -539,6 +551,7 @@ impl Condr {
             transfer_strip_open: false,
             sidebar_workspace_open: HashMap::new(),
             sidebar_folded_devices: HashSet::new(),
+            agents_anchor: None,
             terminal_font,
             keybindings,
             keymap: keymap::Keymap::default(),

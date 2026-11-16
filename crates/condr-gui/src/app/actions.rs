@@ -143,4 +143,6 @@ action_handlers! {
     action_previous_workspace(PreviousWorkspace) |this, window, cx| {
         this.cycle_workspace(-1, window, cx);
     }
+    action_next_agent(NextAgent) |this, window, cx| { this.cycle_agent(1, window, cx); }
+    action_previous_agent(PreviousAgent) |this, window, cx| { this.cycle_agent(-1, window, cx); }
 }

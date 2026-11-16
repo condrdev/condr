@@ -52,6 +52,19 @@ Every key combination not declared on this page passes through to the child proc
 
 ---
 
+## Agents
+
+| Action | macOS | Windows / Linux |
+| :--- | :--- | :--- |
+| Previous Agent | `Cmd + [` | `Alt + [` |
+| Next Agent | `Cmd + ]` | `Alt + ]` |
+
+* **Order**: the order of the sidebar's Agents section, the most urgent first, across every Device; wraps around at either end.
+* **Starting point**: when the focused Pane runs no Agent, Next goes to the first Agent and Previous to the last.
+* On Windows and Linux, a program in the terminal no longer receives `Alt + [`; [rebind](#change-a-shortcut) these if it needs it.
+
+---
+
 ## Tabs
 
 | Action | macOS | Windows / Linux |
@@ -147,7 +160,7 @@ Every key combination not declared on this page passes through to the child proc
 
 ## Change a shortcut
 
-Every shortcut in the Window, Command Palette, Workspace, Tab and Pane tables above can be rebound or removed, except `Shift` twice. The actions without a default key, such as Close tab, Rename workspace or the Pane swaps, can be given one. The terminal's own keys (copy and paste, image paste, prompt jumps and the mouse) stay as they are.
+Every shortcut in the Window, Command Palette, Workspace, Agent, Tab and Pane tables above can be rebound or removed, except `Shift` twice. The actions without a default key, such as Close tab, Rename workspace or the Pane swaps, can be given one. The terminal's own keys (copy and paste, image paste, prompt jumps and the mouse) stay as they are.
 
 * **In Settings**: open **Shortcuts**. Click the pencil beside an action and press the new key, or `Esc` to cancel; it replaces the action's keys. The reset button brings back the defaults. A change applies at once.
 * **In `config.toml`**: [`[client.keybindings]`](/docs/reference/configuration/#clientkeybindings-window-shortcuts) lists each action's name. Restart Condr after a hand edit.

@@ -125,6 +125,7 @@ toggle-zoom = []
 | 应用（Application） | `open-settings`、`toggle-sidebar`、`toggle-changes`、`command-palette`、`go-to` |
 | 设备（Devices） | `connect-remote-device`、`reconnect-device` |
 | Workspaces | `next-workspace`、`previous-workspace`、`new-workspace`、`rename-workspace`、`close-workspace` |
+| Agents | `next-agent`、`previous-agent` |
 | Tabs | `new-tab`、`next-tab`、`previous-tab`、`rename-tab`、`close-tab`、`go-to-tab-1` … `go-to-tab-9` |
 | Panes | `split-right`、`split-down`、`close-pane`、`toggle-zoom`、`focus-left`、`focus-right`、`focus-up`、`focus-down`、`resize-left`、`resize-right`、`resize-up`、`resize-down`、`swap-left`、`swap-right`、`swap-up`、`swap-down` |
 

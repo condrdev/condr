@@ -10,6 +10,9 @@ keymap:
     workspaces:
       en: Workspaces
       zh-CN: Workspace
+    agents:
+      en: Agents
+      zh-CN: Agent
     tabs:
       en: Tabs
       zh-CN: Tab
@@ -53,6 +56,12 @@ keymap:
     close_workspace:
       en: Close workspace
       zh-CN: 关闭 Workspace
+    next_agent:
+      en: Next agent
+      zh-CN: 下一个 Agent
+    previous_agent:
+      en: Previous agent
+      zh-CN: 上一个 Agent
     new_tab:
       en: New tab
       zh-CN: 新建 Tab

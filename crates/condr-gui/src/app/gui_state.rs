@@ -33,6 +33,9 @@ pub(super) struct GuiState {
     /// Logical pixels, as the handles set them; `None` keeps the defaults.
     pub sidebar_width: Option<f32>,
     pub sidebar_collapsed: bool,
+    /// The Agents section's height, and whether it is folded to its heading (ADR 0067).
+    pub agents_height: Option<f32>,
+    pub agents_collapsed: bool,
     pub changes_width: Option<f32>,
     /// Diff Tabs show one column rather than two (ADR 0046).
     pub diff_unified: bool,
@@ -268,6 +271,10 @@ mod wire {
         diff_unified: bool,
         #[prost(message, repeated, tag = "8")]
         detached: Vec<Detached>,
+        #[prost(float, optional, tag = "9")]
+        agents_height: Option<f32>,
+        #[prost(bool, tag = "10")]
+        agents_collapsed: bool,
     }
 
     /// `kind` 1 Device, 2 Workspace, 3 Tab; `id` names the Workspace or the Tab.
@@ -379,6 +386,8 @@ mod wire {
                     .collect(),
                 sidebar_width: state.sidebar_width,
                 sidebar_collapsed: state.sidebar_collapsed,
+                agents_height: state.agents_height,
+                agents_collapsed: state.agents_collapsed,
                 changes_width: state.changes_width,
                 diff_unified: state.diff_unified,
                 active_server: state.active_server.map(|server| server.0),
@@ -440,6 +449,8 @@ mod wire {
                     .collect(),
                 sidebar_width: state.sidebar_width,
                 sidebar_collapsed: state.sidebar_collapsed,
+                agents_height: state.agents_height,
+                agents_collapsed: state.agents_collapsed,
                 changes_width: state.changes_width,
                 diff_unified: state.diff_unified,
                 active_server: state.active_server.map(ServerId),
@@ -589,6 +600,8 @@ impl Condr {
             window: Some(self.main_view().bounds),
             sidebar_width: Some(self.main_view().sidebar_width.into()),
             sidebar_collapsed: self.main_view().sidebar_collapsed,
+            agents_height: self.main_view().agents_height.map(Into::into),
+            agents_collapsed: self.main_view().agents_collapsed,
             changes_width: Some(self.main_view().changes_width.into()),
             diff_unified: self.files_view.diff_unified,
             // Until the active connection has bootstrapped (a slow first start), the
@@ -742,6 +755,8 @@ mod tests {
             })),
             sidebar_width: Some(240.),
             sidebar_collapsed: true,
+            agents_height: Some(180.),
+            agents_collapsed: true,
             changes_width: Some(300.),
             diff_unified: true,
             active_server: Some(ServerId(7)),

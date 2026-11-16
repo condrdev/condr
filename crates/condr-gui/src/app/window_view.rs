@@ -63,6 +63,10 @@ pub(super) struct WindowView {
     /// only dragging the handle does.
     pub(super) sidebar_width: Pixels,
     pub(super) sidebar_collapsed: bool,
+    /// The Agents section's height as its handle last left it; `None` is a third of the
+    /// window (ADR 0067).
+    pub(super) agents_height: Option<Pixels>,
+    pub(super) agents_collapsed: bool,
     pub(super) changes_width: Pixels,
     /// The title bar's Tab strip scrolls when the Tabs outgrow it; a newly active Tab
     /// is scrolled into view once, which `last_scrolled_tab` remembers across renders.
@@ -120,6 +124,8 @@ impl WindowView {
             ),
             sidebar_width: INITIAL_SIDEBAR_WIDTH,
             sidebar_collapsed: false,
+            agents_height: None,
+            agents_collapsed: false,
             changes_width: INITIAL_CHANGES_WIDTH,
             tab_strip_scroll: ScrollHandle::new(),
             last_scrolled_tab: Cell::new(None),
@@ -444,11 +450,13 @@ impl Condr {
         cx: &mut Context<Self>,
     ) {
         let owner = cx.entity();
-        let (sidebar_width, sidebar_collapsed, changes_width) = {
+        let (sidebar_width, sidebar_collapsed, agents_height, agents_collapsed, changes_width) = {
             let main = self.main_view();
             (
                 main.sidebar_width,
                 main.sidebar_collapsed,
+                main.agents_height,
+                main.agents_collapsed,
                 main.changes_width,
             )
         };
@@ -463,6 +471,8 @@ impl Condr {
                     let mut view = WindowView::new(window, scope, cx);
                     view.sidebar_width = sidebar_width;
                     view.sidebar_collapsed = sidebar_collapsed;
+                    view.agents_height = agents_height;
+                    view.agents_collapsed = agents_collapsed;
                     view.changes_width = changes_width;
                     this.windows.push(view);
                     window.set_window_title(&this.window_title(scope));

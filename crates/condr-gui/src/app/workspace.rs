@@ -986,6 +986,8 @@ impl Render for Condr {
             .on_action(cx.listener(Self::action_toggle_changes))
             .on_action(cx.listener(Self::action_next_workspace))
             .on_action(cx.listener(Self::action_previous_workspace))
+            .on_action(cx.listener(Self::action_next_agent))
+            .on_action(cx.listener(Self::action_previous_agent))
             .size_full()
             .flex()
             .flex_col()
@@ -1045,7 +1047,7 @@ impl Render for Condr {
                                     .w(view.sidebar_layout_width())
                                     .flex_none()
                                     .h_full()
-                                    .child(self.render_sidebar(view, cx))
+                                    .child(self.render_sidebar(view, window, cx))
                                     // Deferred so it paints above the workspace it overlaps by
                                     // half its width, occluding so the terminal underneath never
                                     // sees the press, and swallowing the press so the pane does

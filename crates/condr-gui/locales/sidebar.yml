@@ -53,6 +53,12 @@ sidebar:
   needs_you:
     en: Needs you
     zh-CN: Needs you
+  agents:
+    en: Agents
+    zh-CN: Agent
+  no_agents:
+    en: No agents
+    zh-CN: 没有 Agent
   command_palette:
     en: Command Palette
     zh-CN: 命令面板

@@ -1,3 +1,4 @@
+mod agents;
 mod drag_drop;
 mod icon;
 mod item;
@@ -31,6 +32,19 @@ fn workspace_suffix(
                 .children(upstream.map(|counts| upstream_label(counts, cx))),
         )
         .into_any_element()
+}
+
+/// A Workspace's second line, `detached` and no repository included, so its rows keep
+/// one height: the Workspace row's, and an Agents section row's without a `detail`.
+fn branch_line(git: Option<&WorkspaceGitSnapshot>) -> String {
+    git.map_or_else(
+        || t!("sidebar.no_git").into_owned(),
+        |git| {
+            git.branch
+                .clone()
+                .unwrap_or_else(|| t!("sidebar.detached").into_owned())
+        },
+    )
 }
 
 /// How a Pane's agent shows in the sidebar, the bell over its state while it wants a
@@ -254,12 +268,18 @@ impl Condr {
         }
     }
 
-    pub(super) fn render_sidebar(&self, view: &WindowView, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_sidebar(
+        &self,
+        view: &WindowView,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         if view.sidebar_collapsed {
             return self.render_collapsed_sidebar(view, cx);
         }
         let owner = cx.weak_entity();
         let needs_you = self.needs_you_items(view, cx);
+        let agents = self.render_agents_section(view, window, cx);
         // A detached window lists only what it shows (ADR 0043).
         let scope = view.scope;
         let items = self
@@ -283,16 +303,7 @@ impl Condr {
                                 let workspace_id = workspace.id();
                                 let workspace_name = workspace.name().to_owned();
                                 let git = connection.model.workspace_git.get(&workspace_id);
-                                // Every Workspace gets its second line, `detached` and no
-                                // repository included, so the rows keep one height.
-                                let detail = git.map_or_else(
-                                    || t!("sidebar.no_git").into_owned(),
-                                    |git| {
-                                        git.branch
-                                            .clone()
-                                            .unwrap_or_else(|| t!("sidebar.detached").into_owned())
-                                    },
-                                );
+                                let detail = branch_line(git);
                                 let upstream =
                                     git.and_then(|git| git.upstream).and_then(upstream_counts);
                                 let mut statuses = Vec::new();
@@ -757,74 +768,77 @@ impl Condr {
                 )
             }))
             .children(items)
-            // The app name lives in the title bar; the keep-awake toggle sits at the bottom
-            // left, the actions at the bottom right, Connect Remote Device left of Settings.
-            // Reconnect is the `ReconnectServer` action; it has no button here.
+            // The Agents section sits above the buttons, as VS Code's Outline sits under its
+            // Explorer (ADR 0067). The app name lives in the title bar; the keep-awake toggle
+            // sits at the bottom left, the actions at the bottom right, Connect Remote Device
+            // left of Settings. Reconnect is the `ReconnectServer` action; it has no button.
             .footer(
-                h_flex()
-                    .w_full()
-                    .justify_between()
-                    .gap_1()
-                    .child(power::keep_awake_button(
-                        self.keep_awake,
-                        keep_awake_owner,
-                        cx,
-                    ))
-                    .child(div().flex_1())
-                    .child(
-                        // Shift twice is no key binding for `tooltip_with_action` to find, so
-                        // the tooltip draws the pair as Settings' tooltip draws its key.
-                        div()
-                            .id("command-palette-tooltip")
-                            .tooltip(|window, cx| {
-                                Tooltip::element(|_, cx| {
-                                    let shift = || {
-                                        Kbd::new(Keystroke::parse("shift").expect("a key"))
-                                            .appearance(false)
-                                    };
-                                    h_flex().gap_3().child(t!("sidebar.command_palette")).child(
-                                        h_flex()
-                                            .gap_1()
-                                            .text_xs()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .child(shift())
-                                            .child(shift()),
-                                    )
+                v_flex().w_full().child(agents).child(
+                    h_flex()
+                        .w_full()
+                        .justify_between()
+                        .gap_1()
+                        .child(power::keep_awake_button(
+                            self.keep_awake,
+                            keep_awake_owner,
+                            cx,
+                        ))
+                        .child(div().flex_1())
+                        .child(
+                            // Shift twice is no key binding for `tooltip_with_action` to find, so
+                            // the tooltip draws the pair as Settings' tooltip draws its key.
+                            div()
+                                .id("command-palette-tooltip")
+                                .tooltip(|window, cx| {
+                                    Tooltip::element(|_, cx| {
+                                        let shift = || {
+                                            Kbd::new(Keystroke::parse("shift").expect("a key"))
+                                                .appearance(false)
+                                        };
+                                        h_flex().gap_3().child(t!("sidebar.command_palette")).child(
+                                            h_flex()
+                                                .gap_1()
+                                                .text_xs()
+                                                .text_color(cx.theme().muted_foreground)
+                                                .child(shift())
+                                                .child(shift()),
+                                        )
+                                    })
+                                    .build(window, cx)
                                 })
-                                .build(window, cx)
-                            })
-                            .child(
-                                Button::new("command-palette")
-                                    .debug_selector(|| "command-palette-button".into())
-                                    .ghost()
-                                    .small()
-                                    .icon(Glyph::Command)
-                                    .accessibility_label(t!("sidebar.command_palette"))
-                                    .on_click(move |_, window, cx| {
-                                        let _ = palette_owner.update(cx, |this, cx| {
-                                            let all = command_palette::OpenCommandPalette {
-                                                page: command_palette::Page::All,
-                                            };
-                                            this.action_open_command_palette(&all, window, cx)
-                                        });
-                                    }),
-                            ),
-                    )
-                    .child(self.render_ports_button(view, cx))
-                    .child(
-                        Button::new("add-server")
-                            .debug_selector(|| "add-server".into())
-                            .ghost()
-                            .small()
-                            .icon(Icon::new(CondrIconName::ServerPlus))
-                            .tooltip(t!("sidebar.connect_remote_device"))
-                            .accessibility_label(t!("sidebar.connect_remote_device"))
-                            .dropdown_menu(move |menu, _, _| {
-                                Condr::add_server_menu(menu, add_owner.clone())
-                            })
-                            .anchor(Anchor::BottomLeft),
-                    )
-                    .child(self.settings_button(settings_owner, cx)),
+                                .child(
+                                    Button::new("command-palette")
+                                        .debug_selector(|| "command-palette-button".into())
+                                        .ghost()
+                                        .small()
+                                        .icon(Glyph::Command)
+                                        .accessibility_label(t!("sidebar.command_palette"))
+                                        .on_click(move |_, window, cx| {
+                                            let _ = palette_owner.update(cx, |this, cx| {
+                                                let all = command_palette::OpenCommandPalette {
+                                                    page: command_palette::Page::All,
+                                                };
+                                                this.action_open_command_palette(&all, window, cx)
+                                            });
+                                        }),
+                                ),
+                        )
+                        .child(self.render_ports_button(view, cx))
+                        .child(
+                            Button::new("add-server")
+                                .debug_selector(|| "add-server".into())
+                                .ghost()
+                                .small()
+                                .icon(Icon::new(CondrIconName::ServerPlus))
+                                .tooltip(t!("sidebar.connect_remote_device"))
+                                .accessibility_label(t!("sidebar.connect_remote_device"))
+                                .dropdown_menu(move |menu, _, _| {
+                                    Condr::add_server_menu(menu, add_owner.clone())
+                                })
+                                .anchor(Anchor::BottomLeft),
+                        )
+                        .child(self.settings_button(settings_owner, cx)),
+                ),
             )
             .into_any_element()
     }

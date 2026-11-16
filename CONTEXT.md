@@ -134,8 +134,12 @@ An Agent's state once a turn finished and it has not seen the user come back for
 _Avoid_: Finished, Completed (as states)
 
 **Needs you**:
-The list of every `Blocked` or `Error` Agent on every connected Device, with its `detail`, at the top of the GUI's sidebar and on the Companion's first screen (ADR 0024, ADR 0044). Each Client builds it from state it already holds; it is not a Server feature, and choosing a row opens the Pane without answering anything.
+The list of every `Blocked` or `Error` Agent on every connected Device, with its `detail`, at the top of the GUI's sidebar and on the Companion's first screen (ADR 0024, ADR 0044). Each Client builds it from state it already holds; it is not a Server feature, and choosing a row opens the Pane without answering anything. The Agents section lists the same Agents first among all the others; "Needs you" is what stays in sight while that section is collapsed.
 _Avoid_: inbox, queue
+
+**Agents section**:
+The collapsible section at the bottom of the GUI's left sidebar that lists every Agent the window's tree lists, most urgent first, in a height the person drags (ADR 0067). A row shows the Agent's title, its Workspace and the Workspace's branch, or its `detail` while it has one; choosing a row selects its Pane, as a row of "Needs you" does, and `next-agent` / `previous-agent` step through the same order. It adds to the Workspace tree and replaces none of it.
+_Avoid_: Agents panel, Agents view, dashboard
 
 **Command Palette**:
 The GUI's one overlay for running a window action or going to a place by typing part of its name, opened by pressing Shift twice (ADR 0064). Its pages are All, Actions and Go to: Actions lists every window action with its current key, greyed where it cannot run in that window; Go to lists every connected Device and its Workspaces, Tabs and Agents, the most urgent Agents first. It searches names, never terminal output or file contents, and is the Client's own: nothing is sent until a choice is made.

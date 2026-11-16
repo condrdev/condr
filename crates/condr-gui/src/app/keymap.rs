@@ -33,6 +33,8 @@ pub(super) enum Needs {
     Device,
     /// A Workspace on any Device.
     Workspaces,
+    /// An Agent the window's Agents section lists (ADR 0067).
+    Agents,
     /// A presented Workspace whose right sidebar this window draws.
     Changes,
 }
@@ -184,6 +186,26 @@ pub(super) const GROUPS: &[(&str, &[Shortcut])] = &[
                 &CloseWorkspace,
                 Needs::Change,
                 &[],
+            ),
+        ],
+    ),
+    (
+        "keymap.group.agents",
+        &[
+            // Alt+[ elsewhere: Ctrl+[ is the terminal's Escape.
+            shortcut(
+                "next-agent",
+                "keymap.action.next_agent",
+                &NextAgent,
+                Needs::Agents,
+                on(&["cmd-]"], &["alt-]"]),
+            ),
+            shortcut(
+                "previous-agent",
+                "keymap.action.previous_agent",
+                &PreviousAgent,
+                Needs::Agents,
+                on(&["cmd-["], &["alt-["]),
             ),
         ],
     ),
