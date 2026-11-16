@@ -641,3 +641,39 @@ fn going_to_an_agent_outside_the_scope_widens_it_and_selects_its_card() {
     assert!(window.debug_bounds(card).is_some());
     assert!(window.debug_bounds("tasks-area").is_some());
 }
+
+#[test]
+fn a_disconnected_device_shows_a_band_and_its_open_pane_a_veil() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    let (view, window, _server, pane_id) = tasks_mode_with_an_agent(&mut cx);
+    let card = leaked_selector(format!("tasks-card-1-{}", pane_id.as_u64()));
+    let bounds = window.debug_bounds(card).unwrap();
+    window.simulate_click(bounds.center(), Modifiers::default());
+    window.run_until_parked();
+    draw(window);
+    assert!(
+        window.debug_bounds("tasks-band-1").is_none(),
+        "no band while connected"
+    );
+
+    window.update(|_, cx| {
+        view.update(cx, |this, cx| {
+            let generation = this.connection(1).unwrap().connect_generation;
+            this.handle_incoming(
+                1,
+                generation,
+                Incoming::Disconnected("the device closed the connection".into()),
+                cx,
+            );
+            // Past the grace a blip that heals on its own is never shown for.
+            this.connection_mut(1).unwrap().disconnected_at =
+                Some(Instant::now() - Duration::from_secs(3));
+            cx.notify();
+        });
+    });
+    draw(window);
+    assert!(window.debug_bounds("tasks-band-1").is_some());
+    assert!(window.debug_bounds("tasks-band-reconnect-1").is_some());
+    assert!(inside(window, "reconnect-veil-1", "tasks-area"));
+}

@@ -69,3 +69,13 @@ tasks:
     agent_exited:
       en: Agent exited
       zh-CN: Agent 已退出
+  band:
+    not_connected:
+      en: "%{device} is not connected"
+      zh-CN: "%{device} 未连接"
+    reconnecting:
+      en: Reconnecting…
+      zh-CN: 正在重新连接…
+    reconnect:
+      en: Reconnect
+      zh-CN: 重新连接

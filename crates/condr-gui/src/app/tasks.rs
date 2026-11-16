@@ -582,9 +582,11 @@ impl Condr {
             TasksLayout::Board => self.render_tasks_board(&columns, view.tasks, cx),
             TasksLayout::List => self.render_tasks_list(&columns, view.tasks, cx),
         };
-        div()
+        let bands = self.render_connection_bands(view.tasks.scope, cx);
+        v_flex()
             .debug_selector(|| "tasks-cards".into())
             .size_full()
+            .children(bands)
             .track_focus(&view.tasks_focus)
             .on_key_down(cx.listener(Self::tasks_key_down))
             .on_mouse_down(
@@ -766,6 +768,78 @@ impl Condr {
             .overflow_y_scroll()
             .children(rows)
             .into_any_element()
+    }
+
+    /// With the sidebar hidden, ADR 0020's mark has nowhere to be: a band names each
+    /// Device in the scope that is not connected, whose Agents the cards then leave out.
+    fn render_connection_bands(
+        &self,
+        scope: TasksScope,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let scope = self.effective_tasks_scope(scope);
+        let mut bands = Vec::new();
+        for connection in &self.connections {
+            let in_scope = match scope {
+                TasksScope::All => true,
+                TasksScope::Device(server) | TasksScope::Workspace(server, _) => {
+                    connection.model.server_id == Some(server)
+                }
+            };
+            if !in_scope || connection.status == ConnectionStatus::Connected {
+                continue;
+            }
+            let key = connection.key;
+            let reconnecting = connection.reconnect_deadline.is_some();
+            let owner = cx.weak_entity();
+            let status = super::sidebar::device_status(
+                key,
+                connection.status,
+                connection.build_notice().is_some(),
+                connection.error.is_some() && !reconnecting,
+                cx,
+            );
+            let theme = cx.theme();
+            bands.push(
+                h_flex()
+                    .debug_selector(move || format!("tasks-band-{key}"))
+                    .flex_none()
+                    .w_full()
+                    .gap_2()
+                    .px_3()
+                    .py_1()
+                    .items_center()
+                    .border_b_1()
+                    .border_color(theme.border)
+                    .bg(theme.sidebar)
+                    .text_sm()
+                    .child(status)
+                    .child(div().min_w_0().truncate().child(
+                        t!("tasks.band.not_connected", device = connection.label).into_owned(),
+                    ))
+                    .when(reconnecting, |this| {
+                        this.child(
+                            div()
+                                .text_color(theme.muted_foreground)
+                                .child(t!("tasks.band.reconnecting").into_owned()),
+                        )
+                    })
+                    .child(div().flex_1())
+                    .child(
+                        Button::new(SharedString::from(format!("tasks-band-reconnect-{key}")))
+                            .debug_selector(move || format!("tasks-band-reconnect-{key}"))
+                            .ghost()
+                            .xsmall()
+                            .label(t!("tasks.band.reconnect"))
+                            .on_click(move |_, window, cx| {
+                                let _ = owner
+                                    .update(cx, |this, cx| this.connect_server(key, window, cx));
+                            }),
+                    )
+                    .into_any_element(),
+            );
+        }
+        bands
     }
 
     /// What a card shows, gathered once for every density.
@@ -1598,12 +1672,21 @@ impl Condr {
                 None => div().into_any_element(),
             },
         };
+        // A Device retrying on its own veils its Pane, as its Workspace is in normal mode.
+        let veil = connection.and_then(|connection| self.render_reconnect_veil(connection, cx));
         v_flex()
             .id("tasks-area")
             .debug_selector(|| "tasks-area".into())
             .size_full()
             .child(header)
-            .child(div().flex_1().min_h_0().child(body))
+            .child(
+                div()
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .child(body)
+                    .children(veil),
+            )
             .into_any_element()
     }
 }
