@@ -45,7 +45,36 @@ pub(super) struct TasksPrefs {
     pub(super) scope: TasksScope,
     /// One bit per column, by `TasksColumn::bit`.
     pub(super) folded: u8,
+    /// Where each layout splits the cards from the interaction area, in thousandths of
+    /// the Board's height or the List's width; `None` keeps the default.
+    pub(super) split_board: Option<u16>,
+    pub(super) split_list: Option<u16>,
 }
+
+/// The card whose Agent the interaction area shows: its Pane, the column it had when it
+/// was selected, which it keeps until another is selected or the area closes, and
+/// whether the keyboard is in its terminal or in the card area (ADR 0068).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct TasksSelection {
+    pub(super) key: ConnectionKey,
+    pub(super) pane_id: PaneId,
+    pub(super) column: Option<TasksColumn>,
+    pub(super) keyboard: bool,
+}
+
+/// The Dock holding only the selected Agent's Pane: locked and never subscribed to, so
+/// it sends no Layout command; zoom is Session state and is not borrowed (ADR 0068).
+pub(super) struct TasksDock {
+    pub(super) area: Entity<DockArea>,
+    pub(super) pane: (ConnectionKey, PaneId),
+}
+
+/// The drag payload of the handle between the cards and the interaction area.
+#[derive(Clone)]
+pub(super) struct DraggedTasksSplit;
+
+const DEFAULT_SPLIT_BOARD: u16 = 450;
+const DEFAULT_SPLIT_LIST: u16 = 440;
 
 impl TasksPrefs {
     pub(super) fn is_folded(self, column: TasksColumn) -> bool {
@@ -172,6 +201,25 @@ impl Condr {
         self.sync_terminal_focus(window, cx);
         self.schedule_state_save(cx);
         cx.notify();
+    }
+
+    /// Makes each window's cached views before a frame renders them: GPUI tracks a
+    /// cached view for invalidation from the frames after the one it was made in, so
+    /// one made while a frame renders is never notified again.
+    pub(super) fn prepare_cached_views(&mut self, cx: &mut Context<Self>) {
+        let owner = cx.entity();
+        for index in 0..self.windows.len() {
+            if self.windows[index].sidebar.is_none() {
+                let sidebar = cx.new(|cx| super::sidebar::LeftSidebar::new(&owner, cx));
+                self.windows[index].sidebar = Some(sidebar);
+            }
+            if self.windows[index].scope == WindowScope::Main
+                && self.windows[index].tasks_board.is_none()
+            {
+                let board = cx.new(|cx| TasksBoard::new(&owner, cx));
+                self.windows[index].tasks_board = Some(board);
+            }
+        }
     }
 
     /// The Tasks row at the top of the main window's sidebar.
@@ -303,7 +351,12 @@ impl Condr {
     }
 
     /// Every Agent on a connected Device in `scope`, by column, each column by urgency.
-    pub(super) fn task_cards(&self, scope: TasksScope) -> Vec<(TasksColumn, Vec<TaskCard>)> {
+    /// The selected card keeps the column it had when it was selected.
+    pub(super) fn task_cards(
+        &self,
+        scope: TasksScope,
+        selection: Option<TasksSelection>,
+    ) -> Vec<(TasksColumn, Vec<TaskCard>)> {
         let mut columns: Vec<(TasksColumn, Vec<TaskCard>)> = TasksColumn::ALL
             .iter()
             .map(|column| (*column, Vec::new()))
@@ -326,7 +379,12 @@ impl Condr {
                         pane_id: pane.id(),
                         status,
                     };
-                    let column = TasksColumn::of(status);
+                    let column = selection
+                        .filter(|selected| {
+                            (selected.key, selected.pane_id) == (connection.key, pane.id())
+                        })
+                        .and_then(|selected| selected.column)
+                        .unwrap_or_else(|| TasksColumn::of(status));
                     columns
                         .iter_mut()
                         .find(|(each, _)| *each == column)
@@ -427,7 +485,7 @@ impl Condr {
     fn render_scope_menu(&self, scope: TasksScope, cx: &mut Context<Self>) -> AnyElement {
         let scope = self.effective_tasks_scope(scope);
         let count = |scope| -> usize {
-            self.task_cards(scope)
+            self.task_cards(scope, None)
                 .iter()
                 .map(|(_, cards)| cards.len())
                 .sum()
@@ -516,11 +574,25 @@ impl Condr {
         view: &WindowView,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let columns = self.task_cards(self.effective_tasks_scope(view.tasks.scope));
-        match view.tasks.layout {
+        let columns = self.task_cards(
+            self.effective_tasks_scope(view.tasks.scope),
+            view.tasks_selection,
+        );
+        let cards = match view.tasks.layout {
             TasksLayout::Board => self.render_tasks_board(&columns, view.tasks, cx),
             TasksLayout::List => self.render_tasks_list(&columns, view.tasks, cx),
-        }
+        };
+        div()
+            .debug_selector(|| "tasks-cards".into())
+            .size_full()
+            .track_focus(&view.tasks_focus)
+            .on_key_down(cx.listener(Self::tasks_key_down))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, window, cx| this.focus_task_cards(window, cx)),
+            )
+            .child(cards)
+            .into_any_element()
     }
 
     fn render_tasks_board(
@@ -753,6 +825,14 @@ impl Condr {
             return div().into_any_element();
         };
         let icon = self.card_icon(card, facts.kind, cx);
+        let (card_key, card_pane) = (card.key, card.pane_id);
+        let selected = self
+            .main_view()
+            .tasks_selection
+            .is_some_and(|selected| (selected.key, selected.pane_id) == (card_key, card_pane));
+        let on_click = cx.listener(move |this, _: &ClickEvent, window, cx| {
+            this.click_task_card(card_key, card_pane, window, cx)
+        });
         let theme = cx.theme();
         let (key, pane) = (card.key, card.pane_id.as_u64());
         let place = match &facts.branch {
@@ -767,8 +847,14 @@ impl Condr {
             .p_2()
             .rounded(theme.radius)
             .border_1()
-            .border_color(theme.border)
+            .border_color(if selected {
+                theme.primary
+            } else {
+                theme.border
+            })
             .bg(theme.sidebar)
+            .cursor_pointer()
+            .on_click(on_click)
             .child(
                 h_flex()
                     .gap_2()
@@ -814,6 +900,14 @@ impl Condr {
             return div().into_any_element();
         };
         let icon = self.card_icon(card, facts.kind, cx);
+        let (card_key, card_pane) = (card.key, card.pane_id);
+        let selected = self
+            .main_view()
+            .tasks_selection
+            .is_some_and(|selected| (selected.key, selected.pane_id) == (card_key, card_pane));
+        let on_click = cx.listener(move |this, _: &ClickEvent, window, cx| {
+            this.click_task_card(card_key, card_pane, window, cx)
+        });
         let theme = cx.theme();
         let (key, pane) = (card.key, card.pane_id.as_u64());
         v_flex()
@@ -823,6 +917,14 @@ impl Condr {
             .px_1()
             .py_0p5()
             .rounded(theme.radius)
+            .border_1()
+            .border_color(if selected {
+                theme.primary
+            } else {
+                gpui_kit::transparent_black()
+            })
+            .cursor_pointer()
+            .on_click(on_click)
             .child(
                 h_flex()
                     .gap_2()
@@ -848,6 +950,14 @@ impl Condr {
             return div().into_any_element();
         };
         let icon = self.card_icon(card, facts.kind, cx);
+        let (card_key, card_pane) = (card.key, card.pane_id);
+        let selected = self
+            .main_view()
+            .tasks_selection
+            .is_some_and(|selected| (selected.key, selected.pane_id) == (card_key, card_pane));
+        let on_click = cx.listener(move |this, _: &ClickEvent, window, cx| {
+            this.click_task_card(card_key, card_pane, window, cx)
+        });
         let theme = cx.theme();
         let (key, pane) = (card.key, card.pane_id.as_u64());
         let state = match &facts.detail {
@@ -873,6 +983,14 @@ impl Condr {
         )
         .text_sm()
         .rounded(theme.radius)
+        .border_1()
+        .border_color(if selected {
+            theme.primary
+        } else {
+            gpui_kit::transparent_black()
+        })
+        .cursor_pointer()
+        .on_click(on_click)
         .into_any_element()
     }
 }
@@ -996,6 +1114,497 @@ impl Render for TasksBoard {
                 condr.render_task_cards(condr.window_view(window), cx)
             })
             .unwrap_or_else(|_| div().into_any_element())
+    }
+}
+
+/// The interaction area: selecting, the single-Pane Dock, the keyboard and the split.
+impl Condr {
+    /// Selects a card and opens the interaction area on its Agent's Pane. With
+    /// `keyboard`, its terminal takes the keyboard, and with it the PTY's sizing (ADR
+    /// 0036); without, the area previews the Pane and the card area keeps the keyboard.
+    pub(super) fn select_task_card(
+        &mut self,
+        key: ConnectionKey,
+        pane_id: PaneId,
+        keyboard: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(connection) = self.connection(key) else {
+            return;
+        };
+        let column = pane_sidebar_status(&connection.model, pane_id).map(TasksColumn::of);
+        let shown = connection
+            .presented_session()
+            .and_then(|session| session.workspace_for_pane(pane_id))
+            .is_some_and(|workspace| {
+                Self::tasks_scope_shows(
+                    self.effective_tasks_scope(self.main_view().tasks.scope),
+                    connection,
+                    workspace,
+                )
+            });
+        let view = self.main_view_mut();
+        // A notification's Agent outside the scope widens it to All first.
+        if !shown {
+            view.tasks.scope = TasksScope::All;
+        }
+        let kept = view
+            .tasks_selection
+            .filter(|selected| (selected.key, selected.pane_id) == (key, pane_id))
+            .and_then(|selected| selected.column);
+        view.tasks_selection = Some(TasksSelection {
+            key,
+            pane_id,
+            column: kept.or(column),
+            keyboard,
+        });
+        self.rebuild_window_dock(window, cx);
+        if keyboard {
+            self.focus_tasks_terminal(key, pane_id, window, cx);
+        } else {
+            self.main_view().tasks_focus.clone().focus(window, cx);
+        }
+        self.sync_terminal_focus(window, cx);
+        self.schedule_state_save(cx);
+        cx.notify();
+    }
+
+    fn focus_tasks_terminal(
+        &self,
+        key: ConnectionKey,
+        pane_id: PaneId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(focus) = self
+            .panels
+            .get(&(key, pane_id))
+            .map(|panel| panel.read(cx).focus_handle.clone())
+        else {
+            return;
+        };
+        let owner = cx.weak_entity();
+        // The Panel mounts with the next render; focus it then and report the focus.
+        window.defer(cx, move |window, cx| {
+            focus.focus(window, cx);
+            let _ = owner.update(cx, |this, cx| this.sync_terminal_focus(window, cx));
+        });
+    }
+
+    /// Closes the interaction area, which ends the selection and leaves no terminal
+    /// with the keyboard.
+    pub(super) fn close_task_area(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let view = self.main_view_mut();
+        view.tasks_selection = None;
+        view.tasks_dock = None;
+        self.terminal_input.target = None;
+        self.main_view().tasks_focus.clone().focus(window, cx);
+        self.sync_terminal_focus(window, cx);
+        cx.notify();
+    }
+
+    /// A click on a card: the selected one closes the area, another opens it with the
+    /// keyboard in its terminal.
+    fn click_task_card(
+        &mut self,
+        key: ConnectionKey,
+        pane_id: PaneId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let selected = self
+            .main_view()
+            .tasks_selection
+            .is_some_and(|selected| (selected.key, selected.pane_id) == (key, pane_id));
+        if selected {
+            self.close_task_area(window, cx);
+        } else {
+            self.select_task_card(key, pane_id, true, window, cx);
+        }
+    }
+
+    /// The Agent cards in the order `next-agent` and the arrows step through: column
+    /// by column, each by urgency.
+    fn task_card_order(&self) -> Vec<(ConnectionKey, PaneId)> {
+        let view = self.main_view();
+        self.task_cards(
+            self.effective_tasks_scope(view.tasks.scope),
+            view.tasks_selection,
+        )
+        .into_iter()
+        .flat_map(|(_, cards)| cards)
+        .map(|card| (card.key, card.pane_id))
+        .collect()
+    }
+
+    /// Steps the selection through the cards, wrapping at both ends; from no selection,
+    /// forward starts at the first card and back at the last.
+    pub(super) fn step_task_card(
+        &mut self,
+        step: isize,
+        keyboard: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let order = self.task_card_order();
+        if order.is_empty() {
+            return;
+        }
+        let current = self.main_view().tasks_selection.and_then(|selected| {
+            order
+                .iter()
+                .position(|card| *card == (selected.key, selected.pane_id))
+        });
+        let next = match current {
+            Some(ix) => (ix as isize + step).rem_euclid(order.len() as isize) as usize,
+            None if step > 0 => 0,
+            None => order.len() - 1,
+        };
+        let (key, pane_id) = order[next];
+        self.select_task_card(key, pane_id, keyboard, window, cx);
+    }
+
+    /// The card area's keys: the arrows move the selection and keep the keyboard here,
+    /// so neither an arrow nor Enter reaches an Agent by accident; Enter gives the
+    /// selected terminal the keyboard.
+    fn tasks_key_down(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let stroke = &event.keystroke;
+        if stroke.modifiers.modified() {
+            return;
+        }
+        match stroke.key.as_str() {
+            "up" | "left" => self.step_task_card(-1, false, window, cx),
+            "down" | "right" => self.step_task_card(1, false, window, cx),
+            "enter" => {
+                if let Some(selected) = self.main_view().tasks_selection {
+                    self.select_task_card(selected.key, selected.pane_id, true, window, cx);
+                }
+            }
+            _ => return,
+        }
+        cx.stop_propagation();
+    }
+
+    /// A press on the card area's background takes the keyboard back from the terminal.
+    fn focus_task_cards(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let focus = self.main_view().tasks_focus.clone();
+        if let Some(selected) = self.main_view_mut().tasks_selection.as_mut() {
+            selected.keyboard = false;
+        }
+        self.terminal_input.target = None;
+        focus.focus(window, cx);
+        self.sync_terminal_focus(window, cx);
+        cx.notify();
+    }
+
+    /// Leaves Tasks mode, for Go to's places and Open in Workspace.
+    pub(super) fn leave_tasks_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.main_view().tasks.on {
+            self.main_view_mut().tasks.on = false;
+            self.main_view_mut().tasks_dock = None;
+            if self.is_main(window) {
+                self.rebuild_window_dock(window, cx);
+            }
+            self.schedule_state_save(cx);
+            cx.notify();
+        }
+    }
+
+    fn open_selected_in_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(selected) = self.main_view().tasks_selection else {
+            return;
+        };
+        self.main_view_mut().tasks_selection = None;
+        self.leave_tasks_mode(window, cx);
+        self.select_pane(selected.key, selected.pane_id, window, cx);
+    }
+
+    /// Whether the interaction area only previews `pane_id`: then the Client sends it no
+    /// size, so stepping through cards resizes no Agent (ADR 0068).
+    pub(super) fn tasks_previews(&self, key: ConnectionKey, pane_id: PaneId) -> bool {
+        let view = self.main_view();
+        view.tasks.on
+            && view.tasks_selection.is_some_and(|selected| {
+                (selected.key, selected.pane_id) == (key, pane_id) && !selected.keyboard
+            })
+    }
+
+    /// The other window that draws the selected Pane's Tab, if one does.
+    fn tasks_pane_shown_elsewhere(
+        &self,
+        selected: TasksSelection,
+    ) -> Option<(WindowScope, AnyWindowHandle)> {
+        let tab_id = self
+            .connection(selected.key)?
+            .session()?
+            .workspace_for_pane(selected.pane_id)?
+            .tabs()
+            .iter()
+            .find(|tab| tab.panes().iter().any(|pane| pane.id() == selected.pane_id))?
+            .id();
+        self.windows.iter().skip(1).find_map(|view| {
+            let (key, _, _, shown) = self.presented_in(view)?;
+            ((key, shown) == (selected.key, tab_id)).then_some((view.scope, view.handle))
+        })
+    }
+
+    /// The Dock part of `rebuild_window_dock` in Tasks mode: no Tab's surface, and a
+    /// Dock of the selected Pane alone, unless another window draws it.
+    pub(super) fn rebuild_tasks_dock(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let input_window = self.last_active == window.window_handle();
+        self.window_view_mut(window).dock_surface = None;
+        // A Pane that closed takes the area with it.
+        if let Some(selected) = self.main_view().tasks_selection
+            && self
+                .connection(selected.key)
+                .and_then(ServerConnection::session)
+                .and_then(|session| session.workspace_for_pane(selected.pane_id))
+                .is_none()
+        {
+            let view = self.main_view_mut();
+            view.tasks_selection = None;
+            view.tasks_dock = None;
+        }
+        let selection = self.main_view().tasks_selection;
+        if input_window {
+            self.terminal_input.target = selection
+                .filter(|selected| selected.keyboard)
+                .map(|selected| (selected.key, selected.pane_id));
+        }
+        let Some(selected) = selection else {
+            self.main_view_mut().tasks_dock = None;
+            return;
+        };
+        if self.tasks_pane_shown_elsewhere(selected).is_some() {
+            self.main_view_mut().tasks_dock = None;
+            return;
+        }
+        let pane = (selected.key, selected.pane_id);
+        if self
+            .main_view()
+            .tasks_dock
+            .as_ref()
+            .is_some_and(|dock| dock.pane == pane)
+        {
+            return;
+        }
+        let size = {
+            let workspace = self.main_view().workspace_size;
+            size(
+                workspace.width.max(px(1.)),
+                (workspace.height / 2.).max(px(1.)),
+            )
+        };
+        let layout =
+            self.build_dock_layout(selected.key, &PaneLayout::Pane(selected.pane_id), size, cx);
+        let area = cx.new(|cx| {
+            DockArea::new("condr-tasks-dock", None, window, cx)
+                .with_renderer(Rc::new(CondrDockRenderer))
+        });
+        area.update(cx, |dock, cx| {
+            dock.set_locked(true, window, cx);
+            dock.set_center(layout, window, cx);
+        });
+        self.main_view_mut().tasks_dock = Some(TasksDock { area, pane });
+    }
+
+    /// The cards, and below the Board or beside the List the interaction area, with a
+    /// handle between them.
+    pub(super) fn render_tasks_body(
+        &self,
+        view: &WindowView,
+        board: Entity<TasksBoard>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let cards = AnyView::from(board).cached(StyleRefinement::default().size_full());
+        let Some(selected) = view.tasks_selection else {
+            return div().size_full().child(cards).into_any_element();
+        };
+        let area = self.render_tasks_area(view, selected, cx);
+        let board_layout = view.tasks.layout == TasksLayout::Board;
+        let split = if board_layout {
+            view.tasks.split_board.unwrap_or(DEFAULT_SPLIT_BOARD)
+        } else {
+            view.tasks.split_list.unwrap_or(DEFAULT_SPLIT_LIST)
+        };
+        let fraction = relative(f32::from(split) / 1000.);
+        let handle = div()
+            .id("tasks-split")
+            .debug_selector(|| "tasks-split".into())
+            .flex_none()
+            .bg(cx.theme().border)
+            .map(|this| {
+                if board_layout {
+                    this.h(px(1.)).w_full().cursor_row_resize()
+                } else {
+                    this.w(px(1.)).h_full().cursor_col_resize()
+                }
+            })
+            .on_drag(DraggedTasksSplit, |_, _, _, cx| cx.new(|_| EmptyView));
+        let container = if board_layout { v_flex() } else { h_flex() };
+        container
+            .size_full()
+            .on_drag_move(cx.listener(
+                move |this, event: &DragMoveEvent<DraggedTasksSplit>, _, cx| {
+                    let bounds = event.bounds;
+                    let position = event.event.position;
+                    let fraction = if board_layout {
+                        (position.y - bounds.top()) / bounds.size.height
+                    } else {
+                        (position.x - bounds.left()) / bounds.size.width
+                    };
+                    let split = Some((fraction.clamp(0.2, 0.8) * 1000.).round() as u16);
+                    let prefs = &mut this.main_view_mut().tasks;
+                    if board_layout {
+                        prefs.split_board = split;
+                    } else {
+                        prefs.split_list = split;
+                    }
+                    this.schedule_state_save(cx);
+                    cx.notify();
+                },
+            ))
+            .child(
+                div()
+                    .flex_none()
+                    .map(|this| {
+                        if board_layout {
+                            this.h(fraction).w_full()
+                        } else {
+                            this.w(fraction).h_full()
+                        }
+                    })
+                    .child(cards),
+            )
+            .child(handle)
+            .child(div().flex_1().min_w_0().min_h_0().child(area))
+            .into_any_element()
+    }
+
+    /// The interaction area: a header of its own over the selected Agent's Pane.
+    fn render_tasks_area(
+        &self,
+        view: &WindowView,
+        selected: TasksSelection,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let (key, pane) = (selected.key, selected.pane_id);
+        let connection = self.connection(key);
+        let agent = connection.and_then(|connection| connection.model.agents.get(&pane));
+        let card = connection.and_then(|connection| {
+            let workspace = connection.presented_session()?.workspace_for_pane(pane)?;
+            Some(TaskCard {
+                key,
+                workspace_id: workspace.id(),
+                pane_id: pane,
+                status: pane_sidebar_status(&connection.model, pane)?,
+            })
+        });
+        let facts = card.as_ref().and_then(|card| self.card_facts(card));
+        let icon = card
+            .as_ref()
+            .zip(facts.as_ref())
+            .map(|(card, facts)| self.card_icon(card, facts.kind, cx));
+        let theme = cx.theme();
+        let title = match (&facts, agent) {
+            (Some(facts), Some(_)) => facts.title.clone(),
+            _ => connection
+                .and_then(|connection| connection.model.terminal_titles.get(&pane).cloned())
+                .unwrap_or_default(),
+        };
+        let place = facts.as_ref().map(|facts| {
+            let mut place = vec![facts.workspace.clone()];
+            place.extend(facts.branch.clone());
+            place.push(facts.kind.label().to_owned());
+            place.push(facts.device.clone());
+            place.join(" · ")
+        });
+        let open_owner = cx.weak_entity();
+        let close_owner = cx.weak_entity();
+        let header = h_flex()
+            .debug_selector(|| "tasks-area-header".into())
+            .flex_none()
+            .h(rems(2.25))
+            .w_full()
+            .gap_2()
+            .px_2()
+            .items_center()
+            .border_b_1()
+            .border_color(theme.border)
+            .children(icon)
+            .child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .text_sm()
+                    .font_semibold()
+                    .child(title),
+            )
+            .children(place.map(|place| {
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child(place)
+            }))
+            .when(agent.is_none(), |this| {
+                this.child(
+                    div()
+                        .debug_selector(|| "tasks-agent-exited".into())
+                        .flex_none()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(t!("tasks.area.agent_exited").into_owned()),
+                )
+            })
+            .child(div().flex_1())
+            .child(
+                Button::new("tasks-open-in-workspace")
+                    .debug_selector(|| "tasks-open-in-workspace".into())
+                    .ghost()
+                    .xsmall()
+                    .label(t!("tasks.area.open_in_workspace"))
+                    .on_click(move |_, window, cx| {
+                        let _ = open_owner
+                            .update(cx, |this, cx| this.open_selected_in_workspace(window, cx));
+                    }),
+            )
+            .child(
+                Button::new("tasks-area-close")
+                    .debug_selector(|| "tasks-area-close".into())
+                    .ghost()
+                    .xsmall()
+                    .icon(Icon::new(IconName::Close))
+                    .tooltip(t!("tasks.area.close"))
+                    .on_click(move |_, window, cx| {
+                        let _ = close_owner.update(cx, |this, cx| this.close_task_area(window, cx));
+                    }),
+            );
+        let body = match self.tasks_pane_shown_elsewhere(selected) {
+            Some((scope, handle)) => self.render_shown_elsewhere(scope, handle, cx),
+            None => match &view.tasks_dock {
+                Some(dock) => div()
+                    .debug_selector(|| "tasks-area-dock".into())
+                    .size_full()
+                    .child(dock.area.clone())
+                    .into_any_element(),
+                None => div().into_any_element(),
+            },
+        };
+        v_flex()
+            .id("tasks-area")
+            .debug_selector(|| "tasks-area".into())
+            .size_full()
+            .child(header)
+            .child(div().flex_1().min_h_0().child(body))
+            .into_any_element()
     }
 }
 

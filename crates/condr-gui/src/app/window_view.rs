@@ -83,6 +83,12 @@ pub(super) struct WindowView {
     pub(super) tasks: super::tasks::TasksPrefs,
     /// Tasks mode's cached card area, made when the mode first shows.
     pub(super) tasks_board: Option<Entity<super::tasks::TasksBoard>>,
+    /// The card whose Agent the interaction area shows; none while the area is closed.
+    pub(super) tasks_selection: Option<super::tasks::TasksSelection>,
+    /// The card area's keyboard focus, where the arrows move the selection.
+    pub(super) tasks_focus: FocusHandle,
+    /// The Dock holding only the selected Agent's Pane (ADR 0068).
+    pub(super) tasks_dock: Option<super::tasks::TasksDock>,
     _activation_subscription: Subscription,
     _bounds_subscription: Subscription,
     _focus_lost_subscription: Subscription,
@@ -141,6 +147,9 @@ impl WindowView {
             sidebar: None,
             tasks: Default::default(),
             tasks_board: None,
+            tasks_selection: None,
+            tasks_focus: cx.focus_handle(),
+            tasks_dock: None,
             _activation_subscription: activation_subscription,
             _bounds_subscription: bounds_subscription,
             _focus_lost_subscription: focus_lost_subscription,
@@ -488,6 +497,7 @@ impl Condr {
                     view.agents_collapsed = agents_collapsed;
                     view.changes_width = changes_width;
                     this.windows.push(view);
+                    this.prepare_cached_views(cx);
                     window.set_window_title(&this.window_title(scope));
                     let close_owner = cx.weak_entity();
                     window.on_window_should_close(cx, move |window, cx| {

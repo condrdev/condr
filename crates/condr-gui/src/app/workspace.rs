@@ -1022,10 +1022,7 @@ impl Render for Condr {
                             .flex_1()
                             .min_h_0()
                             .w_full()
-                            .child(
-                                AnyView::from(tasks_board)
-                                    .cached(StyleRefinement::default().size_full()),
-                            ),
+                            .child(self.render_tasks_body(view, tasks_board, cx)),
                     )
                 } else {
                     this.child(workspace_title_bar(

@@ -122,6 +122,10 @@ impl Condr {
         active: bool,
         cx: &mut Context<Self>,
     ) {
+        // A preview in Tasks mode's interaction area sizes nothing (ADR 0068).
+        if self.tasks_previews(key, pane_id) {
+            return;
+        }
         let pending_key = (key, pane_id);
         if self
             .pending_sizes

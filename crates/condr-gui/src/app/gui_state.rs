@@ -299,6 +299,11 @@ mod wire {
         scope_server: Option<u64>,
         #[prost(uint64, optional, tag = "6")]
         scope_workspace: Option<u64>,
+        /// Thousandths of the Board's height and of the List's width.
+        #[prost(uint32, optional, tag = "7")]
+        split_board: Option<u32>,
+        #[prost(uint32, optional, tag = "8")]
+        split_list: Option<u32>,
     }
 
     /// `kind` 1 Device, 2 Workspace, 3 Tab; `id` names the Workspace or the Tab.
@@ -427,6 +432,8 @@ mod wire {
                         folded: state.tasks.folded.into(),
                         scope_server,
                         scope_workspace,
+                        split_board: state.tasks.split_board.map(u32::from),
+                        split_list: state.tasks.split_list.map(u32::from),
                     }
                 }),
                 changes_width: state.changes_width,
@@ -515,6 +522,10 @@ mod wire {
                             _ => TasksScope::All,
                         },
                         folded: u8::try_from(tasks.folded).unwrap_or_default(),
+                        split_board: tasks
+                            .split_board
+                            .and_then(|split| u16::try_from(split).ok()),
+                        split_list: tasks.split_list.and_then(|split| u16::try_from(split).ok()),
                     }),
                 changes_width: state.changes_width,
                 diff_unified: state.diff_unified,
@@ -832,6 +843,8 @@ mod tests {
                     WorkspaceId::from_u64(3),
                 ),
                 folded: 0b0101,
+                split_board: Some(600),
+                split_list: None,
             },
             changes_width: Some(300.),
             diff_unified: true,

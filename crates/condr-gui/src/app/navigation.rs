@@ -149,6 +149,11 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        // In Tasks mode, going to an Agent selects its card, keyboard and all (ADR 0068).
+        if self.is_main(window) && self.in_tasks_mode(self.window_view(window)) {
+            self.select_task_card(key, pane_id, true, window, cx);
+            return true;
+        }
         let Some((workspace_id, tab_id, server_focused, can_mutate)) =
             self.connection(key).and_then(|connection| {
                 let session = connection.session()?;

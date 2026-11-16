@@ -252,12 +252,9 @@ impl Condr {
         }
         let handle = window.window_handle();
         let input_window = self.last_active == handle;
-        // Tasks mode shows no Tab, so nothing targets the keyboard (ADR 0068).
+        // Tasks mode shows no Tab: only the selected Agent's Pane (ADR 0068).
         if self.in_tasks_mode(self.window_view(window)) {
-            if input_window {
-                self.terminal_input.target = None;
-            }
-            self.window_view_mut(window).dock_surface = None;
+            self.rebuild_tasks_dock(window, cx);
             return;
         }
         let view = self.window_view(window);

@@ -108,6 +108,9 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.is_main(window) && self.in_tasks_mode(self.window_view(window)) {
+            return self.step_task_card(step, true, window, cx);
+        }
         let rows = self.agent_rows(self.window_view(window).scope);
         if rows.is_empty() {
             return;

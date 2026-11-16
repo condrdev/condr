@@ -604,6 +604,11 @@ impl Condr {
             state_save: None,
         };
         this.sync_sidebar_workspace_open(cx);
+        // Before the first frame, which must not be the one that makes them.
+        let owner = cx.weak_entity();
+        cx.defer(move |cx| {
+            let _ = owner.update(cx, |this, cx| this.prepare_cached_views(cx));
+        });
         // A connection handed in ready has bootstrapped already, so restore it here.
         if this.connections[0].model.server_id.is_some() {
             this.restore_server_state(1, cx);

@@ -437,6 +437,8 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A place is not an Agent: Go to leaves Tasks mode for it (ADR 0068).
+        self.leave_tasks_mode(window, cx);
         let pane_id = self.connection(key).and_then(|connection| {
             let session = connection.session()?;
             let tab_id = tab_id.or_else(|| connection.viewed_tab_id(session, workspace_id))?;
@@ -452,6 +454,7 @@ impl Condr {
 
     /// Presents a Device in the window that draws it: its own, or the main window.
     fn go_to_device(&mut self, key: ConnectionKey, window: &mut Window, cx: &mut Context<Self>) {
+        self.leave_tasks_mode(window, cx);
         let home = self.home_window(key, None, None);
         if home == self.main_window() && self.active_connection != key {
             self.active_connection = key;
