@@ -233,6 +233,7 @@ impl Condr {
             Needs::Changes => {
                 self.presented_workspace().is_some() && self.draws_workspace(self.active_view())
             }
+            Needs::MainWindow => self.active_view().scope == WindowScope::Main,
         }
     }
 
@@ -256,7 +257,11 @@ impl Condr {
                     also: format!("{group} {label}"),
                     label: label.into_owned(),
                     detail: group.into_owned(),
-                    enabled: self.can_run(shortcut.needs),
+                    enabled: self.can_run(shortcut.needs)
+                        && !(self.in_tasks_mode(self.active_view())
+                            && super::tasks::inert_in_tasks_mode(
+                                shortcut.action.as_any().type_id(),
+                            )),
                     look: Look::Action(self.keymap.keys[index].first().cloned()),
                 }
             })

@@ -888,6 +888,13 @@ impl Render for Condr {
             .sidebar
             .get_or_insert_with(|| cx.new(|cx| super::sidebar::LeftSidebar::new(&owner, cx)))
             .clone();
+        let tasks_board = self.in_tasks_mode(self.window_view(window)).then(|| {
+            let owner = cx.entity();
+            self.window_view_mut(window)
+                .tasks_board
+                .get_or_insert_with(|| cx.new(|cx| super::tasks::TasksBoard::new(&owner, cx)))
+                .clone()
+        });
         let view = self.window_view(window);
         let workspace_owner = cx.weak_entity();
         let sidebar_toggle_owner = cx.weak_entity();
@@ -990,6 +997,7 @@ impl Render for Condr {
             .on_action(cx.listener(Self::action_toggle_zoom))
             .on_action(cx.listener(Self::action_toggle_sidebar))
             .on_action(cx.listener(Self::action_toggle_changes))
+            .on_action(cx.listener(Self::action_toggle_tasks))
             .on_action(cx.listener(Self::action_next_workspace))
             .on_action(cx.listener(Self::action_previous_workspace))
             .on_action(cx.listener(Self::action_next_agent))
@@ -1006,6 +1014,19 @@ impl Render for Condr {
                 if tab_window {
                     this.child(tab_window_title_bar(title, bring_back, cx))
                         .child(workspace)
+                } else if let Some(tasks_board) = tasks_board {
+                    // Tasks mode takes the whole window, both sidebars too (ADR 0068).
+                    this.child(self.tasks_title_bar(view, cx)).child(
+                        div()
+                            .debug_selector(|| "tasks-mode".into())
+                            .flex_1()
+                            .min_h_0()
+                            .w_full()
+                            .child(
+                                AnyView::from(tasks_board)
+                                    .cached(StyleRefinement::default().size_full()),
+                            ),
+                    )
                 } else {
                     this.child(workspace_title_bar(
                         title,

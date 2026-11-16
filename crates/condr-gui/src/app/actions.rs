@@ -9,7 +9,7 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if window.has_active_dialog(cx) {
+        if window.has_active_dialog(cx) || self.in_tasks_mode(self.window_view(window)) {
             return;
         }
         self.activate_tab_at_index(action.index, window, cx);
@@ -79,6 +79,12 @@ macro_rules! action_handlers {
                     if window.has_active_dialog(cx) {
                         return;
                     }
+                    // Tasks mode shows no Tab for these to act on (ADR 0068).
+                    if self.in_tasks_mode(self.window_view(window))
+                        && super::tasks::inert_in_tasks_mode(std::any::TypeId::of::<$action>())
+                    {
+                        return;
+                    }
                     #[allow(unused_variables)]
                     let ($this, $window, $cx) = (self, window, cx);
                     $body
@@ -137,6 +143,7 @@ action_handlers! {
     action_toggle_zoom(ToggleZoom) |this, window, cx| { this.toggle_zoom(); }
     action_toggle_sidebar(ToggleSidebar) |this, window, cx| { this.toggle_sidebar(window, cx); }
     action_toggle_changes(ToggleChanges) |this, window, cx| { this.toggle_changes_sidebar(cx); }
+    action_toggle_tasks(ToggleTasks) |this, window, cx| { this.toggle_tasks(window, cx); }
     action_next_workspace(NextWorkspace) |this, window, cx| {
         this.cycle_workspace(1, window, cx);
     }

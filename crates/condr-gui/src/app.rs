@@ -38,6 +38,7 @@ mod settings;
 mod sidebar;
 mod startup;
 mod syntax;
+mod tasks;
 mod terminal_images;
 mod terminal_input;
 mod terminal_panel;
@@ -193,6 +194,7 @@ actions!(
         ToggleZoom,
         ToggleSidebar,
         ToggleChanges,
+        ToggleTasks,
         NextWorkspace,
         PreviousWorkspace,
         NextAgent,
@@ -287,6 +289,9 @@ pub(crate) struct Condr {
     /// How many times the sidebar was built, for the test that frames leave it alone.
     #[cfg(feature = "test-support")]
     sidebar_render_count: std::cell::Cell<usize>,
+    /// How many times Tasks mode's card area was built (ADR 0068).
+    #[cfg(feature = "test-support")]
+    tasks_board_render_count: std::cell::Cell<usize>,
     panels: HashMap<(ConnectionKey, PaneId), Entity<TerminalPanel>>,
     /// Every window this Client draws in, the main window first (ADR 0043).
     windows: Vec<WindowView>,
@@ -462,6 +467,7 @@ impl Condr {
             main_view.sidebar_width = px(width).max(MIN_SIDEBAR_WIDTH).min(MAX_SIDEBAR_WIDTH);
         }
         main_view.sidebar_collapsed = restored_state.sidebar_collapsed;
+        main_view.tasks = restored_state.tasks;
         main_view.agents_height = restored_state
             .agents_height
             .map(|height| px(height).max(MIN_AGENTS_HEIGHT));
@@ -533,6 +539,8 @@ impl Condr {
             dock_rebuild_count: 0,
             #[cfg(feature = "test-support")]
             sidebar_render_count: std::cell::Cell::new(0),
+            #[cfg(feature = "test-support")]
+            tasks_board_render_count: std::cell::Cell::new(0),
             panels: HashMap::new(),
             windows: vec![main_view],
             last_active: window.window_handle(),

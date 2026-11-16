@@ -37,6 +37,8 @@ pub(super) enum Needs {
     Agents,
     /// A presented Workspace whose right sidebar this window draws.
     Changes,
+    /// The main window, the only one Tasks mode shows in (ADR 0068).
+    MainWindow,
 }
 
 const MAC: bool = cfg!(target_os = "macos");
@@ -108,6 +110,14 @@ pub(super) const GROUPS: &[(&str, &[Shortcut])] = &[
                 &ToggleChanges,
                 Needs::Changes,
                 on(&["cmd-alt-b"], &["ctrl-alt-b"]),
+            ),
+            // The level above Tabs 1 to 9 (ADR 0068).
+            shortcut(
+                "toggle-tasks",
+                "keymap.action.toggle_tasks",
+                &ToggleTasks,
+                Needs::MainWindow,
+                on(&["cmd-0"], &["alt-0"]),
             ),
             // VS Code's Command Palette and Go to File; Ctrl+P stays the terminal's, and
             // herdr-app takes Ctrl+Shift+K for its Go to.

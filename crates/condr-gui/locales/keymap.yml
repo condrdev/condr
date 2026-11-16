@@ -29,6 +29,9 @@ keymap:
     toggle_changes:
       en: Toggle Changes & Files
       zh-CN: 切换变更与文件
+    toggle_tasks:
+      en: Toggle Tasks
+      zh-CN: 切换 Tasks
     command_palette:
       en: 'Command Palette: Actions'
       zh-CN: '命令面板：操作'

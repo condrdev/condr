@@ -97,8 +97,12 @@ fn numbered_tab_shortcuts_reserve_only_the_platforms_digit_chords() {
             Some(&ActivateTab { index: number - 1 })
         );
     }
+    // The digit before 1 is Tasks mode, the level above the Tabs (ADR 0068).
+    assert!(
+        default_shortcut(&keystroke(&format!("{TAB_MODIFIER}-0")))
+            .is_some_and(|action| action.as_any().is::<super::super::ToggleTasks>())
+    );
     for chord in [
-        format!("{TAB_MODIFIER}-0"),
         format!("{TAB_MODIFIER}-shift-1"),
         "ctrl-1".into(),
         "ctrl-alt-1".into(),

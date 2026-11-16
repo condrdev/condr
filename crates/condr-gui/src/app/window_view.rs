@@ -79,6 +79,10 @@ pub(super) struct WindowView {
     pub(super) ports: Option<super::ports::PortsScope>,
     /// The left sidebar's cached view, made at the window's first render.
     pub(super) sidebar: Option<Entity<super::sidebar::LeftSidebar>>,
+    /// Tasks mode, which only the main window enters, and how it shows (ADR 0068).
+    pub(super) tasks: super::tasks::TasksPrefs,
+    /// Tasks mode's cached card area, made when the mode first shows.
+    pub(super) tasks_board: Option<Entity<super::tasks::TasksBoard>>,
     _activation_subscription: Subscription,
     _bounds_subscription: Subscription,
     _focus_lost_subscription: Subscription,
@@ -135,6 +139,8 @@ impl WindowView {
             display: window.display(cx).map(|display| display.id()),
             ports: None,
             sidebar: None,
+            tasks: Default::default(),
+            tasks_board: None,
             _activation_subscription: activation_subscription,
             _bounds_subscription: bounds_subscription,
             _focus_lost_subscription: focus_lost_subscription,
@@ -200,6 +206,10 @@ impl Condr {
     /// failure with no window behind it is shown (ADR 0043).
     pub(super) fn main_view(&self) -> &WindowView {
         &self.windows[0]
+    }
+
+    pub(super) fn main_view_mut(&mut self) -> &mut WindowView {
+        &mut self.windows[0]
     }
 
     pub(super) fn main_window(&self) -> AnyWindowHandle {

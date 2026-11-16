@@ -10,6 +10,7 @@ mod ports;
 mod rendering;
 mod session_model;
 mod settings;
+mod tasks;
 mod terminal;
 mod transfers;
 mod windows;

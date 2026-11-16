@@ -43,6 +43,8 @@ pub(in crate::app) enum CondrIconName {
     SquarePlus,
     SquareDot,
     SquareMinus,
+    /// Lucide `square-kanban`: Tasks mode (ADR 0068).
+    SquareKanban,
     /// Lucide `file-text`: the Diff Tab's "Show File" button.
     FileText,
     /// Lucide `qr-code`: the pairing card before its code shows.
@@ -80,6 +82,7 @@ impl IconNamed for CondrIconName {
             Self::Coffee => "icons/coffee.svg",
             Self::SquarePlus => "icons/square-plus.svg",
             Self::SquareDot => "icons/square-dot.svg",
+            Self::SquareKanban => "icons/square-kanban.svg",
             Self::SquareMinus => "icons/square-minus.svg",
             Self::FileText => "icons/file-text.svg",
             Self::QrCode => "icons/qr-code.svg",

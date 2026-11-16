@@ -301,6 +301,8 @@ impl Condr {
             return self.render_collapsed_sidebar(view, cx);
         }
         let owner = cx.weak_entity();
+        // Above everything, in the main window only (ADR 0068).
+        let tasks_entry = (view.scope == WindowScope::Main).then(|| self.render_tasks_entry(cx));
         let needs_you = self.needs_you_items(view, cx);
         let agents = self.render_agents_section(view, window, cx);
         // A detached window lists only what it shows (ADR 0043).
@@ -791,6 +793,7 @@ impl Condr {
         Sidebar::new("condr-sidebar")
             .collapsible(SidebarCollapsible::None)
             .w_full()
+            .when_some(tasks_entry, |this, entry| this.header(entry))
             // Every Blocked agent on every Device, first (ADR 0024); absent when none.
             .children((!needs_you.is_empty()).then(|| {
                 CondrSidebarSection::new(
@@ -1029,6 +1032,9 @@ impl Condr {
             .text_color(cx.theme().sidebar_foreground)
             .border_r_1()
             .border_color(cx.theme().sidebar_border)
+            .when(view.scope == WindowScope::Main, |this| {
+                this.child(self.render_collapsed_tasks_entry(cx))
+            })
             .children(avatars)
             .into_any_element()
     }

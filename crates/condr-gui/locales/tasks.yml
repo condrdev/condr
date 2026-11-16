@@ -1,0 +1,57 @@
+_version: 2
+tasks:
+  title:
+    en: Tasks
+    zh-CN: Tasks
+  back:
+    en: Workspaces
+    zh-CN: Workspace
+  layout:
+    list:
+      en: List
+      zh-CN: 列表
+    board:
+      en: Board
+      zh-CN: 看板
+  density:
+    cards:
+      en: Cards
+      zh-CN: 卡片
+    compact:
+      en: Compact
+      zh-CN: 紧凑
+  column:
+    needs_you:
+      en: Needs you
+      zh-CN: Needs you
+    done:
+      en: Done
+      zh-CN: Done
+    working:
+      en: Working
+      zh-CN: Working
+    idle:
+      en: Idle
+      zh-CN: Idle
+  nothing_here:
+    en: Nothing here
+    zh-CN: 这里没有 Agent
+  list:
+    title:
+      en: Title
+      zh-CN: 标题
+    workspace:
+      en: Workspace
+      zh-CN: Workspace
+    branch:
+      en: Branch
+      zh-CN: 分支
+    device:
+      en: Device
+      zh-CN: 设备
+    changes:
+      en: Changes
+      zh-CN: 变更
+    state:
+      en: State
+      zh-CN: 状态

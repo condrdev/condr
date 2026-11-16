@@ -46,6 +46,8 @@ pub(super) struct GuiState {
     pub servers: HashMap<ServerId, ServerState>,
     /// The detached windows (ADR 0043), each opened again once its Server bootstraps.
     pub detached: Vec<DetachedWindowState>,
+    /// The main window's Tasks mode and how it shows (ADR 0068).
+    pub tasks: super::tasks::TasksPrefs,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -248,6 +250,7 @@ impl GuiState {
 /// `proto/`: nothing else reads it. A value this build does not know is dropped, which
 /// costs a window position or a sidebar choice at most.
 mod wire {
+    use super::super::tasks::{TasksDensity, TasksLayout, TasksPrefs};
     use super::{DetachedWindowState, SavedScope, SidebarView, WindowRect, WindowState};
     use condr_core::protocol::ServerId;
     use condr_core::{TabId, WorkspaceId};
@@ -275,6 +278,19 @@ mod wire {
         agents_height: Option<f32>,
         #[prost(bool, tag = "10")]
         agents_collapsed: bool,
+        #[prost(message, optional, tag = "11")]
+        tasks: Option<Tasks>,
+    }
+
+    /// Tasks mode (ADR 0068); every field's zero is its default.
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct Tasks {
+        #[prost(bool, tag = "1")]
+        on: bool,
+        #[prost(bool, tag = "2")]
+        list: bool,
+        #[prost(bool, tag = "3")]
+        compact: bool,
     }
 
     /// `kind` 1 Device, 2 Workspace, 3 Tab; `id` names the Workspace or the Tab.
@@ -388,6 +404,11 @@ mod wire {
                 sidebar_collapsed: state.sidebar_collapsed,
                 agents_height: state.agents_height,
                 agents_collapsed: state.agents_collapsed,
+                tasks: Some(Tasks {
+                    on: state.tasks.on,
+                    list: state.tasks.layout == TasksLayout::List,
+                    compact: state.tasks.density == TasksDensity::Compact,
+                }),
                 changes_width: state.changes_width,
                 diff_unified: state.diff_unified,
                 active_server: state.active_server.map(|server| server.0),
@@ -451,6 +472,21 @@ mod wire {
                 sidebar_collapsed: state.sidebar_collapsed,
                 agents_height: state.agents_height,
                 agents_collapsed: state.agents_collapsed,
+                tasks: state
+                    .tasks
+                    .map_or_else(TasksPrefs::default, |tasks| TasksPrefs {
+                        on: tasks.on,
+                        layout: if tasks.list {
+                            TasksLayout::List
+                        } else {
+                            TasksLayout::Board
+                        },
+                        density: if tasks.compact {
+                            TasksDensity::Compact
+                        } else {
+                            TasksDensity::Cards
+                        },
+                    }),
                 changes_width: state.changes_width,
                 diff_unified: state.diff_unified,
                 active_server: state.active_server.map(ServerId),
@@ -602,6 +638,7 @@ impl Condr {
             sidebar_collapsed: self.main_view().sidebar_collapsed,
             agents_height: self.main_view().agents_height.map(Into::into),
             agents_collapsed: self.main_view().agents_collapsed,
+            tasks: self.main_view().tasks,
             changes_width: Some(self.main_view().changes_width.into()),
             diff_unified: self.files_view.diff_unified,
             // Until the active connection has bootstrapped (a slow first start), the
@@ -757,6 +794,11 @@ mod tests {
             sidebar_collapsed: true,
             agents_height: Some(180.),
             agents_collapsed: true,
+            tasks: super::super::tasks::TasksPrefs {
+                on: true,
+                layout: super::super::tasks::TasksLayout::List,
+                density: super::super::tasks::TasksDensity::Compact,
+            },
             changes_width: Some(300.),
             diff_unified: true,
             active_server: Some(ServerId(7)),
