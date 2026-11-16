@@ -77,6 +77,8 @@ pub(super) struct WindowView {
     pub(super) display: Option<DisplayId>,
     /// The Ports page, when it covers this window's content area (ADR 0061).
     pub(super) ports: Option<super::ports::PortsScope>,
+    /// The left sidebar's cached view, made at the window's first render.
+    pub(super) sidebar: Option<Entity<super::sidebar::LeftSidebar>>,
     _activation_subscription: Subscription,
     _bounds_subscription: Subscription,
     _focus_lost_subscription: Subscription,
@@ -132,6 +134,7 @@ impl WindowView {
             bounds: window.window_bounds().into(),
             display: window.display(cx).map(|display| display.id()),
             ports: None,
+            sidebar: None,
             _activation_subscription: activation_subscription,
             _bounds_subscription: bounds_subscription,
             _focus_lost_subscription: focus_lost_subscription,

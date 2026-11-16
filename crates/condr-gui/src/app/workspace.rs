@@ -882,6 +882,12 @@ impl Render for Condr {
             return div().into_any_element();
         }
         self.ask_file_prompts(window, cx);
+        let owner = cx.entity();
+        let sidebar = self
+            .window_view_mut(window)
+            .sidebar
+            .get_or_insert_with(|| cx.new(|cx| super::sidebar::LeftSidebar::new(&owner, cx)))
+            .clone();
         let view = self.window_view(window);
         let workspace_owner = cx.weak_entity();
         let sidebar_toggle_owner = cx.weak_entity();
@@ -1047,7 +1053,10 @@ impl Render for Condr {
                                     .w(view.sidebar_layout_width())
                                     .flex_none()
                                     .h_full()
-                                    .child(self.render_sidebar(view, window, cx))
+                                    .child(
+                                        AnyView::from(sidebar)
+                                            .cached(StyleRefinement::default().size_full()),
+                                    )
                                     // Deferred so it paints above the workspace it overlaps by
                                     // half its width, occluding so the terminal underneath never
                                     // sees the press, and swallowing the press so the pane does

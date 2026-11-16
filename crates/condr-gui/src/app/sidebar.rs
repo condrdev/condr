@@ -11,6 +11,39 @@ use rust_i18n::t;
 pub(super) use drag_drop::*;
 pub(super) use icon::*;
 
+/// The left sidebar as a view of its own. A terminal frame notifies only its Panel, and
+/// GPUI then re-renders every ancestor up to `Condr`; cached, the sidebar keeps its last
+/// render through them and is built again only when `Condr` notifies (ADR 0068).
+pub(super) struct LeftSidebar {
+    owner: WeakEntity<Condr>,
+    _owner_changed: Subscription,
+}
+
+impl LeftSidebar {
+    pub(super) fn new(owner: &Entity<Condr>, cx: &mut Context<Self>) -> Self {
+        Self {
+            owner: owner.downgrade(),
+            // Everything the sidebar shows lives on `Condr`, which notifies when it changes.
+            _owner_changed: cx.observe(owner, |_, _, cx| cx.notify()),
+        }
+    }
+}
+
+impl Render for LeftSidebar {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.owner
+            .update(cx, |condr, cx| {
+                // A detached window being closed draws once more after its view went back.
+                if !condr.owns_window(window) {
+                    return div().into_any_element();
+                }
+                let condr = &*condr;
+                condr.render_sidebar(condr.window_view(window), window, cx)
+            })
+            .unwrap_or_else(|_| div().into_any_element())
+    }
+}
+
 /// The Workspace row's trailing column: its agents' states beside the name and `↑ ↓`
 /// beside the branch. The two boxes take `DETAIL_LINE_HEIGHTS` so they sit level with
 /// the row's own two lines.
@@ -261,6 +294,9 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        #[cfg(feature = "test-support")]
+        self.sidebar_render_count
+            .set(self.sidebar_render_count.get() + 1);
         if view.sidebar_collapsed {
             return self.render_collapsed_sidebar(view, cx);
         }

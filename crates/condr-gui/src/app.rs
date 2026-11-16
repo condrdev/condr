@@ -284,6 +284,9 @@ pub(crate) struct Condr {
     dock_surfaces: HashMap<DockSurfaceKey, DockSurface>,
     #[cfg(feature = "test-support")]
     dock_rebuild_count: usize,
+    /// How many times the sidebar was built, for the test that frames leave it alone.
+    #[cfg(feature = "test-support")]
+    sidebar_render_count: std::cell::Cell<usize>,
     panels: HashMap<(ConnectionKey, PaneId), Entity<TerminalPanel>>,
     /// Every window this Client draws in, the main window first (ADR 0043).
     windows: Vec<WindowView>,
@@ -528,6 +531,8 @@ impl Condr {
             dock_surfaces: HashMap::new(),
             #[cfg(feature = "test-support")]
             dock_rebuild_count: 0,
+            #[cfg(feature = "test-support")]
+            sidebar_render_count: std::cell::Cell::new(0),
             panels: HashMap::new(),
             windows: vec![main_view],
             last_active: window.window_handle(),

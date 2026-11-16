@@ -467,8 +467,9 @@ impl Condr {
                         self.pending_sizes.remove(&pending_key);
                     }
                 }
-                // A visual frame redraws only the Panels it touched; re-rendering the
-                // root would rebuild the sidebar and every Pane's chrome per frame.
+                // A visual frame notifies only the Panels it touched. GPUI still renders
+                // their ancestors up to `Condr` again, so what `Condr` builds must not be
+                // rebuilt per frame: the sidebar is a cached view (ADR 0068).
                 for pane_id in &pane_ids {
                     if let Some(panel) = self.panels.get(&(key, *pane_id)) {
                         panel.update(cx, |_, cx| cx.notify());
