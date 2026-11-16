@@ -15,6 +15,7 @@ mod paths;
 pub mod protocol;
 mod session;
 mod snapshot;
+mod task;
 mod terminal;
 pub mod uri;
 
@@ -49,8 +50,9 @@ pub use git::{
 };
 #[cfg(feature = "runtime")]
 pub use git::{
-    GitBase, GitError, GitFingerprint, GitRepository, create_worktree, discover_repository,
-    open_worktree, remove_worktree, validate_worktree_removal, worktree_destination,
+    GitBase, GitError, GitFingerprint, GitRepository, branch_commit, branch_is_checked_out,
+    create_worktree, delete_branch_at, discover_repository, open_worktree, remove_worktree,
+    validate_worktree_removal, worktree_destination,
 };
 pub use network::{ProxyMode, ProxySetting, check_proxy_url};
 #[cfg(feature = "runtime")]
@@ -63,6 +65,12 @@ pub use session::{
     Workspace, WorkspaceId, WorktreeAssociation, valid_diff_path,
 };
 pub use snapshot::{SessionSnapshot, SnapshotError};
+#[cfg(feature = "runtime")]
+pub use task::default_task_branch;
+pub use task::{
+    LastPlace, MAX_TASK_DESCRIPTION_BYTES, MAX_TASK_TITLE_BYTES, StartPlace, Task, TaskCommand,
+    TaskError, TaskId, TaskResponse, TaskStatus, task_error,
+};
 pub use terminal::{
     CELL_BLINK, CELL_BOLD, CELL_FAINT, CELL_INVERSE, CELL_INVISIBLE, CELL_ITALIC, CELL_OVERLINE,
     CELL_SPACER_HEAD, CELL_SPACER_TAIL, CELL_STRIKETHROUGH, CELL_UNDERLINE, CELL_UNDERLINE_CURLY,

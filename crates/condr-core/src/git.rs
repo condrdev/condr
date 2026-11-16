@@ -19,8 +19,9 @@ pub use changes::{
 };
 #[cfg(feature = "runtime")]
 pub use repository::{
-    GitBase, GitError, GitFingerprint, GitRepository, create_worktree, discover_repository,
-    open_worktree, remove_worktree, validate_worktree_removal, worktree_destination,
+    GitBase, GitError, GitFingerprint, GitRepository, branch_commit, branch_is_checked_out,
+    create_worktree, delete_branch_at, discover_repository, open_worktree, remove_worktree,
+    validate_worktree_removal, worktree_destination,
 };
 
 /// How far the branch has diverged from its upstream, as of the last local fetch.

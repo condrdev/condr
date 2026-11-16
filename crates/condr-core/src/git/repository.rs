@@ -402,6 +402,54 @@ pub fn create_worktree(
     }
 }
 
+/// Whether `branch` is checked out in `repository` or any of its worktrees, where Create
+/// Worktree would refuse it.
+pub fn branch_is_checked_out(repository: &GitRepository, branch: &str) -> Result<bool, GitError> {
+    let reference = branch_ref_name(branch.trim())?;
+    Ok(ensure_branch_not_checked_out(&repository.open()?, reference.as_ref()).is_err())
+}
+
+/// The commit `branch` points at, as hex, or `None` when it does not exist.
+pub fn branch_commit(repository: &GitRepository, branch: &str) -> Result<Option<String>, GitError> {
+    let reference = branch_ref_name(branch.trim())?;
+    let repo = repository.open()?;
+    let Some(mut found) = repo
+        .try_find_reference(reference.as_ref())
+        .map_err(git_error)?
+    else {
+        return Ok(None);
+    };
+    Ok(Some(found.peel_to_id().map_err(git_error)?.to_string()))
+}
+
+/// Deletes `branch` only while it still points at `commit`: undoing a branch Condr made,
+/// which keeps one anything has committed to since (ADR 0068). `Ok(false)` when it moved
+/// or is gone.
+pub fn delete_branch_at(
+    repository: &GitRepository,
+    branch: &str,
+    commit: &str,
+) -> Result<bool, GitError> {
+    use gix::refs::transaction::{Change, RefEdit, RefLog};
+    let reference = branch_ref_name(branch.trim())?;
+    let commit = gix::ObjectId::from_hex(commit.as_bytes()).map_err(git_error)?;
+    if branch_commit(repository, branch)? != Some(commit.to_string()) {
+        return Ok(false);
+    }
+    repository
+        .open()?
+        .edit_reference(RefEdit {
+            change: Change::Delete {
+                expected: PreviousValue::MustExistAndMatch(gix::refs::Target::Object(commit)),
+                log: RefLog::AndReference,
+            },
+            name: reference,
+            deref: false,
+        })
+        .map_err(git_error)?;
+    Ok(true)
+}
+
 /// The `refs/heads/` name for a user-typed branch, rejected like `check-ref-format --branch`.
 fn branch_ref_name(branch: &str) -> Result<gix::refs::FullName, GitError> {
     if branch.starts_with('-') {
