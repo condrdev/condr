@@ -1,4 +1,5 @@
 use super::*;
+use rust_i18n::t;
 
 impl Condr {
     pub(in crate::app) fn copy_terminal_selection(
@@ -81,7 +82,7 @@ impl Condr {
         cx.defer(move |cx| {
             let _ = handle.update(cx, |_, window, cx| {
                 window.push_notification(
-                    Notification::success("Copied to clipboard").id::<TerminalCopied>(),
+                    Notification::success(t!("terminal.copied")).id::<TerminalCopied>(),
                     cx,
                 );
             });
@@ -133,7 +134,7 @@ impl Condr {
             return false;
         }
         if bytes.len() > condr_core::protocol::MAX_CLIPBOARD_IMAGE_BYTES {
-            self.report_error("Image exceeds 16 MiB", cx);
+            self.report_error(t!("terminal.image_too_large"), cx);
             return true;
         }
         // The Pane is fixed here; a focus change while the upload is in flight must not
@@ -194,7 +195,7 @@ pub(in crate::app) fn prepare_clipboard_image(
     use condr_core::protocol::{ClipboardImageFormat, MAX_CLIPBOARD_IMAGE_BYTES};
 
     if bytes.len() > MAX_CLIPBOARD_IMAGE_BYTES {
-        return Err("Image exceeds 16 MiB".into());
+        return Err(t!("terminal.image_too_large").into_owned());
     }
     if *format != ClipboardImageFormat::Bmp {
         return Ok(());
@@ -214,9 +215,9 @@ pub(in crate::app) fn prepare_clipboard_image(
             decoded.write_to(&mut output, image::ImageFormat::Png)?;
             Ok(output.into_inner())
         })
-        .map_err(|error| format!("Could not convert clipboard image to PNG: {error}"))?;
+        .map_err(|error| t!("terminal.image_not_converted", error = error).into_owned())?;
     if png.len() > MAX_CLIPBOARD_IMAGE_BYTES {
-        return Err("Converted image exceeds 16 MiB".into());
+        return Err(t!("terminal.converted_image_too_large").into_owned());
     }
     *format = ClipboardImageFormat::Png;
     *bytes = png;

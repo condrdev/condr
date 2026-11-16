@@ -1,5 +1,6 @@
 use super::dialogs::{DangerConfirm, confirm_danger};
 use super::*;
+use rust_i18n::t;
 
 impl Condr {
     pub(super) fn action_activate_tab(
@@ -38,13 +39,15 @@ impl Condr {
             return self.confirm_unsaved(UnsavedScope::All, quit, window, cx);
         }
         let confirm = DangerConfirm {
-            title: match live {
-                1 => "A transfer is running".to_owned(),
-                count => format!("{count} transfers are running"),
-            },
-            description: "Quitting cancels it and leaves nothing half-written behind.".into(),
-            ok: "Quit".into(),
-            cancel: "Keep Going".into(),
+            title: if live == 1 {
+                t!("actions.quit_transfers.title.one", count = live)
+            } else {
+                t!("actions.quit_transfers.title.other", count = live)
+            }
+            .into_owned(),
+            description: t!("actions.quit_transfers.description").into_owned(),
+            ok: t!("actions.quit_transfers.quit").into(),
+            cancel: t!("actions.quit_transfers.keep_going").into(),
         };
         let quit = std::cell::Cell::new(Some(quit));
         confirm_danger(

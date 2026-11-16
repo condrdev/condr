@@ -3,10 +3,12 @@
 
 use super::command_palette::{self, OpenCommandPalette, Page};
 use super::*;
+use rust_i18n::t;
 
 /// One window action, by the name `[client.keybindings]` knows it by.
 pub(super) struct Shortcut {
     pub name: &'static str,
+    /// The message key of its label, which `t!` turns into text.
     pub label: &'static str,
     pub action: &'static dyn Action,
     /// What it acts on, for the Command Palette to grey it out without (ADR 0064).
@@ -75,16 +77,16 @@ const fn shortcut(
     }
 }
 
-/// Every window action, grouped as the Shortcuts page and the Command Palette show them.
-/// The order is also the precedence when two entries of `[client.keybindings]` name the
+/// Every window action, grouped as the Shortcuts page and the Command Palette show them,
+/// each group and label by its message key. The order is also the precedence when two entries of `[client.keybindings]` name the
 /// same key.
 pub(super) const GROUPS: &[(&str, &[Shortcut])] = &[
     (
-        "Application",
+        "keymap.group.application",
         &[
             shortcut(
                 "open-settings",
-                "Open Settings",
+                "keymap.action.open_settings",
                 &OpenSettings,
                 Needs::Nothing,
                 on(&["cmd-,"], &["ctrl-,"]),
@@ -93,14 +95,14 @@ pub(super) const GROUPS: &[(&str, &[Shortcut])] = &[
             // prefix and readline's backward-char, so Shift joins it.
             shortcut(
                 "toggle-sidebar",
-                "Toggle sidebar",
+                "keymap.action.toggle_sidebar",
                 &ToggleSidebar,
                 Needs::Nothing,
                 on(&["cmd-b"], &["ctrl-shift-b"]),
             ),
             shortcut(
                 "toggle-changes",
-                "Toggle Changes & Files",
+                "keymap.action.toggle_changes",
                 &ToggleChanges,
                 Needs::Changes,
                 on(&["cmd-alt-b"], &["ctrl-alt-b"]),
@@ -109,7 +111,7 @@ pub(super) const GROUPS: &[(&str, &[Shortcut])] = &[
             // herdr-app takes Ctrl+Shift+K for its Go to.
             shortcut(
                 "command-palette",
-                "Command Palette: Actions",
+                "keymap.action.command_palette",
                 &OpenCommandPalette {
                     page: Page::Actions,
                 },
@@ -118,7 +120,7 @@ pub(super) const GROUPS: &[(&str, &[Shortcut])] = &[
             ),
             shortcut(
                 "go-to",
-                "Command Palette: Go to",
+                "keymap.action.go_to",
                 &OpenCommandPalette { page: Page::GoTo },
                 Needs::Nothing,
                 on(&["cmd-p"], &["ctrl-shift-k"]),
@@ -126,18 +128,18 @@ pub(super) const GROUPS: &[(&str, &[Shortcut])] = &[
         ],
     ),
     (
-        "Devices",
+        "keymap.group.devices",
         &[
             shortcut(
                 "connect-remote-device",
-                "Connect remote device",
+                "keymap.action.connect_remote_device",
                 &AddServer,
                 Needs::Nothing,
                 &[],
             ),
             shortcut(
                 "reconnect-device",
-                "Reconnect device",
+                "keymap.action.reconnect_device",
                 &ReconnectServer,
                 Needs::Nothing,
                 &[],
@@ -145,40 +147,40 @@ pub(super) const GROUPS: &[(&str, &[Shortcut])] = &[
         ],
     ),
     (
-        "Workspaces",
+        "keymap.group.workspaces",
         &[
             // Workspaces stack vertically in the sidebar, so Up and Down walk them.
             shortcut(
                 "next-workspace",
-                "Next workspace",
+                "keymap.action.next_workspace",
                 &NextWorkspace,
                 Needs::Workspaces,
                 on(&["cmd-shift-down"], &["ctrl-shift-down"]),
             ),
             shortcut(
                 "previous-workspace",
-                "Previous workspace",
+                "keymap.action.previous_workspace",
                 &PreviousWorkspace,
                 Needs::Workspaces,
                 on(&["cmd-shift-up"], &["ctrl-shift-up"]),
             ),
             shortcut(
                 "new-workspace",
-                "New workspace",
+                "keymap.action.new_workspace",
                 &NewWorkspace,
                 Needs::Device,
                 &[],
             ),
             shortcut(
                 "rename-workspace",
-                "Rename workspace",
+                "keymap.action.rename_workspace",
                 &RenameWorkspace,
                 Needs::Change,
                 &[],
             ),
             shortcut(
                 "close-workspace",
-                "Close workspace",
+                "keymap.action.close_workspace",
                 &CloseWorkspace,
                 Needs::Change,
                 &[],
@@ -186,90 +188,102 @@ pub(super) const GROUPS: &[(&str, &[Shortcut])] = &[
         ],
     ),
     (
-        "Tabs",
+        "keymap.group.tabs",
         &[
             shortcut(
                 "new-tab",
-                "New tab",
+                "keymap.action.new_tab",
                 &NewTab,
                 Needs::Change,
                 on(&["cmd-t"], &["ctrl-shift-t"]),
             ),
             shortcut(
                 "next-tab",
-                "Next tab",
+                "keymap.action.next_tab",
                 &NextTab,
                 Needs::Tab,
                 on(&["cmd-}", "ctrl-tab"], &["ctrl-tab"]),
             ),
             shortcut(
                 "previous-tab",
-                "Previous tab",
+                "keymap.action.previous_tab",
                 &PreviousTab,
                 Needs::Tab,
                 on(&["cmd-{", "ctrl-shift-tab"], &["ctrl-shift-tab"]),
             ),
-            shortcut("rename-tab", "Rename tab", &RenameTab, Needs::Change, &[]),
-            shortcut("close-tab", "Close tab", &CloseTab, Needs::Change, &[]),
+            shortcut(
+                "rename-tab",
+                "keymap.action.rename_tab",
+                &RenameTab,
+                Needs::Change,
+                &[],
+            ),
+            shortcut(
+                "close-tab",
+                "keymap.action.close_tab",
+                &CloseTab,
+                Needs::Change,
+                &[],
+            ),
             shortcut(
                 "go-to-tab-1",
-                "Go to tab 1",
+                "keymap.action.go_to_tab_1",
                 &ActivateTab { index: 0 },
                 Needs::Tab,
                 on(&["cmd-1"], &["alt-1"]),
             ),
             shortcut(
                 "go-to-tab-2",
-                "Go to tab 2",
+                "keymap.action.go_to_tab_2",
                 &ActivateTab { index: 1 },
                 Needs::Tab,
                 on(&["cmd-2"], &["alt-2"]),
             ),
             shortcut(
                 "go-to-tab-3",
-                "Go to tab 3",
+                "keymap.action.go_to_tab_3",
                 &ActivateTab { index: 2 },
                 Needs::Tab,
                 on(&["cmd-3"], &["alt-3"]),
             ),
             shortcut(
                 "go-to-tab-4",
-                "Go to tab 4",
+                "keymap.action.go_to_tab_4",
                 &ActivateTab { index: 3 },
                 Needs::Tab,
                 on(&["cmd-4"], &["alt-4"]),
             ),
             shortcut(
                 "go-to-tab-5",
-                "Go to tab 5",
+                "keymap.action.go_to_tab_5",
                 &ActivateTab { index: 4 },
                 Needs::Tab,
                 on(&["cmd-5"], &["alt-5"]),
             ),
             shortcut(
                 "go-to-tab-6",
-                "Go to tab 6",
+                "keymap.action.go_to_tab_6",
                 &ActivateTab { index: 5 },
                 Needs::Tab,
                 on(&["cmd-6"], &["alt-6"]),
             ),
             shortcut(
                 "go-to-tab-7",
-                "Go to tab 7",
+                "keymap.action.go_to_tab_7",
                 &ActivateTab { index: 6 },
                 Needs::Tab,
                 on(&["cmd-7"], &["alt-7"]),
             ),
             shortcut(
                 "go-to-tab-8",
-                "Go to tab 8",
+                "keymap.action.go_to_tab_8",
                 &ActivateTab { index: 7 },
                 Needs::Tab,
                 on(&["cmd-8"], &["alt-8"]),
             ),
             shortcut(
                 "go-to-tab-9",
-                "Go to tab 9",
+                "keymap.action.go_to_tab_9",
                 &ActivateTab { index: 8 },
                 Needs::Tab,
                 on(&["cmd-9"], &["alt-9"]),
@@ -277,96 +291,120 @@ pub(super) const GROUPS: &[(&str, &[Shortcut])] = &[
         ],
     ),
     (
-        "Panes",
+        "keymap.group.panes",
         &[
             shortcut(
                 "split-right",
-                "Split right",
+                "keymap.action.split_right",
                 &SplitRight,
                 Needs::Pane,
                 on(&["cmd-d"], &["alt-shift-="]),
             ),
             shortcut(
                 "split-down",
-                "Split down",
+                "keymap.action.split_down",
                 &SplitDown,
                 Needs::Pane,
                 on(&["cmd-shift-d"], &["alt-shift--"]),
             ),
             shortcut(
                 "close-pane",
-                "Close pane",
+                "keymap.action.close_pane",
                 &ClosePane,
                 Needs::Pane,
                 on(&["cmd-w"], &["ctrl-shift-w"]),
             ),
             shortcut(
                 "toggle-zoom",
-                "Toggle zoom",
+                "keymap.action.toggle_zoom",
                 &ToggleZoom,
                 Needs::Pane,
                 on(&["cmd-shift-enter"], &["alt-shift-enter"]),
             ),
             shortcut(
                 "focus-left",
-                "Focus left",
+                "keymap.action.focus_left",
                 &FocusLeft,
                 Needs::Pane,
                 on(&["cmd-alt-left"], &["alt-left"]),
             ),
             shortcut(
                 "focus-right",
-                "Focus right",
+                "keymap.action.focus_right",
                 &FocusRight,
                 Needs::Pane,
                 on(&["cmd-alt-right"], &["alt-right"]),
             ),
             shortcut(
                 "focus-up",
-                "Focus up",
+                "keymap.action.focus_up",
                 &FocusUp,
                 Needs::Pane,
                 on(&["cmd-alt-up"], &["alt-up"]),
             ),
             shortcut(
                 "focus-down",
-                "Focus down",
+                "keymap.action.focus_down",
                 &FocusDown,
                 Needs::Pane,
                 on(&["cmd-alt-down"], &["alt-down"]),
             ),
             shortcut(
                 "resize-left",
-                "Resize left",
+                "keymap.action.resize_left",
                 &ResizeLeft,
                 Needs::Pane,
                 on(&["cmd-ctrl-left"], &["alt-shift-left"]),
             ),
             shortcut(
                 "resize-right",
-                "Resize right",
+                "keymap.action.resize_right",
                 &ResizeRight,
                 Needs::Pane,
                 on(&["cmd-ctrl-right"], &["alt-shift-right"]),
             ),
             shortcut(
                 "resize-up",
-                "Resize up",
+                "keymap.action.resize_up",
                 &ResizeUp,
                 Needs::Pane,
                 on(&["cmd-ctrl-up"], &["alt-shift-up"]),
             ),
             shortcut(
                 "resize-down",
-                "Resize down",
+                "keymap.action.resize_down",
                 &ResizeDown,
                 Needs::Pane,
                 on(&["cmd-ctrl-down"], &["alt-shift-down"]),
             ),
-            shortcut("swap-left", "Swap left", &SwapLeft, Needs::Pane, &[]),
-            shortcut("swap-right", "Swap right", &SwapRight, Needs::Pane, &[]),
-            shortcut("swap-up", "Swap up", &SwapUp, Needs::Pane, &[]),
-            shortcut("swap-down", "Swap down", &SwapDown, Needs::Pane, &[]),
+            shortcut(
+                "swap-left",
+                "keymap.action.swap_left",
+                &SwapLeft,
+                Needs::Pane,
+                &[],
+            ),
+            shortcut(
+                "swap-right",
+                "keymap.action.swap_right",
+                &SwapRight,
+                Needs::Pane,
+                &[],
+            ),
+            shortcut(
+                "swap-up",
+                "keymap.action.swap_up",
+                &SwapUp,
+                Needs::Pane,
+                &[],
+            ),
+            shortcut(
+                "swap-down",
+                "keymap.action.swap_down",
+                &SwapDown,
+                Needs::Pane,
+                &[],
+            ),
         ],
     ),
 ];
@@ -406,7 +444,8 @@ pub(super) fn written(key: &Keystroke) -> String {
 }
 
 /// Why `key` cannot be a window shortcut, if it cannot: one with no Cmd, Ctrl or Alt
-/// would take a key the terminal needs for typing (F-keys aside).
+/// would take a key the terminal needs for typing (F-keys aside). The reason is the key
+/// of a message that names the key as `key`.
 pub(super) fn refusal(key: &Keystroke) -> Option<&'static str> {
     let modifiers = key.modifiers;
     let function_key = key
@@ -416,15 +455,15 @@ pub(super) fn refusal(key: &Keystroke) -> Option<&'static str> {
         .is_some_and(|number| (1..=24).contains(&number));
     if !(modifiers.control || modifiers.alt || modifiers.platform || function_key) {
         return Some(if MAC {
-            "needs Cmd, Ctrl or Option"
+            "keymap.error.needs_modifier_mac"
         } else {
-            "needs Ctrl or Alt"
+            "keymap.error.needs_modifier"
         });
     }
     SYSTEM
         .iter()
         .any(|(system, _)| parse(system).as_ref() == Some(key))
-        .then_some("belongs to macOS")
+        .then_some("keymap.error.belongs_to_macos")
 }
 
 /// What a typed key is as a shortcut: the platform's way of reporting a shifted symbol
@@ -494,21 +533,21 @@ impl Keymap {
                 continue;
             };
             let Some(list) = value.as_array() else {
-                errors[index].push(format!("Takes a list of keys, not {value}."));
+                errors[index].push(t!("keymap.error.not_a_list", value = value).into_owned());
                 continue;
             };
             let mut keys = Vec::new();
             for item in list {
                 let Some(source) = item.as_str() else {
-                    errors[index].push(format!("{item} is not a key."));
+                    errors[index].push(t!("keymap.error.not_a_key", key = item).into_owned());
                     continue;
                 };
                 let Some(key) = parse(source) else {
-                    errors[index].push(format!("{source} is not a key."));
+                    errors[index].push(t!("keymap.error.not_a_key", key = source).into_owned());
                     continue;
                 };
                 if let Some(why) = refusal(&key) {
-                    errors[index].push(format!("{source} {why}."));
+                    errors[index].push(t!(why, key = source).into_owned());
                 } else if !keys.contains(&key) {
                     keys.push(key);
                 }
@@ -520,11 +559,14 @@ impl Keymap {
             let Some(keys) = keys else { continue };
             keys.retain(|key| match taken.iter().find(|(owned, _)| owned == key) {
                 Some((_, owner)) => {
-                    errors[index].push(format!(
-                        "{} is already {}.",
-                        written(key),
-                        shortcuts[*owner].label
-                    ));
+                    errors[index].push(
+                        t!(
+                            "keymap.error.taken",
+                            key = written(key),
+                            action = t!(shortcuts[*owner].label)
+                        )
+                        .into_owned(),
+                    );
                     false
                 }
                 None => {

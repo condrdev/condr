@@ -1,5 +1,6 @@
 use super::*;
 use crate::app::keymap::{self, Shortcut};
+use rust_i18n::t;
 
 /// The keys a focused terminal takes for the clipboard before any action sees them, so
 /// the keymap cannot show them; a test holds them to `terminal_clipboard_shortcut`.
@@ -38,7 +39,7 @@ pub(super) fn shortcuts_page(
     settings: &Entity<SettingsWindow>,
     cx: &App,
 ) -> SettingPage {
-    let mut page = SettingPage::new("Shortcuts").icon(IconName::LayoutDashboard);
+    let mut page = SettingPage::new(t!("shortcuts.title")).icon(IconName::LayoutDashboard);
     if cfg!(target_os = "macos") {
         page = page.group(option_group(owner));
     }
@@ -53,23 +54,20 @@ pub(super) fn shortcuts_page(
                     .debug_selector(|| "shortcuts-unknown".into())
                     .text_sm()
                     .text_color(cx.theme().danger)
-                    .child(format!(
-                        "[client.keybindings] names no shortcut: {}.",
-                        unknown.join(", ")
-                    ))
+                    .child(t!("shortcuts.unknown", names = unknown.join(", ")))
             })),
         );
     }
     let mut index = 0;
     for (title, shortcuts) in keymap::GROUPS {
-        let mut group = SettingGroup::new().title(*title);
+        let mut group = SettingGroup::new().title(t!(*title));
         for shortcut in *shortcuts {
             group = group.item(shortcut_row(index, shortcut, owner, settings));
             index += 1;
         }
-        if *title == "Application" {
+        if *title == "keymap.group.application" {
             // No key `[client.keybindings]` can write, so it only shows (ADR 0064).
-            group = group.item(fixed_row("Command Palette", &["shift", "shift"]));
+            group = group.item(fixed_row("shortcuts.command_palette", &["shift", "shift"]));
         }
         page = page.group(group);
     }
@@ -81,9 +79,9 @@ fn option_group(owner: &WeakEntity<Condr>) -> SettingGroup {
     let options = OptionAsMeta::ALL
         .map(|option| (option.as_str().into(), option.label().into()))
         .to_vec();
-    SettingGroup::new().title("Keyboard").item(
+    SettingGroup::new().title(t!("shortcuts.keyboard")).item(
         SettingItem::new(
-            "Option as Meta",
+            t!("shortcuts.option_as_meta.title"),
             SettingField::dropdown(
                 options,
                 move |cx| {
@@ -101,9 +99,7 @@ fn option_group(owner: &WeakEntity<Condr>) -> SettingGroup {
             )
             .default_value(OptionAsMeta::default().as_str()),
         )
-        .description(
-            "Sends Esc and the key, as a shell expects of Meta, instead of typing a character such as ∫.",
-        ),
+        .description(t!("shortcuts.option_as_meta.description").into_owned()),
     )
 }
 
@@ -118,7 +114,7 @@ fn shortcut_row(
     let (field_owner, dirty_owner, reset_owner) = (owner.clone(), owner.clone(), owner.clone());
     let settings = settings.clone();
     SettingItem::new(
-        shortcut.label,
+        t!(shortcut.label),
         SettingField::render(move |_, _, cx| {
             shortcut_keys(index, shortcut.name, &field_owner, &settings, cx)
         })
@@ -160,10 +156,10 @@ fn shortcut_keys(
     let field = if recording {
         Button::new(SharedString::from(format!("shortcut-{name}-recording")))
             .debug_selector(move || format!("shortcut-{name}-recording"))
-            .label("Press a key…")
+            .label(t!("shortcuts.press_a_key"))
             .outline()
             .xsmall()
-            .tooltip("Esc cancels")
+            .tooltip(t!("shortcuts.esc_cancels"))
             .on_click(move |_, _, cx| {
                 settings.update(cx, |this, cx| {
                     this.recording = None;
@@ -182,7 +178,7 @@ fn shortcut_keys(
                     .icon(Glyph::Pencil)
                     .ghost()
                     .xsmall()
-                    .tooltip("Change key")
+                    .tooltip(t!("shortcuts.change_key"))
                     .on_click(move |_, _, cx| {
                         settings.update(cx, |this, cx| {
                             this.recording = Some(index);
@@ -238,7 +234,7 @@ impl SettingsWindow {
         } else {
             let key = keymap::normalize(stroke);
             if let Some(why) = keymap::refusal(&key) {
-                let refusal = format!("{} {why}.", keymap::written(&key));
+                let refusal = t!(why, key = keymap::written(&key));
                 self.refusal = Some((index, refusal.into()));
             } else {
                 self.recording = None;
@@ -257,25 +253,25 @@ impl SettingsWindow {
 /// remote Pane takes (ADR 0012), and the prompt jumps.
 fn terminal_group() -> SettingGroup {
     let rows: [(&str, &'static [&'static str]); 5] = [
-        ("Copy selection", TERMINAL_COPY_KEYS),
-        ("Paste text", TERMINAL_PASTE_KEYS),
+        ("shortcuts.terminal.copy_selection", TERMINAL_COPY_KEYS),
+        ("shortcuts.terminal.paste_text", TERMINAL_PASTE_KEYS),
         (
-            "Paste image to a remote Device",
+            "shortcuts.terminal.paste_image",
             &[crate::app::terminal_input::IMAGE_PASTE_KEY],
         ),
-        ("Previous prompt", PREVIOUS_PROMPT_KEYS),
-        ("Next prompt", NEXT_PROMPT_KEYS),
+        ("shortcuts.terminal.previous_prompt", PREVIOUS_PROMPT_KEYS),
+        ("shortcuts.terminal.next_prompt", NEXT_PROMPT_KEYS),
     ];
     rows.into_iter().fold(
-        SettingGroup::new().title("Terminal"),
+        SettingGroup::new().title(t!("shortcuts.terminal.title")),
         |group, (label, keys)| group.item(fixed_row(label, keys)),
     )
 }
 
-/// A row whose keys stay as they are, which the page only shows.
+/// A row whose keys stay as they are, which the page only shows; `label` is a message key.
 fn fixed_row(label: &'static str, keys: &'static [&'static str]) -> SettingItem {
     SettingItem::new(
-        label,
+        t!(label),
         SettingField::render(move |_, _, _| {
             h_flex().gap_1().children(
                 keys.iter().map(|key| {

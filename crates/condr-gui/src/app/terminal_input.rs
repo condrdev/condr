@@ -3,6 +3,8 @@ mod mouse;
 mod selection;
 
 use super::*;
+use rust_i18n::t;
+use std::borrow::Cow;
 
 #[cfg(test)]
 pub(super) use clipboard::clipboard_image_format;
@@ -563,12 +565,12 @@ impl OptionAsMeta {
         }
     }
 
-    pub(super) fn label(self) -> &'static str {
+    pub(super) fn label(self) -> Cow<'static, str> {
         match self {
-            Self::Off => "Off",
-            Self::Left => "Left Option",
-            Self::Right => "Right Option",
-            Self::Both => "Both",
+            Self::Off => t!("shortcuts.option_as_meta.disabled"),
+            Self::Left => t!("shortcuts.option_as_meta.left"),
+            Self::Right => t!("shortcuts.option_as_meta.right"),
+            Self::Both => t!("shortcuts.option_as_meta.both"),
         }
     }
 

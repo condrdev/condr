@@ -1,5 +1,7 @@
 use super::dialogs::{DangerConfirm, confirm_danger};
 use super::*;
+use rust_i18n::t;
+use std::borrow::Cow;
 
 impl Condr {
     /// Points the keyboard at the Session's focus in the active window's Tab, when that
@@ -346,7 +348,7 @@ impl Condr {
         };
         self.prompt_directory_on(
             key,
-            format!("New Workspace on {label}"),
+            t!("navigation.new_workspace_on", device = label).into_owned(),
             "Create",
             move |this, path, window, cx| this.new_workspace_on(key, path, window, cx),
             window,
@@ -613,8 +615,8 @@ impl Condr {
     ) {
         let prompt = if closes_workspace {
             Some((
-                "Close Workspace?",
-                "The workspace terminals will be stopped. Files are not deleted.".to_owned(),
+                t!("navigation.close_workspace.title"),
+                t!("navigation.close_workspace.description").into_owned(),
             ))
         } else {
             self.agents_closed_by(key, &command)
@@ -639,13 +641,12 @@ impl Condr {
         &self,
         key: ConnectionKey,
         command: &LayoutCommand,
-    ) -> Option<(&'static str, String)> {
+    ) -> Option<(Cow<'static, str>, String)> {
         let connection = self.connection(key)?;
-        let (title, place, panes) = match *command {
-            LayoutCommand::ClosePane { pane_id } => ("Close Pane?", "Pane", vec![pane_id]),
+        let (pane, panes) = match *command {
+            LayoutCommand::ClosePane { pane_id } => (true, vec![pane_id]),
             LayoutCommand::CloseTab { tab_id } => (
-                "Close Tab?",
-                "Tab",
+                false,
                 connection
                     .session()?
                     .tab(tab_id)?
@@ -660,17 +661,18 @@ impl Condr {
             .iter()
             .filter_map(|pane_id| connection.model.agents.get(pane_id))
             .collect();
-        let description = match agents.as_slice() {
-            [] => return None,
-            [agent] => format!(
-                "{} is running in this {place} and will be stopped.",
-                agent.kind.label()
-            ),
-            agents => format!(
-                "{} agents are running in this {place} and will be stopped.",
-                agents.len()
-            ),
+        let description = match (agents.as_slice(), pane) {
+            ([], _) => return None,
+            ([agent], true) => t!("navigation.close_pane.agent", agent = agent.kind.label()),
+            ([agent], false) => t!("navigation.close_tab.agent", agent = agent.kind.label()),
+            (agents, true) => t!("navigation.close_pane.agents", count = agents.len()),
+            (agents, false) => t!("navigation.close_tab.agents", count = agents.len()),
         };
-        Some((title, description))
+        let title = if pane {
+            t!("navigation.close_pane.title")
+        } else {
+            t!("navigation.close_tab.title")
+        };
+        Some((title, description.into_owned()))
     }
 }

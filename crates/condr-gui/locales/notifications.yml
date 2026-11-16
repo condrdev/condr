@@ -1,0 +1,35 @@
+_version: 2
+notifications:
+  agent:
+    finished:
+      en: '%{agent} finished'
+      zh-CN: '%{agent} 已完成'
+    failed:
+      en: '%{agent} failed'
+      zh-CN: '%{agent} 运行失败'
+    needs_input:
+      en: '%{agent} needs your input'
+      zh-CN: '%{agent} 需要你的输入'
+  command:
+    failed:
+      en: 'Command failed with exit code %{code}'
+      zh-CN: '命令失败，退出码 %{code}'
+    finished:
+      en: Command finished
+      zh-CN: 命令已完成
+    after_seconds:
+      en: 'after %{seconds}s'
+      zh-CN: '用时 %{seconds} 秒'
+    after_minutes:
+      en: 'after %{minutes}m %{seconds}s'
+      zh-CN: '用时 %{minutes} 分 %{seconds} 秒'
+    after_hours:
+      en: 'after %{hours}h %{minutes}m'
+      zh-CN: '用时 %{hours} 小时 %{minutes} 分'
+  test:
+    title:
+      en: Condr notifications work
+      zh-CN: Condr 通知可以正常显示
+    body:
+      en: Agents that finish or need you while you look elsewhere show up like this.
+      zh-CN: 你在看别处时，完成或需要你处理的 Agent 会这样提醒你。

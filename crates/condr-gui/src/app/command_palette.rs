@@ -9,6 +9,8 @@ use gpui_kit::component::command::{Command, CommandGroup, CommandItem, CommandSt
 use gpui_kit::component::kbd::Kbd;
 use nucleo_matcher::pattern::{AtomKind, CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
+use rust_i18n::t;
+use std::borrow::Cow;
 use std::cmp::Reverse;
 
 /// The key context around the open palette, which sits outside the window's own.
@@ -30,11 +32,11 @@ pub(super) enum Page {
 impl Page {
     const ALL: [Self; 3] = [Self::All, Self::Actions, Self::GoTo];
 
-    fn label(self) -> &'static str {
+    fn label(self) -> Cow<'static, str> {
         match self {
-            Self::All => "All",
-            Self::Actions => "Actions",
-            Self::GoTo => "Go to",
+            Self::All => t!("palette.page.all"),
+            Self::Actions => t!("palette.page.actions"),
+            Self::GoTo => t!("palette.page.go_to"),
         }
     }
 
@@ -105,6 +107,9 @@ enum Look {
 pub(super) struct Entry {
     pub(super) target: Target,
     pub(super) label: String,
+    /// An action's label in English when `label` is in another language: matched as
+    /// `label` is, so a known English name still finds it, but never highlighted.
+    pub(super) english: Option<String>,
     /// Matched when `label` is not, below every `label` match and without highlights.
     pub(super) also: String,
     detail: String,
@@ -116,7 +121,7 @@ pub(super) struct Entry {
 pub(super) type Ranked = (Entry, Vec<Range<usize>>);
 
 /// A heading, if the page shows one, and its rows.
-type Section = (Option<&'static str>, Vec<Ranked>);
+type Section = (Option<Cow<'static, str>>, Vec<Ranked>);
 
 /// `entries` that match `query`, best first, each with the byte ranges of its label to
 /// highlight. A label match beats a match of `also`; ties keep the order given.
@@ -141,8 +146,17 @@ pub(super) fn rank(entries: Vec<Entry>, query: &str) -> Vec<Ranked> {
         .filter_map(|(order, entry)| {
             let mut indices = Vec::new();
             let label = Utf32Str::new(&entry.label, &mut buffer);
-            if let Some(score) = pattern.indices(label, &mut matcher, &mut indices) {
-                let ranges = byte_ranges(&entry.label, indices);
+            let shown = pattern.indices(label, &mut matcher, &mut indices);
+            let english = entry.english.as_deref().and_then(|english| {
+                pattern.score(Utf32Str::new(english, &mut buffer), &mut matcher)
+            });
+            if let Some(score) = shown.max(english) {
+                // Highlights mark the text shown, so a better English match shows it plain.
+                let ranges = if shown == Some(score) {
+                    byte_ranges(&entry.label, indices)
+                } else {
+                    Vec::new()
+                };
                 return Some(((0, Reverse(score), order), entry, ranges));
             }
             let score = pattern.score(Utf32Str::new(&entry.also, &mut buffer), &mut matcher)?;
@@ -232,13 +246,18 @@ impl Condr {
                 let action = shortcut.action.as_any();
                 !action.is::<ActivateTab>() && !action.is::<OpenCommandPalette>()
             })
-            .map(|(index, (group, shortcut))| Entry {
-                target: Target::Action(index),
-                label: shortcut.label.to_owned(),
-                also: format!("{group} {}", shortcut.label),
-                detail: group.to_owned(),
-                enabled: self.can_run(shortcut.needs),
-                look: Look::Action(self.keymap.keys[index].first().cloned()),
+            .map(|(index, (group, shortcut))| {
+                let (label, group) = (t!(shortcut.label), t!(group));
+                let english = t!(shortcut.label, locale = "en");
+                Entry {
+                    target: Target::Action(index),
+                    english: (english != label).then(|| english.into_owned()),
+                    also: format!("{group} {label}"),
+                    label: label.into_owned(),
+                    detail: group.into_owned(),
+                    enabled: self.can_run(shortcut.needs),
+                    look: Look::Action(self.keymap.keys[index].first().cloned()),
+                }
             })
             .collect::<Vec<_>>();
         if recent_first {
@@ -272,12 +291,13 @@ impl Condr {
                 target: Target::Device(key),
                 label: connection.label.clone(),
                 also: connection.label.clone(),
+                english: None,
                 detail: match connection.status {
-                    ConnectionStatus::Connected => "Connected",
-                    ConnectionStatus::Connecting => "Connecting…",
-                    ConnectionStatus::Disconnected => "Not connected",
+                    ConnectionStatus::Connected => t!("palette.device.connected"),
+                    ConnectionStatus::Connecting => t!("palette.device.connecting"),
+                    ConnectionStatus::Disconnected => t!("palette.device.not_connected"),
                 }
-                .to_owned(),
+                .into_owned(),
                 enabled: true,
                 look: Look::Device {
                     status: connection.status,
@@ -296,6 +316,7 @@ impl Condr {
                 workspaces.push(Entry {
                     target: Target::Workspace(key, workspace_id),
                     label: name.to_owned(),
+                    english: None,
                     also: format!("{name} {root}"),
                     detail: format!("{root}{device}"),
                     enabled: true,
@@ -316,6 +337,7 @@ impl Condr {
                     tabs.push(Entry {
                         target: Target::Tab(key, workspace_id, tab.id()),
                         label: tab_text.clone(),
+                        english: None,
                         also: format!("{tab_text} {name}"),
                         detail: format!("{name}{device}"),
                         enabled: true,
@@ -346,6 +368,7 @@ impl Condr {
                                 target: Target::Agent(key, pane_id),
                                 also: format!("{title} {kind} {name} {tab_text}"),
                                 label: title,
+                                english: None,
                                 detail: format!("{name}{device}"),
                                 enabled: true,
                                 look: Look::Agent(agent.kind, status),
@@ -503,14 +526,17 @@ impl CommandPalette {
                         .take(condr.recent_actions.len())
                         .collect()
                 };
-                [("Go to", places), ("Actions", actions)]
-                    .into_iter()
-                    .map(|(heading, entries)| {
-                        let mut ranked = rank(entries, query);
-                        ranked.truncate(SHORT_LIST);
-                        (Some(heading), ranked)
-                    })
-                    .collect()
+                [
+                    (Page::GoTo.label(), places),
+                    (Page::Actions.label(), actions),
+                ]
+                .into_iter()
+                .map(|(heading, entries)| {
+                    let mut ranked = rank(entries, query);
+                    ranked.truncate(SHORT_LIST);
+                    (Some(heading), ranked)
+                })
+                .collect()
             }
             Page::GoTo => vec![(None, rank(condr.place_entries(), query))],
             Page::Actions if searching => vec![(None, rank(condr.action_entries(true), query))],
@@ -526,15 +552,16 @@ impl CommandPalette {
                 };
                 let mut sections = Vec::new();
                 if !recent.is_empty() {
-                    sections.push((Some("Recent"), rows(recent.iter().collect())));
+                    sections.push((Some(t!("palette.recent")), rows(recent.iter().collect())));
                 }
                 for (group, _) in keymap::GROUPS {
+                    let group = t!(*group);
                     let members = rest
                         .iter()
-                        .filter(|entry| entry.detail == *group)
+                        .filter(|entry| entry.detail == group)
                         .collect::<Vec<_>>();
                     if !members.is_empty() {
-                        sections.push((Some(*group), rows(members)));
+                        sections.push((Some(group), rows(members)));
                     }
                 }
                 sections
@@ -578,26 +605,23 @@ impl Render for CommandPalette {
             .items_center()
             .children(Page::ALL.map(|page| {
                 let owner = this.clone();
-                Button::new(SharedString::from(format!(
-                    "command-palette-page-{}",
-                    page.label()
-                )))
-                .debug_selector(move || format!("command-palette-page-{}", page.label()))
-                .label(page.label())
-                .ghost()
-                .xsmall()
-                .selected(page == self.page)
-                // Ghost's selected fill matches the popover; take the list's selected-row tone.
-                .when(page == self.page, |button| button.bg(theme.accent))
-                .on_click(move |_, window, cx| {
-                    let _ = owner.update(cx, |this, cx| {
-                        this.page = page;
-                        // Back to the field, so typing goes on.
-                        this.command
-                            .update(cx, |command, cx| command.focus(window, cx));
-                        cx.notify();
-                    });
-                })
+                Button::new(SharedString::from(format!("command-palette-page-{page:?}")))
+                    .debug_selector(move || format!("command-palette-page-{page:?}"))
+                    .label(page.label())
+                    .ghost()
+                    .xsmall()
+                    .selected(page == self.page)
+                    // Ghost's selected fill matches the popover; take the list's selected-row tone.
+                    .when(page == self.page, |button| button.bg(theme.accent))
+                    .on_click(move |_, window, cx| {
+                        let _ = owner.update(cx, |this, cx| {
+                            this.page = page;
+                            // Back to the field, so typing goes on.
+                            this.command
+                                .update(cx, |command, cx| command.focus(window, cx));
+                            cx.notify();
+                        });
+                    })
             }))
             .child(div().flex_1())
             .child(
@@ -606,7 +630,7 @@ impl Render for CommandPalette {
                     .text_xs()
                     .text_color(theme.muted_foreground)
                     .child(Kbd::new(Keystroke::parse("tab").expect("a key")))
-                    .child("next page"),
+                    .child(t!("palette.next_page")),
             );
         let page = self.page;
         v_flex()
@@ -621,9 +645,9 @@ impl Render for CommandPalette {
                     .filterable(false)
                     .max_h(rems(24.))
                     .placeholder(match page {
-                        Page::All => "Search actions, Workspaces, Tabs and Agents…",
-                        Page::Actions => "Search actions…",
-                        Page::GoTo => "Go to a Device, Workspace, Tab or Agent…",
+                        Page::All => t!("palette.placeholder.all"),
+                        Page::Actions => t!("palette.placeholder.actions"),
+                        Page::GoTo => t!("palette.placeholder.go_to"),
                     })
                     .on_query(move |_, _, cx| {
                         let _ = query_owner.update(cx, |_, cx| cx.notify());
@@ -633,10 +657,11 @@ impl Render for CommandPalette {
                             confirm_owner.update(cx, |this, cx| this.confirm(index, window, cx));
                     })
                     .empty(|state, _, cx| {
-                        let text = if state.query(cx).trim().is_empty() {
-                            "Type to find an action or a place.".to_owned()
+                        let query = state.query(cx);
+                        let text = if query.trim().is_empty() {
+                            t!("palette.empty.start")
                         } else {
-                            format!("Nothing matches “{}”.", state.query(cx).trim())
+                            t!("palette.empty.no_match", query = query.trim())
                         };
                         div()
                             .py_6()
@@ -760,6 +785,7 @@ mod tests {
         Entry {
             target: Target::Workspace(1, WorkspaceId::from_u64(1)),
             label: label.to_owned(),
+            english: None,
             also: also.to_owned(),
             detail: String::new(),
             enabled: true,
@@ -803,6 +829,28 @@ mod tests {
             "split",
         );
         assert_eq!(labels(&ranked), ["Split right", "Split down"]);
+    }
+
+    #[test]
+    fn an_action_matches_in_the_language_shown_and_in_english() {
+        let mut zoom = entry(
+            &rust_i18n::t!("keymap.action.toggle_zoom", locale = "zh-CN"),
+            "",
+        );
+        zoom.english = Some(rust_i18n::t!("keymap.action.toggle_zoom", locale = "en").into());
+        let entries = vec![entry("Close pane", ""), zoom.clone()];
+        let ranked = rank(entries.clone(), "zoom");
+        assert_eq!(labels(&ranked), [zoom.label.as_str()]);
+        assert!(
+            ranked[0].1.is_empty(),
+            "the Chinese label shows without highlights"
+        );
+        let ranked = rank(entries, "放大");
+        assert_eq!(labels(&ranked), [zoom.label.as_str()]);
+        assert!(
+            !ranked[0].1.is_empty(),
+            "a match of the label shown is highlighted"
+        );
     }
 
     #[test]

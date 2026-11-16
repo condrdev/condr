@@ -1,0 +1,19 @@
+_version: 2
+actions:
+  quit_transfers:
+    title:
+      one:
+        en: A transfer is running
+        zh-CN: 有 1 个传输正在进行
+      other:
+        en: '%{count} transfers are running'
+        zh-CN: '有 %{count} 个传输正在进行'
+    description:
+      en: Quitting cancels it and leaves nothing half-written behind.
+      zh-CN: 退出会取消传输，不会留下写了一半的文件。
+    quit:
+      en: Quit
+      zh-CN: 退出
+    keep_going:
+      en: Keep Going
+      zh-CN: 继续传输

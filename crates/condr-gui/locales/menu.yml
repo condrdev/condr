@@ -1,0 +1,53 @@
+_version: 2
+menu:
+  app:
+    settings:
+      en: Settings…
+      zh-CN: 设置…
+    services:
+      en: Services
+      zh-CN: 服务
+    hide:
+      en: 'Hide %{app}'
+      zh-CN: '隐藏 %{app}'
+    hide_others:
+      en: Hide Others
+      zh-CN: 隐藏其他
+    show_all:
+      en: Show All
+      zh-CN: 全部显示
+    quit:
+      en: 'Quit %{app}'
+      zh-CN: '退出 %{app}'
+  edit:
+    title:
+      en: Edit
+      zh-CN: 编辑
+    undo:
+      en: Undo
+      zh-CN: 撤销
+    redo:
+      en: Redo
+      zh-CN: 重做
+    cut:
+      en: Cut
+      zh-CN: 剪切
+    copy:
+      en: Copy
+      zh-CN: 拷贝
+    paste:
+      en: Paste
+      zh-CN: 粘贴
+    select_all:
+      en: Select All
+      zh-CN: 全选
+  window:
+    minimize:
+      en: Minimize
+      zh-CN: 最小化
+    zoom:
+      en: Zoom
+      zh-CN: 缩放
+    full_screen:
+      en: Toggle Full Screen
+      zh-CN: 进入全屏幕

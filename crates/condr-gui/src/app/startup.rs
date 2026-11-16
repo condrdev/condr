@@ -4,6 +4,8 @@ use std::io;
 use super::*;
 #[cfg(target_os = "macos")]
 use gpui_kit::component::input;
+#[cfg(target_os = "macos")]
+use rust_i18n::t;
 
 /// Cmd on macOS and Ctrl elsewhere, as `secondary-` was before `KeyBinding::new` stopped
 /// resolving it without an `App`.
@@ -42,37 +44,44 @@ pub(super) fn install_app_menus(cx: &mut App) {
 }
 
 /// The menus themselves, made again whenever the keymap changes: an item's key
-/// equivalent comes from the bindings when it is made.
+/// equivalent comes from the bindings when it is made, and its text from the locale.
 #[cfg(target_os = "macos")]
 pub(super) fn set_app_menus(cx: &mut App) {
+    let app = condr_core::APP_NAME;
     cx.set_menus([
-        Menu::new(condr_core::APP_NAME).items([
-            MenuItem::action("Settings…", OpenSettings),
+        Menu::new(app).items([
+            MenuItem::action(t!("menu.app.settings"), OpenSettings),
             MenuItem::separator(),
-            MenuItem::os_submenu("Services", SystemMenuType::Services),
+            MenuItem::os_submenu(t!("menu.app.services"), SystemMenuType::Services),
             MenuItem::separator(),
-            MenuItem::action(format!("Hide {}", condr_core::APP_NAME), HideApp),
-            MenuItem::action("Hide Others", HideOtherApps),
-            MenuItem::action("Show All", ShowAllApps),
+            MenuItem::action(t!("menu.app.hide", app = app), HideApp),
+            MenuItem::action(t!("menu.app.hide_others"), HideOtherApps),
+            MenuItem::action(t!("menu.app.show_all"), ShowAllApps),
             MenuItem::separator(),
-            MenuItem::action(format!("Quit {}", condr_core::APP_NAME), QuitApp),
+            MenuItem::action(t!("menu.app.quit", app = app), QuitApp),
         ]),
         // A text field answers every item and a terminal Copy and Paste. The OS actions
         // let macOS recognise the menu and append Dictation and Emoji & Symbols.
-        Menu::new("Edit").items([
-            MenuItem::os_action("Undo", input::Undo, OsAction::Undo),
-            MenuItem::os_action("Redo", input::Redo, OsAction::Redo),
+        Menu::new(t!("menu.edit.title")).items([
+            MenuItem::os_action(t!("menu.edit.undo"), input::Undo, OsAction::Undo),
+            MenuItem::os_action(t!("menu.edit.redo"), input::Redo, OsAction::Redo),
             MenuItem::separator(),
-            MenuItem::os_action("Cut", input::Cut, OsAction::Cut),
-            MenuItem::os_action("Copy", input::Copy, OsAction::Copy),
-            MenuItem::os_action("Paste", input::Paste, OsAction::Paste),
-            MenuItem::os_action("Select All", input::SelectAll, OsAction::SelectAll),
+            MenuItem::os_action(t!("menu.edit.cut"), input::Cut, OsAction::Cut),
+            MenuItem::os_action(t!("menu.edit.copy"), input::Copy, OsAction::Copy),
+            MenuItem::os_action(t!("menu.edit.paste"), input::Paste, OsAction::Paste),
+            MenuItem::os_action(
+                t!("menu.edit.select_all"),
+                input::SelectAll,
+                OsAction::SelectAll,
+            ),
         ]),
+        // GPUI makes macOS's window list of the menu named exactly "Window", so that one
+        // name stays English.
         Menu::new("Window").items([
-            MenuItem::action("Minimize", MinimizeWindow),
-            MenuItem::action("Zoom", ZoomWindow),
+            MenuItem::action(t!("menu.window.minimize"), MinimizeWindow),
+            MenuItem::action(t!("menu.window.zoom"), ZoomWindow),
             MenuItem::separator(),
-            MenuItem::action("Toggle Full Screen", ToggleFullScreen),
+            MenuItem::action(t!("menu.window.full_screen"), ToggleFullScreen),
         ]),
     ]);
 }

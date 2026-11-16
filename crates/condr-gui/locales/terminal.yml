@@ -1,0 +1,63 @@
+_version: 2
+terminal:
+  title:
+    en: Terminal
+    zh-CN: 终端
+  unavailable:
+    en: Terminal unavailable
+    zh-CN: 终端不可用
+  pane_menu:
+    tooltip:
+      en: Pane actions
+      zh-CN: Pane 操作
+    split_right:
+      en: Split Right
+      zh-CN: 向右拆分
+    split_down:
+      en: Split Down
+      zh-CN: 向下拆分
+    swap:
+      en: Swap
+      zh-CN: 交换
+    swap_left:
+      en: Left
+      zh-CN: 左侧
+    swap_right:
+      en: Right
+      zh-CN: 右侧
+    swap_up:
+      en: Up
+      zh-CN: 上方
+    swap_down:
+      en: Down
+      zh-CN: 下方
+    toggle_zoom:
+      en: Toggle Zoom
+      zh-CN: 切换放大
+    close_pane:
+      en: Close Pane
+      zh-CN: 关闭 Pane
+  zoom_in:
+    en: Zoom In
+    zh-CN: 放大
+  zoom_out:
+    en: Zoom Out
+    zh-CN: 取消放大
+  bell:
+    en: Terminal bell
+    zh-CN: 终端响铃
+  pasting_image:
+    en: Pasting image…
+    zh-CN: 正在粘贴图片…
+  copied:
+    en: Copied to clipboard
+    zh-CN: 已复制到剪贴板
+  image_too_large:
+    en: Image exceeds 16 MiB
+    zh-CN: 图片超过 16 MiB
+  image_not_converted:
+    en: 'Could not convert clipboard image to PNG: %{error}'
+    zh-CN: '无法将剪贴板图片转换为 PNG：%{error}'
+  converted_image_too_large:
+    en: Converted image exceeds 16 MiB
+    zh-CN: 转换后的图片超过 16 MiB

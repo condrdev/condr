@@ -1,5 +1,6 @@
 use super::*;
 use gpui_kit::{SystemNotification, SystemNotificationResponse};
+use rust_i18n::t;
 
 const PANE_TAG_PREFIX: &str = "pane:";
 
@@ -32,11 +33,12 @@ impl Condr {
         // waits for something new replaces the toast without asking for attention again.
         let label = agent.kind.label();
         let (title, attention) = match AgentAlert::between(previous, agent) {
-            Some(AgentAlert::Finished) => (format!("{label} finished"), true),
-            Some(AgentAlert::Failed) => (format!("{label} failed"), true),
-            Some(AgentAlert::NeedsInput { updated }) => {
-                (format!("{label} needs your input"), !updated)
-            }
+            Some(AgentAlert::Finished) => (t!("notifications.agent.finished", agent = label), true),
+            Some(AgentAlert::Failed) => (t!("notifications.agent.failed", agent = label), true),
+            Some(AgentAlert::NeedsInput { updated }) => (
+                t!("notifications.agent.needs_input", agent = label),
+                !updated,
+            ),
             None => return,
         };
         let Some(connection) = self.connection(key) else {
@@ -101,23 +103,39 @@ impl Condr {
         cx: &mut App,
     ) {
         let title = match exit_code {
-            Some(code) if code != 0 => format!("Command failed with exit code {code}"),
-            _ => "Command finished".to_owned(),
+            Some(code) if code != 0 => t!("notifications.command.failed", code = code),
+            _ => t!("notifications.command.finished"),
         };
         let took = match duration_secs {
-            0..60 => format!("after {duration_secs}s"),
-            60..3600 => format!("after {}m {}s", duration_secs / 60, duration_secs % 60),
-            _ => format!(
-                "after {}h {}m",
-                duration_secs / 3600,
-                duration_secs / 60 % 60
+            0..60 => t!(
+                "notifications.command.after_seconds",
+                seconds = duration_secs
+            ),
+            60..3600 => t!(
+                "notifications.command.after_minutes",
+                minutes = duration_secs / 60,
+                seconds = duration_secs % 60
+            ),
+            _ => t!(
+                "notifications.command.after_hours",
+                hours = duration_secs / 3600,
+                minutes = duration_secs / 60 % 60
             ),
         };
         let pane = self
             .connection(key)
             .and_then(|connection| connection.pane_title(pane_id));
-        let body = [Some(took), pane].into_iter().flatten().collect::<Vec<_>>();
-        self.notify_pane(key, pane_id, Some(title), Some(body.join(" · ")), cx);
+        let body = [Some(took.into_owned()), pane]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+        self.notify_pane(
+            key,
+            pane_id,
+            Some(title.into_owned()),
+            Some(body.join(" · ")),
+            cx,
+        );
     }
 
     /// Posts one notification for the Pane under the notifications switch, unless the
@@ -153,7 +171,9 @@ impl Condr {
         .join(" · ");
         cx.show_system_notification(SystemNotification {
             tag: pane_notification_tag(key, pane_id),
-            title: title.unwrap_or_else(|| "Terminal".into()).into(),
+            title: title
+                .unwrap_or_else(|| t!("terminal.title").into_owned())
+                .into(),
             body: body.into(),
             actions: Vec::new(),
         });
@@ -179,9 +199,8 @@ impl Condr {
     pub(in crate::app) fn send_test_notification(&self, cx: &App) {
         cx.show_system_notification(SystemNotification {
             tag: "test".into(),
-            title: "Condr notifications work".into(),
-            body: "Agents that finish or need you while you look elsewhere show up like this."
-                .into(),
+            title: t!("notifications.test.title").into(),
+            body: t!("notifications.test.body").into(),
             actions: Vec::new(),
         });
     }

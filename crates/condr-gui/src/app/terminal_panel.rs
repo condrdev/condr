@@ -3,6 +3,7 @@
 use super::*;
 use condr_core::{TerminalProgress, TerminalProgressState};
 use gpui_kit::component::progress::Progress;
+use rust_i18n::t;
 
 pub(super) struct TerminalPanel {
     connection_key: ConnectionKey,
@@ -152,7 +153,7 @@ impl Render for TerminalPanel {
                 let pane_title = connection
                     .and_then(|connection| connection.pane_title(self.pane_id))
                     .map(SharedString::from)
-                    .unwrap_or_else(|| SharedString::from("Terminal"));
+                    .unwrap_or_else(|| t!("terminal.title").into());
                 (
                     terminal,
                     active,
@@ -194,7 +195,7 @@ impl Render for TerminalPanel {
                 None,
                 None,
                 None,
-                SharedString::from("Terminal"),
+                t!("terminal.title").into(),
                 None,
                 None,
                 false,
@@ -308,7 +309,7 @@ impl Render for TerminalPanel {
                     .justify_center()
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Terminal unavailable")
+                    .child(t!("terminal.unavailable"))
                     .into_any_element()
             })
             .when_some(link_tooltip, |this, uri| {
@@ -332,30 +333,71 @@ impl Render for TerminalPanel {
             .xsmall()
             .ghost()
             .tab_stop(false)
-            .tooltip("Pane actions")
-            .accessibility_label("Pane actions")
+            .tooltip(t!("terminal.pane_menu.tooltip"))
+            .accessibility_label(t!("terminal.pane_menu.tooltip"))
             .debug_selector(move || format!("terminal-pane-menu-{}", pane_id.as_u64()))
             .dropdown_menu(move |menu, window, cx| {
                 let _ = menu_owner.update(cx, |app, cx| {
                     app.set_target_pane(key, pane_id, cx);
                 });
-                menu.menu_with_enable("Split Right", Box::new(SplitRight), can_mutate)
-                    .menu_with_enable("Split Down", Box::new(SplitDown), can_mutate)
-                    .separator()
-                    .submenu("Swap", window, cx, move |menu, _, _| {
-                        menu.menu_with_enable("Left", Box::new(SwapLeft), can_mutate)
-                            .menu_with_enable("Right", Box::new(SwapRight), can_mutate)
-                            .menu_with_enable("Up", Box::new(SwapUp), can_mutate)
-                            .menu_with_enable("Down", Box::new(SwapDown), can_mutate)
-                    })
-                    .separator()
-                    .menu_with_enable("Toggle Zoom", Box::new(ToggleZoom), can_mutate)
-                    .menu_with_enable("Close Pane", Box::new(ClosePane), can_mutate)
+                menu.menu_with_enable(
+                    t!("terminal.pane_menu.split_right"),
+                    Box::new(SplitRight),
+                    can_mutate,
+                )
+                .menu_with_enable(
+                    t!("terminal.pane_menu.split_down"),
+                    Box::new(SplitDown),
+                    can_mutate,
+                )
+                .separator()
+                .submenu(
+                    t!("terminal.pane_menu.swap"),
+                    window,
+                    cx,
+                    move |menu, _, _| {
+                        menu.menu_with_enable(
+                            t!("terminal.pane_menu.swap_left"),
+                            Box::new(SwapLeft),
+                            can_mutate,
+                        )
+                        .menu_with_enable(
+                            t!("terminal.pane_menu.swap_right"),
+                            Box::new(SwapRight),
+                            can_mutate,
+                        )
+                        .menu_with_enable(
+                            t!("terminal.pane_menu.swap_up"),
+                            Box::new(SwapUp),
+                            can_mutate,
+                        )
+                        .menu_with_enable(
+                            t!("terminal.pane_menu.swap_down"),
+                            Box::new(SwapDown),
+                            can_mutate,
+                        )
+                    },
+                )
+                .separator()
+                .menu_with_enable(
+                    t!("terminal.pane_menu.toggle_zoom"),
+                    Box::new(ToggleZoom),
+                    can_mutate,
+                )
+                .menu_with_enable(
+                    t!("terminal.pane_menu.close_pane"),
+                    Box::new(ClosePane),
+                    can_mutate,
+                )
             })
             .anchor(Anchor::TopRight);
         // The zoom state is otherwise invisible: a zoomed Pane looks like a one-Pane Tab.
         let zoom_owner = self.owner.clone();
-        let zoom_label = if zoomed { "Zoom Out" } else { "Zoom In" };
+        let zoom_label = if zoomed {
+            t!("terminal.zoom_out")
+        } else {
+            t!("terminal.zoom_in")
+        };
         let pane_zoom = Button::new(format!("terminal-pane-zoom-{key}-{}", pane_id.as_u64()))
             .icon(Icon::new(if zoomed {
                 super::sidebar::CondrIconName::Minimize2
@@ -365,7 +407,7 @@ impl Render for TerminalPanel {
             .xsmall()
             .ghost()
             .tab_stop(false)
-            .tooltip_with_action(zoom_label, &ToggleZoom, Some(SHORTCUT_CONTEXT))
+            .tooltip_with_action(zoom_label.clone(), &ToggleZoom, Some(SHORTCUT_CONTEXT))
             .accessibility_label(zoom_label)
             .debug_selector(move || format!("terminal-pane-zoom-{}", pane_id.as_u64()))
             .disabled(!can_mutate)
@@ -481,7 +523,8 @@ impl Render for TerminalPanel {
                                         .items_center()
                                         .justify_center()
                                         .tooltip(|window, cx| {
-                                            Tooltip::new("Terminal bell").build(window, cx)
+                                            Tooltip::new(t!("terminal.bell").into_owned())
+                                                .build(window, cx)
                                         })
                                         .child(
                                             super::sidebar::SidebarGlyph::Bell
@@ -533,7 +576,7 @@ impl Render for TerminalPanel {
                                         .text_xs()
                                         .text_color(cx.theme().muted_foreground)
                                         .child(Spinner::new().xsmall())
-                                        .child("Pasting image…"),
+                                        .child(t!("terminal.pasting_image")),
                                 )
                             })
                             .child(pane_zoom)

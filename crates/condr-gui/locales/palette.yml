@@ -1,0 +1,45 @@
+_version: 2
+palette:
+  page:
+    all:
+      en: All
+      zh-CN: 全部
+    actions:
+      en: Actions
+      zh-CN: 操作
+    go_to:
+      en: Go to
+      zh-CN: 前往
+  recent:
+    en: Recent
+    zh-CN: 最近使用
+  device:
+    connected:
+      en: Connected
+      zh-CN: 已连接
+    connecting:
+      en: Connecting…
+      zh-CN: 正在连接…
+    not_connected:
+      en: Not connected
+      zh-CN: 未连接
+  next_page:
+    en: next page
+    zh-CN: 下一页
+  placeholder:
+    all:
+      en: Search actions, Workspaces, Tabs and Agents…
+      zh-CN: 搜索操作、Workspace、Tab 和 Agent…
+    actions:
+      en: Search actions…
+      zh-CN: 搜索操作…
+    go_to:
+      en: Go to a Device, Workspace, Tab or Agent…
+      zh-CN: 前往设备、Workspace、Tab 或 Agent…
+  empty:
+    start:
+      en: Type to find an action or a place.
+      zh-CN: 输入以查找操作或位置。
+    no_match:
+      en: 'Nothing matches “%{query}”.'
+      zh-CN: '没有与“%{query}”匹配的结果。'

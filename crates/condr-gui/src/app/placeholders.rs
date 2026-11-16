@@ -2,6 +2,7 @@
 
 use super::preview::file_size_text;
 use super::*;
+use rust_i18n::t;
 
 /// Nothing to show, said in the middle of the view.
 pub(super) fn empty_state(text: impl Into<SharedString>, cx: &App) -> AnyElement {
@@ -36,12 +37,17 @@ pub(super) fn list_note(text: impl Into<SharedString>, color: Hsla) -> Div {
         .child(text.into())
 }
 
-/// "Diff too large to show (3.0 MiB)".
+/// "Diff too large to show (3.0 MiB)". `what` names the view in English, Diff, File or
+/// Image, and picks its sentence.
 pub(super) fn too_large(what: &str, bytes: u64) -> String {
-    format!(
-        "{what} too large to show ({})",
-        file_size_text(bytes as usize)
-    )
+    let size = file_size_text(bytes as usize);
+    match what {
+        "Diff" => t!("app.too_large.diff", size = size),
+        "File" => t!("app.too_large.file", size = size),
+        "Image" => t!("app.too_large.image", size = size),
+        _ => t!("app.too_large.other", what = what, size = size),
+    }
+    .into_owned()
 }
 
 #[cfg(test)]

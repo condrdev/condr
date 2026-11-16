@@ -1,0 +1,164 @@
+_version: 2
+keymap:
+  group:
+    application:
+      en: Application
+      zh-CN: 应用
+    devices:
+      en: Devices
+      zh-CN: 设备
+    workspaces:
+      en: Workspaces
+      zh-CN: Workspace
+    tabs:
+      en: Tabs
+      zh-CN: Tab
+    panes:
+      en: Panes
+      zh-CN: Pane
+  action:
+    open_settings:
+      en: Open Settings
+      zh-CN: 打开设置
+    toggle_sidebar:
+      en: Toggle sidebar
+      zh-CN: 切换侧边栏
+    toggle_changes:
+      en: Toggle Changes & Files
+      zh-CN: 切换变更与文件
+    command_palette:
+      en: 'Command Palette: Actions'
+      zh-CN: '命令面板：操作'
+    go_to:
+      en: 'Command Palette: Go to'
+      zh-CN: '命令面板：前往'
+    connect_remote_device:
+      en: Connect remote device
+      zh-CN: 连接远程设备
+    reconnect_device:
+      en: Reconnect device
+      zh-CN: 重新连接设备
+    next_workspace:
+      en: Next workspace
+      zh-CN: 下一个 Workspace
+    previous_workspace:
+      en: Previous workspace
+      zh-CN: 上一个 Workspace
+    new_workspace:
+      en: New workspace
+      zh-CN: 新建 Workspace
+    rename_workspace:
+      en: Rename workspace
+      zh-CN: 重命名 Workspace
+    close_workspace:
+      en: Close workspace
+      zh-CN: 关闭 Workspace
+    new_tab:
+      en: New tab
+      zh-CN: 新建 Tab
+    next_tab:
+      en: Next tab
+      zh-CN: 下一个 Tab
+    previous_tab:
+      en: Previous tab
+      zh-CN: 上一个 Tab
+    rename_tab:
+      en: Rename tab
+      zh-CN: 重命名 Tab
+    close_tab:
+      en: Close tab
+      zh-CN: 关闭 Tab
+    go_to_tab_1:
+      en: Go to tab 1
+      zh-CN: 前往 Tab 1
+    go_to_tab_2:
+      en: Go to tab 2
+      zh-CN: 前往 Tab 2
+    go_to_tab_3:
+      en: Go to tab 3
+      zh-CN: 前往 Tab 3
+    go_to_tab_4:
+      en: Go to tab 4
+      zh-CN: 前往 Tab 4
+    go_to_tab_5:
+      en: Go to tab 5
+      zh-CN: 前往 Tab 5
+    go_to_tab_6:
+      en: Go to tab 6
+      zh-CN: 前往 Tab 6
+    go_to_tab_7:
+      en: Go to tab 7
+      zh-CN: 前往 Tab 7
+    go_to_tab_8:
+      en: Go to tab 8
+      zh-CN: 前往 Tab 8
+    go_to_tab_9:
+      en: Go to tab 9
+      zh-CN: 前往 Tab 9
+    split_right:
+      en: Split right
+      zh-CN: 向右拆分
+    split_down:
+      en: Split down
+      zh-CN: 向下拆分
+    close_pane:
+      en: Close pane
+      zh-CN: 关闭 Pane
+    toggle_zoom:
+      en: Toggle zoom
+      zh-CN: 切换放大
+    focus_left:
+      en: Focus left
+      zh-CN: 聚焦左侧 Pane
+    focus_right:
+      en: Focus right
+      zh-CN: 聚焦右侧 Pane
+    focus_up:
+      en: Focus up
+      zh-CN: 聚焦上方 Pane
+    focus_down:
+      en: Focus down
+      zh-CN: 聚焦下方 Pane
+    resize_left:
+      en: Resize left
+      zh-CN: 向左调整大小
+    resize_right:
+      en: Resize right
+      zh-CN: 向右调整大小
+    resize_up:
+      en: Resize up
+      zh-CN: 向上调整大小
+    resize_down:
+      en: Resize down
+      zh-CN: 向下调整大小
+    swap_left:
+      en: Swap left
+      zh-CN: 与左侧交换
+    swap_right:
+      en: Swap right
+      zh-CN: 与右侧交换
+    swap_up:
+      en: Swap up
+      zh-CN: 与上方交换
+    swap_down:
+      en: Swap down
+      zh-CN: 与下方交换
+  error:
+    not_a_list:
+      en: 'Takes a list of keys, not %{value}.'
+      zh-CN: '需要一个按键列表，而不是 %{value}。'
+    not_a_key:
+      en: '%{key} is not a key.'
+      zh-CN: '%{key} 不是按键。'
+    taken:
+      en: '%{key} is already %{action}.'
+      zh-CN: '%{key} 已分配给“%{action}”。'
+    needs_modifier_mac:
+      en: '%{key} needs Cmd, Ctrl or Option.'
+      zh-CN: '%{key} 需要搭配 Cmd、Ctrl 或 Option。'
+    needs_modifier:
+      en: '%{key} needs Ctrl or Alt.'
+      zh-CN: '%{key} 需要搭配 Ctrl 或 Alt。'
+    belongs_to_macos:
+      en: '%{key} belongs to macOS.'
+      zh-CN: '%{key} 由 macOS 保留。'
