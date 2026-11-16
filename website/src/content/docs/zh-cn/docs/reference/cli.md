@@ -290,6 +290,37 @@ condr agent hooks uninstall <种类>
 
 ---
 
+### `task`
+
+任务是写下来、由 Agent 去做的事（参见[任务](/zh-cn/docs/using/tasks/)）。每台设备的 Server 各自保存自己的任务；`<id>` 是任务在那台设备上的编号。在 Pane 里运行时，省略 `<id>` 表示这个 Pane 所在 Workspace 的任务。
+
+```bash
+# 列出待办和已开始的任务；--archived 列出已归档的（列表里不含描述）
+condr task list [--archived]
+
+# 查看一个任务，含描述
+condr task get [<id>]
+
+# 写一个任务；--description-file - 从标准输入读描述
+condr task create --title <文本> [--description <文本> | --description-file <路径|->] [--repository <workspace id>]
+condr task edit [<id>] [--title <文本>] [--description <文本> | --description-file <路径|->] [--repository <workspace id>]
+
+# 为它启动 Agent：默认位置与 GUI 相同，也可以指定 Workspace、新建 worktree，或在上次的地方继续
+# 返回 .workspace、.tab 和 .pane；--focus 请所有已连接的 GUI 显示这个 Workspace
+condr task start [<id>] --kind <kind> [--workspace <id> | --worktree [<分支>] | --continue] [--focus]
+
+# 归档；只有明确指定时才关闭它的 Workspace、删除它的 worktree（--remove-worktree 需要同时给 --close-workspace）
+condr task archive [<id>] [--close-workspace] [--remove-worktree]
+
+# 把已归档的任务放回待办；删除待办或已归档的任务
+condr task restore [<id>]
+condr task delete [<id>]
+```
+
+开始一个任务时，Agent 收到的只有一句话：去读 Server 数据目录里这个任务的文件，按其中的描述去做。错误码包括 `task_not_found`、`no_task`、`task_starting`、`task_started`、`workspace_has_task`、`where_required`（没有默认位置，需要指定一个）和 `feature_unavailable`（Server 不认识任务）。
+
+---
+
 ### `port`
 
 ```bash

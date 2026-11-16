@@ -4,18 +4,6 @@
 
 按优先级排列。每项写清为什么、做到哪、什么时候停。
 
-### Tasks 模式与任务
-
-**为什么**：同时推进好几个项目时，切到另一个 Agent 要展开 Workspace、选中 Pane，整个内容区随之换掉，回到顶层又得重新找。人是从“要做成什么”往下想到“谁在做”、再到“它的终端”的，Condr 在 Workspace 之上没有这一层。
-
-**做到哪**（ADR 0068，按顺序）：
-
-1. 左侧栏改为缓存视图，不再随终端的每一帧重建。
-2. Tasks 模式：侧栏顶部的 Tasks 行或 `Cmd+0` 进入，整窗切换；列表和看板两种视图，看板有 Cards 和 Compact；列按 Agent 状态推出、只读、可折叠；按 Device 或 Workspace 筛选；点卡片在旁边打开那个 Agent 的 Pane 直接交互。不改协议。
-3. 任务：存在各台 Device 的 Server 上（SQLite）；To do 列、写任务的表单（显式 Save）、在交互区里 Start（`StartTask` 建 worktree 或挂已有 Workspace、启动 Agent、让它读任务文件）、归档与恢复；`condr task` 命令。
-
-**停在哪**：任务来源只有本地，不接 GitHub、Jira，也不回写；不跟踪 PR；不在交互区里看 diff；拆出去的窗口不进 Tasks 模式；手机端不显示任务。
-
 ### 移动端 Companion（iOS 与 Android）
 
 **状态**：1–7 步已在 iOS 完成，推送随桌面 0.1.14 与 TestFlight 0.1 (4) 发布。Android（第 8 步）已按 ADR 0048 实现：配对、Agents / Devices / Settings、自绘终端、锁与推送都在模拟器上走通，APK 随 Companion 自己的版本发布（ADR 0049）。剩下的是 Android 真机验证和 FCM：Firebase 项目建好之前，发布的 APK 收不到推送。

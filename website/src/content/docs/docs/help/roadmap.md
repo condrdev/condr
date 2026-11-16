@@ -9,10 +9,6 @@ Condr is in Public Preview. This page lists what comes next; the order is the or
 
 ## Next
 
-### Tasks mode and tasks
-
-A whole-window **Tasks** view of every Agent on every Device, entered from the top of the sidebar or with `Cmd+0`. Agents sit in columns by state, Needs you, Done, Working and Idle, as a board or a list, narrowed to one Device or one Workspace, and clicking one opens its terminal beside the others so you can answer it without leaving the view. Then tasks: write down what needs doing in a **To do** column, and start it when you are ready; Condr makes the worktree, starts the Agent you choose and hands it the task. Tasks are kept on each Device's Server, and `condr task` manages them from the command line.
-
 ### Mobile apps (iOS and Android)
 
 **Both in early preview.** The iPhone app is in public beta on TestFlight, and the Android app ships as a signed APK in its own releases on GitHub; see [Mobile app](/docs/using/mobile/). Both show the Agents on each of your Devices and the Needs you list, and open Panes so you can read and reply.

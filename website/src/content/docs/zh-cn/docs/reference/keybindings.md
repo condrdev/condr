@@ -21,6 +21,10 @@ Condr 的快捷键分为两层逻辑：
 | 关闭设置 | `Esc` | `Esc` |
 | 切换左侧栏显示状态 | `Cmd + B` | `Ctrl + Shift + B` |
 | 切换右侧栏“变更与文件”（Changes & Files） | `Cmd + Option + B` | `Ctrl + Alt + B` |
+| 进入或离开 [Tasks 模式](/zh-cn/docs/using/tasks/) | `Cmd + 0` | `Alt + 0` |
+
+* **New Task** 没有默认快捷键，可以在命令面板里找到，或者用 `new-task` [自己绑一个](#修改快捷键)。
+* 在 Windows 和 Linux 上，终端里的程序收不到 `Alt + 0`；需要的话可以[改绑](#修改快捷键) `toggle-tasks`。
 
 ---
 
@@ -61,7 +65,7 @@ Condr 的快捷键分为两层逻辑：
 | 切换至上一个 Agent | `Cmd + [` | `Alt + [` |
 | 切换至下一个 Agent | `Cmd + ]` | `Alt + ]` |
 
-* **轮转逻辑**：遵循侧栏 Agent 分段的顺序，按 Workspace 分组、最需要处理的在前，跨设备遍历，到达边界后自动循环。
+* **轮转逻辑**：遵循侧栏 Agent 分段的顺序，按 Workspace 分组、最需要处理的在前，跨设备遍历，到达边界后自动循环。在 Tasks 模式里按卡片的顺序（一列一列，限于当前范围），Agent 的终端在卡片旁边打开。
 * **初始行为**：当前聚焦的 Pane 没有运行 Agent 时，下一个跳到第一个 Agent，上一个跳到最后一个。
 * 在 Windows 和 Linux 上，终端里的程序将收不到 `Alt + [`；如有需要，可以[改绑](#修改快捷键)这两个快捷键。
 

@@ -291,6 +291,37 @@ condr agent hooks uninstall <kind>
 
 ---
 
+### `task`
+
+Tasks are written-down work an Agent starts on (see [Tasks](/docs/using/tasks/)). Each Device's Server keeps its own; `<id>` is a Task's number on that Device. Run inside a Pane, an omitted `<id>` means the Task holding that Pane's Workspace.
+
+```bash
+# List the Tasks to do and started; --archived lists the archived ones (no descriptions in a list)
+condr task list [--archived]
+
+# Show one Task, with its description
+condr task get [<id>]
+
+# Write a Task; --description-file - reads the description from stdin
+condr task create --title <text> [--description <text> | --description-file <path|->] [--repository <workspace id>]
+condr task edit [<id>] [--title <text>] [--description <text> | --description-file <path|->] [--repository <workspace id>]
+
+# Start an Agent on it, where the GUI would by default, or in a Workspace, a new worktree or where it was last worked
+# Returns .workspace, .tab and .pane; --focus asks every connected GUI to show the Workspace
+condr task start [<id>] --kind <kind> [--workspace <id> | --worktree [<branch>] | --continue] [--focus]
+
+# Archive it; its Workspace closes and its worktree goes only when asked (--remove-worktree needs --close-workspace)
+condr task archive [<id>] [--close-workspace] [--remove-worktree]
+
+# Put an archived Task back in To do, or delete a Task that is in To do or archived
+condr task restore [<id>]
+condr task delete [<id>]
+```
+
+A started Task's Agent is given one sentence: read the Task's file in the Server's data directory and do the task it describes. Errors include `task_not_found`, `no_task`, `task_starting`, `task_started`, `workspace_has_task`, `where_required` (nowhere to start by default: name one) and `feature_unavailable` (a Server that does not know Tasks).
+
+---
+
 ### `port`
 
 ```bash

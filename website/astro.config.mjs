@@ -40,6 +40,7 @@ export default defineConfig({
             { slug: 'docs/using/overview' },
             { slug: 'docs/using/workspaces' },
             { slug: 'docs/using/agents' },
+            { slug: 'docs/using/tasks' },
             { slug: 'docs/using/changes' },
             { slug: 'docs/using/remote' },
             { slug: 'docs/using/mobile' },
