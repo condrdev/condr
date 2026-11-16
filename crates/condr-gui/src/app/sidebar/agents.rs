@@ -1,5 +1,6 @@
 //! The Agents section at the bottom of the left sidebar (ADR 0067): every Agent the
-//! window's tree lists, most urgent first, in a height its top-edge handle sets.
+//! window's tree lists, grouped by Workspace and most urgent first, in a height its
+//! top-edge handle sets.
 
 use super::*;
 use crate::app::change_tree::row_highlight;
@@ -18,15 +19,35 @@ pub(in crate::app) struct AgentRow {
     pub(in crate::app) status: SidebarStatusVisual,
 }
 
-/// Most urgent first and Session order within a rank, the sort being stable; the
-/// anchored Agent keeps the rank it had when it was selected.
+/// Groups each Workspace's Agents, the group with the most urgent Agent first and the
+/// most urgent first within it; ties keep Session order, the rows coming in it. The
+/// anchored Agent keeps the rank it had when it was selected, and so does its group.
 pub(in crate::app) fn rank_agents(
     rows: &mut [AgentRow],
     anchor: Option<((ConnectionKey, PaneId), usize)>,
 ) {
-    rows.sort_by_key(|row| match anchor {
+    let rank = |row: &AgentRow| match anchor {
         Some((pane, rank)) if pane == (row.key, row.pane_id) => rank,
         _ => urgency(row.status),
+    };
+    // Each Workspace in Session order, with its most urgent rank.
+    let mut groups: Vec<((ConnectionKey, WorkspaceId), usize)> = Vec::new();
+    for row in rows.iter() {
+        let workspace = (row.key, row.workspace_id);
+        match groups.iter_mut().find(|(group, _)| *group == workspace) {
+            Some((_, best)) => *best = (*best).min(rank(row)),
+            None => groups.push((workspace, rank(row))),
+        }
+    }
+    rows.sort_by_key(|row| {
+        let (ix, best) = groups
+            .iter()
+            .enumerate()
+            .find_map(|(ix, (group, best))| {
+                (*group == (row.key, row.workspace_id)).then_some((ix, *best))
+            })
+            .expect("every row's Workspace is a group");
+        (best, ix, rank(row))
     });
 }
 
@@ -173,66 +194,89 @@ impl Condr {
         }
 
         let several_devices = self.connections.len() > 1;
-        // The Workspace and Device take at most half the row; the title truncates first.
-        let place_width = (view.sidebar_width - px(32.)) / 2.;
-        let items = rows
-            .iter()
-            .filter_map(|row| {
-                let AgentRow {
-                    key,
-                    workspace_id,
-                    pane_id,
-                    status,
-                } = *row;
-                let connection = self.connection(key)?;
-                let workspace = connection.presented_session()?.workspace(workspace_id)?;
-                let agent = connection.model.agents.get(&pane_id)?;
-                let kind = agent.kind.label();
-                let title = connection
-                    .model
-                    .terminal_titles
-                    .get(&pane_id)
-                    .cloned()
-                    .unwrap_or_else(|| kind.to_owned());
-                // What it waits for or why it halted while it says so; its branch otherwise.
-                let detail = agent.detail.clone().unwrap_or_else(|| {
-                    branch_line(connection.model.workspace_git.get(&workspace_id))
-                });
-                let place = if several_devices {
+        let mut items = Vec::new();
+        let mut group = None;
+        for row in &rows {
+            let AgentRow {
+                key,
+                workspace_id,
+                pane_id,
+                status,
+            } = *row;
+            let Some(connection) = self.connection(key) else {
+                continue;
+            };
+            let Some(workspace) = connection
+                .presented_session()
+                .and_then(|session| session.workspace(workspace_id))
+            else {
+                continue;
+            };
+            let Some(agent) = connection.model.agents.get(&pane_id) else {
+                continue;
+            };
+            // A muted heading over each Workspace's Agents; it does nothing when clicked.
+            if group != Some((key, workspace_id)) {
+                group = Some((key, workspace_id));
+                let name = if several_devices {
                     format!("{} · {}", workspace.name(), connection.label)
                 } else {
                     workspace.name().to_owned()
                 };
-                let pane = pane_id.as_u64();
-                let row_owner = owner.clone();
-                Some(
-                    CondrSidebarTreeItem::new(
-                        format!("agents-{key}-{pane}"),
-                        format!("agents-row-{key}-{pane}"),
-                        format!("agents-label-{key}-{pane}"),
-                        title,
-                    )
-                    .icon(CondrSidebarIcon::agent(
-                        agent.kind,
-                        status,
-                        format!("agents-status-{key}-{pane}-{}", status.key),
-                        format!("{kind}: {}", status.label),
-                    ))
-                    .detail(detail)
-                    .label_end(place, place_width)
-                    .active(
-                        key == self.presented_key(view)
-                            && self.terminal_input.target == Some((key, pane_id)),
-                    )
-                    .disable(!connection.can_mutate())
-                    .on_click(move |_, window, cx| {
-                        let _ = row_owner
-                            .update(cx, |this, cx| this.select_pane(key, pane_id, window, cx));
-                    })
-                    .render(window, cx),
+                items.push(
+                    div()
+                        .debug_selector(move || {
+                            format!("agents-group-{key}-{}", workspace_id.as_u64())
+                        })
+                        .px_1()
+                        .pt_1()
+                        .truncate()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(name)
+                        .into_any_element(),
+                );
+            }
+            let kind = agent.kind.label();
+            let title = connection
+                .model
+                .terminal_titles
+                .get(&pane_id)
+                .cloned()
+                .unwrap_or_else(|| kind.to_owned());
+            let pane = pane_id.as_u64();
+            let row_owner = owner.clone();
+            items.push(
+                CondrSidebarTreeItem::new(
+                    format!("agents-{key}-{pane}"),
+                    format!("agents-row-{key}-{pane}"),
+                    format!("agents-label-{key}-{pane}"),
+                    title,
                 )
-            })
-            .collect::<Vec<_>>();
+                .icon(CondrSidebarIcon::agent(
+                    agent.kind,
+                    status,
+                    format!("agents-status-{key}-{pane}-{}", status.key),
+                    format!("{kind}: {}", status.label),
+                ))
+                // What it waits for or why it halted, while it says so (ADR 0024).
+                .when_some(agent.detail.clone(), |item, text| item.detail(text))
+                // Named only while it wants something or works; a quiet row stays quiet.
+                .when(!matches!(status.key, "idle" | "unknown"), |item| {
+                    item.label_end(status.label, status.tone.color(cx))
+                })
+                .active(
+                    key == self.presented_key(view)
+                        && self.terminal_input.target == Some((key, pane_id)),
+                )
+                .disable(!connection.can_mutate())
+                .on_click(move |_, window, cx| {
+                    let _ =
+                        row_owner.update(cx, |this, cx| this.select_pane(key, pane_id, window, cx));
+                })
+                .render(window, cx),
+            );
+        }
         let list = if items.is_empty() {
             div()
                 .debug_selector(|| "agents-empty".into())
@@ -294,12 +338,30 @@ mod tests {
     use condr_core::{AgentDisplayState, PaneId, WorkspaceId};
 
     fn row(pane: u64, state: AgentDisplayState) -> AgentRow {
+        in_workspace(1, pane, state)
+    }
+
+    fn in_workspace(workspace: u64, pane: u64, state: AgentDisplayState) -> AgentRow {
         AgentRow {
             key: 1,
-            workspace_id: WorkspaceId::from_u64(1),
+            workspace_id: WorkspaceId::from_u64(workspace),
             pane_id: PaneId::from_u64(pane),
             status: agent_sidebar_status(state),
         }
+    }
+
+    #[test]
+    fn workspaces_group_their_agents_the_most_urgent_group_first() {
+        let mut rows = vec![
+            in_workspace(1, 1, AgentDisplayState::Idle),
+            in_workspace(1, 2, AgentDisplayState::Working),
+            in_workspace(2, 3, AgentDisplayState::Idle),
+            in_workspace(2, 4, AgentDisplayState::Blocked),
+            in_workspace(3, 5, AgentDisplayState::Working),
+        ];
+        rank_agents(&mut rows, None);
+        // Workspace 2 holds the Blocked one; 1 and 3 tie on Working and keep Session order.
+        assert_eq!(panes(&rows), [4, 3, 2, 1, 5]);
     }
 
     fn panes(rows: &[AgentRow]) -> Vec<u64> {

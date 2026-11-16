@@ -138,7 +138,7 @@ The list of every `Blocked` or `Error` Agent on every connected Device, with its
 _Avoid_: inbox, queue
 
 **Agents section**:
-The collapsible section at the bottom of the GUI's left sidebar that lists every Agent the window's tree lists, most urgent first, in a height the person drags (ADR 0067). A row shows the Agent's title, its Workspace and the Workspace's branch, or its `detail` while it has one; choosing a row selects its Pane, as a row of "Needs you" does, and `next-agent` / `previous-agent` step through the same order. It adds to the Workspace tree and replaces none of it.
+The collapsible section at the bottom of the GUI's left sidebar that lists every Agent the window's tree lists, grouped under their Workspaces with the most urgent first, in a height the person drags (ADR 0067). A row shows the Agent's title and, while it wants something or works, its state, with its `detail` below while it has one; choosing a row selects its Pane, as a row of "Needs you" does, and `next-agent` / `previous-agent` step through the same order. It adds to the Workspace tree and replaces none of it.
 _Avoid_: Agents panel, Agents view, dashboard
 
 **Command Palette**:

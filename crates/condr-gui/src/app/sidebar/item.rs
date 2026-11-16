@@ -23,9 +23,8 @@ pub(in crate::app) struct CondrSidebarTreeItem {
     pub(super) label_selector: SharedString,
     pub(super) toggle_selector: Option<SharedString>,
     pub(super) label: SharedString,
-    /// Muted text at the label line's end, at most the width given; the label truncates
-    /// first and the detail line below keeps the row's whole width.
-    pub(super) label_end: Option<(SharedString, Pixels)>,
+    /// A short word at the label line's end, in the colour given; the label truncates.
+    pub(super) label_end: Option<(SharedString, Hsla)>,
     /// A muted second line under the label; the row grows to hold it.
     pub(super) detail: Option<SharedString>,
     pub(super) icon: Option<CondrSidebarIcon>,
@@ -103,12 +102,8 @@ impl CondrSidebarTreeItem {
         self
     }
 
-    pub(in crate::app) fn label_end(
-        mut self,
-        text: impl Into<SharedString>,
-        max_width: Pixels,
-    ) -> Self {
-        self.label_end = Some((text.into(), max_width));
+    pub(in crate::app) fn label_end(mut self, text: impl Into<SharedString>, color: Hsla) -> Self {
+        self.label_end = Some((text.into(), color));
         self
     }
 
@@ -309,24 +304,9 @@ impl CondrSidebarTreeItem {
                             .min_w_0()
                             .truncate()
                             .child(label);
-                        match label_end {
-                            None => label.w_full().into_any_element(),
-                            Some((text, max_width)) => h_flex()
-                                .w_full()
-                                .min_w_0()
-                                .gap_2()
-                                .child(label.flex_1())
-                                .child(
-                                    div()
-                                        .flex_none()
-                                        .max_w(max_width)
-                                        .truncate()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(text),
-                                )
-                                .into_any_element(),
-                        }
+                        let end = label_end
+                            .map(|(text, color)| div().text_xs().text_color(color).child(text));
+                        line_with_end(label, end)
                     })
                     .when_some(detail, |this, detail| {
                         this.child(
@@ -449,6 +429,20 @@ impl CondrSidebarTreeItem {
             .into_any_element(),
             None => item.into_any_element(),
         }
+    }
+}
+
+/// A row's text line, with `end` kept whole at its right while the line truncates.
+fn line_with_end(line: Div, end: Option<Div>) -> AnyElement {
+    match end {
+        None => line.w_full().into_any_element(),
+        Some(end) => h_flex()
+            .w_full()
+            .min_w_0()
+            .gap_2()
+            .child(line.flex_1())
+            .child(end.flex_none())
+            .into_any_element(),
     }
 }
 

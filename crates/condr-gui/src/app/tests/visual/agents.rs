@@ -1,5 +1,5 @@
-//! The Agents section (ADR 0067): its order across Workspaces, the keys that step through
-//! it, and folding it to its heading.
+//! The Agents section (ADR 0067): its Workspace groups and their order, the keys that
+//! step through it, and folding it to its heading.
 
 use super::layout::agent_changed;
 use super::*;
@@ -113,6 +113,23 @@ fn the_agents_section_lists_every_workspaces_agents_most_urgent_first() {
             .collect::<Vec<_>>()
     };
     assert_eq!(order(window), [blocked, done, working]);
+    let group = |window: &mut VisualTestContext, workspace_id: WorkspaceId| {
+        window
+            .debug_bounds(leaked_selector(format!(
+                "agents-group-1-{}",
+                workspace_id.as_u64()
+            )))
+            .expect("each Workspace with an Agent heads its group")
+    };
+    let row = |window: &mut VisualTestContext, pane_id: PaneId| {
+        window.debug_bounds(row_selector(pane_id)).unwrap()
+    };
+    assert!(
+        group(window, busy).bottom() <= row(window, blocked).top()
+            && row(window, done).bottom() <= group(window, quiet).top()
+            && group(window, quiet).bottom() <= row(window, working).top(),
+        "the Workspace with the Blocked Agent comes first, each group under its name"
+    );
     let heading = window.debug_bounds("agents-heading").unwrap();
     let footer_button = window.debug_bounds("open-settings").unwrap();
     assert!(
@@ -137,7 +154,7 @@ fn the_agents_section_lists_every_workspaces_agents_most_urgent_first() {
     assert_eq!(
         order(window),
         [blocked, done, working],
-        "the Done just seen keeps its place while it is selected"
+        "the Done just seen stays in its Workspace's group"
     );
     press(window, NEXT_AGENT);
     assert_eq!(
@@ -145,24 +162,21 @@ fn the_agents_section_lists_every_workspaces_agents_most_urgent_first() {
         Some((1, working)),
         "so the next one is the Agent after it, not one skipped"
     );
-    assert_eq!(
-        order(window),
-        [blocked, working, done],
-        "once left, the seen Done ranks as the Idle it now is"
-    );
-    press(window, NEXT_AGENT);
-    assert_eq!(target(window), Some((1, done)));
     press(window, NEXT_AGENT);
     assert_eq!(target(window), Some((1, blocked)), "next wraps to the top");
     press(window, PREVIOUS_AGENT);
-    assert_eq!(target(window), Some((1, done)), "previous wraps to the end");
-
-    let row = window.debug_bounds(row_selector(working)).unwrap();
-    window.simulate_click(row.center(), Modifiers::default());
-    window.run_until_parked();
     assert_eq!(
         target(window),
         Some((1, working)),
+        "previous wraps to the end"
+    );
+
+    let done_row = row(window, done);
+    window.simulate_click(done_row.center(), Modifiers::default());
+    window.run_until_parked();
+    assert_eq!(
+        target(window),
+        Some((1, done)),
         "a click selects the Agent's Pane"
     );
 

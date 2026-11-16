@@ -34,19 +34,6 @@ fn workspace_suffix(
         .into_any_element()
 }
 
-/// A Workspace's second line, `detached` and no repository included, so its rows keep
-/// one height: the Workspace row's, and an Agents section row's without a `detail`.
-fn branch_line(git: Option<&WorkspaceGitSnapshot>) -> String {
-    git.map_or_else(
-        || t!("sidebar.no_git").into_owned(),
-        |git| {
-            git.branch
-                .clone()
-                .unwrap_or_else(|| t!("sidebar.detached").into_owned())
-        },
-    )
-}
-
 /// How a Pane's agent shows in the sidebar, the bell over its state while it wants a
 /// person; `None` when the Pane runs no agent.
 pub(super) fn pane_sidebar_status(
@@ -303,7 +290,16 @@ impl Condr {
                                 let workspace_id = workspace.id();
                                 let workspace_name = workspace.name().to_owned();
                                 let git = connection.model.workspace_git.get(&workspace_id);
-                                let detail = branch_line(git);
+                                // Every Workspace gets its second line, `detached` and no
+                                // repository included, so the rows keep one height.
+                                let detail = git.map_or_else(
+                                    || t!("sidebar.no_git").into_owned(),
+                                    |git| {
+                                        git.branch
+                                            .clone()
+                                            .unwrap_or_else(|| t!("sidebar.detached").into_owned())
+                                    },
+                                );
                                 let upstream =
                                     git.and_then(|git| git.upstream).and_then(upstream_counts);
                                 let mut statuses = Vec::new();

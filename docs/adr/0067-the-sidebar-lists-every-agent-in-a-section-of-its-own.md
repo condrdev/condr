@@ -23,18 +23,20 @@ What it lists:
 - A disconnected Device's Agents are left out, as "Needs you" leaves them out.
 - A detached window (ADR 0043) lists what its tree lists: a Device window that Device's Agents, a Workspace window that Workspace's. A Tab window has no sidebar. The collapsed sidebar shows only Workspace avatars, as before.
 
-Order:
+Grouping and order:
 
-- Most urgent first, by the ranking the Command Palette already uses: a bell, then `Blocked`, `Error`, unseen `Done`, `Working`, and `Idle` with `Unknown`.
-- Within a state, Session order: Device, Workspace, Tab, Pane.
+- Each Workspace's Agents sit under its name, in muted text, with ` · Device` once more than one Device is configured. The name does nothing when clicked and does not fold; only the section's own heading folds.
+- Urgency is the ranking the Command Palette already uses: a bell, then `Blocked`, `Error`, unseen `Done`, `Working`, and `Idle` with `Unknown`.
+- The group holding the most urgent Agent comes first, so a Workspace with a `Blocked` Agent rises to the top; within a group, the most urgent Agent comes first.
+- Ties keep Session order: Device, Workspace, Tab, Pane.
 - There is no timestamp of the last state change to sort by, and the section adds none.
 
-The row last selected keeps the rank it had when it was selected, until another Agent is selected. Without this, selecting a `Done` Agent marks it seen and it drops among the `Idle` ones under the pointer, and stepping through finished Agents with the keyboard skips one.
+The row last selected keeps the rank it had when it was selected, and its group with it, until another Agent is selected. Without this, selecting a `Done` Agent marks it seen and it drops among the `Idle` ones under the pointer, and stepping through finished Agents with the keyboard skips one.
 
-A row:
+A row is one line: the Agent's mark with its state badge, then the Pane's terminal title, or the agent kind's name until a title arrives. On the right, the state's name in its colour (Bell, Blocked, Error, Done or Working); an Idle or Unknown Agent's row shows none, so a quiet row stays quiet. While the Agent carries a `detail`, a second line shows it across the row's width, as the tree's Agent rows do (ADR 0024). The branch is left to the tree: every Agent of a group shares it.
 
-- **First line:** the Agent's mark with its state badge, then the Pane's terminal title, or the agent kind's name until a title arrives. On the right, in muted text, the Workspace, and `Workspace · Device` once more than one Device is configured. The title truncates first; the right side takes at most half the row before it truncates too.
-- **Second line:** the Workspace's branch, `detached` or `no git`, as the Workspace row's second line reads. While the Agent carries a `detail`, the detail replaces it. Every row keeps two lines, so they are one height.
+Two earlier layouts were tried and dropped. Each row first carried its Workspace and Device beside the title and its branch below; that crowded the title out. Then the state went beside the title and the Workspace below; every row was two lines, and the Workspace repeated on each row of a Workspace.
+
 - A row is lit while its Pane is the keyboard's target, together with the same Agent's row in the tree.
 - A click runs `select_pane`, as "Needs you", Go to and a notification's click do. A row cannot be dragged and has no menu.
 
