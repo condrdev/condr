@@ -40,12 +40,12 @@ impl Default for ServerConfig {
             listen: load_listen(config_path.as_deref()),
             p2p: load_p2p(config_path.as_deref()),
             snapshot_path: default_snapshot_path(&socket_path),
+            data_directory: default_data_directory(&socket_path),
             socket_path,
             config_path,
             identity: None,
             test_device: None,
             cloud_url: None,
-            data_directory: condr_core::data_directory(),
         }
     }
 }
@@ -157,18 +157,19 @@ pub(super) fn save_proxy(path: &std::path::Path, key: &str, value: &str) -> io::
 
 impl ServerConfig {
     /// The host's Server on a specific socket, with the default snapshot for that socket.
+    /// Its Tasks go in a data directory of its own unless it is the host's socket.
     pub fn at_socket(socket_path: impl Into<PathBuf>) -> Self {
         let socket_path = socket_path.into();
         Self {
             listen: None,
             p2p: false,
             snapshot_path: default_snapshot_path(&socket_path),
+            data_directory: default_data_directory(&socket_path),
             socket_path,
             config_path: condr_core::config_path(),
             identity: None,
             test_device: None,
             cloud_url: None,
-            data_directory: condr_core::data_directory(),
         }
     }
 

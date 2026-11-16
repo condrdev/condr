@@ -21,6 +21,9 @@ pub(super) struct Tasks {
     /// The agents a test starts in place of the ones on PATH.
     #[cfg(test)]
     pub(super) agents: Option<Vec<condr_core::agent_discovery::AgentInstallation>>,
+    /// Makes every Pane's shell look busy to a Start, which a test stops the Server under.
+    #[cfg(test)]
+    pub(super) shells_busy: bool,
 }
 
 impl Tasks {
@@ -36,6 +39,8 @@ impl Tasks {
             claims: HashMap::new(),
             #[cfg(test)]
             agents: None,
+            #[cfg(test)]
+            shells_busy: false,
         }
     }
 
@@ -176,8 +181,11 @@ impl RuntimeState {
             .expect("Task requests reach only a Server that keeps Tasks")
     }
 
+    /// The Task `id`; once a stopping Server has taken its Tasks, none.
     pub(super) fn task_mut(&mut self, id: TaskId) -> Result<&mut Task, TaskError> {
-        self.tasks_mut()
+        self.tasks
+            .as_mut()
+            .ok_or_else(stopping_server)?
             .items
             .get_mut(&id)
             .ok_or_else(|| not_found(id))
@@ -264,6 +272,9 @@ impl RuntimeState {
     /// Answers every Task command but Start and an Archive that closes its Workspace,
     /// which take their time off the lock.
     pub(super) fn task_command(&mut self, command: TaskCommand) -> Result<TaskResponse, TaskError> {
+        if self.tasks.is_none() {
+            return Err(stopping_server());
+        }
         match command {
             TaskCommand::Create {
                 title,
@@ -429,6 +440,10 @@ impl RuntimeState {
     }
 }
 
+fn stopping_server() -> TaskError {
+    TaskError::new(task_error::SERVER_STOPPING, "the Server is stopping")
+}
+
 fn starting(id: TaskId) -> TaskError {
     TaskError::new(
         task_error::TASK_STARTING,
@@ -509,10 +524,16 @@ pub(super) fn handle_task_request(
             close_workspace: true,
             remove_worktree,
         } => {
-            let (state, layouts, outbound) = (Arc::clone(state), layouts.clone(), outbound.clone());
+            let (state, lifecycle, layouts, outbound) = (
+                Arc::clone(state),
+                Arc::clone(lifecycle),
+                layouts.clone(),
+                outbound.clone(),
+            );
             thread::spawn(move || {
                 archive_and_close(
                     &state,
+                    &lifecycle,
                     &layouts,
                     &outbound,
                     request_id,
@@ -529,8 +550,9 @@ pub(super) fn handle_task_request(
             };
             let (result, file) = {
                 let mut state = state.lock().or_abort();
-                let file = removed.map(|task| state.tasks_mut().file(task));
-                (state.task_command(command), file)
+                let result = state.task_command(command);
+                let file = removed.and_then(|task| Some(state.tasks.as_ref()?.file(task)));
+                (result, file)
             };
             if result.is_ok()
                 && let Some(file) = file
@@ -553,14 +575,51 @@ fn remove_task_file(file: &std::path::Path) {
 
 /// Archives a started Task and then closes its Workspace, removing a Managed Worktree
 /// when asked. The answer goes first, since the requester may run in that Workspace.
-fn archive_and_close(
+/// Shutdown waits for it (ADR 0053), and a panic answers with an error.
+pub(super) fn archive_and_close(
     state: &Arc<Mutex<RuntimeState>>,
+    lifecycle: &Arc<ServerLifecycle>,
     layouts: &ClientLayouts,
     outbound: &ClientWriter,
     request_id: u64,
     id: TaskId,
     remove_worktree: bool,
 ) {
+    let Some(_operation) = lifecycle.begin_operation() else {
+        reply_task(outbound, request_id, Err(stopping_server()));
+        return;
+    };
+    let archived = answer_or_fail(
+        || archive_for_close(state, id, remove_worktree),
+        |message| Err(TaskError::new(task_error::INTERNAL_ERROR, message)),
+    );
+    let (task, close, file) = match archived {
+        Ok(archived) => archived,
+        Err(error) => {
+            reply_task(outbound, request_id, Err(error));
+            return;
+        }
+    };
+    remove_task_file(&file);
+    reply_task(outbound, request_id, Ok(TaskResponse::Task(task)));
+    if let Some(command) = close {
+        let closed = answer_or_fail(|| layouts.apply(command), Err);
+        if let Err(error) = closed {
+            tracing::warn!(
+                task = id.as_u64(),
+                "the archived Task's Workspace stays open: {error}"
+            );
+        }
+    }
+}
+
+/// Archives `id` once its worktree, when it is to go, may be removed; returns the Task,
+/// how to close its Workspace, and its file.
+fn archive_for_close(
+    state: &Arc<Mutex<RuntimeState>>,
+    id: TaskId,
+    remove_worktree: bool,
+) -> Result<(Task, Option<LayoutCommand>, PathBuf), TaskError> {
     let planned = {
         let mut state = state.lock().or_abort();
         state
@@ -597,13 +656,7 @@ fn archive_and_close(
                 Ok((workspace, removal))
             })
     };
-    let (workspace, removal) = match planned {
-        Ok(planned) => planned,
-        Err(error) => {
-            reply_task(outbound, request_id, Err(error));
-            return;
-        }
-    };
+    let (workspace, removal) = planned?;
     // A worktree with changes stays, and so does its Task (ADR 0002).
     if let Some((parent_root, root)) = &removal {
         let checked = discover_repository(parent_root)
@@ -615,43 +668,20 @@ fn archive_and_close(
                 }
                 _ => Err("the Workspace is not a Git worktree".into()),
             });
-        if let Err(message) = checked {
-            reply_task(
-                outbound,
-                request_id,
-                Err(TaskError::new(task_error::WORKTREE_NOT_REMOVABLE, message)),
-            );
-            return;
-        }
+        checked.map_err(|message| TaskError::new(task_error::WORKTREE_NOT_REMOVABLE, message))?;
     }
-    let (result, file) = {
-        let mut state = state.lock().or_abort();
-        let result = state.task_mut(id).and_then(|task| {
-            if task.starting {
-                return Err(starting(id));
-            }
-            Ok(())
-        });
-        let file = state.tasks_mut().file(id);
-        (result.map(|()| state.archive(id)), file)
-    };
-    let archived = result.is_ok();
-    reply_task(outbound, request_id, result.map(TaskResponse::Task));
-    if !archived {
-        return;
+    let mut state = state.lock().or_abort();
+    if state.task_mut(id)?.starting {
+        return Err(starting(id));
     }
-    remove_task_file(&file);
-    if let Some(workspace_id) = workspace {
-        let command = if removal.is_some() {
+    let file = state.tasks_mut().file(id);
+    let task = state.archive(id);
+    let close = workspace.map(|workspace_id| {
+        if removal.is_some() {
             LayoutCommand::RemoveWorktree { workspace_id }
         } else {
             LayoutCommand::CloseWorkspace { workspace_id }
-        };
-        if let Err(error) = layouts.apply(command) {
-            tracing::warn!(
-                task = id.as_u64(),
-                "the archived Task's Workspace stays open: {error}"
-            );
         }
-    }
+    });
+    Ok((task, close, file))
 }

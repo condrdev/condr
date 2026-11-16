@@ -50,8 +50,8 @@ pub use git::{
 };
 #[cfg(feature = "runtime")]
 pub use git::{
-    GitBase, GitError, GitFingerprint, GitRepository, branch_commit, branch_is_checked_out,
-    create_worktree, delete_branch_at, discover_repository, open_worktree, remove_worktree,
+    GitBase, GitError, GitFingerprint, GitRepository, branch_is_checked_out, create_worktree,
+    delete_branch_at, discover_repository, open_worktree, remove_worktree,
     validate_worktree_removal, worktree_destination,
 };
 pub use network::{ProxyMode, ProxySetting, check_proxy_url};

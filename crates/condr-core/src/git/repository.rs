@@ -333,14 +333,15 @@ pub fn worktree_destination(parent: &Path, branch: &str, worktree_root: Option<&
 
 /// `git worktree add`: registers the checkout under `<common>/worktrees/<id>`, creates the
 /// branch from HEAD when it does not exist yet, and checks its tree out into
-/// [`worktree_destination`]. Alongside the checkout comes the parent's branch when the new
-/// branch was made from it, which is the worktree's base (ADR 0034); a branch that already
-/// existed says nothing about where it forked.
+/// [`worktree_destination`]. Alongside the checkout come the parent's branch when the new
+/// branch was made from it, which is the worktree's base (ADR 0034), since a branch that
+/// already existed says nothing about where it forked; and whether this call made the
+/// branch, which a Task's Start undoes (ADR 0068).
 pub fn create_worktree(
     parent: &GitRepository,
     branch: &str,
     worktree_root: Option<&Path>,
-) -> Result<(GitRepository, Option<String>), GitError> {
+) -> Result<(GitRepository, Option<String>, bool), GitError> {
     if parent.is_linked_worktree() {
         return Err(GitError(
             "create a worktree from the main repository Workspace".into(),
@@ -363,11 +364,11 @@ pub fn create_worktree(
     let repo = parent.open()?;
     ensure_branch_not_checked_out(&repo, reference.as_ref())?;
     let mut forked_from = None;
-    if repo
+    let created_branch = repo
         .try_find_reference(reference.as_ref())
         .map_err(git_error)?
-        .is_none()
-    {
+        .is_none();
+    if created_branch {
         forked_from = parent.branch.clone();
         let head = repo
             .head_id()
@@ -388,7 +389,7 @@ pub fn create_worktree(
         let child = discover_repository(&destination)?
             .ok_or_else(|| GitError("created worktree is not a Git checkout".into()))?;
         ensure_same_repository(parent, &child)?;
-        Ok((child, forked_from))
+        Ok((child, forked_from, created_branch))
     })();
     match result {
         Ok(created) => {
@@ -410,7 +411,7 @@ pub fn branch_is_checked_out(repository: &GitRepository, branch: &str) -> Result
 }
 
 /// The commit `branch` points at, as hex, or `None` when it does not exist.
-pub fn branch_commit(repository: &GitRepository, branch: &str) -> Result<Option<String>, GitError> {
+fn branch_commit(repository: &GitRepository, branch: &str) -> Result<Option<String>, GitError> {
     let reference = branch_ref_name(branch.trim())?;
     let repo = repository.open()?;
     let Some(mut found) = repo

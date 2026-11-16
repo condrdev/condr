@@ -15,6 +15,8 @@ mod push;
 mod shutdown;
 mod streams;
 mod subscriptions;
+// The Tasks a build without the task store does not keep.
+#[cfg(feature = "tasks")]
 mod tasks;
 mod unit;
 mod viewers;

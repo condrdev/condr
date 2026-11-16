@@ -64,6 +64,8 @@ pub(super) enum PreparedExternalLayout {
         child: GitRepository,
         /// The parent's branch the new one forked from, the worktree's base (ADR 0034).
         base_branch: Option<String>,
+        /// The branch is new: a Task's failed Start deletes it again (ADR 0068).
+        created_branch: bool,
     },
     OpenWorktree {
         parent_workspace_id: WorkspaceId,
@@ -202,8 +204,9 @@ pub(super) fn prepare_external_layout(
             let parent = discover_repository(&parent_root)
                 .map_err(|error| error.to_string())?
                 .ok_or_else(|| "parent Workspace is not a Git repository".to_string())?;
-            let (child, base_branch) = create_worktree(&parent, &branch, worktree_root.as_deref())
-                .map_err(|error| error.to_string())?;
+            let (child, base_branch, created_branch) =
+                create_worktree(&parent, &branch, worktree_root.as_deref())
+                    .map_err(|error| error.to_string())?;
             // The shell starts in `apply_prepared_external_layout`, once the Pane exists
             // and its id can go into the shell's environment.
             Ok(PreparedExternalLayout::CreateWorktree {
@@ -212,6 +215,7 @@ pub(super) fn prepare_external_layout(
                 parent,
                 child,
                 base_branch,
+                created_branch,
             })
         }
         ExternalLayoutPlan::OpenWorktree {
@@ -912,6 +916,7 @@ pub(super) fn apply_prepared_external_layout(
             parent: _,
             child,
             base_branch,
+            created_branch: _,
         } => {
             let mut candidate = state.session.clone();
             if candidate

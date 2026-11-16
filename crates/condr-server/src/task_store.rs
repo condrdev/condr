@@ -69,16 +69,21 @@ pub(crate) struct OpenedTasks {
 }
 
 impl TaskStore {
-    /// Opens the database at `path`, creating it when missing. One whose schema is newer
-    /// than this build's, or that cannot be read, is renamed aside to
-    /// `<file>.unreadable-<unix seconds>` and a new one starts empty, which the log says.
+    /// Opens the database at `path`, creating it owner-only when missing, and holds it
+    /// exclusively until the store stops, so a second Server on the same file cannot write
+    /// over this one's Tasks. One whose schema is newer than this build's, or that is not
+    /// a database, is renamed aside to `<file>.unreadable-<unix seconds>` and a new one
+    /// starts empty, which the log says. Any other failure, one held by another Server
+    /// included, leaves the file alone and is the caller's error.
     pub(crate) fn open(path: &Path) -> io::Result<OpenedTasks> {
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
+            crate::persistence::create_private_directory(parent)?;
         }
+        // SQLite gives its log files the database's permissions.
+        crate::persistence::private_file_options().open(path)?;
         let (connection, tasks, next_id) = match load(path) {
             Ok(loaded) => loaded,
-            Err(reason) => {
+            Err(LoadError::Unreadable(reason)) => {
                 let aside = set_aside(path)?;
                 tracing::error!(
                     "set aside the task store {} as {}: {reason}; this Server starts with no \
@@ -86,10 +91,12 @@ impl TaskStore {
                     path.display(),
                     aside.display()
                 );
+                crate::persistence::private_file_options().open(path)?;
                 load(path).map_err(|error| {
                     io::Error::other(format!("cannot create {}: {error}", path.display()))
                 })?
             }
+            Err(LoadError::Unavailable(reason)) => return Err(io::Error::other(reason)),
         };
         let shared = Arc::new(Shared {
             state: Mutex::new(Pending::default()),
@@ -152,24 +159,64 @@ impl Drop for TaskStore {
     }
 }
 
-fn sqlite(error: rusqlite::Error) -> String {
-    error.to_string()
+/// Why a store did not open.
+#[derive(Debug)]
+enum LoadError {
+    /// Not a database, a damaged one, or one from a newer Server: set aside (ADR 0068).
+    Unreadable(String),
+    /// Anything else, in use by another Server, a full disk or a failed read, which may
+    /// pass: the file is left as it is.
+    Unavailable(String),
 }
 
-/// Opens and reads the database, creating its schema in a new one.
-fn load(path: &Path) -> Result<(Connection, Vec<Task>, u64), String> {
+impl std::fmt::Display for LoadError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unreadable(reason) | Self::Unavailable(reason) => formatter.write_str(reason),
+        }
+    }
+}
+
+fn sqlite(error: rusqlite::Error) -> LoadError {
+    use rusqlite::ErrorCode;
+    match error.sqlite_error_code() {
+        Some(ErrorCode::NotADatabase | ErrorCode::DatabaseCorrupt) => {
+            LoadError::Unreadable(error.to_string())
+        }
+        Some(ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked) => {
+            LoadError::Unavailable(format!("another Server holds it: {error}"))
+        }
+        _ => LoadError::Unavailable(error.to_string()),
+    }
+}
+
+/// Opens and reads the database, creating its schema in a new one, and takes its lock.
+fn load(path: &Path) -> Result<(Connection, Vec<Task>, u64), LoadError> {
     let connection = Connection::open(path).map_err(sqlite)?;
+    // Another Server holds its lock for as long as it runs: waiting would not help.
+    connection.busy_timeout(Duration::ZERO).map_err(sqlite)?;
+    // Held from the first write until the connection closes; with it set before WAL is
+    // entered, SQLite keeps no shared-memory index either.
+    connection
+        .pragma_update_and_check(None, "locking_mode", "EXCLUSIVE", |row| {
+            row.get::<_, String>(0)
+        })
+        .map_err(sqlite)?;
     // The first read of the file: one that is not a database fails here.
     let version: i64 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(sqlite)?;
     if version > SCHEMA_VERSION {
-        return Err(format!(
+        return Err(LoadError::Unreadable(format!(
             "its schema version {version} is newer than this Server's {SCHEMA_VERSION}"
-        ));
+        )));
     }
     connection
         .pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get::<_, String>(0))
+        .map_err(sqlite)?;
+    // A write takes the exclusive lock now, not at the first change.
+    connection
+        .execute_batch("BEGIN EXCLUSIVE; COMMIT;")
         .map_err(sqlite)?;
     if version == 0 {
         connection.execute_batch(SCHEMA).map_err(sqlite)?;

@@ -69,7 +69,6 @@ fn the_store_keeps_every_change_across_a_restart_and_never_reuses_a_number() {
     let mut opened = TaskStore::open(&directory.store()).unwrap();
     assert!(opened.tasks.is_empty());
     assert_eq!(opened.next_id, 1);
-    assert_eq!(user_version(&directory.store()), SCHEMA_VERSION);
 
     let mut first = task(1, "Fix the login bug", 0);
     let mut second = task(2, "修复输入法", -1);
@@ -95,6 +94,7 @@ fn the_store_keeps_every_change_across_a_restart_and_never_reuses_a_number() {
     opened.store.schedule(third.id, None);
     opened.store.shutdown().unwrap();
     drop(opened);
+    assert_eq!(user_version(&directory.store()), SCHEMA_VERSION);
 
     let mut reopened = TaskStore::open(&directory.store()).unwrap();
     assert_eq!(
@@ -135,8 +135,8 @@ fn a_newer_or_unreadable_store_is_set_aside_and_tasks_start_empty() {
         SCHEMA_VERSION + 1,
         "left as it was"
     );
-    assert_eq!(user_version(&directory.store()), SCHEMA_VERSION);
     drop(opened);
+    assert_eq!(user_version(&directory.store()), SCHEMA_VERSION);
 
     let directory = TestDirectory::new();
     fs::write(directory.store(), b"not a database, just text").unwrap();
@@ -145,4 +145,45 @@ fn a_newer_or_unreadable_store_is_set_aside_and_tasks_start_empty() {
     let aside = directory.set_aside();
     assert_eq!(aside.len(), 1);
     assert_eq!(fs::read(&aside[0]).unwrap(), b"not a database, just text");
+}
+
+/// A store another Server holds, or one that cannot be opened for a reason that may pass,
+/// is left exactly as it is: the caller keeps its Tasks in memory.
+#[test]
+fn a_store_in_use_or_unavailable_is_left_alone() {
+    let directory = TestDirectory::new();
+    let mut first = TaskStore::open(&directory.store()).unwrap();
+    let error = TaskStore::open(&directory.store())
+        .err()
+        .expect("a second Server cannot open a held store");
+    assert!(error.to_string().contains("another Server"), "{error}");
+    assert!(directory.set_aside().is_empty(), "nothing is set aside");
+    let kept = task(1, "Kept", 0);
+    first.store.schedule(kept.id, Some(kept.clone()));
+    first.store.shutdown().unwrap();
+    drop(first);
+    assert_eq!(
+        TaskStore::open(&directory.store()).unwrap().tasks,
+        vec![kept]
+    );
+
+    // A directory where the file should be cannot be opened, and is not a damaged store.
+    let directory = TestDirectory::new();
+    fs::create_dir(directory.store()).unwrap();
+    assert!(TaskStore::open(&directory.store()).is_err());
+    assert!(directory.set_aside().is_empty());
+    assert!(directory.store().is_dir());
+}
+
+#[cfg(unix)]
+#[test]
+fn the_store_is_the_persons_alone() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let directory = TestDirectory::new();
+    let store = directory.0.join("data").join("tasks.sqlite");
+    let opened = TaskStore::open(&store).unwrap();
+    let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(&store), 0o600);
+    assert_eq!(mode(store.parent().unwrap()), 0o700);
+    drop(opened);
 }

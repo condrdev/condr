@@ -61,9 +61,10 @@ fn git_worktree_lifecycle_preserves_branches_and_refuses_dirty_removal() {
     assert!(!parent.is_linked_worktree());
 
     // Without a configured root the checkout lands beside the repository, on the same volume.
-    let (beside, forked_from) = create_worktree(&parent, "feature/beside", None).unwrap();
+    let (beside, forked_from, created) = create_worktree(&parent, "feature/beside", None).unwrap();
     // A branch Condr made remembers where it forked (ADR 0034).
     assert_eq!(forked_from.as_deref(), Some("main"));
+    assert!(created, "it made the branch");
     assert_eq!(
         beside.root(),
         temp.path()
@@ -73,12 +74,13 @@ fn git_worktree_lifecycle_preserves_branches_and_refuses_dirty_removal() {
     remove_worktree(&parent, &beside).unwrap();
 
     let worktree_root = temp.path().join("worktrees");
-    let (existing, forked_from) =
+    let (existing, forked_from, created_existing) =
         create_worktree(&parent, "existing", Some(&worktree_root)).unwrap();
     assert_eq!(
         forked_from, None,
         "a branch that existed says nothing about its fork"
     );
+    assert!(!created_existing, "it made no branch");
     assert_eq!(
         existing.root(),
         worktree_root.join("repository").join("existing")
@@ -109,7 +111,7 @@ fn git_worktree_lifecycle_preserves_branches_and_refuses_dirty_removal() {
         ["show-ref", "--verify", "refs/heads/existing"]
     ));
 
-    let (dirty, _) = create_worktree(&parent, "feature/dirty", Some(&worktree_root)).unwrap();
+    let (dirty, _, _) = create_worktree(&parent, "feature/dirty", Some(&worktree_root)).unwrap();
     fs::write(dirty.root().join("untracked.txt"), "keep me\n").unwrap();
     let error = remove_worktree(&parent, &dirty).unwrap_err();
     assert!(error.to_string().contains("modified or untracked"));
@@ -186,7 +188,7 @@ fn empty_repository(path: &Path, tree: Option<gix::ObjectId>) -> condr_core::Git
 fn failed_worktree_registration_removes_only_its_own_directories() {
     let temp = TempDirectory::new("worktree-registration-failure");
     let parent = empty_repository(&temp.path().join("repository"), None);
-    let (previous, _) = create_worktree(&parent, "existing", None).unwrap();
+    let (previous, _, _) = create_worktree(&parent, "existing", None).unwrap();
     let root = temp.path().join("blocked");
     fs::write(&root, "existing file").unwrap();
     let registrations = parent.git_directory().join("worktrees");

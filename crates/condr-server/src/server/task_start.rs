@@ -5,8 +5,8 @@
 use super::*;
 use condr_core::agent_discovery::AgentInstallation;
 use condr_core::{
-    AgentKind, StartPlace, TabId, TaskError, TaskId, TaskResponse, branch_commit,
-    branch_is_checked_out, default_task_branch, delete_branch_at, task_error,
+    AgentKind, StartPlace, TabId, TaskError, TaskId, TaskResponse, branch_is_checked_out,
+    default_task_branch, delete_branch_at, task_error,
 };
 
 /// How long a new Pane's shell has to reach its prompt.
@@ -33,13 +33,13 @@ enum Plan {
 
 /// What this Start made, which a failure before the commit point undoes.
 #[derive(Default)]
-struct Made {
-    workspace: Option<WorkspaceId>,
-    tab: Option<TabId>,
+pub(super) struct Made {
+    pub(super) workspace: Option<WorkspaceId>,
+    pub(super) tab: Option<TabId>,
     /// The repository and the worktree created in it.
-    worktree: Option<(GitRepository, GitRepository)>,
+    pub(super) worktree: Option<(GitRepository, GitRepository)>,
     /// A branch created for the worktree, with the commit it was made at.
-    branch: Option<(GitRepository, String, String)>,
+    pub(super) branch: Option<(GitRepository, String, String)>,
 }
 
 /// Holds the Task in "Starting" and the Workspace it chose; dropping it before the
@@ -84,7 +84,7 @@ pub(super) fn start(
     };
     answer_or_fail(
         || run(state, lifecycle, task, place, agent),
-        |message| Err(error(task_error::AGENT_START_FAILED, message)),
+        |message| Err(error(task_error::INTERNAL_ERROR, message)),
     )
 }
 
@@ -167,10 +167,7 @@ fn run(
         })
     });
     if let Err(failure) = &result {
-        // A stopping Server keeps what it made: it returns as a Workspace without a Task.
-        if !lifecycle.is_stopping() {
-            undo(state, made);
-        }
+        undo_failed(state, made, lifecycle.is_stopping());
         tracing::info!(
             task = id.as_u64(),
             step = failure.step.as_deref().unwrap_or(""),
@@ -430,6 +427,7 @@ fn prepare(
                     parent,
                     child,
                     base_branch: base.clone(),
+                    created_branch: false,
                 })
             });
             let prepared = match managed {
@@ -465,9 +463,6 @@ fn prepare(
                 Ok(false) => {}
                 Err(git) => return Err(failed(git.to_string())),
             }
-            let existed = branch_commit(&parent, branch)
-                .map_err(|error| failed(error.to_string()))?
-                .is_some();
             let prepared = prepare_external_layout(ExternalLayoutPlan::CreateWorktree {
                 parent_workspace_id: *parent_workspace_id,
                 parent_root: parent_root.clone(),
@@ -475,9 +470,15 @@ fn prepare(
                 worktree_root,
             })
             .map_err(failed)?;
-            if let PreparedExternalLayout::CreateWorktree { parent, child, .. } = &prepared {
+            if let PreparedExternalLayout::CreateWorktree {
+                parent,
+                child,
+                created_branch,
+                ..
+            } = &prepared
+            {
                 made.worktree = Some((parent.clone(), child.clone()));
-                if !existed && let Some(commit) = child.head() {
+                if *created_branch && let Some(commit) = child.head() {
                     made.branch = Some((parent.clone(), branch.clone(), commit.to_owned()));
                 }
             }
@@ -516,10 +517,17 @@ fn write_task_file(
     title: &str,
     description: &str,
 ) -> Result<(), TaskError> {
+    use std::io::Write as _;
+    // The person's alone, as the store is: owner-only directory and file.
     let written = file
         .parent()
-        .map_or(Ok(()), std::fs::create_dir_all)
-        .and_then(|()| std::fs::write(file, format!("{title}\n\n{description}")));
+        .map_or(Ok(()), crate::persistence::create_private_directory)
+        .and_then(|()| {
+            crate::persistence::private_file_options()
+                .truncate(true)
+                .open(file)?
+                .write_all(format!("{title}\n\n{description}").as_bytes())
+        });
     written.map_err(|io| {
         error(
             task_error::TASK_FILE_FAILED,
@@ -630,20 +638,35 @@ fn type_agent(
                 .map(TerminalRuntime::launch_probe);
             instance.zip(probe).ok_or_else(gone)?
         };
-        let command = match probe.readiness() {
-            ShellReadiness::Ready(_) => probe
-                .command(&installation, &args)
-                .map_err(|io| error(task_error::AGENT_START_FAILED, io.to_string()))?,
-            ShellReadiness::Starting | ShellReadiness::Busy if Instant::now() < deadline => {
+        // `command` looks at the shell itself: a prompt hook's child still running reads
+        // as busy, which passes like a shell still starting.
+        #[cfg(test)]
+        let busy = state
+            .lock()
+            .or_abort()
+            .tasks
+            .as_ref()
+            .is_some_and(|tasks| tasks.shells_busy);
+        #[cfg(not(test))]
+        let busy = false;
+        let command = if busy {
+            Err(io::Error::from(io::ErrorKind::WouldBlock))
+        } else {
+            probe.command(&installation, &args)
+        };
+        let command = match command {
+            Ok(command) => command,
+            Err(io) if io.kind() == io::ErrorKind::WouldBlock && Instant::now() < deadline => {
                 thread::sleep(PROMPT_POLL_INTERVAL);
                 continue;
             }
-            ShellReadiness::Starting | ShellReadiness::Busy => {
+            Err(io) if io.kind() == io::ErrorKind::WouldBlock => {
                 return Err(error(
                     task_error::SHELL_NOT_READY,
                     "the shell did not reach its prompt in 30 seconds",
                 ));
             }
+            Err(io) => return Err(error(task_error::AGENT_START_FAILED, io.to_string())),
         };
         let mut state = state.lock().or_abort();
         if !state.terminal_is_current(pane_id, instance)
@@ -684,13 +707,32 @@ fn type_agent(
     }
 }
 
-/// Undoes what a Start made before its commit point: the Workspace or the Tab, then the
-/// worktree, then a branch still where it was made.
-fn undo(state: &Arc<Mutex<RuntimeState>>, made: Made) {
-    let close = match (made.workspace, made.tab) {
-        (Some(workspace_id), _) => Some(LayoutCommand::CloseWorkspace { workspace_id }),
-        (None, Some(tab_id)) => Some(LayoutCommand::CloseTab { tab_id }),
-        (None, None) => None,
+/// Undoes what a failed Start made before its commit point: the Workspace or the Tab, then
+/// the worktree, then a branch still where it was made. A stopping Server keeps a
+/// Workspace it made, which returns without a Task (ADR 0068), and only takes back a
+/// worktree and branch no Workspace was made for.
+pub(super) fn undo_failed(state: &Arc<Mutex<RuntimeState>>, mut made: Made, stopping: bool) {
+    if stopping {
+        if made.workspace.is_some() {
+            return;
+        }
+        made.tab = None;
+    }
+    let close = {
+        let state = state.lock().or_abort();
+        match (made.workspace, made.tab) {
+            (Some(workspace_id), _) => Some(LayoutCommand::CloseWorkspace { workspace_id }),
+            // Closing a Workspace's last Tab would close the Workspace, which this Start
+            // did not make.
+            (None, Some(tab_id))
+                if state.session.workspaces().iter().any(|workspace| {
+                    workspace.tab(tab_id).is_some() && workspace.tabs().len() > 1
+                }) =>
+            {
+                Some(LayoutCommand::CloseTab { tab_id })
+            }
+            _ => None,
+        }
     };
     if let Some(command) = close {
         let removed = {

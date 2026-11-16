@@ -66,25 +66,7 @@ fn stage_in(
     format: ClipboardImageFormat,
     bytes: &[u8],
 ) -> io::Result<PathBuf> {
-    let mut builder = fs::DirBuilder::new();
-    builder.recursive(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::DirBuilderExt as _;
-        builder.mode(0o700);
-    }
-    builder.create(directory)?;
-    if !fs::symlink_metadata(directory)?.is_dir() {
-        return Err(io::Error::other(format!(
-            "{} is not a directory",
-            directory.display()
-        )));
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        fs::set_permissions(directory, fs::Permissions::from_mode(0o700))?;
-    }
+    crate::persistence::create_private_directory(directory)?;
 
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)

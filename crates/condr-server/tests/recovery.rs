@@ -102,7 +102,8 @@ fn restart_revalidates_worktree_authority_against_the_git_topology() {
     let first_endpoint = test_endpoint();
     let first_server = BoundServer::bind(
         ServerConfig::at_socket(first_endpoint.as_local_path().unwrap())
-            .with_snapshot_path(snapshot_path.clone()),
+            .with_snapshot_path(snapshot_path.clone())
+            .with_data_directory(directory.join("data")),
     )
     .unwrap();
     let first_handle = first_server.handle();
@@ -129,7 +130,8 @@ fn restart_revalidates_worktree_authority_against_the_git_topology() {
     let second_endpoint = test_endpoint();
     let second_server = BoundServer::bind(
         ServerConfig::at_socket(second_endpoint.as_local_path().unwrap())
-            .with_snapshot_path(snapshot_path.clone()),
+            .with_snapshot_path(snapshot_path.clone())
+            .with_data_directory(directory.join("data")),
     )
     .unwrap();
     let second_handle = second_server.handle();

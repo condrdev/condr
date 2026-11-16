@@ -248,6 +248,174 @@ fn tasks_survive_a_restart_and_one_whose_workspace_did_not_returns_to_todo() {
     let _ = std::fs::remove_dir_all(data);
 }
 
+/// Each endpoint keeps its own task store, as it keeps its own Snapshot; only the host's
+/// Server uses the data directory itself.
+#[test]
+fn each_endpoint_keeps_its_own_task_store() {
+    let host = ServerConfig::at_socket(default_socket_path());
+    assert_eq!(host.data_directory, condr_core::data_directory());
+    let other = ServerConfig::at_socket(std::env::temp_dir().join("condr-other.sock"))
+        .data_directory
+        .unwrap();
+    assert_eq!(other.parent(), condr_core::data_directory().as_deref());
+    assert_ne!(
+        Some(other),
+        ServerConfig::at_socket(std::env::temp_dir().join("condr-another.sock")).data_directory
+    );
+}
+
+/// A second Server on a task store another one holds keeps its Tasks in memory and
+/// leaves the store, and the first one's Tasks, as they are.
+#[test]
+fn a_second_server_on_a_held_task_store_keeps_its_tasks_in_memory() {
+    let data = temp("shared");
+    let recover = || {
+        RuntimeState::recover(
+            test_endpoint().as_local_path().unwrap(),
+            None,
+            None,
+            Some(data.clone()),
+        )
+        .unwrap()
+        .0
+    };
+    let mut first = recover();
+    let kept = create(&mut first, "First").id;
+    let mut second = recover();
+    assert!(listed(&mut second, false).is_empty());
+    create(&mut second, "Second");
+    assert!(
+        std::fs::read_dir(&data).unwrap().all(|entry| !entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .contains("unreadable")),
+        "nothing is set aside"
+    );
+    first.tasks.as_mut().unwrap().shutdown().unwrap();
+    drop((first, second));
+    let mut third = recover();
+    assert_eq!(listed(&mut third, false), [kept]);
+    drop(third);
+    let _ = std::fs::remove_dir_all(data);
+}
+
+/// Undoing a Start closes the Tab it opened only while its Workspace keeps another one:
+/// closing a last Tab would close a Workspace the Start did not make.
+#[test]
+fn undoing_a_start_never_closes_a_workspace_by_its_last_tab() {
+    let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
+    let workspace = state
+        .session
+        .create_workspace(std::env::temp_dir())
+        .unwrap();
+    let only = state.session.workspace(workspace).unwrap().tabs()[0].id();
+    let opened = state.session.create_tab(workspace, None).unwrap();
+    let state = Arc::new(Mutex::new(state));
+    let undo = |tab| {
+        task_start::undo_failed(
+            &state,
+            task_start::Made {
+                tab: Some(tab),
+                ..Default::default()
+            },
+            false,
+        )
+    };
+    undo(opened);
+    let tabs = |state: &Arc<Mutex<RuntimeState>>| {
+        state
+            .lock()
+            .unwrap()
+            .session
+            .workspace(workspace)
+            .map(|workspace| workspace.tabs().len())
+    };
+    assert_eq!(tabs(&state), Some(1), "the Tab it opened closed");
+    undo(only);
+    assert_eq!(
+        tabs(&state),
+        Some(1),
+        "the last Tab, and its Workspace, stay"
+    );
+}
+
+/// A Server stopping during a Start keeps a Workspace the Start made, which comes back
+/// without a Task, but takes back a worktree and branch no Workspace was made for.
+#[test]
+fn a_stopping_server_undoes_only_a_worktree_no_workspace_was_made_for() {
+    let root = temp("stopping-undo");
+    let repository = root.join("api");
+    std::fs::create_dir_all(&repository).unwrap();
+    run_git(&repository, &["init", "-q", "-b", "main"]);
+    run_git(&repository, &["config", "user.name", "Condr Tests"]);
+    run_git(
+        &repository,
+        &["config", "user.email", "condr@example.invalid"],
+    );
+    run_git(&repository, &["config", "commit.gpgsign", "false"]);
+    std::fs::write(repository.join("README.md"), "api\n").unwrap();
+    run_git(&repository, &["add", "README.md"]);
+    run_git(&repository, &["commit", "-q", "-m", "initial"]);
+    let parent = discover_repository(&repository).unwrap().unwrap();
+    let branch_exists = |branch: &str| {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repository)
+            .args([
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                &format!("refs/heads/{branch}"),
+            ])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    };
+    let state = Arc::new(Mutex::new(RuntimeState::new(
+        test_endpoint().as_local_path().unwrap(),
+    )));
+    let made = |branch: &str, workspace: bool| {
+        let (child, _, created) =
+            create_worktree(&parent, branch, Some(&root.join("worktrees"))).unwrap();
+        assert!(created);
+        let workspace = workspace.then(|| {
+            state
+                .lock()
+                .unwrap()
+                .session
+                .create_workspace(child.root().to_path_buf())
+                .unwrap()
+        });
+        let commit = child.head().unwrap().to_owned();
+        (
+            child.root().to_path_buf(),
+            task_start::Made {
+                workspace,
+                tab: None,
+                worktree: Some((parent.clone(), child)),
+                branch: Some((parent.clone(), branch.to_owned(), commit)),
+            },
+        )
+    };
+
+    let (folder, without_workspace) = made("worktree/refused", false);
+    task_start::undo_failed(&state, without_workspace, true);
+    assert!(!folder.exists());
+    assert!(!branch_exists("worktree/refused"));
+
+    let (folder, with_workspace) = made("worktree/kept", true);
+    task_start::undo_failed(&state, with_workspace, true);
+    assert!(
+        folder.exists(),
+        "it comes back as a Workspace without a Task"
+    );
+    assert!(branch_exists("worktree/kept"));
+    assert_eq!(state.lock().unwrap().session.workspaces().len(), 1);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// ADR 0068: a task store the Server cannot read is set aside, and it starts with no
 /// Tasks and keeps new ones.
 #[test]

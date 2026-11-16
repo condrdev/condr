@@ -56,7 +56,10 @@ use config::{
 use layout::*;
 #[cfg(test)]
 use local::snapshot_path_for_endpoint;
-use local::{default_snapshot_path, runtime_epoch, stable_endpoint_id, temporary_task_files};
+use local::{
+    default_data_directory, default_snapshot_path, runtime_epoch, stable_endpoint_id,
+    temporary_task_files,
+};
 use recovery::{observe_terminal_cwds, shutdown_cwd};
 use relative_path::RelativePathBuf;
 use std::io::{self, Write};

@@ -41,6 +41,43 @@ struct WorkerState {
     stopping: bool,
 }
 
+/// Makes `directory` and its missing parents owner-only (0700 on Unix), and refuses a
+/// symlink or file in its place: where a Server keeps what is the person's alone.
+pub(crate) fn create_private_directory(directory: &Path) -> io::Result<()> {
+    let mut builder = fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt as _;
+        builder.mode(0o700);
+    }
+    builder.create(directory)?;
+    if !fs::symlink_metadata(directory)?.is_dir() {
+        return Err(io::Error::other(format!(
+            "{} is not a directory",
+            directory.display()
+        )));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(directory, fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(())
+}
+
+/// Opens `path` for writing, creating it owner-only (0600 on Unix) when it is missing.
+pub(crate) fn private_file_options() -> OpenOptions {
+    let mut options = OpenOptions::new();
+    options.write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    options
+}
+
 /// Where an atomic replace of `path` must land: a symlinked file (dotfiles, a snapshot
 /// kept elsewhere) is updated through its target instead of being replaced by a regular
 /// file. A dangling link is replaced as is.

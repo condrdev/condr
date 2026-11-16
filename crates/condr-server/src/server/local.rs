@@ -29,9 +29,26 @@ fn endpoint_file(
         .map(|directory| directory.join(format!("{}.{extension}", server_log_stem(socket_path))))
 }
 
-/// Where a Server with no data directory, as tests start, writes its task files.
+/// Where a Server keeps its Tasks (ADR 0068): the data directory for the host's Server,
+/// and a directory of its own under it for any other endpoint, as each endpoint has its
+/// own Snapshot, so no two Servers share a task store.
+pub(super) fn default_data_directory(socket_path: &Path) -> Option<PathBuf> {
+    let root = condr_core::data_directory()?;
+    Some(
+        if stable_endpoint_id(socket_path) == stable_endpoint_id(&default_socket_path()) {
+            root
+        } else {
+            root.join(server_log_stem(socket_path))
+        },
+    )
+}
+
+/// Where a Server with no data directory, as tests start, writes its task files: under
+/// the per-user runtime directory, which only the person can read.
 pub(super) fn temporary_task_files(socket_path: &Path) -> PathBuf {
-    std::env::temp_dir().join(format!("{}-tasks", server_log_stem(socket_path)))
+    condr_core::runtime_directory()
+        .unwrap_or_else(std::env::temp_dir)
+        .join(format!("{}-tasks", server_log_stem(socket_path)))
 }
 
 /// The file stem this Server's stderr redirect and its rolling log files share.

@@ -210,6 +210,13 @@ fn a_task_starts_in_a_new_tab_with_its_file_and_one_sentence() {
         std::fs::read_to_string(&file).unwrap(),
         "Write the notes\n\nMake it work.\nThen test it."
     );
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode =
+            |path: &std::path::Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&file), 0o600, "the task file is the person's alone");
+        assert_eq!(mode(file.parent().unwrap()), 0o700);
+    }
     assert_eq!(
         agent_args(&args),
         [format!(
@@ -539,4 +546,154 @@ fn a_data_directory_a_cmd_shim_refuses_fails_the_agent_step() {
         1
     );
     assert_eq!(get(&mut connection, task).workspace, None);
+}
+
+/// Waits until `done` holds of the Session.
+fn wait_for_session(fixture: &Fixture, done: impl Fn(&Session) -> bool) {
+    for _ in 0..400 {
+        if done(&fixture.session()) {
+            return;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    panic!("the Session never got there");
+}
+
+fn archive(
+    connection: &mut ClientConnection,
+    task: TaskId,
+    remove_worktree: bool,
+) -> Result<TaskResponse, TaskError> {
+    connection
+        .task(TaskCommand::Archive {
+            task,
+            close_workspace: true,
+            remove_worktree,
+        })
+        .unwrap()
+}
+
+/// ADR 0068: archiving a started Task closes its Workspace when asked and, for a clean
+/// Managed Worktree, removes it while its branch stays; a worktree with changes, or a
+/// Workspace that is no Managed Worktree, refuses the removal and keeps the Task started.
+#[test]
+fn archiving_closes_the_workspace_and_removes_a_clean_managed_worktree() {
+    let fixture = Fixture::new("archive");
+    let args = fixture.agent(AgentKind::Claude, "claude");
+    let mut connection = fixture.connect();
+    let (repository, _) = fixture.repository(&mut connection);
+    let task = new_task(&mut connection, "Fix the login bug", Some(&repository));
+    let (workspace, _, _) = start_task(
+        &mut connection,
+        task,
+        Some(StartPlace::NewWorktree { branch: None }),
+    )
+    .unwrap();
+    agent_args(&args);
+    let folder = fixture
+        .session()
+        .workspace(workspace)
+        .unwrap()
+        .root_directory()
+        .to_path_buf();
+
+    std::fs::write(folder.join("notes.txt"), "keep me\n").unwrap();
+    assert_eq!(
+        archive(&mut connection, task, true).unwrap_err().code,
+        task_error::WORKTREE_NOT_REMOVABLE
+    );
+    let still = get(&mut connection, task);
+    assert!(!still.archived && still.workspace == Some(workspace));
+
+    std::fs::remove_file(folder.join("notes.txt")).unwrap();
+    let Ok(TaskResponse::Task(archived)) = archive(&mut connection, task, true) else {
+        panic!("archived")
+    };
+    assert!(archived.archived && archived.workspace.is_none());
+    assert!(!fixture.file(task).exists());
+    wait_for_session(&fixture, |session| session.workspace(workspace).is_none());
+    for _ in 0..200 {
+        if !folder.exists() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    assert!(!folder.exists(), "the worktree is removed");
+    assert!(branch_exists(&repository, "worktree/fix-the-login-bug"));
+
+    // A plain Workspace closes, and its folder stays.
+    let notes = fixture.root.join("notes");
+    std::fs::create_dir_all(&notes).unwrap();
+    let plain = fixture.workspace(&mut connection, &notes);
+    let other = new_task(&mut connection, "Write the notes", None);
+    start_task(&mut connection, other, Some(StartPlace::Workspace(plain))).unwrap();
+    assert_eq!(
+        archive(&mut connection, other, true).unwrap_err().code,
+        task_error::WORKTREE_NOT_REMOVABLE,
+        "only a Managed Worktree is removed"
+    );
+    assert!(matches!(
+        archive(&mut connection, other, false),
+        Ok(TaskResponse::Task(task)) if task.archived
+    ));
+    wait_for_session(&fixture, |session| session.workspace(plain).is_none());
+    assert!(notes.is_dir());
+}
+
+/// ADR 0068: a Server that stops in the middle of a Start loses the reservation, and the
+/// Workspace it had made stays, without a Task.
+#[test]
+fn a_server_stopped_mid_start_keeps_the_workspace_without_a_task() {
+    let mut fixture = Fixture::new("stopped");
+    fixture.agent(AgentKind::Claude, "claude");
+    let mut connection = fixture.connect();
+    let (repository, _) = fixture.repository(&mut connection);
+    let task = new_task(&mut connection, "Never typed", Some(&repository));
+    // The new shell never looks ready, so the Start waits until the Server stops.
+    fixture
+        .handle
+        .state
+        .lock()
+        .unwrap()
+        .tasks
+        .as_mut()
+        .unwrap()
+        .shells_busy = true;
+
+    let server_id = connection.overview().server_id;
+    let mut stream = connection.into_stream();
+    condr_core::protocol::write_message(
+        &mut stream,
+        &ClientMessage::Task {
+            server_id,
+            request_id: 1,
+            command: TaskCommand::Start {
+                task,
+                place: Some(StartPlace::NewWorktree { branch: None }),
+                agent: AgentKind::Claude,
+            },
+        },
+    )
+    .unwrap();
+    wait_for_session(&fixture, |session| session.workspaces().len() == 2);
+    let folder = fixture.session().workspaces()[1]
+        .root_directory()
+        .to_path_buf();
+
+    fixture.handle.stop();
+    fixture.thread.take().unwrap().join().unwrap().unwrap();
+    let answer = loop {
+        match read_server(&mut stream) {
+            ServerMessage::Task { result, .. } => break result,
+            _ => continue,
+        }
+    };
+    assert_eq!(answer.unwrap_err().code, task_error::SERVER_STOPPING);
+    assert!(folder.is_dir(), "the Workspace it made stays");
+    assert!(branch_exists(&repository, "worktree/never-typed"));
+    let stored = crate::task_store::TaskStore::open(&fixture.root.join("data/tasks.sqlite"))
+        .unwrap()
+        .tasks;
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].workspace, None, "no Task holds it");
 }
