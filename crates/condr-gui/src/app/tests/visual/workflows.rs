@@ -1317,7 +1317,7 @@ fn a_program_that_fails_to_start_is_one_copyable_toast() {
     window.update(|_, cx| {
         view.update(cx, |this, cx| {
             this.spawn_launch(
-                "open notes in Nothing".into(),
+                "Couldn't open notes in Nothing".into(),
                 || Err(std::io::Error::other("not installed")),
                 cx,
             )

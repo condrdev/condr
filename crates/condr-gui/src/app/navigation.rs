@@ -349,7 +349,7 @@ impl Condr {
         self.prompt_directory_on(
             key,
             t!("navigation.new_workspace_on", device = label).into_owned(),
-            "Create",
+            t!("navigation.create"),
             move |this, path, window, cx| this.new_workspace_on(key, path, window, cx),
             window,
             cx,
@@ -627,7 +627,7 @@ impl Condr {
         };
         confirm_danger(
             cx.weak_entity(),
-            DangerConfirm::new(title, description, "Close"),
+            DangerConfirm::new(title, description, t!("navigation.close")),
             move |this, _, _| {
                 this.send_layout_to(key, command.clone());
             },

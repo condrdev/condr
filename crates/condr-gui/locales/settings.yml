@@ -1,5 +1,8 @@
 _version: 2
 settings:
+  window_title:
+    en: Condr — Settings
+    zh-CN: Condr — 设置
   open_failed:
     en: 'Failed to open Settings: %{error}'
     zh-CN: '无法打开设置：%{error}'
@@ -43,6 +46,9 @@ settings:
       en: No screen blanking, lock or idle sleep while Condr is running.
       zh-CN: Condr 运行期间不熄屏、不锁屏，也不因闲置而睡眠。
   developer:
+    open_failed:
+      en: 'Couldn''t open %{location}'
+      zh-CN: '无法打开“%{location}”'
     title:
       en: Developer
       zh-CN: 开发者
@@ -201,6 +207,12 @@ settings:
       en: Saved
       zh-CN: 已保存
   general:
+    autostart_on_failed:
+      en: 'Couldn''t turn on %{title}'
+      zh-CN: '无法开启“%{title}”'
+    autostart_off_failed:
+      en: 'Couldn''t turn off %{title}'
+      zh-CN: '无法关闭“%{title}”'
     title:
       en: General
       zh-CN: 通用
@@ -229,6 +241,9 @@ settings:
       en: Reachable after a restart. No window opens.
       zh-CN: 重启后仍可连接，不会打开窗口。
   restart:
+    ok:
+      en: Restart
+      zh-CN: 重启
     title:
       en: Restart
       zh-CN: 重启
@@ -472,6 +487,9 @@ settings:
     revoke_description:
       en: It disconnects now and needs a new pairing code to connect again.
       zh-CN: 它会立即断开，之后需要新的配对码才能再次连接。
+    revoke_ok:
+      en: Revoke
+      zh-CN: 撤销
   agents:
     title:
       en: Agent integrations

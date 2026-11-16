@@ -2,7 +2,7 @@ _version: 2
 history:
   detached:
     en: detached
-    zh-CN: 分离头指针
+    zh-CN: 分离 HEAD
   no_workspace:
     en: No Workspace
     zh-CN: 没有 Workspace

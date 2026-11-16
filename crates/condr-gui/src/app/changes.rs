@@ -7,7 +7,7 @@ use super::change_tree::{
 };
 use super::files::language_for;
 use super::history::history_branch;
-use super::placeholders::{empty_state, failed_state, list_note, too_large};
+use super::placeholders::{Oversized, empty_state, failed_state, list_note, too_large};
 use super::sidebar::CondrIconName;
 use super::viewer_header::{header_meta, mode_toggle, viewer_header};
 use super::*;
@@ -936,7 +936,9 @@ impl Condr {
                 empty_state(t!("changes.diff.unchanged", path = path_text), cx)
             }
             (DiffContent::Binary, _) => empty_state(t!("changes.diff.binary"), cx),
-            (DiffContent::TooLarge { bytes }, _) => empty_state(too_large("Diff", *bytes), cx),
+            (DiffContent::TooLarge { bytes }, _) => {
+                empty_state(too_large(Oversized::Diff, *bytes), cx)
+            }
             (DiffContent::Failed(reason), _) => failed_state(reason.clone(), cx),
             (DiffContent::Text, None) => empty_state(t!("changes.diff.loading"), cx),
         };

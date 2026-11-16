@@ -3,13 +3,10 @@ app:
   too_large:
     diff:
       en: 'Diff too large to show (%{size})'
-      zh-CN: 'Diff 太大，无法显示（%{size}）'
+      zh-CN: '差异太大，无法显示（%{size}）'
     file:
       en: 'File too large to show (%{size})'
       zh-CN: '文件太大，无法显示（%{size}）'
     image:
       en: 'Image too large to show (%{size})'
       zh-CN: '图片太大，无法显示（%{size}）'
-    other:
-      en: '%{what} too large to show (%{size})'
-      zh-CN: '%{what} 太大，无法显示（%{size}）'

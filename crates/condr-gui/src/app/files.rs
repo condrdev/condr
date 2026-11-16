@@ -4,7 +4,7 @@
 //! back to the Server (ADR 0045); `file_edits` holds that side.
 
 use super::change_tree::{RowKind, status_color, tree_indent, tree_row};
-use super::placeholders::{empty_state, failed_state, list_note, too_large};
+use super::placeholders::{Oversized, empty_state, failed_state, list_note, too_large};
 use super::preview::{
     DecodedImage, NoImage, PreviewImages, Rendering, image_summary, release_images, render_image,
     rendering_for,
@@ -863,7 +863,7 @@ impl Condr {
         };
         self.spawn_launch(
             t!(
-                "open_in.open_path",
+                "open_in.open_failed",
                 path = path.display(),
                 editor = target.label
             )
@@ -1002,7 +1002,7 @@ impl Condr {
             ) => empty_state(t!("files.loading_file"), cx),
             (None, None, FileViewContent::Binary, _) => empty_state(t!("files.binary"), cx),
             (None, None, FileViewContent::TooLarge { bytes }, _) => {
-                empty_state(too_large("File", *bytes), cx)
+                empty_state(too_large(Oversized::File, *bytes), cx)
             }
             (None, None, FileViewContent::Failed(reason), _) => failed_state(reason.clone(), cx),
         };

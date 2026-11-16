@@ -239,14 +239,21 @@ pub(in crate::app) fn set_autostart(settings: &Entity<SettingsWindow>, on: bool,
         cx.notify();
     });
     let owner = settings.read(cx).owner.clone();
-    let what = format!(
-        "turn {} {}",
-        if on { "on" } else { "off" },
-        autostart_title()
-    );
+    let failure = if on {
+        t!(
+            "settings.general.autostart_on_failed",
+            title = autostart_title()
+        )
+    } else {
+        t!(
+            "settings.general.autostart_off_failed",
+            title = autostart_title()
+        )
+    }
+    .into_owned();
     let Ok(done) = owner.update(cx, |owner, cx| {
         owner.spawn_launch(
-            what,
+            failure,
             move || {
                 if on {
                     condr_server::autostart::enable(&condr_server::resolve_server_executable()?)
@@ -739,9 +746,7 @@ fn confirm_restart(settings: &Entity<SettingsWindow>, window: &mut Window, cx: &
         DangerConfirm::new(
             t!("settings.restart.confirm_title"),
             t!("settings.restart.confirm_description"),
-            // shortcut: English, as `DangerConfirm::ok` is a `&'static str`; translate it
-            // once dialogs.rs takes owned text.
-            "Restart",
+            t!("settings.restart.ok"),
         ),
         move |owner, _, cx| owner.restart_server(key, cx),
         window,
@@ -1462,9 +1467,7 @@ fn revoke_button(
                 DangerConfirm::new(
                     t!("settings.devices.revoke_title", name = name),
                     t!("settings.devices.revoke_description"),
-                    // shortcut: English, as `DangerConfirm::ok` is a `&'static str`; translate
-                    // it once dialogs.rs takes owned text.
-                    "Revoke",
+                    t!("settings.devices.revoke_ok"),
                 ),
                 move |owner, _, _| {
                     owner.server_admin(selected, ServerAdminCommand::Revoke { key: key.clone() });

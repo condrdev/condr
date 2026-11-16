@@ -62,9 +62,9 @@ files:
       linux:
         en: Open Containing Folder
         zh-CN: 打开所在文件夹
-  reveal_what:
-    en: 'show %{path}'
-    zh-CN: '显示 %{path}'
+  reveal_failed:
+    en: 'Couldn''t show %{path}'
+    zh-CN: '无法显示 %{path}'
   note:
     gone:
       en: No longer on disk
@@ -195,3 +195,13 @@ files:
     dont_save:
       en: 'Don''t Save'
       zh-CN: 不保存
+  button:
+    create:
+      en: Create
+      zh-CN: 创建
+    rename:
+      en: Rename
+      zh-CN: 重命名
+    delete:
+      en: Delete
+      zh-CN: 删除

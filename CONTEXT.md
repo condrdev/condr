@@ -159,9 +159,9 @@ The GUI's Simplified Chinese keeps Condr's own concepts in English, as condr.dev
 
 | English | zh-CN |
 |---|---|
-| Workspace, Tab, Pane, Session, Agent, Worktree, Managed Worktree, Diff Tab, Preview Tab, Needs you | unchanged |
-| Unknown, Idle, Working, Blocked, Done, Error (Agent states) | unchanged |
-| Condr, Condr Cloud, Companion, Shell, agent CLI and editor names | unchanged |
+| Workspace, Tab, Pane, Session, Server, Agent, Worktree, Managed Worktree, Diff Tab, Preview Tab, Needs you, Peer-to-peer | unchanged |
+| Unknown, Idle, Working, Blocked, Done, Error (Agent states), Bell | unchanged |
+| Condr, Condr Cloud, Companion, Shell, agent CLI and editor names, `Local` (this machine's Device name) | unchanged |
 | Device | 设备 |
 | Paired devices | 已配对设备 |
 | Client | 客户端 |

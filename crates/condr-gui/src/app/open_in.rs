@@ -663,7 +663,7 @@ impl Condr {
         cx.notify();
         let started = self.spawn_launch(
             t!(
-                "open_in.open_path",
+                "open_in.open_failed",
                 path = root.display(),
                 editor = target.label
             )
@@ -692,11 +692,11 @@ impl Condr {
     }
 
     /// Runs `launch`, which starts a program on this machine, off the UI thread. A
-    /// failure is one `report_error` toast, "Couldn't {what}: …" (ADR 0020); the task says
-    /// whether the program started.
+    /// failure is one `report_error` toast, `failure` ("Couldn't open …") and the error
+    /// (ADR 0020); the task says whether the program started.
     pub(super) fn spawn_launch(
         &self,
-        what: String,
+        failure: String,
         launch: impl FnOnce() -> io::Result<()> + Send + 'static,
         cx: &mut Context<Self>,
     ) -> Task<bool> {
@@ -705,7 +705,10 @@ impl Condr {
                 return true;
             };
             let _ = this.update(cx, |this, cx| {
-                this.report_error(t!("open_in.launch_failed", what = what, error = error), cx)
+                this.report_error(
+                    t!("open_in.launch_failed", failure = failure, error = error),
+                    cx,
+                )
             });
             false
         })

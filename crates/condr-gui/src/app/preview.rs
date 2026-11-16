@@ -3,7 +3,7 @@
 //! Markdown, through GPUI Kit's TextView with Condr's images, links and highlighting. Every
 //! image comes from the Server through `ReadFile`, so a remote Workspace renders the same.
 
-use super::placeholders::too_large;
+use super::placeholders::{Oversized, too_large};
 use super::*;
 use gpui_kit::base::text::{
     MarkdownExtensions, MarkdownNode, MarkdownParseContext, MarkdownPlugin, TextView,
@@ -379,7 +379,7 @@ impl Condr {
                     Ok((text.into_bytes(), ImageFormat::Svg))
                 }
                 (Ok(FileContent::TooLarge { bytes }), _) => {
-                    Err(NoImage::Note(too_large("Image", bytes).into()))
+                    Err(NoImage::Note(too_large(Oversized::Image, bytes).into()))
                 }
                 (Ok(_), _) => Err(NoImage::Note(t!("preview.not_an_image").into())),
                 (Err(reason), _) => Err(NoImage::Failed(reason.into())),

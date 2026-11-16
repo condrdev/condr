@@ -37,15 +37,20 @@ pub(super) fn list_note(text: impl Into<SharedString>, color: Hsla) -> Div {
         .child(text.into())
 }
 
-/// "Diff too large to show (3.0 MiB)". `what` names the view in English, Diff, File or
-/// Image, and picks its sentence.
-pub(super) fn too_large(what: &str, bytes: u64) -> String {
+/// What a view is too large to show.
+pub(super) enum Oversized {
+    Diff,
+    File,
+    Image,
+}
+
+/// "Diff too large to show (3.0 MiB)".
+pub(super) fn too_large(what: Oversized, bytes: u64) -> String {
     let size = file_size_text(bytes as usize);
     match what {
-        "Diff" => t!("app.too_large.diff", size = size),
-        "File" => t!("app.too_large.file", size = size),
-        "Image" => t!("app.too_large.image", size = size),
-        _ => t!("app.too_large.other", what = what, size = size),
+        Oversized::Diff => t!("app.too_large.diff", size = size),
+        Oversized::File => t!("app.too_large.file", size = size),
+        Oversized::Image => t!("app.too_large.image", size = size),
     }
     .into_owned()
 }
@@ -55,11 +60,11 @@ mod tests {
     #[test]
     fn too_large_states_the_size_like_the_image_preview() {
         assert_eq!(
-            super::too_large("Diff", 3 << 20),
+            super::too_large(super::Oversized::Diff, 3 << 20),
             "Diff too large to show (3.0 MiB)"
         );
         assert_eq!(
-            super::too_large("File", 1536),
+            super::too_large(super::Oversized::File, 1536),
             "File too large to show (1.5 KiB)"
         );
     }

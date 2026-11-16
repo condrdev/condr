@@ -24,9 +24,6 @@ const SETTINGS_SIDEBAR_WIDTH: Pixels = px(200.);
 const SETTINGS_WINDOW_MIN_WIDTH: Rems = rems(40.);
 const SETTINGS_WINDOW_MIN_HEIGHT: Rems = rems(20.);
 
-/// Shown in the drawn title bar and set as the OS title for the taskbar.
-const SETTINGS_WINDOW_TITLE: &str = "Condr — Settings";
-
 /// Centered over the main window and kept inside that window's display, minus the
 /// taskbar or Dock: a main window on a secondary screen gets its Settings there, and
 /// a small screen gets a smaller Settings window rather than one hanging off the edge.
@@ -90,7 +87,7 @@ impl Condr {
             };
             let view_owner = owner.clone();
             let opened = cx.open_window(options, |window, cx| {
-                window.set_window_title(SETTINGS_WINDOW_TITLE);
+                window.set_window_title(&t!("settings.window_title"));
                 let view = cx.new(|cx| SettingsWindow::new(view_owner.clone(), window, cx));
                 view.read(cx).focus_handle.clone().focus(window, cx);
                 let _ =
@@ -635,7 +632,7 @@ impl Render for SettingsWindow {
                         window.remove_window();
                     }
                 })
-                .child(title_bar(SETTINGS_WINDOW_TITLE, cx))
+                .child(title_bar(t!("settings.window_title"), cx))
                 .child(header)
                 .child(div().flex_1().min_h_0().child(content)),
         )
@@ -803,7 +800,7 @@ fn location_row(
                     let _ = owner.update(cx, |owner, cx| {
                         owner
                             .spawn_launch(
-                                format!("open {label}"),
+                                t!("settings.developer.open_failed", location = label).into_owned(),
                                 move || open_in::reveal(&path),
                                 cx,
                             )

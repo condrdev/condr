@@ -30,3 +30,9 @@ navigation:
     agents:
       en: '%{count} agents are running in this Tab and will be stopped.'
       zh-CN: '这个 Tab 中有 %{count} 个 Agent 正在运行，关闭后都会被停止。'
+  create:
+    en: Create
+    zh-CN: 创建
+  close:
+    en: Close
+    zh-CN: 关闭

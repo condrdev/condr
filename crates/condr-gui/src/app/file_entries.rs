@@ -313,7 +313,7 @@ impl Condr {
             trim: false,
             selected: Some(0..initial.len()),
             error,
-            ..TextPrompt::new(title, "Create", initial)
+            ..TextPrompt::new(title, t!("files.button.create"), initial)
         };
         self.prompt_text_input(
             prompt,
@@ -358,7 +358,11 @@ impl Condr {
             trim: false,
             selected: Some(name_stem(&initial, kind)),
             error,
-            ..TextPrompt::new(t!("files.rename_title", path = from), "Rename", initial)
+            ..TextPrompt::new(
+                t!("files.rename_title", path = from),
+                t!("files.button.rename"),
+                initial,
+            )
         };
         self.prompt_text_input(
             prompt,
@@ -409,7 +413,7 @@ impl Condr {
         );
         confirm_danger(
             cx.weak_entity(),
-            DangerConfirm::new(title, description, "Delete"),
+            DangerConfirm::new(title, description, t!("files.button.delete")),
             move |this, _, cx| {
                 let path = path.clone();
                 this.send_entry(key, workspace_id, EntryRequest::Delete { path }, cx);
@@ -511,7 +515,7 @@ impl Condr {
     /// failure is a toast, as "Open in" does.
     pub(super) fn reveal_entry(&self, path: PathBuf, cx: &mut Context<Self>) {
         self.spawn_launch(
-            t!("files.reveal_what", path = path.display()).into_owned(),
+            t!("files.reveal_failed", path = path.display()).into_owned(),
             move || open_in::reveal_entry(&path),
             cx,
         )
