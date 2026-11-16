@@ -19,6 +19,8 @@ use condr_core::{
 use gpui_kit::component::diff::{Diff, DiffFile, DiffLinePosition, DiffMode, DiffSide, DiffState};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::tab::{Tab, TabBar};
+use rust_i18n::t;
+use std::borrow::Cow;
 
 /// What the right sidebar shows (ADR 0018); remembered per Workspace (ADR 0023).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -59,11 +61,12 @@ impl ChangesSection {
         }
     }
 
-    fn title(self) -> &'static str {
+    /// The section's header, with how many rows it holds.
+    fn title(self, count: usize) -> Cow<'static, str> {
         match self {
-            Self::Conflicts => "Conflicts",
-            Self::Tracked => "Tracked",
-            Self::Untracked => "Untracked",
+            Self::Conflicts => t!("changes.section.conflicts", count = count),
+            Self::Tracked => t!("changes.section.tracked", count = count),
+            Self::Untracked => t!("changes.section.untracked", count = count),
         }
     }
 
@@ -195,9 +198,9 @@ impl Condr {
         let owner = cx.weak_entity();
         let open = self.changes_sidebar_open(view);
         let label = if open {
-            "Hide Changes & Files"
+            t!("changes.toggle.hide")
         } else {
-            "Show Changes & Files"
+            t!("changes.toggle.show")
         };
         let icon = if open {
             IconName::PanelRightClose
@@ -219,7 +222,7 @@ impl Condr {
                     .ghost()
                     .small()
                     .icon(Icon::new(icon))
-                    .tooltip_with_action(label, &ToggleChanges, Some(SHORTCUT_CONTEXT))
+                    .tooltip_with_action(label.clone(), &ToggleChanges, Some(SHORTCUT_CONTEXT))
                     .accessibility_label(label)
                     .on_click(move |_, _, cx| {
                         let _ = owner.update(cx, |this, cx| this.toggle_changes_sidebar(cx));
@@ -309,7 +312,7 @@ impl Condr {
         else {
             return column
                 .child(self.sidebar_header(None, SidebarView::Changes, None, false, cx))
-                .child(empty_state("No Workspace", cx))
+                .child(empty_state(t!("changes.no_workspace"), cx))
                 .into_any_element();
         };
         // A Server that sends `head` serves History (ADR 0046).
@@ -357,7 +360,10 @@ impl Condr {
                         cx,
                     ))
                     .into_any_element(),
-                None => empty_state(format!("{workspace_name} is not a Git repository"), cx),
+                None => empty_state(
+                    t!("changes.not_a_repository", workspace = workspace_name),
+                    cx,
+                ),
             },
             SidebarView::History => v_flex()
                 .flex_1()
@@ -399,8 +405,8 @@ impl Condr {
                 .xsmall()
                 .icon(Icon::new(IconName::RefreshCw))
                 .debug_selector(|| "sidebar-refresh".into())
-                .tooltip("Refresh")
-                .accessibility_label("Refresh")
+                .tooltip(t!("changes.refresh"))
+                .accessibility_label(t!("changes.refresh"))
                 .loading(
                     self.files_view
                         .refreshing
@@ -429,19 +435,19 @@ impl Condr {
             })
             .children([
                 Tab::new()
-                    .label("Files")
+                    .label(t!("changes.tab.files"))
                     .debug_selector(|| "sidebar-view-files".into()),
                 Tab::new()
                     .label(match count {
-                        Some(count) => format!("Changes ({count})"),
-                        None => "Changes".to_owned(),
+                        Some(count) => t!("changes.tab.changes_count", count = count),
+                        None => t!("changes.tab.changes"),
                     })
                     .debug_selector(|| "sidebar-view-changes".into()),
             ])
             .when(history, |this| {
                 this.child(
                     Tab::new()
-                        .label("History")
+                        .label(t!("changes.tab.history"))
                         .debug_selector(|| "sidebar-view-history".into()),
                 )
             })
@@ -608,7 +614,7 @@ impl Condr {
         let control = match git.base.as_ref().map(|base| base.branch.clone()) {
             None => button
                 .disabled(true)
-                .tooltip("No base branch to compare with")
+                .tooltip(t!("changes.no_base"))
                 .into_any_element(),
             Some(branch) => {
                 let owner = cx.weak_entity();
@@ -675,7 +681,7 @@ impl Condr {
         let (radius, muted, warning) = (theme.radius, theme.muted_foreground, theme.warning);
         let entries = &changes.entries;
         if entries.is_empty() {
-            return empty_state("No changes", cx);
+            return empty_state(t!("changes.none"), cx);
         }
 
         let mut list = v_flex()
@@ -688,9 +694,7 @@ impl Condr {
             .overflow_y_scrollbar();
         if changes.truncated {
             list = list.child(list_note(
-                format!(
-                    "Only the first {MAX_GIT_CHANGES} changes are listed; add a .gitignore for the rest."
-                ),
+                t!("changes.truncated", count = MAX_GIT_CHANGES),
                 warning,
             ));
         }
@@ -725,11 +729,12 @@ impl Condr {
                         });
                     })
                     .child(disclosure(!collapsed, cx))
-                    .child(div().text_xs().text_color(muted).child(format!(
-                        "{} ({})",
-                        section.title(),
-                        rows.len()
-                    ))),
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(muted)
+                            .child(section.title(rows.len())),
+                    ),
             );
             if collapsed {
                 continue;
@@ -836,9 +841,12 @@ impl Condr {
         let commit = self.diff_commit(key, workspace_id, path);
         let entry = self.diff_entry(key, workspace_id, path);
         let comparison = match (commit, git) {
-            (Some(commit), _) => format!("Commit {}", super::history::short_id(&commit.id)),
+            (Some(commit), _) => t!(
+                "changes.comparison.commit",
+                id = super::history::short_id(&commit.id)
+            ),
             (None, Some(git)) => comparison_label(git, against),
-            (None, None) => "Against HEAD".to_owned(),
+            (None, None) => t!("changes.comparison.head"),
         };
         let viewer = self.files_view.diff_viewers.get(&(key, tab_id));
         let content = viewer.map_or(DiffContent::Loading, |viewer| viewer.content.clone());
@@ -855,13 +863,13 @@ impl Condr {
                     Button::new("diff-mode-split")
                         .debug_selector(|| "diff-mode-split".into())
                         .icon(Icon::new(gpui_kit::assets::IconName::Columns2))
-                        .tooltip("Split")
-                        .accessibility_label("Split"),
+                        .tooltip(t!("changes.diff.split"))
+                        .accessibility_label(t!("changes.diff.split")),
                     Button::new("diff-mode-unified")
                         .debug_selector(|| "diff-mode-unified".into())
                         .icon(Icon::new(gpui_kit::assets::IconName::Rows2))
-                        .tooltip("Unified")
-                        .accessibility_label("Unified"),
+                        .tooltip(t!("changes.diff.unified"))
+                        .accessibility_label(t!("changes.diff.unified")),
                     self.files_view.diff_unified,
                     move |unified, cx| {
                         let _ = owner.update(cx, |this, cx| this.set_diff_unified(unified, cx));
@@ -878,8 +886,8 @@ impl Condr {
                     .xsmall()
                     .icon(Icon::new(CondrIconName::FileText))
                     .debug_selector(|| "diff-show-file".into())
-                    .tooltip("Show File")
-                    .accessibility_label("Show File")
+                    .tooltip(t!("changes.diff.show_file"))
+                    .accessibility_label(t!("changes.diff.show_file"))
                     .disabled(deleted)
                     .on_click(move |_, window, cx| {
                         let _ = owner.update(cx, |this, cx| {
@@ -923,12 +931,14 @@ impl Condr {
                     )
                     .into_any_element()
             }
-            (DiffContent::Loading, _) => empty_state("Loading diff…", cx),
-            (DiffContent::Unchanged, _) => empty_state(format!("No changes in {path_text}"), cx),
-            (DiffContent::Binary, _) => empty_state("Binary file", cx),
+            (DiffContent::Loading, _) => empty_state(t!("changes.diff.loading"), cx),
+            (DiffContent::Unchanged, _) => {
+                empty_state(t!("changes.diff.unchanged", path = path_text), cx)
+            }
+            (DiffContent::Binary, _) => empty_state(t!("changes.diff.binary"), cx),
             (DiffContent::TooLarge { bytes }, _) => empty_state(too_large("Diff", *bytes), cx),
             (DiffContent::Failed(reason), _) => failed_state(reason.clone(), cx),
-            (DiffContent::Text, None) => empty_state("Loading diff…", cx),
+            (DiffContent::Text, None) => empty_state(t!("changes.diff.loading"), cx),
         };
         v_flex()
             .debug_selector(|| "diff-tab".into())
@@ -1114,7 +1124,8 @@ impl Condr {
                 viewer.patch = patch;
             }
             Err(error) => {
-                viewer.content = DiffContent::Failed(format!("Could not show this diff: {error}"));
+                viewer.content =
+                    DiffContent::Failed(t!("changes.diff.failed", error = error).into_owned());
                 viewer.patch.clear();
             }
         }
@@ -1186,10 +1197,10 @@ fn shown_changes(git: &WorkspaceGitSnapshot, against: DiffBase) -> &GitChanges {
 }
 
 /// What the Changes header and the Diff Tab header say a comparison is against.
-fn comparison_label(git: &WorkspaceGitSnapshot, against: DiffBase) -> String {
+fn comparison_label(git: &WorkspaceGitSnapshot, against: DiffBase) -> Cow<'static, str> {
     match (against, &git.base) {
-        (DiffBase::MergeBase, Some(base)) => format!("Against {}", base.branch),
-        _ => "Against HEAD".to_owned(),
+        (DiffBase::MergeBase, Some(base)) => t!("changes.comparison.base", branch = base.branch),
+        _ => t!("changes.comparison.head"),
     }
 }
 

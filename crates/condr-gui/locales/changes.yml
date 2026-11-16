@@ -1,0 +1,82 @@
+_version: 2
+changes:
+  toggle:
+    hide:
+      en: Hide Changes & Files
+      zh-CN: 隐藏变更和文件
+    show:
+      en: Show Changes & Files
+      zh-CN: 显示变更和文件
+  tab:
+    files:
+      en: Files
+      zh-CN: 文件
+    changes:
+      en: Changes
+      zh-CN: 变更
+    changes_count:
+      en: 'Changes (%{count})'
+      zh-CN: '变更（%{count}）'
+    history:
+      en: History
+      zh-CN: 历史
+  refresh:
+    en: Refresh
+    zh-CN: 刷新
+  no_workspace:
+    en: No Workspace
+    zh-CN: 没有 Workspace
+  not_a_repository:
+    en: '%{workspace} is not a Git repository'
+    zh-CN: '%{workspace} 不是 Git 仓库'
+  no_base:
+    en: No base branch to compare with
+    zh-CN: 没有可供比较的基准分支
+  none:
+    en: No changes
+    zh-CN: 没有变更
+  truncated:
+    en: 'Only the first %{count} changes are listed; add a .gitignore for the rest.'
+    zh-CN: '只列出前 %{count} 项变更；其余的请用 .gitignore 忽略。'
+  section:
+    conflicts:
+      en: 'Conflicts (%{count})'
+      zh-CN: '冲突（%{count}）'
+    tracked:
+      en: 'Tracked (%{count})'
+      zh-CN: '已跟踪（%{count}）'
+    untracked:
+      en: 'Untracked (%{count})'
+      zh-CN: '未跟踪（%{count}）'
+  comparison:
+    head:
+      en: Against HEAD
+      zh-CN: 对比 HEAD
+    base:
+      en: 'Against %{branch}'
+      zh-CN: '对比 %{branch}'
+    commit:
+      en: 'Commit %{id}'
+      zh-CN: '提交 %{id}'
+  diff:
+    split:
+      en: Split
+      zh-CN: 并排
+    unified:
+      en: Unified
+      zh-CN: 统一
+    show_file:
+      en: Show File
+      zh-CN: 显示文件
+    loading:
+      en: Loading diff…
+      zh-CN: 正在加载差异…
+    unchanged:
+      en: 'No changes in %{path}'
+      zh-CN: '%{path} 没有变更'
+    binary:
+      en: Binary file
+      zh-CN: 二进制文件
+    failed:
+      en: 'Could not show this diff: %{error}'
+      zh-CN: '无法显示这个差异：%{error}'

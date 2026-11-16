@@ -11,6 +11,7 @@ use gpui_kit::base::text::{
 };
 use gpui_kit::component::text::FrontmatterPlugin;
 use image::AnimationDecoder as _;
+use rust_i18n::t;
 use std::hash::{DefaultHasher, Hash as _, Hasher as _};
 use std::io::Cursor;
 
@@ -191,7 +192,7 @@ fn animation(frames: image::Frames<'_>) -> Result<Vec<(Arc<RenderImage>, Duratio
         ));
     }
     if decoded.is_empty() {
-        return Err("the image has no frames".into());
+        return Err(t!("preview.no_frames").into_owned());
     }
     Ok(decoded)
 }
@@ -380,7 +381,7 @@ impl Condr {
                 (Ok(FileContent::TooLarge { bytes }), _) => {
                     Err(NoImage::Note(too_large("Image", bytes).into()))
                 }
-                (Ok(_), _) => Err(NoImage::Note("Not an image".into())),
+                (Ok(_), _) => Err(NoImage::Note(t!("preview.not_an_image").into())),
                 (Err(reason), _) => Err(NoImage::Failed(reason.into())),
             };
             let (bytes, format) = match decodable {

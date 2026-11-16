@@ -791,12 +791,12 @@ fn preview_tab_saves_edits_and_never_drops_unsaved_text() {
     assert!(
         wait_until(window, |window| {
             window.update(|window, cx| _ = window.draw(cx));
-            window.debug_bounds("file-choice-Overwrite").is_some()
+            window.debug_bounds("file-choice-overwrite").is_some()
         }),
         "a save from a stale version should ask"
     );
     assert_eq!(std::fs::read(root.join("plan.txt")).unwrap(), b"agent\r\n");
-    let overwrite = window.debug_bounds("file-choice-Overwrite").unwrap();
+    let overwrite = window.debug_bounds("file-choice-overwrite").unwrap();
     window.simulate_click(overwrite.center(), Modifiers::default());
     assert!(wait_until(window, |window| {
         window.update(|window, cx| _ = window.draw(cx));
@@ -812,9 +812,9 @@ fn preview_tab_saves_edits_and_never_drops_unsaved_text() {
     window.simulate_click(notes.center(), Modifiers::default());
     assert!(wait_until(window, |window| {
         window.update(|window, cx| _ = window.draw(cx));
-        window.debug_bounds("file-choice-Don't Save").is_some()
+        window.debug_bounds("file-choice-dont-save").is_some()
     }));
-    let cancel = window.debug_bounds("file-choice-Cancel").unwrap();
+    let cancel = window.debug_bounds("file-choice-cancel").unwrap();
     window.simulate_click(cancel.center(), Modifiers::default());
     window.run_until_parked();
     assert!(dirty(window));
@@ -836,11 +836,11 @@ fn preview_tab_saves_edits_and_never_drops_unsaved_text() {
     assert!(
         wait_until(window, |window| {
             window.update(|window, cx| _ = window.draw(cx));
-            window.debug_bounds("file-choice-Copy").is_some()
+            window.debug_bounds("file-choice-copy").is_some()
         }),
         "text whose Tab moved on should be asked about"
     );
-    let copy = window.debug_bounds("file-choice-Copy").unwrap();
+    let copy = window.debug_bounds("file-choice-copy").unwrap();
     window.simulate_click(copy.center(), Modifiers::default());
     window.run_until_parked();
     assert!(
@@ -1009,7 +1009,7 @@ fn files_view_creates_renames_and_deletes_entries() {
         "the Preview Tab and its unsaved text follow the rename"
     );
     assert!(window.read(|app| editor.read(app).value().contains("draft")));
-    assert!(window.debug_bounds("file-choice-Copy").is_none());
+    assert!(window.debug_bounds("file-choice-copy").is_none());
 
     // Delete asks, then removes.
     window.update(|window, cx| {

@@ -1,0 +1,197 @@
+_version: 2
+files:
+  loading:
+    en: Loading…
+    zh-CN: 正在加载…
+  loading_file:
+    en: Loading file…
+    zh-CN: 正在加载文件…
+  loading_image:
+    en: Loading image…
+    zh-CN: 正在加载图片…
+  empty_directory:
+    en: Empty directory
+    zh-CN: 空目录
+  binary:
+    en: Binary file
+    zh-CN: 二进制文件
+  truncated:
+    en: 'Only the first %{count} entries are listed.'
+    zh-CN: '只列出前 %{count} 项。'
+  menu:
+    show_file:
+      en: Show File
+      zh-CN: 显示文件
+    download:
+      en: Download…
+      zh-CN: 下载…
+    open_in_editor:
+      en: Open in Editor
+      zh-CN: 在编辑器中打开
+    insert_path:
+      en: Insert Path into Terminal
+      zh-CN: 将路径插入终端
+    copy_relative_path:
+      en: Copy Relative Path
+      zh-CN: 复制相对路径
+    copy_path:
+      en: Copy Path
+      zh-CN: 复制路径
+    upload:
+      en: Upload Files…
+      zh-CN: 上传文件…
+    new_file:
+      en: New File…
+      zh-CN: 新建文件…
+    new_folder:
+      en: New Folder…
+      zh-CN: 新建文件夹…
+    rename:
+      en: Rename…
+      zh-CN: 重命名…
+    delete:
+      en: Delete…
+      zh-CN: 删除…
+    reveal:
+      macos:
+        en: Reveal in Finder
+        zh-CN: 在 Finder 中显示
+      windows:
+        en: Reveal in File Explorer
+        zh-CN: 在文件资源管理器中显示
+      linux:
+        en: Open Containing Folder
+        zh-CN: 打开所在文件夹
+  reveal_what:
+    en: 'show %{path}'
+    zh-CN: '显示 %{path}'
+  note:
+    gone:
+      en: No longer on disk
+      zh-CN: 已不在磁盘上
+    changed:
+      en: Changed on disk
+      zh-CN: 磁盘上的文件已更改
+    not_utf8:
+      en: Not valid UTF-8; read-only
+      zh-CN: 不是有效的 UTF-8，只读
+    old_server:
+      en: 'Update this device''s Server to edit'
+      zh-CN: 更新这台设备的 Server 后才能编辑
+  mode:
+    preview:
+      en: Preview
+      zh-CN: 预览
+    source:
+      en: Source
+      zh-CN: 源码
+  name:
+    empty:
+      en: Enter a name
+      zh-CN: 输入名称
+    separator:
+      en: 'A name cannot hold / or \'
+      zh-CN: '名称不能包含 / 或 \'
+    dots:
+      en: Not a name
+      zh-CN: 不是有效的名称
+    git:
+      en: Condr does not change .git
+      zh-CN: Condr 不会修改 .git
+    exists:
+      en: Already exists
+      zh-CN: 已存在
+  new:
+    file:
+      en: New File
+      zh-CN: 新建文件
+    folder:
+      en: New Folder
+      zh-CN: 新建文件夹
+    file_in:
+      en: 'New File in %{parent}'
+      zh-CN: '在 %{parent} 中新建文件'
+    folder_in:
+      en: 'New Folder in %{parent}'
+      zh-CN: '在 %{parent} 中新建文件夹'
+  rename_title:
+    en: 'Rename %{path}'
+    zh-CN: '重命名 %{path}'
+  delete:
+    title:
+      en: 'Delete “%{name}”?'
+      zh-CN: '要删除“%{name}”吗？'
+    directory:
+      en: '%{path} and everything in it will be deleted permanently.'
+      zh-CN: '%{path} 及其中的所有内容将被永久删除。'
+    file:
+      en: '%{path} will be deleted permanently.'
+      zh-CN: '%{path} 将被永久删除。'
+  failed:
+    create:
+      en: 'Couldn''t create %{path}: %{error}'
+      zh-CN: '无法创建 %{path}：%{error}'
+    rename:
+      en: 'Couldn''t rename %{path}: %{error}'
+      zh-CN: '无法重命名 %{path}：%{error}'
+    delete:
+      en: 'Couldn''t delete %{path}: %{error}'
+      zh-CN: '无法删除 %{path}：%{error}'
+  not_connected:
+    en: '%{device} is not connected'
+    zh-CN: '%{device} 未连接'
+  save_too_large:
+    en: '%{path} was not saved: it is larger than %{size} KiB'
+    zh-CN: '%{path} 未保存：文件超过 %{size} KiB'
+  save_failed:
+    en: 'Couldn''t save %{path}: %{error}'
+    zh-CN: '无法保存 %{path}：%{error}'
+  conflict:
+    title:
+      en: '%{path} changed on disk'
+      zh-CN: '%{path} 在磁盘上已更改'
+    description:
+      en: Something else changed it since you opened it. Overwrite it with your text, or discard your edits and load it again.
+      zh-CN: 你打开它之后，它被别处修改了。用你的文本覆盖它，或者放弃你的编辑并重新加载。
+  unsaved:
+    title:
+      en: '%{path} has unsaved changes'
+      zh-CN: '%{path} 有未保存的更改'
+    conflicted:
+      en: It changed on disk since you opened it. Overwrite it with your text, copy your text, or discard it.
+      zh-CN: 你打开它之后，它在磁盘上被修改了。用你的文本覆盖它、复制你的文本，或者放弃它。
+    orphaned:
+      en: Its Preview Tab no longer shows it. Save your text to the file, copy it, or discard it.
+      zh-CN: 它的 Preview Tab 已不再显示它。把你的文本保存到文件、复制它，或者放弃它。
+  save_prompt:
+    title:
+      en: 'Save changes to %{path}?'
+      zh-CN: '要保存对 %{path} 的更改吗？'
+    connected:
+      en: 'Your changes are lost if you don''t save them.'
+      zh-CN: 如果不保存，你的更改将会丢失。
+    disconnected:
+      en: The device is not connected, so the file cannot be saved now. Copy your text to keep it.
+      zh-CN: 设备未连接，现在无法保存文件。复制你的文本以保留它。
+  choice:
+    cancel:
+      en: Cancel
+      zh-CN: 取消
+    discard_and_reload:
+      en: Discard and Reload
+      zh-CN: 放弃并重新加载
+    overwrite:
+      en: Overwrite
+      zh-CN: 覆盖
+    discard:
+      en: Discard
+      zh-CN: 放弃
+    copy:
+      en: Copy
+      zh-CN: 复制
+    save:
+      en: Save
+      zh-CN: 保存
+    dont_save:
+      en: 'Don''t Save'
+      zh-CN: 不保存

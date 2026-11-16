@@ -15,6 +15,7 @@ use condr_core::{DirectoryEntry, FileKind};
 use gpui_kit::base::text::TextViewState;
 use gpui_kit::component::input::{Position, RopeExt as _};
 use gpui_kit::component::scroll::ScrollableElement as _;
+use rust_i18n::t;
 use std::path::{Path, PathBuf};
 
 /// Local Files/Changes presentation, retained against the authoritative structure.
@@ -231,7 +232,7 @@ pub(super) struct FileEditor {
     pub(super) root: PathBuf,
     /// What a save starts from (ADR 0045); `None` keeps the Editor read-only.
     pub(super) version: Option<u64>,
-    /// Why the Editor is read-only, for the header.
+    /// The message key of why the Editor is read-only, for the header.
     readonly_reason: Option<&'static str>,
     /// The text as last read or saved: anything else in the Editor is unsaved.
     pub(super) base_text: String,
@@ -321,7 +322,7 @@ impl Condr {
             .connection(key)
             .and_then(|connection| connection.resources.directories.get(&(workspace_id, root)));
         let listing = match listing {
-            None => return empty_state("Loading…", cx),
+            None => return empty_state(t!("files.loading"), cx),
             Some(Err(reason)) => return failed_state(reason.clone(), cx),
             Some(Ok(listing)) => listing.clone(),
         };
@@ -331,7 +332,7 @@ impl Condr {
                 .flex_1()
                 .flex()
                 .context_menu(self.root_context_menu(key, workspace_id, cx))
-                .child(empty_state("Empty directory", cx))
+                .child(empty_state(t!("files.empty_directory"), cx))
                 .into_any_element();
         }
         let context = FilesContext {
@@ -436,7 +437,7 @@ impl Condr {
                             .get(&(context.workspace_id, path.clone()))
                     });
                     match listing {
-                        None => rows.push(note_row("Loading…", depth + 1, cx)),
+                        None => rows.push(note_row(t!("files.loading"), depth + 1, cx)),
                         Some(Err(reason)) => rows.push(note_row(reason.clone(), depth + 1, cx)),
                         Some(Ok(listing)) => {
                             if listing.truncated {
@@ -664,7 +665,7 @@ impl Condr {
                 let show_owner = owner.clone();
                 let show_path = show_path.clone();
                 menu.item(
-                    PopupMenuItem::new("Show File")
+                    PopupMenuItem::new(t!("files.menu.show_file"))
                         .icon(menu_icon(Glyph::FileText))
                         .disabled(!enabled)
                         .on_click(move |_, window, cx| {
@@ -681,7 +682,7 @@ impl Condr {
             let download_path = show_path.clone();
             let menu = menu
                 .item(
-                    PopupMenuItem::new("Download…")
+                    PopupMenuItem::new(t!("files.menu.download"))
                         .icon(menu_icon(Glyph::Download))
                         .disabled(!exists)
                         .on_click(move |_, _, cx| {
@@ -695,7 +696,7 @@ impl Condr {
                 Some((target_id, label, icon, enabled)) => {
                     let target_id = target_id.clone();
                     menu.item(
-                        PopupMenuItem::new(format!("Open in {label}"))
+                        PopupMenuItem::new(t!("open_in.open_in", editor = label))
                             .icon(menu_icon(icon.icon()))
                             .disabled(!enabled || open_absolute.is_none())
                             .on_click(move |_, _, cx| {
@@ -709,13 +710,13 @@ impl Condr {
                     )
                 }
                 None => menu.item(
-                    PopupMenuItem::new("Open in Editor")
+                    PopupMenuItem::new(t!("files.menu.open_in_editor"))
                         .icon(menu_icon(Glyph::ExternalLink))
                         .disabled(true),
                 ),
             };
             let menu = menu.item(
-                PopupMenuItem::new("Insert Path into Terminal")
+                PopupMenuItem::new(t!("files.menu.insert_path"))
                     .icon(menu_icon(Glyph::SquareTerminal))
                     .disabled(target_pane.is_none())
                     .on_click(move |_, window, cx| {
@@ -861,7 +862,12 @@ impl Condr {
             return;
         };
         self.spawn_launch(
-            format!("open {} in {}", path.display(), target.label),
+            t!(
+                "open_in.open_path",
+                path = path.display(),
+                editor = target.label
+            )
+            .into_owned(),
             move || open_in::launch(&target, &path),
             cx,
         )
@@ -954,7 +960,7 @@ impl Condr {
             .and_then(|editor| Some((editor.markdown.clone()?, editor.markdown_scroll.clone())))
             .filter(|_| rendering == Some(Rendering::Markdown) && !source);
         let body = match (image, markdown, &content, editor) {
-            (Some(None), ..) => empty_state("Loading image…", cx),
+            (Some(None), ..) => empty_state(t!("files.loading_image"), cx),
             (Some(Some(Ok(image))), ..) => render_image(image),
             (Some(Some(Err(NoImage::Note(note)))), ..) => empty_state(note, cx),
             (Some(Some(Err(NoImage::Failed(reason)))), ..) => failed_state(reason, cx),
@@ -993,8 +999,8 @@ impl Condr {
                 None,
                 FileViewContent::Loading | FileViewContent::Text | FileViewContent::Image,
                 _,
-            ) => empty_state("Loading file…", cx),
-            (None, None, FileViewContent::Binary, _) => empty_state("Binary file", cx),
+            ) => empty_state(t!("files.loading_file"), cx),
+            (None, None, FileViewContent::Binary, _) => empty_state(t!("files.binary"), cx),
             (None, None, FileViewContent::TooLarge { bytes }, _) => {
                 empty_state(too_large("File", *bytes), cx)
             }
@@ -1044,8 +1050,8 @@ impl Condr {
                 })
                 .is_some_and(|(_, answer)| answer.is_err());
             match () {
-                _ if editor.disk_changed && gone => Some(("No longer on disk", true)),
-                _ if editor.disk_changed => Some(("Changed on disk", true)),
+                _ if editor.disk_changed && gone => Some(("files.note.gone", true)),
+                _ if editor.disk_changed => Some(("files.note.changed", true)),
                 _ if editor.content == FileViewContent::Text => {
                     editor.readonly_reason.map(|reason| (reason, false))
                 }
@@ -1059,10 +1065,10 @@ impl Condr {
                 "file-view-mode",
                 Button::new("file-view-rendered")
                     .debug_selector(|| "file-view-rendered".into())
-                    .label("Preview"),
+                    .label(t!("files.mode.preview")),
                 Button::new("file-view-source")
                     .debug_selector(|| "file-view-source".into())
-                    .label("Source"),
+                    .label(t!("files.mode.source")),
                 source,
                 move |source, cx| {
                     let _ = owner.update(cx, |this, cx| {
@@ -1088,7 +1094,7 @@ impl Condr {
         viewer_header("file-header", path, entry.map(|entry| entry.status), cx)
             .when_some(note, |this, (note, warning)| {
                 let color = if warning { theme.warning } else { muted };
-                this.child(header_meta("file-note", note, color))
+                this.child(header_meta("file-note", t!(note), color))
             })
             .when_some(summary, |this, summary| {
                 this.child(header_meta("file-image-summary", summary, muted))
@@ -1274,8 +1280,8 @@ impl Condr {
         editor.version = version.filter(|_| content == FileViewContent::Text);
         editor.readonly_reason = match (&content, version) {
             (FileViewContent::Text, Some(_)) => None,
-            (FileViewContent::Text, None) if lossy => Some("Not valid UTF-8; read-only"),
-            (FileViewContent::Text, None) => Some("Update this device's Server to edit"),
+            (FileViewContent::Text, None) if lossy => Some("files.note.not_utf8"),
+            (FileViewContent::Text, None) => Some("files.note.old_server"),
             _ => None,
         };
         editor.crlf = super::file_edits::crlf_only(&text);
@@ -1524,14 +1530,14 @@ impl Condr {
 fn path_copy_items(menu: PopupMenu, relative: String, absolute: Option<PathBuf>) -> PopupMenu {
     let copy_absolute = absolute.clone();
     menu.item(
-        PopupMenuItem::new("Copy Relative Path")
+        PopupMenuItem::new(t!("files.menu.copy_relative_path"))
             .icon(menu_icon(Glyph::Copy))
             .on_click(move |_, _, cx| {
                 cx.write_to_clipboard(ClipboardItem::new_string(relative.clone()));
             }),
     )
     .item(
-        PopupMenuItem::new("Copy Path")
+        PopupMenuItem::new(t!("files.menu.copy_path"))
             .icon(menu_icon(Glyph::CopySlash))
             .disabled(absolute.is_none())
             .on_click(move |_, _, cx| {
@@ -1583,10 +1589,7 @@ fn note_row(text: impl Into<SharedString>, depth: usize, cx: &App) -> AnyElement
 
 pub(super) fn truncated_note(cx: &App) -> AnyElement {
     list_note(
-        format!(
-            "Only the first {} entries are listed.",
-            condr_core::MAX_DIRECTORY_ENTRIES
-        ),
+        t!("files.truncated", count = condr_core::MAX_DIRECTORY_ENTRIES),
         cx.theme().warning,
     )
     .into_any_element()
@@ -1601,7 +1604,7 @@ fn upload_item(
     owner: WeakEntity<Condr>,
 ) -> PopupMenu {
     menu.item(
-        PopupMenuItem::new("Upload Files…")
+        PopupMenuItem::new(t!("files.menu.upload"))
             .icon(menu_icon(Glyph::Upload))
             .on_click(move |_, window, cx| {
                 let _ = owner.update(cx, |this, cx| {

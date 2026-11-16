@@ -1,0 +1,8 @@
+_version: 2
+preview:
+  not_an_image:
+    en: Not an image
+    zh-CN: 不是图片
+  no_frames:
+    en: the image has no frames
+    zh-CN: 图片没有任何帧

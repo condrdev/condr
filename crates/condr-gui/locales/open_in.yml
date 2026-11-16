@@ -1,0 +1,17 @@
+_version: 2
+open_in:
+  open_in:
+    en: 'Open in %{editor}'
+    zh-CN: '在 %{editor} 中打开'
+  needs_local:
+    en: Opening in an editor needs a local Server
+    zh-CN: 在编辑器中打开需要本机的 Server
+  open_path:
+    en: 'open %{path} in %{editor}'
+    zh-CN: '在 %{editor} 中打开 %{path}'
+  path_missing:
+    en: '%{path} does not exist'
+    zh-CN: '%{path} 不存在'
+  launch_failed:
+    en: 'Couldn''t %{what}: %{error}'
+    zh-CN: '无法%{what}：%{error}'

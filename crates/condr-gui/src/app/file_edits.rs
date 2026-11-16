@@ -4,6 +4,7 @@
 
 use super::*;
 use condr_core::{FileMutation, FileMutationResult, MAX_FILE_BYTES};
+use rust_i18n::t;
 
 pub(super) type Continuation = Box<dyn FnOnce(&mut Condr, &mut Window, &mut Context<Condr>)>;
 type Action = Rc<dyn Fn(&mut Condr, &mut Window, &mut Context<Condr>)>;
@@ -98,7 +99,9 @@ enum ChoiceStyle {
 
 #[derive(Clone)]
 struct Choice {
-    label: &'static str,
+    /// Names the button's debug selector, which the translated label cannot.
+    id: &'static str,
+    label: SharedString,
     style: ChoiceStyle,
     enabled: bool,
     act: Action,
@@ -106,13 +109,15 @@ struct Choice {
 
 impl Choice {
     fn new(
-        label: &'static str,
+        id: &'static str,
+        label: impl Into<SharedString>,
         style: ChoiceStyle,
         enabled: bool,
         act: impl Fn(&mut Condr, &mut Window, &mut Context<Condr>) + 'static,
     ) -> Self {
         Self {
-            label,
+            id,
+            label: label.into(),
             style,
             enabled,
             act: Rc::new(act),
@@ -144,10 +149,10 @@ impl Condr {
                 for (index, choice) in choices.iter().enumerate() {
                     let owner = owner.clone();
                     let act = choice.act.clone();
-                    let label = choice.label;
+                    let id = choice.id;
                     let button = Button::new(("file-choice", index))
-                        .debug_selector(move || format!("file-choice-{label}"))
-                        .label(label)
+                        .debug_selector(move || format!("file-choice-{id}"))
+                        .label(choice.label.clone())
                         .disabled(!choice.enabled)
                         .on_click(move |_, window, cx| {
                             window.close_dialog(cx);
@@ -198,7 +203,7 @@ impl Condr {
         });
         if request_id.is_none() {
             let label = connection.label.clone();
-            self.report_error(format!("{label} is not connected"), cx);
+            self.report_error(t!("files.not_connected", device = label), cx);
         }
         request_id
     }
@@ -220,9 +225,10 @@ impl Condr {
         // A frame too large to encode would drop the whole connection.
         if bytes.len() as u64 > MAX_FILE_BYTES {
             self.report_error(
-                format!(
-                    "{path} was not saved: it is larger than {} KiB",
-                    MAX_FILE_BYTES / 1024
+                t!(
+                    "files.save_too_large",
+                    path = path,
+                    size = MAX_FILE_BYTES / 1024
                 ),
                 cx,
             );
@@ -359,7 +365,10 @@ impl Condr {
                             .push_back(FilePrompt::Unsaved(unsaved));
                     }
                     FileMutationResult::Invalid(error) | FileMutationResult::Failed(error) => {
-                        self.report_error(format!("Couldn't save {}: {error}", save.path), cx);
+                        self.report_error(
+                            t!("files.save_failed", path = save.path, error = error),
+                            cx,
+                        );
                         self.files_view
                             .prompts
                             .push_back(FilePrompt::Unsaved(unsaved));
@@ -397,7 +406,7 @@ impl Condr {
                     .push_back(FilePrompt::Conflict { key, tab_id, after });
             }
             FileMutationResult::Invalid(error) | FileMutationResult::Failed(error) => {
-                self.report_error(format!("Couldn't save {}: {error}", save.path), cx);
+                self.report_error(t!("files.save_failed", path = save.path, error = error), cx);
             }
         }
         cx.notify();
@@ -491,16 +500,19 @@ impl Condr {
         let after = Rc::new(RefCell::new(after));
         let (overwrite, reload) = (after.clone(), after);
         self.open_choice(
-            format!("{path} changed on disk"),
-            "Something else changed it since you opened it. Overwrite it with your text, or \
-             discard your edits and load it again."
-                .into(),
+            t!("files.conflict.title", path = path).into(),
+            t!("files.conflict.description").into(),
             vec![
-                Choice::new("Cancel", ChoiceStyle::Plain, true, |this, _, cx| {
-                    this.prompt_answered(cx)
-                }),
                 Choice::new(
-                    "Discard and Reload",
+                    "cancel",
+                    t!("files.choice.cancel"),
+                    ChoiceStyle::Plain,
+                    true,
+                    |this, _, cx| this.prompt_answered(cx),
+                ),
+                Choice::new(
+                    "reload",
+                    t!("files.choice.discard_and_reload"),
                     ChoiceStyle::Plain,
                     true,
                     move |this, window, cx| {
@@ -512,7 +524,8 @@ impl Condr {
                     },
                 ),
                 Choice::new(
-                    "Overwrite",
+                    "overwrite",
+                    t!("files.choice.overwrite"),
                     ChoiceStyle::Danger,
                     true,
                     move |this, window, cx| {
@@ -556,13 +569,16 @@ impl Condr {
                         .and_then(|session| session.workspace(unsaved.workspace_id))
                         .is_some_and(|workspace| workspace.root_directory() == unsaved.root)
             });
-        let title = format!("{} has unsaved changes", unsaved.path);
+        let title = t!("files.unsaved.title", path = unsaved.path).into_owned();
         let description = if unsaved.conflicted {
-            "It changed on disk since you opened it. Overwrite it with your text, copy your \
-             text, or discard it."
+            t!("files.unsaved.conflicted")
         } else {
-            "Its Preview Tab no longer shows it. Save your text to the file, copy it, or \
-             discard it."
+            t!("files.unsaved.orphaned")
+        };
+        let (save_id, save_label) = if unsaved.conflicted {
+            ("overwrite", t!("files.choice.overwrite"))
+        } else {
+            ("save", t!("files.choice.save"))
         };
         let text = unsaved.text.clone();
         let unsaved = Rc::new(RefCell::new(Some(unsaved)));
@@ -570,23 +586,26 @@ impl Condr {
             title,
             description.into(),
             vec![
-                Choice::new("Discard", ChoiceStyle::Plain, true, |this, _, cx| {
-                    this.prompt_answered(cx)
-                }),
-                Choice::new("Copy", ChoiceStyle::Plain, true, move |this, _, cx| {
-                    cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
-                    this.prompt_answered(cx);
-                }),
                 Choice::new(
-                    if unsaved
-                        .borrow()
-                        .as_ref()
-                        .is_some_and(|unsaved| unsaved.conflicted)
-                    {
-                        "Overwrite"
-                    } else {
-                        "Save"
+                    "discard",
+                    t!("files.choice.discard"),
+                    ChoiceStyle::Plain,
+                    true,
+                    |this, _, cx| this.prompt_answered(cx),
+                ),
+                Choice::new(
+                    "copy",
+                    t!("files.choice.copy"),
+                    ChoiceStyle::Plain,
+                    true,
+                    move |this, _, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
+                        this.prompt_answered(cx);
                     },
+                ),
+                Choice::new(
+                    save_id,
+                    save_label,
                     ChoiceStyle::Primary,
                     can_save,
                     move |this, _, cx| {
@@ -655,7 +674,8 @@ impl Condr {
         };
         let save_choice = if connected {
             Choice::new(
-                "Save",
+                "save",
+                t!("files.choice.save"),
                 ChoiceStyle::Primary,
                 true,
                 move |this, window, cx| {
@@ -665,7 +685,8 @@ impl Condr {
             )
         } else {
             Choice::new(
-                "Copy",
+                "copy",
+                t!("files.choice.copy"),
                 ChoiceStyle::Primary,
                 true,
                 move |this, window, cx| {
@@ -681,18 +702,24 @@ impl Condr {
             )
         };
         self.open_choice(
-            format!("Save changes to {path}?"),
+            t!("files.save_prompt.title", path = path).into(),
             if connected {
-                "Your changes are lost if you don't save them."
+                t!("files.save_prompt.connected")
             } else {
-                "The device is not connected, so the file cannot be saved now. Copy your \
-                 text to keep it."
+                t!("files.save_prompt.disconnected")
             }
             .into(),
             vec![
-                Choice::new("Cancel", ChoiceStyle::Plain, true, |_, _, _| {}),
                 Choice::new(
-                    "Don't Save",
+                    "cancel",
+                    t!("files.choice.cancel"),
+                    ChoiceStyle::Plain,
+                    true,
+                    |_, _, _| {},
+                ),
+                Choice::new(
+                    "dont-save",
+                    t!("files.choice.dont_save"),
                     ChoiceStyle::Plain,
                     true,
                     move |this, window, cx| {

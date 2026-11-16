@@ -10,6 +10,7 @@ use super::sidebar::CondrIconName;
 use super::*;
 use gpui_kit::component::Side;
 use gpui_kit::component::button::DropdownButton;
+use rust_i18n::t;
 use serde::Deserialize;
 use std::ffi::OsString;
 use std::io;
@@ -432,7 +433,7 @@ pub(super) fn launch(target: &OpenTarget, path: &Path) -> io::Result<()> {
     if !path.exists() {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
-            format!("{} does not exist", path.display()),
+            t!("open_in.path_missing", path = path.display()).into_owned(),
         ));
     }
     spawn(launch_command(target, path))
@@ -552,9 +553,9 @@ impl Condr {
         let key = connection.key;
         let workspace_id = workspace.id();
         let tooltip: SharedString = if is_local {
-            format!("Open in {}", current.label).into()
+            t!("open_in.open_in", editor = current.label).into()
         } else {
-            "Opening in an editor needs a local Server".into()
+            t!("open_in.needs_local").into()
         };
         let primary_owner = cx.weak_entity();
         let current_id = current.id.clone();
@@ -661,7 +662,12 @@ impl Condr {
         self.opening_workspace = Some((key, workspace_id));
         cx.notify();
         let started = self.spawn_launch(
-            format!("open {} in {}", root.display(), target.label),
+            t!(
+                "open_in.open_path",
+                path = root.display(),
+                editor = target.label
+            )
+            .into_owned(),
             {
                 let target = target.clone();
                 move || launch(&target, &root)
@@ -699,7 +705,7 @@ impl Condr {
                 return true;
             };
             let _ = this.update(cx, |this, cx| {
-                this.report_error(format!("Couldn't {what}: {error}"), cx)
+                this.report_error(t!("open_in.launch_failed", what = what, error = error), cx)
             });
             false
         })

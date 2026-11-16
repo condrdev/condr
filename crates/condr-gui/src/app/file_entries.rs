@@ -4,6 +4,8 @@
 use super::dialogs::{DangerConfirm, TextPrompt, confirm_danger};
 use super::*;
 use condr_core::{FileKind, FileMutation, FileMutationResult};
+use rust_i18n::t;
+use std::borrow::Cow;
 
 /// A create, rename or delete in flight.
 pub(super) enum EntryRequest {
@@ -25,17 +27,20 @@ pub(super) enum EntryRequest {
 
 /// Why `name` cannot be given to a new or renamed entry, as far as this Client can tell;
 /// the Server checks again and knows its own platform's rules.
-pub(super) fn entry_name_problem(name: &str, taken: impl Fn(&str) -> bool) -> Option<&'static str> {
+pub(super) fn entry_name_problem(
+    name: &str,
+    taken: impl Fn(&str) -> bool,
+) -> Option<Cow<'static, str>> {
     if name.is_empty() {
-        Some("Enter a name")
+        Some(t!("files.name.empty"))
     } else if name.contains(['/', '\\']) {
-        Some("A name cannot hold / or \\")
+        Some(t!("files.name.separator"))
     } else if name == "." || name == ".." {
-        Some("Not a name")
+        Some(t!("files.name.dots"))
     } else if name.eq_ignore_ascii_case(".git") {
-        Some("Condr does not change .git")
+        Some(t!("files.name.git"))
     } else if taken(name) {
-        Some("Already exists")
+        Some(t!("files.name.exists"))
     } else {
         None
     }
@@ -50,13 +55,13 @@ pub(super) fn name_stem(name: &str, kind: FileKind) -> std::ops::Range<usize> {
 }
 
 /// "Reveal in Finder" and its counterparts; Linux opens the folder without selecting.
-pub(super) fn reveal_label() -> &'static str {
+pub(super) fn reveal_label() -> Cow<'static, str> {
     if cfg!(target_os = "macos") {
-        "Reveal in Finder"
+        t!("files.menu.reveal.macos")
     } else if cfg!(windows) {
-        "Reveal in File Explorer"
+        t!("files.menu.reveal.windows")
     } else {
-        "Open Containing Folder"
+        t!("files.menu.reveal.linux")
     }
 }
 
@@ -181,12 +186,20 @@ impl Condr {
                     cx.notify();
                     return;
                 }
-                EntryRequest::Delete { path } => format!("Couldn't delete {path}: {reason}"),
+                EntryRequest::Delete { path } => {
+                    t!("files.failed.delete", path = path, error = reason)
+                }
             },
             FileMutationResult::Failed(reason) => match request {
-                EntryRequest::Create { path, .. } => format!("Couldn't create {path}: {reason}"),
-                EntryRequest::Rename { from, .. } => format!("Couldn't rename {from}: {reason}"),
-                EntryRequest::Delete { path } => format!("Couldn't delete {path}: {reason}"),
+                EntryRequest::Create { path, .. } => {
+                    t!("files.failed.create", path = path, error = reason)
+                }
+                EntryRequest::Rename { from, .. } => {
+                    t!("files.failed.rename", path = from, error = reason)
+                }
+                EntryRequest::Delete { path } => {
+                    t!("files.failed.delete", path = path, error = reason)
+                }
             },
             FileMutationResult::Conflict => return,
         };
@@ -291,10 +304,10 @@ impl Condr {
         cx: &mut Context<Self>,
     ) {
         let title = match (kind, parent.as_str()) {
-            (FileKind::File, "") => "New File".to_owned(),
-            (FileKind::Directory, "") => "New Folder".to_owned(),
-            (FileKind::File, parent) => format!("New File in {parent}"),
-            (FileKind::Directory, parent) => format!("New Folder in {parent}"),
+            (FileKind::File, "") => t!("files.new.file"),
+            (FileKind::Directory, "") => t!("files.new.folder"),
+            (FileKind::File, parent) => t!("files.new.file_in", parent = parent),
+            (FileKind::Directory, parent) => t!("files.new.folder_in", parent = parent),
         };
         let prompt = TextPrompt {
             trim: false,
@@ -345,7 +358,7 @@ impl Condr {
             trim: false,
             selected: Some(name_stem(&initial, kind)),
             error,
-            ..TextPrompt::new(format!("Rename {from}"), "Rename", initial)
+            ..TextPrompt::new(t!("files.rename_title", path = from), "Rename", initial)
         };
         self.prompt_text_input(
             prompt,
@@ -387,12 +400,13 @@ impl Condr {
         cx: &mut Context<Self>,
     ) {
         let description = match kind {
-            FileKind::Directory => {
-                format!("{path} and everything in it will be deleted permanently.")
-            }
-            FileKind::File => format!("{path} will be deleted permanently."),
+            FileKind::Directory => t!("files.delete.directory", path = path),
+            FileKind::File => t!("files.delete.file", path = path),
         };
-        let title = format!("Delete “{}”?", path.file_name().unwrap_or(path.as_str()));
+        let title = t!(
+            "files.delete.title",
+            name = path.file_name().unwrap_or(path.as_str())
+        );
         confirm_danger(
             cx.weak_entity(),
             DangerConfirm::new(title, description, "Delete"),
@@ -414,29 +428,35 @@ impl Condr {
         owner: WeakEntity<Self>,
     ) -> PopupMenu {
         [
-            ("New File…", Glyph::FilePlus, FileKind::File),
-            ("New Folder…", Glyph::FolderPlus, FileKind::Directory),
+            ("files.menu.new_file", Glyph::FilePlus, FileKind::File),
+            (
+                "files.menu.new_folder",
+                Glyph::FolderPlus,
+                FileKind::Directory,
+            ),
         ]
         .into_iter()
         .fold(menu, |menu, (label, icon, kind)| {
             let (owner, parent) = (owner.clone(), parent.clone());
-            menu.item(PopupMenuItem::new(label).icon(menu_icon(icon)).on_click(
-                move |_, window, cx| {
-                    let parent = parent.clone();
-                    let _ = owner.update(cx, |this, cx| {
-                        this.prompt_new_entry(
-                            key,
-                            workspace_id,
-                            parent,
-                            kind,
-                            String::new(),
-                            None,
-                            window,
-                            cx,
-                        )
-                    });
-                },
-            ))
+            menu.item(
+                PopupMenuItem::new(t!(label))
+                    .icon(menu_icon(icon))
+                    .on_click(move |_, window, cx| {
+                        let parent = parent.clone();
+                        let _ = owner.update(cx, |this, cx| {
+                            this.prompt_new_entry(
+                                key,
+                                workspace_id,
+                                parent,
+                                kind,
+                                String::new(),
+                                None,
+                                window,
+                                cx,
+                            )
+                        });
+                    }),
+            )
         })
     }
 
@@ -454,7 +474,7 @@ impl Condr {
         let (rename_path, delete_path) = (path.to_relative_path_buf(), path.to_relative_path_buf());
         let rename_owner = owner.clone();
         menu.item(
-            PopupMenuItem::new("Rename…")
+            PopupMenuItem::new(t!("files.menu.rename"))
                 .icon(menu_icon(Glyph::Pencil))
                 .disabled(!exists)
                 .on_click(move |_, window, cx| {
@@ -475,7 +495,7 @@ impl Condr {
                 }),
         )
         .item(
-            PopupMenuItem::new("Delete…")
+            PopupMenuItem::new(t!("files.menu.delete"))
                 .icon(menu_icon(Glyph::Trash))
                 .disabled(!exists)
                 .on_click(move |_, window, cx| {
@@ -491,7 +511,7 @@ impl Condr {
     /// failure is a toast, as "Open in" does.
     pub(super) fn reveal_entry(&self, path: PathBuf, cx: &mut Context<Self>) {
         self.spawn_launch(
-            format!("show {}", path.display()),
+            t!("files.reveal_what", path = path.display()).into_owned(),
             move || open_in::reveal_entry(&path),
             cx,
         )
