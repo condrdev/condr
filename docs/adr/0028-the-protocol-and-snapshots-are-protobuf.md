@@ -29,3 +29,5 @@ Tests: the handshake decode-golden fixtures, one with an unknown field, and one 
 > ADR 0047 adds the first Client hint: `push` in `Hello`, whether this Client takes the Server's pushes through Condr Cloud.
 
 > ADR 0061 adds `stream.proto`, the messages of a Stream connection, and the `streams` member of `ClientHandshake`. The protocol stays `1`; an older Server refuses that handshake as malformed and closes the connection, and like ADR 0059's request it is not gated until the protocol is raised.
+
+> ADR 0068 keeps a Server's Tasks in SQLite rather than protobuf, renaming an unreadable or newer database aside as this decision does for files it cannot restore. Tasks cross the wire as protobuf only to a Client that says `tasks` in `Hello`, the second Client hint after ADR 0047's `push`, so an older Client never meets a record or event it does not know.

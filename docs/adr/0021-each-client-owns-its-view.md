@@ -15,3 +15,5 @@ Two alternatives were declined. Keeping a per-subscriber view on the Server, so 
 ADR 0001 stands: `condr-core` owns structure, and the GUI projects the Tab it shows into the Dock. ADR 0005's Snapshot no longer holds active selections; focus history stays. ADR 0009's "preserves the selection at commit time" is now about Pane focus only, and its list of viewer state the controller owns gains nothing: the view is not controller state either, it is every client's own. ADR 0010 still carries the structure in every event; the view is simply not in it. ADR 0017 and 0018's viewer Tabs are shown by the client that opened them, not activated on the Server. The Snapshot and protocol version constants stay at 1, as ADR 0005 says: the project is unreleased and old Snapshots are simply rejected at startup.
 
 > ADR 0041: the Companion ignores `Activated`. It shows one screen at a time and its person navigates by Agent, so a CLI's `--focus` does not move it.
+
+> ADR 0068: entering Tasks mode and working in it never change the View; an `Activated` that arrives while the main window is in Tasks mode changes the View underneath and leaves the window in Tasks mode.

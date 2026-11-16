@@ -39,3 +39,5 @@ Each row of the Shortcuts page shows its keys and an edit button that records on
 GPUI's modifiers have one Alt, so the side comes from the window server: `CGEventSourceFlagsState` still carries `NX_DEVICELALTKEYMASK` and `NX_DEVICERALTKEYMASK`. That is the one call `objc2-core-graphics` is declared for, on the version Kit already builds for GPUI's macOS backend. herdr-app gets the side by patching GPUI's `Keystroke`; Condr declares only Kit's crates.
 
 Where Option is Meta, the GUI ignores the character Option composed and sends the key it was pressed with, Alt held; the Server's encoder already treats Alt as Alt. GPUI hands an Option chord to the app before AppKit's text input whenever no IME composition is under way, and the terminal tells GPUI it does not want printable keys sent to an IME first, so the key never starts a dead-key composition: Option+E sends Esc e, not an accent waiting for its letter.
+
+> ADR 0068 adds `toggle-tasks` (`Cmd+0`, `Alt+0` elsewhere) and `new-task` (unbound), and makes layout and Tab actions inert in Tasks mode.

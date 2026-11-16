@@ -9,6 +9,10 @@ Condr 正处于公开预览阶段。本页列出后续准备开发的功能，�
 
 ## 接下来
 
+### Tasks 模式与任务
+
+一个整窗的 **Tasks** 视图，列出每台设备上的所有 Agent，从侧栏顶部或用 `Cmd+0` 进入。Agent 按状态分列（Needs you、Done、Working、Idle），可以看板或列表显示，也可以只看某台设备或某个 Workspace；点一张卡片，它的终端就在旁边打开，不用离开这个视图就能回复。接着是任务：在 **To do** 列里写下要做的事，准备好了再开始，Condr 会建好 worktree、启动你选的 Agent，并把任务交给它。任务保存在各台设备的 Server 上，也可以用 `condr task` 在命令行里管理。
+
 ### 手机端（iOS 与 Android）
 
 **两端均为早期预览**。iPhone 版通过 TestFlight 公开测试，Android 版以签名 APK 形式在 GitHub 上单独发布，详见[手机端](/zh-cn/docs/using/mobile/)。两端都能查看各设备上的 Agent 与 Needs you 列表，打开 Pane 进行阅读和回复。

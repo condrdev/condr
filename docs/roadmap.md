@@ -4,6 +4,18 @@
 
 按优先级排列。每项写清为什么、做到哪、什么时候停。
 
+### Tasks 模式与任务
+
+**为什么**：同时推进好几个项目时，切到另一个 Agent 要展开 Workspace、选中 Pane，整个内容区随之换掉，回到顶层又得重新找。人是从“要做成什么”往下想到“谁在做”、再到“它的终端”的，Condr 在 Workspace 之上没有这一层。
+
+**做到哪**（ADR 0068，按顺序）：
+
+1. 左侧栏改为缓存视图，不再随终端的每一帧重建。
+2. Tasks 模式：侧栏顶部的 Tasks 行或 `Cmd+0` 进入，整窗切换；列表和看板两种视图，看板有 Cards 和 Compact；列按 Agent 状态推出、只读、可折叠；按 Device 或 Workspace 筛选；点卡片在旁边打开那个 Agent 的 Pane 直接交互。不改协议。
+3. 任务：存在各台 Device 的 Server 上（SQLite）；To do 列、写任务的表单（显式 Save）、在交互区里 Start（`StartTask` 建 worktree 或挂已有 Workspace、启动 Agent、让它读任务文件）、归档与恢复；`condr task` 命令。
+
+**停在哪**：任务来源只有本地，不接 GitHub、Jira，也不回写；不跟踪 PR；不在交互区里看 diff；拆出去的窗口不进 Tasks 模式；手机端不显示任务。
+
 ### 移动端 Companion（iOS 与 Android）
 
 **状态**：1–7 步已在 iOS 完成，推送随桌面 0.1.14 与 TestFlight 0.1 (4) 发布。Android（第 8 步）已按 ADR 0048 实现：配对、Agents / Devices / Settings、自绘终端、锁与推送都在模拟器上走通，APK 随 Companion 自己的版本发布（ADR 0049）。剩下的是 Android 真机验证和 FCM：Firebase 项目建好之前，发布的 APK 收不到推送。
@@ -122,7 +134,7 @@ ADR 要回答三个问题：
 这些还没有足够的使用证据；出现两次以上真实摩擦再排。外部用户的 Issue 和单人 dogfood 一样算数。
 
 - Diff Tab 内跳到编辑器。
-- GUI 里启动 Agent 的菜单：列出这台 Device 上装了哪些 Agent，点一下就在 Pane 里启动。现在在终端里输入命令已经够快。真要做时，用协议里现成的 `AgentCommand::Available` 和 `Start`。
+- GUI 里启动 Agent 的菜单：列出这台 Device 上装了哪些 Agent，点一下就在 Pane 里启动。现在在终端里输入命令已经够快；从任务启动 Agent 由 ADR 0068 的 Start 承担。真要做时，用协议里现成的 `AgentCommand::Available` 和 `Start`。
 - 定时任务：按 cron 启动新的 Agent，或定时给已有的 Agent 发提示。现有的 `agent start`、`agent prompt` 和 `agent wait` 已经覆盖了大半。它会让 Condr 从看着 Agent 干活走向无人值守地派活，用户的期待也会跟着变，所以等有人提出需求再定。
 - `observe` 与 `control` 两级 capability（观察者拿 Bootstrap 和视觉流，不能输入、改布局、读文件；配对时决定，`condr server clients` 可看可改；开 Stream，即转发与文件传输，归 `control`，ADR 0061）：触发条件是第二个人开始共用同一个 Server。之后再谈设备密钥进 OS Keychain、密钥轮换、审计日志。不做账号体系、不做公网 listener。
 - Kimi hooks（等上游能区分主任务与子 agent 的 Stop）。
@@ -136,7 +148,7 @@ ADR 要回答三个问题：
 | 遥测（opt-in） | 有外部用户，且本地日志已不足以排障 | 诊断数据默认不含终端内容；先有本地日志再谈上报 |
 | 团队协作、账号与 RBAC | 出现多人共用一个 Server 的真实需求 | observe/control capability（见摩擦记录）扩展为多用户；审计日志 |
 | 替用户批准 Agent 的权限请求（现在只做"看见并跳转"） | 厂商开放外部审批接口；Claude Code 的远程审批仍是 [open feature request](https://github.com/anthropics/claude-code/issues/38299)，Codex 的审批只在它自己的 app-server 客户端里 | `Blocked` 与 `detail`（ADR 0024、ADR 0044） |
-| 编辑器、内置浏览器、任务看板等 IDE 化能力 | dogfood 中反复出现"为了这件事必须离开 Condr" | 逐项立 ADR，不成套引入 |
+| 编辑器、内置浏览器等 IDE 化能力（任务看板见 ADR 0068 的 Tasks 模式） | dogfood 中反复出现"为了这件事必须离开 Condr" | 逐项立 ADR，不成套引入 |
 
 不做的三件事：**Web 客户端**（Condr 是原生 GUI，不把控制面搬进浏览器；异地需求由 Peer-to-peer 和移动端 Companion 承接）；**自建对话或工具循环、绑定单一模型厂商**（Condr 编排原生 Agent CLI，不替代它；因此也不在界面上另做输入框、模型选择或语音对话，这些交给各个 CLI 自己）；**用户自定义 Agent 和插件 SDK**（ADR 0035：Agent 种类变化不频繁，官方支持常见的 CLI 就够了；每种集成都需要声明写不出来的 hook 代码和真实会话验证；未支持的 CLI 通过 Issue 或 PR 加入）。
 

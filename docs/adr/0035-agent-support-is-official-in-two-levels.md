@@ -21,3 +21,5 @@ Not in this decision: which agents join next, which a survey of the CLIs other t
 ADR 0014 stands. Its Kimi paragraph describes the first recognized-only agent, and what the GUI showed as unavailable it now shows as `Recognition only`.
 
 Tests: before the move, a snapshot of every file each agent's installation writes, byte for byte, which must not change, because Settings reports `Installed` only for exactly what this `condr` would write and any drift would show every existing installation as `Outdated`; the spec table covering `AgentKind::ALL`; `agent wait` and `agent prompt --wait` refusing Kimi without waiting.
+
+> ADR 0068 adds a field to `AgentSpec`: how its CLI takes an initial prompt, positional, `--prompt` or `-i`.

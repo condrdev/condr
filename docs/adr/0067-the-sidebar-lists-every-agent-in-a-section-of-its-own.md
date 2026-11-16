@@ -58,3 +58,5 @@ The section:
 - **A grid of every Agent's terminal.** Rejected: drawing many live Panes at once contradicts the one droppable visual slot each Client has (ADR 0004).
 
 A blocked Agent now shows three times while the section is expanded: in "Needs you", in the tree and at the top of the section. That is accepted: "Needs you" is what remains in sight once the section is collapsed.
+
+> ADR 0068 adds a Tasks row above "Needs you", makes the sidebar a cached view no terminal frame rebuilds, and reuses this section's order and sticky selection in Tasks mode. In normal mode a row's click and a notification's click still run `select_pane`.
