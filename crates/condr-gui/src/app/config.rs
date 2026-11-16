@@ -16,6 +16,8 @@ use super::{Appearance, Condr, Endpoint, OptionAsMeta, TerminalFont, UpdateChann
 use std::collections::BTreeMap;
 
 const APPEARANCE_KEY: &str = "appearance";
+/// `[client] language`: one of `i18n::LANGUAGES`, unset to follow the system (ADR 0066).
+const LANGUAGE_KEY: &str = "language";
 const FPS_MONITOR_KEY: &str = "fps_monitor";
 const NOTIFICATIONS_KEY: &str = "notifications";
 const KEEP_AWAKE_KEY: &str = "keep_awake";
@@ -59,6 +61,7 @@ pub(super) struct LoadedConfig {
     pub servers_error: Option<String>,
     pub error: Option<String>,
     pub appearance: Appearance,
+    pub language: Option<String>,
     pub fps_monitor: bool,
     pub notifications: bool,
     pub keep_awake: bool,
@@ -180,6 +183,10 @@ impl LoadedConfig {
                 .and_then(toml::Value::as_str)
                 .map(Appearance::from_str)
                 .unwrap_or_default(),
+            language: value(LANGUAGE_KEY)
+                .and_then(toml::Value::as_str)
+                .filter(|language| crate::i18n::LANGUAGES.contains(language))
+                .map(str::to_owned),
             fps_monitor: value(FPS_MONITOR_KEY)
                 .and_then(toml::Value::as_bool)
                 .unwrap_or(false),
@@ -292,6 +299,18 @@ impl Condr {
         let appearance = self.appearance;
         self.save_config(cx, move |path| {
             write_client_value(path, APPEARANCE_KEY, toml_edit::value(appearance.as_str()))
+        });
+    }
+
+    pub(super) fn save_language(&mut self, cx: &mut Context<Self>) {
+        let language = self.language.clone();
+        self.save_config(cx, move |path| {
+            // Following the system again drops the key rather than naming it.
+            condr_core::update_config_values(
+                path,
+                &["client"],
+                [(LANGUAGE_KEY, language.map(toml_edit::value))],
+            )
         });
     }
 
@@ -647,6 +666,34 @@ mod tests {
         assert!(!read_config(&path).fps_monitor);
         write_client_value(&path, FPS_MONITOR_KEY, toml_edit::value(true)).unwrap();
         assert!(read_config(&path).fps_monitor);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn language_is_one_the_gui_speaks_or_unset() {
+        let directory = std::env::temp_dir().join(format!(
+            "condr-client-language-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let path = directory.join("config.toml");
+        fs::create_dir_all(&directory).unwrap();
+        let write = |language: &str| {
+            condr_core::update_config_values(
+                &path,
+                &["client"],
+                [(LANGUAGE_KEY, Some(toml_edit::value(language)))],
+            )
+            .unwrap()
+        };
+
+        assert_eq!(read_config(&path).language, None);
+        write("zh-CN");
+        assert_eq!(read_config(&path).language.as_deref(), Some("zh-CN"));
+        // Not a language the GUI speaks: the system's, as if unset.
+        write("fr");
+        assert_eq!(read_config(&path).language, None);
+
         fs::remove_dir_all(directory).unwrap();
     }
 

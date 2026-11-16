@@ -58,6 +58,7 @@ The GUI client, the background Server and the `condr` CLI share the `config.toml
 ```toml
 [client]
 appearance = "dark"
+language = "zh-CN"
 notifications = true
 keep_awake = false
 fps_monitor = false
@@ -66,6 +67,7 @@ fps_monitor = false
 | Key | Type / values | Default | Description |
 | --- | --- | --- | --- |
 | `appearance` | `system` / `light` / `dark` | `system` | Interface color mode. An invalid value falls back to `system` |
+| `language` | `en` / `zh-CN` | unset | Interface language. Unset follows the system's preferred languages: Simplified Chinese shows Chinese, anything else English. An invalid value counts as unset |
 | `notifications` | bool | `true` | System notifications when an Agent finishes a task or needs your confirmation, when a program asks for one (OSC 9 or 777), and when a long shell command ends in a Pane you are not looking at |
 | `keep_awake` | bool | `false` | Keep the screen on, and stop the system from sleeping when idle |
 | `fps_monitor` | bool | `false` | Overlay the live frame rate and resource usage on the interface |

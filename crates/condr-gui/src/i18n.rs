@@ -2,12 +2,52 @@
 //! `en` and `zh-CN` text side by side; `rust_i18n::t!` looks one up under the current
 //! locale (ADR 0066). Kit's components translate their own strings under the same locale.
 
+/// The languages the GUI speaks, as `[client] language` names them.
+pub(crate) const LANGUAGES: [&str; 2] = ["en", "zh-CN"];
+
+/// The language to show: `configured` when the GUI speaks it, otherwise the first of the
+/// system's preferred languages it speaks, otherwise English.
+pub(crate) fn resolve(
+    configured: Option<&str>,
+    preferred: impl IntoIterator<Item = String>,
+) -> &'static str {
+    configured
+        .and_then(|configured| {
+            LANGUAGES
+                .into_iter()
+                .find(|language| *language == configured)
+        })
+        .or_else(|| preferred.into_iter().find_map(|tag| spoken(&tag)))
+        .unwrap_or("en")
+}
+
+/// Which of `LANGUAGES` a system locale (`zh-Hans-CN`, `zh_CN.UTF-8`) asks for. Traditional
+/// Chinese asks for none: it reads Simplified no better than it reads English.
+fn spoken(tag: &str) -> Option<&'static str> {
+    let tag = tag
+        .split(['.', '@'])
+        .next()?
+        .to_ascii_lowercase()
+        .replace('_', "-");
+    let mut parts = tag.split('-');
+    match parts.next()? {
+        "en" => Some("en"),
+        "zh" => {
+            let parts = parts.collect::<Vec<_>>();
+            let traditional = !parts.contains(&"hans")
+                && parts
+                    .iter()
+                    .any(|part| matches!(*part, "hant" | "tw" | "hk" | "mo"));
+            (!traditional).then_some("zh-CN")
+        }
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
     use std::path::Path;
-
-    const LOCALES: [&str; 2] = ["en", "zh-CN"];
 
     fn messages(locale: &str) -> Vec<(String, String)> {
         crate::_rust_i18n_backend()
@@ -83,10 +123,31 @@ mod tests {
     }
 
     #[test]
+    fn resolve_prefers_the_setting_then_the_system() {
+        let system = |tags: &[&str]| tags.iter().map(|tag| tag.to_string()).collect::<Vec<_>>();
+        assert_eq!(super::resolve(Some("en"), system(&["zh-Hans-CN"])), "en");
+        assert_eq!(super::resolve(Some("zh-CN"), system(&["en-US"])), "zh-CN");
+        // An unknown setting is no setting.
+        assert_eq!(super::resolve(Some("fr"), system(&["zh-Hans-CN"])), "zh-CN");
+        assert_eq!(super::resolve(None, system(&["zh_CN.UTF-8"])), "zh-CN");
+        assert_eq!(super::resolve(None, system(&["zh-SG"])), "zh-CN");
+        assert_eq!(super::resolve(None, system(&["zh-Hans-HK"])), "zh-CN");
+        assert_eq!(super::resolve(None, system(&["zh-Hant-TW", "en-US"])), "en");
+        assert_eq!(super::resolve(None, system(&["zh-HK"])), "en");
+        assert_eq!(
+            super::resolve(None, system(&["ja-JP", "zh-Hans", "en"])),
+            "zh-CN"
+        );
+        assert_eq!(super::resolve(None, system(&["de-DE"])), "en");
+        assert_eq!(super::resolve(None, system(&[])), "en");
+    }
+
+    #[test]
     fn every_message_has_english_and_chinese() {
         let locales = crate::_rust_i18n_backend().available_locales();
         assert_eq!(
-            locales, LOCALES,
+            locales,
+            super::LANGUAGES,
             "locales/*.yml holds exactly these languages"
         );
         let english = keys("en");

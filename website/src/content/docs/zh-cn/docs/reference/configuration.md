@@ -58,6 +58,7 @@ GUI 客户端、后台 Server 与 `condr` CLI 共用位于配置目录下的 `co
 ```toml
 [client]
 appearance = "dark"
+language = "zh-CN"
 notifications = true
 keep_awake = false
 fps_monitor = false
@@ -66,6 +67,7 @@ fps_monitor = false
 | 键 | 类型 / 可选值 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `appearance` | `system` / `light` / `dark` | `system` | 界面色彩模式。非法值自动降级为 `system` |
+| `language` | `en` / `zh-CN` | 不设 | 界面语言。不设时跟随系统首选语言：简体中文显示中文，其余显示英文。非法值视同不设 |
 | `notifications` | bool | `true` | Agent 任务完成或需介入确认、程序请求通知（OSC 9 或 777），以及你没在看的 Pane 里长命令结束时的系统通知 |
 | `keep_awake` | bool | `false` | 保持屏幕常亮，并阻止系统因空闲而休眠 |
 | `fps_monitor` | bool | `false` | 在界面叠加显示实时帧率与资源占用 |

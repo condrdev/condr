@@ -28,7 +28,7 @@ No interface font is configured for Chinese: macOS and Windows fall back to thei
 
 ## Choosing the language
 
-`[client] language` in `config.toml`, `en` or `zh-CN`, chosen under Settings > Appearance; absent means the system's, the first preferred UI language that is Simplified Chinese (`zh-Hans`, `zh-CN`, `zh-SG`) or else English. Traditional Chinese falls back to English. A change applies at once: `set_locale`, a refresh of every window, and the macOS menus made again as a key binding change does (ADR 0063).
+`[client] language` in `config.toml`, `en` or `zh-CN`, chosen under Settings > Appearance; absent means the system's, the first preferred UI language that is Simplified Chinese (`zh-Hans`, `zh-CN`, `zh-SG`) or else English. Traditional Chinese falls back to English. `sys-locale` reads those preferences, on the version Kit already builds for GPUI's Linux text system; condr-core's CoreFoundation call for a Pane's `LANG` reads the region's format rather than the interface language, and covers macOS alone. A change applies at once: `set_locale`, a refresh of every window, and the macOS menus made again as a key binding change does (ADR 0063). Text a widget kept from when it was made, such as an open Settings window's lists, shows the new language once it is made again. The macOS Window menu keeps its English title: GPUI fills in the system's window list only for a menu named exactly `Window`.
 
 ## Writing Chinese
 

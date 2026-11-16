@@ -325,6 +325,8 @@ pub(crate) struct Condr {
     /// in `keymap::all()`; kept until the GUI quits (ADR 0064).
     recent_actions: Vec<usize>,
     option_as_meta: OptionAsMeta,
+    /// `[client] language`, `None` following the system (ADR 0066).
+    language: Option<String>,
     /// Each mode's terminal colour scheme, empty for its default (ADR 0062).
     dark_color_scheme: SharedString,
     light_color_scheme: SharedString,
@@ -434,6 +436,7 @@ impl Condr {
             workspace_editors,
             keybindings,
             option_as_meta,
+            language,
         } = config;
         let mut connections = vec![connection];
         for (index, (name, endpoint)) in saved_servers.into_iter().enumerate() {
@@ -541,6 +544,7 @@ impl Condr {
             keymap: keymap::Keymap::default(),
             recent_actions: Vec::new(),
             option_as_meta,
+            language,
             dark_color_scheme,
             light_color_scheme,
             code_font_size,

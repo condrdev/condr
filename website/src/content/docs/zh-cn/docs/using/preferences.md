@@ -12,6 +12,18 @@ description: 常用键盘快捷键、自定义外部编辑器联动及终端偏�
   - **Application**：客户端全局设置（包含外观主题、终端字号、系统通知开关及快捷键）。
   - **Device**：服务端与设备设置（包含默认 Shell 路径、连接状态及 Agent 集成控制）。
 
+## 界面语言
+
+Condr 的界面有英文和简体中文两种。默认跟随系统的首选语言：首选简体中文时显示中文，其余情况（包括繁体中文）显示英文。
+
+在 **设置 > 外观 > 语言**（Settings > Appearance > Language）中可以固定选用 English 或简体中文，切换后立即生效，无需重启。
+
+中文界面里有几样保持原样：
+
+- Workspace、Tab、Pane、Agent 等 Condr 自己的概念保留英文名称，与本文档一致。
+- Server、操作系统或 Agent 发来的错误与状态说明按原文显示。
+- macOS 菜单栏的 Window 菜单保留英文名称，系统才会在其中列出各个窗口。
+
 ## 自定义外部编辑器 (Open in Editor)
 
 在文件列表（Files）或改动列表（Changes）中右键点击文件，可以调用外部 IDE 或编辑器直接打开对应文件。标题栏的 **Open in** 按钮则打开整个 Workspace 根目录。两者都只对本机 Device 有效。

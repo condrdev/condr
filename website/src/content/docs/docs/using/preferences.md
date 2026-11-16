@@ -12,6 +12,18 @@ Settings and keyboard shortcuts let you fit Condr to the way you work.
   - **Application**: this window's settings, such as the theme, terminal font size, system notifications and the shortcuts.
   - **Device**: one Device's Server settings, such as the default shell, connection status and Agent integrations.
 
+## Interface language
+
+Condr's interface is in English or Simplified Chinese. By default it follows the system's preferred languages: Simplified Chinese shows Chinese, and anything else, Traditional Chinese included, shows English.
+
+**Settings > Appearance > Language** picks one instead, and the change takes effect at once.
+
+A few things stay as they are in Chinese:
+
+- Condr's own concepts, such as Workspace, Tab, Pane and Agent, keep their English names, as the Chinese documentation does.
+- Errors and states sent by a Server, the operating system or an Agent are shown as they were sent.
+- On macOS the Window menu keeps its English name, which is what keeps the system's list of windows in it.
+
 ## Add an external editor (Open in)
 
 Right-click a file in **Files** or **Changes** to open it in an external IDE or editor. The **Open in** button in the title bar opens the whole Workspace root instead. Both work on local Devices only.

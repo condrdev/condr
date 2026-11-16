@@ -139,6 +139,12 @@ settings:
     title:
       en: Appearance
       zh-CN: 外观
+    language:
+      en: Language
+      zh-CN: 语言
+    language_description:
+      en: Follow the system language, or pick one.
+      zh-CN: 跟随系统语言，或自选一种。
     theme:
       en: Theme
       zh-CN: 主题

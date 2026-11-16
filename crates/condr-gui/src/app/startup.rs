@@ -241,6 +241,11 @@ pub(crate) fn run() {
 
     app.run(move |cx| {
         gpui_kit::init(cx);
+        // Before anything is worded, the menus first (ADR 0066).
+        gpui_kit::component::set_locale(crate::i18n::resolve(
+            config.language.as_deref(),
+            sys_locale::get_locales(),
+        ));
         cx.set_app_identity(APP_IDENTITY, "Condr");
         register_notification_icon();
         bind_keys(cx);

@@ -48,6 +48,9 @@ similar = "2.7"
 # The GUI's translations (ADR 0066); Kit already builds it for its components' own
 # strings and switches them with the same locale. Keep it on Kit's version.
 rust-i18n = "4.2"
+# The system's preferred languages, for the GUI's default (ADR 0066); Kit already builds it
+# for GPUI's Linux text system. Keep it on Kit's version.
+sys-locale = "0.3.2"
 # The Command Palette's fuzzy matching and its highlights (ADR 0064).
 nucleo-matcher = { version = "0.3", default-features = false, features = ["unicode-normalization", "unicode-casefold"] }
 # Which Option key is held, for Option as Meta on one side only (ADR 0063): GPUI's

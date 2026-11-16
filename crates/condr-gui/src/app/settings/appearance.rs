@@ -190,7 +190,11 @@ pub(super) fn default_color_scheme_label() -> SharedString {
 }
 
 pub(super) fn color_scheme_name(label: &SharedString) -> SharedString {
-    if *label == default_color_scheme_label() {
+    // A list made before the language changed still says Default in the old one.
+    let default = crate::i18n::LANGUAGES
+        .iter()
+        .any(|locale| label.as_ref() == t!("settings.appearance.default_scheme", locale = locale));
+    if default {
         SharedString::default()
     } else {
         label.clone()
@@ -209,6 +213,24 @@ pub(in crate::app) fn selected_appearance(owner: &WeakEntity<Condr>, cx: &App) -
         .unwrap_or_default()
         .as_str()
         .into()
+}
+
+/// The Language dropdown's entry for following the system, `[client] language` unset.
+const SYSTEM_LANGUAGE: &str = "system";
+
+/// What the Language dropdown shows. Its getter only ever sees an `&App`.
+pub(in crate::app) fn selected_language(owner: &WeakEntity<Condr>, cx: &App) -> SharedString {
+    owner
+        .upgrade()
+        .and_then(|owner| owner.read(cx).language.clone())
+        .unwrap_or_else(|| SYSTEM_LANGUAGE.to_owned())
+        .into()
+}
+
+/// What the Language dropdown does.
+pub(in crate::app) fn select_language(owner: &WeakEntity<Condr>, value: &str, cx: &mut App) {
+    let language = (value != SYSTEM_LANGUAGE).then(|| value.to_owned());
+    let _ = owner.update(cx, |this, cx| this.set_language(language, cx));
 }
 
 /// What the Mode dropdown does. Its setter only ever sees an `&mut App`.
@@ -309,6 +331,17 @@ pub(super) fn appearance_page(
     let options = Appearance::ALL
         .map(|appearance| (appearance.as_str().into(), appearance.label().into()))
         .to_vec();
+    let language_get = owner.clone();
+    let language_set = owner.clone();
+    // Each language by its own name, so someone who cannot read this one finds theirs.
+    let languages = vec![
+        (
+            SYSTEM_LANGUAGE.into(),
+            t!("settings.appearance.system").into(),
+        ),
+        ("en".into(), "English".into()),
+        ("zh-CN".into(), "简体中文".into()),
+    ];
     let default_font = TerminalFont::default();
     let size_get = settings.clone();
     let size_set = settings.clone();
@@ -316,6 +349,21 @@ pub(super) fn appearance_page(
     let default_size = default_font.size;
     SettingPage::new(t!("settings.appearance.title"))
         .icon(IconName::Palette)
+        .group(
+            SettingGroup::new().item(
+                SettingItem::new(
+                    t!("settings.appearance.language"),
+                    SettingField::dropdown(
+                        languages,
+                        move |cx| selected_language(&language_get, cx),
+                        move |value: SharedString, cx| select_language(&language_set, &value, cx),
+                    )
+                    .default_value(SYSTEM_LANGUAGE),
+                )
+                .description(t!("settings.appearance.language_description").to_string())
+                .keywords(["language", "locale", "English", "Chinese"]),
+            ),
+        )
         .group(
             SettingGroup::new().item(
                 SettingItem::new(
@@ -483,6 +531,26 @@ impl Condr {
         self.fps_monitor = enabled;
         self.save_fps_monitor(cx);
         cx.notify();
+        cx.refresh_windows();
+    }
+
+    pub(in crate::app) fn set_language(
+        &mut self,
+        language: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.language == language {
+            return;
+        }
+        self.language = language;
+        self.save_language(cx);
+        gpui_kit::component::set_locale(crate::i18n::resolve(
+            self.language.as_deref(),
+            sys_locale::get_locales(),
+        ));
+        // The menus and the keymap's messages are worded when they are made; every
+        // window's text is worded when it renders.
+        self.apply_keymap(cx);
         cx.refresh_windows();
     }
 
