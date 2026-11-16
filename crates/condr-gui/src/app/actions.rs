@@ -144,6 +144,7 @@ action_handlers! {
     action_toggle_sidebar(ToggleSidebar) |this, window, cx| { this.toggle_sidebar(window, cx); }
     action_toggle_changes(ToggleChanges) |this, window, cx| { this.toggle_changes_sidebar(cx); }
     action_toggle_tasks(ToggleTasks) |this, window, cx| { this.toggle_tasks(window, cx); }
+    action_new_task(NewTask) |this, window, cx| { this.new_task(window, cx); }
     action_next_workspace(NextWorkspace) |this, window, cx| {
         this.cycle_workspace(1, window, cx);
     }

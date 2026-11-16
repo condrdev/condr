@@ -998,6 +998,7 @@ impl Render for Condr {
             .on_action(cx.listener(Self::action_toggle_sidebar))
             .on_action(cx.listener(Self::action_toggle_changes))
             .on_action(cx.listener(Self::action_toggle_tasks))
+            .on_action(cx.listener(Self::action_new_task))
             .on_action(cx.listener(Self::action_next_workspace))
             .on_action(cx.listener(Self::action_previous_workspace))
             .on_action(cx.listener(Self::action_next_agent))

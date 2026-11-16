@@ -4,10 +4,22 @@
 use super::sidebar::{
     CondrIconName, CondrSidebarIcon, SidebarStatusVisual, pane_sidebar_status, urgency,
 };
+use super::task_form::{todo_tasks, workspace_focused_pane};
 use super::viewer_header::mode_toggle;
 use super::*;
+use condr_core::TaskId;
 use rust_i18n::t;
 use std::any::TypeId;
+
+/// `gpui_kit::Task` is the executor's.
+type TaskRecord = condr_core::Task;
+
+/// The drag payload of a To do card, which drops onto another of its Device's.
+#[derive(Clone)]
+pub(super) struct DraggedTodo {
+    key: ConnectionKey,
+    task: TaskId,
+}
 
 /// Which of Tasks mode's layouts the window shows.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -58,6 +70,9 @@ pub(super) struct TasksPrefs {
 pub(super) struct TasksSelection {
     pub(super) key: ConnectionKey,
     pub(super) pane_id: PaneId,
+    /// A started Task's own card, shown while its Workspace has no Agent, on that
+    /// Workspace's focused Pane; `None` for an Agent's card.
+    pub(super) task: Option<TaskId>,
     pub(super) column: Option<TasksColumn>,
     pub(super) keyboard: bool,
 }
@@ -82,9 +97,11 @@ impl TasksPrefs {
     }
 }
 
-/// The columns, in their one order (ADR 0068). To do joins them with tasks.
+/// The columns, in their one order (ADR 0068): To do, the Tasks not started, then the
+/// Agents by state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum TasksColumn {
+    ToDo,
     NeedsYou,
     Done,
     Working,
@@ -92,6 +109,7 @@ pub(super) enum TasksColumn {
 }
 
 impl TasksColumn {
+    /// The Agents' columns; To do holds Tasks and comes before them.
     pub(super) const ALL: [Self; 4] = [Self::NeedsYou, Self::Done, Self::Working, Self::Idle];
 
     /// The column an Agent's state puts it in: a bell, `Blocked` and `Error` need the
@@ -105,15 +123,20 @@ impl TasksColumn {
         }
     }
 
+    /// To do's bit follows the Agents', which the GUI state file kept before it.
     pub(super) fn bit(self) -> u8 {
-        1 << Self::ALL
-            .iter()
-            .position(|column| *column == self)
-            .expect("every column is listed")
+        match self {
+            Self::NeedsYou => 1,
+            Self::Done => 2,
+            Self::Working => 4,
+            Self::Idle => 8,
+            Self::ToDo => 16,
+        }
     }
 
     fn selector(self) -> &'static str {
         match self {
+            Self::ToDo => "to-do",
             Self::NeedsYou => "needs-you",
             Self::Done => "done",
             Self::Working => "working",
@@ -123,6 +146,7 @@ impl TasksColumn {
 
     fn label(self) -> SharedString {
         match self {
+            Self::ToDo => t!("tasks.column.to_do"),
             Self::NeedsYou => t!("tasks.column.needs_you"),
             Self::Done => t!("tasks.column.done"),
             Self::Working => t!("tasks.column.working"),
@@ -133,13 +157,17 @@ impl TasksColumn {
     }
 }
 
-/// One Agent's card: where it lives and how it shows.
+/// One Agent's card, or a started Task's while its Workspace has no Agent: where it
+/// lives and how it shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct TaskCard {
     pub(super) key: ConnectionKey,
     pub(super) workspace_id: WorkspaceId,
+    /// The Agent's Pane, or for a Task's card its Workspace's focused Pane.
     pub(super) pane_id: PaneId,
     pub(super) status: SidebarStatusVisual,
+    /// The Task whose card this is, which no Agent's card is.
+    pub(super) task: Option<TaskId>,
 }
 
 /// Sorts a column by urgency; ties keep Session order, the cards coming in it.
@@ -222,9 +250,11 @@ impl Condr {
         }
     }
 
-    /// The Tasks row at the top of the main window's sidebar.
+    /// The Tasks row at the top of the main window's sidebar, with To do's count.
     pub(super) fn render_tasks_entry(&self, cx: &mut Context<Self>) -> AnyElement {
         let owner = cx.weak_entity();
+        let todo = self.todo_count();
+        let muted = cx.theme().muted_foreground;
         h_flex()
             .id("sidebar-tasks")
             .debug_selector(|| "sidebar-tasks".into())
@@ -238,7 +268,16 @@ impl Condr {
             .font_semibold()
             .map(|this| super::change_tree::row_highlight(this, false, cx))
             .child(Icon::new(CondrIconName::SquareKanban).size_4())
-            .child(t!("tasks.title").into_owned())
+            .child(div().flex_1().child(t!("tasks.title").into_owned()))
+            .when(todo > 0, |this| {
+                this.child(
+                    div()
+                        .debug_selector(|| "sidebar-tasks-count".into())
+                        .font_normal()
+                        .text_color(muted)
+                        .child(todo.to_string()),
+                )
+            })
             .on_click(move |_, window, cx| {
                 let _ = owner.update(cx, |this, cx| this.toggle_tasks(window, cx));
             })
@@ -369,22 +408,47 @@ impl Condr {
                 if !Self::tasks_scope_shows(scope, connection, workspace) {
                     continue;
                 }
+                let mut cards = Vec::new();
                 for pane in workspace.tabs().iter().flat_map(|tab| tab.panes()) {
                     let Some(status) = pane_sidebar_status(&connection.model, pane.id()) else {
                         continue;
                     };
-                    let card = TaskCard {
+                    cards.push(TaskCard {
                         key: connection.key,
                         workspace_id: workspace.id(),
                         pane_id: pane.id(),
                         status,
+                        task: None,
+                    });
+                }
+                // A started Task whose Workspace has no Agent is a card of its own, so it
+                // never leaves Tasks mode (ADR 0068).
+                if cards.is_empty()
+                    && let Some(task) = connection.model.workspace_task(workspace.id())
+                    && let Some(pane_id) =
+                        workspace_focused_pane(connection, session, workspace.id())
+                {
+                    let state = if self.task_starting(connection.key, task.id) {
+                        AgentDisplayState::Working
+                    } else {
+                        AgentDisplayState::Idle
                     };
+                    cards.push(TaskCard {
+                        key: connection.key,
+                        workspace_id: workspace.id(),
+                        pane_id,
+                        status: super::sidebar::agent_sidebar_status(state),
+                        task: Some(task.id),
+                    });
+                }
+                for card in cards {
                     let column = selection
-                        .filter(|selected| {
-                            (selected.key, selected.pane_id) == (connection.key, pane.id())
+                        .filter(|selected| match card.task {
+                            Some(task) => selected.key == card.key && selected.task == Some(task),
+                            None => (selected.key, selected.pane_id) == (card.key, card.pane_id),
                         })
                         .and_then(|selected| selected.column)
-                        .unwrap_or_else(|| TasksColumn::of(status));
+                        .unwrap_or_else(|| TasksColumn::of(card.status));
                     columns
                         .iter_mut()
                         .find(|(each, _)| *each == column)
@@ -398,6 +462,45 @@ impl Condr {
             rank_column(cards);
         }
         columns
+    }
+
+    /// The To do Tasks of the connected Devices in `scope`, each Device's in its order. A
+    /// Task shows under its repository's Workspace, and one without a repository only
+    /// under All or its Device.
+    pub(super) fn todo_cards(&self, scope: TasksScope) -> Vec<(ConnectionKey, TaskRecord)> {
+        let mut cards = Vec::new();
+        for connection in self.task_devices() {
+            let shown = |task: &TaskRecord| match scope {
+                TasksScope::All => true,
+                TasksScope::Device(server) => connection.model.server_id == Some(server),
+                TasksScope::Workspace(server, workspace_id) => {
+                    connection.model.server_id == Some(server)
+                        && task.repository.as_deref().is_some_and(|root| {
+                            connection
+                                .session()
+                                .and_then(|session| session.workspace_by_root(root))
+                                .is_some_and(|workspace| workspace.id() == workspace_id)
+                        })
+                }
+            };
+            cards.extend(
+                todo_tasks(connection)
+                    .into_iter()
+                    .filter(|task| shown(task))
+                    .map(|task| (connection.key, task.clone())),
+            );
+        }
+        cards
+    }
+
+    /// Whether To do shows: some Device in `scope` keeps Tasks.
+    fn offers_todo(&self, scope: TasksScope) -> bool {
+        self.task_devices().any(|connection| match scope {
+            TasksScope::All => true,
+            TasksScope::Device(server) | TasksScope::Workspace(server, _) => {
+                connection.model.server_id == Some(server)
+            }
+        })
     }
 
     /// Tasks mode's title row: back to the Workspaces, the mode's name, and how it shows.
@@ -574,13 +677,12 @@ impl Condr {
         view: &WindowView,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let columns = self.task_cards(
-            self.effective_tasks_scope(view.tasks.scope),
-            view.tasks_selection,
-        );
+        let scope = self.effective_tasks_scope(view.tasks.scope);
+        let columns = self.task_cards(scope, view.tasks_selection);
+        let todo = self.offers_todo(scope).then(|| self.todo_cards(scope));
         let cards = match view.tasks.layout {
-            TasksLayout::Board => self.render_tasks_board(&columns, view.tasks, cx),
-            TasksLayout::List => self.render_tasks_list(&columns, view.tasks, cx),
+            TasksLayout::Board => self.render_tasks_board(&columns, todo, scope, view.tasks, cx),
+            TasksLayout::List => self.render_tasks_list(&columns, todo, scope, view.tasks, cx),
         };
         let bands = self.render_connection_bands(view.tasks.scope, cx);
         v_flex()
@@ -600,11 +702,40 @@ impl Condr {
     fn render_tasks_board(
         &self,
         columns: &[(TasksColumn, Vec<TaskCard>)],
+        todo: Option<Vec<(ConnectionKey, TaskRecord)>>,
+        scope: TasksScope,
         prefs: TasksPrefs,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let density = prefs.density;
         let theme = cx.theme().clone();
+        let todo = todo.map(|todo| {
+            if prefs.is_folded(TasksColumn::ToDo) {
+                return self.render_strip(TasksColumn::ToDo, todo.len(), cx);
+            }
+            v_flex()
+                .id("to-do")
+                .debug_selector(|| "tasks-column-to-do".into())
+                .flex_1()
+                .min_w(rems(14.))
+                .h_full()
+                .gap_2()
+                .child(self.column_heading(TasksColumn::ToDo, todo.len(), &theme, cx))
+                .child(
+                    v_flex()
+                        .id("tasks-column-cards-to-do")
+                        .flex_1()
+                        .min_h_0()
+                        .gap_2()
+                        .overflow_y_scroll()
+                        .child(self.render_new_task_button(cx))
+                        .children(todo.iter().map(|(key, task)| {
+                            self.render_todo_card(*key, task, density == TasksDensity::Compact, cx)
+                        }))
+                        .child(self.render_archived(scope, cx)),
+                )
+                .into_any_element()
+        });
         h_flex()
             .id("tasks-board")
             .debug_selector(|| "tasks-board".into())
@@ -613,6 +744,7 @@ impl Condr {
             .gap_3()
             .p_3()
             .overflow_x_scroll()
+            .children(todo)
             .children(columns.iter().map(|(column, cards)| {
                 let column = *column;
                 if prefs.is_folded(column) {
@@ -640,9 +772,21 @@ impl Condr {
                                 if cards.is_empty() {
                                     this.child(nothing_here(&theme))
                                 } else {
-                                    this.children(cards.iter().map(|card| match density {
-                                        TasksDensity::Cards => self.render_card(card, cx),
-                                        TasksDensity::Compact => self.render_compact_card(card, cx),
+                                    this.children(cards.iter().map(|card| {
+                                        match (card.task, density) {
+                                            (Some(task), _) => self.render_task_card(
+                                                card,
+                                                task,
+                                                density == TasksDensity::Compact,
+                                                cx,
+                                            ),
+                                            (None, TasksDensity::Cards) => {
+                                                self.render_card(card, cx)
+                                            }
+                                            (None, TasksDensity::Compact) => {
+                                                self.render_compact_card(card, cx)
+                                            }
+                                        }
                                     }))
                                 }
                             }),
@@ -726,6 +870,8 @@ impl Condr {
     fn render_tasks_list(
         &self,
         columns: &[(TasksColumn, Vec<TaskCard>)],
+        todo: Option<Vec<(ConnectionKey, TaskRecord)>>,
+        scope: TasksScope,
         prefs: TasksPrefs,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -743,6 +889,27 @@ impl Condr {
         .text_xs()
         .text_color(theme.muted_foreground);
         let mut rows = vec![header.into_any_element()];
+        if let Some(todo) = todo {
+            let folded = prefs.is_folded(TasksColumn::ToDo);
+            rows.push(
+                self.column_heading(TasksColumn::ToDo, todo.len(), &theme, cx)
+                    .pt_2()
+                    .child(
+                        Icon::new(IconName::ChevronRight)
+                            .size_3()
+                            .when(!folded, |icon| icon.rotate(percentage(90. / 360.))),
+                    )
+                    .into_any_element(),
+            );
+            if !folded {
+                rows.push(self.render_new_task_button(cx));
+                rows.extend(
+                    todo.iter()
+                        .map(|(key, task)| self.render_todo_row(*key, task, cx)),
+                );
+                rows.push(self.render_archived(scope, cx));
+            }
+        }
         for (column, cards) in columns {
             let folded = prefs.is_folded(*column);
             rows.push(
@@ -756,7 +923,10 @@ impl Condr {
                     .into_any_element(),
             );
             if !folded {
-                rows.extend(cards.iter().map(|card| self.render_list_row(card, cx)));
+                rows.extend(cards.iter().map(|card| match card.task {
+                    Some(task) => self.render_task_row(card, task, cx),
+                    None => self.render_list_row(card, cx),
+                }));
             }
         }
         v_flex()
@@ -850,11 +1020,12 @@ impl Condr {
             .workspace(card.workspace_id)?;
         let agent = connection.model.agents.get(&card.pane_id)?;
         let kind = agent.kind;
+        // Every Agent in a Task's Workspace carries the Task's title (ADR 0068).
         let title = connection
             .model
-            .terminal_titles
-            .get(&card.pane_id)
-            .cloned()
+            .workspace_task(card.workspace_id)
+            .map(|task| task.title.clone())
+            .or_else(|| connection.model.terminal_titles.get(&card.pane_id).cloned())
             .unwrap_or_else(|| kind.label().to_owned());
         let git = connection.model.workspace_git.get(&card.workspace_id);
         let branch = git.and_then(|git| git.branch.clone());
@@ -905,7 +1076,7 @@ impl Condr {
             .tasks_selection
             .is_some_and(|selected| (selected.key, selected.pane_id) == (card_key, card_pane));
         let on_click = cx.listener(move |this, _: &ClickEvent, window, cx| {
-            this.click_task_card(card_key, card_pane, window, cx)
+            this.click_task_card(card_key, card_pane, None, window, cx)
         });
         let theme = cx.theme();
         let (key, pane) = (card.key, card.pane_id.as_u64());
@@ -980,7 +1151,7 @@ impl Condr {
             .tasks_selection
             .is_some_and(|selected| (selected.key, selected.pane_id) == (card_key, card_pane));
         let on_click = cx.listener(move |this, _: &ClickEvent, window, cx| {
-            this.click_task_card(card_key, card_pane, window, cx)
+            this.click_task_card(card_key, card_pane, None, window, cx)
         });
         let theme = cx.theme();
         let (key, pane) = (card.key, card.pane_id.as_u64());
@@ -1030,7 +1201,7 @@ impl Condr {
             .tasks_selection
             .is_some_and(|selected| (selected.key, selected.pane_id) == (card_key, card_pane));
         let on_click = cx.listener(move |this, _: &ClickEvent, window, cx| {
-            this.click_task_card(card_key, card_pane, window, cx)
+            this.click_task_card(card_key, card_pane, None, window, cx)
         });
         let theme = cx.theme();
         let (key, pane) = (card.key, card.pane_id.as_u64());
@@ -1054,6 +1225,514 @@ impl Condr {
                 theme,
             )),
             state,
+        )
+        .text_sm()
+        .rounded(theme.radius)
+        .border_1()
+        .border_color(if selected {
+            theme.primary
+        } else {
+            gpui_kit::transparent_black()
+        })
+        .cursor_pointer()
+        .on_click(on_click)
+        .into_any_element()
+    }
+}
+
+/// To do's cards, and a started Task's card while its Workspace has no Agent.
+impl Condr {
+    fn render_new_task_button(&self, cx: &mut Context<Self>) -> AnyElement {
+        let owner = cx.weak_entity();
+        Button::new("tasks-new-task")
+            .debug_selector(|| "tasks-new-task".into())
+            .ghost()
+            .small()
+            .w_full()
+            .icon(Icon::new(IconName::Plus))
+            .label(t!("tasks.todo.new"))
+            .on_click(move |_, window, cx| {
+                let _ = owner.update(cx, |this, cx| this.new_task(window, cx));
+            })
+            .into_any_element()
+    }
+
+    /// `Device · repository` and `↺ branch` for a Task worked before.
+    fn todo_place(&self, key: ConnectionKey, task: &TaskRecord) -> (String, Option<String>) {
+        let connection = self.connection(key);
+        let mut place = vec![
+            connection
+                .map(|connection| connection.label.clone())
+                .unwrap_or_default(),
+        ];
+        place.extend(
+            task.repository
+                .as_deref()
+                .map(|root| super::task_form::repository_name(connection, root)),
+        );
+        let last = task.last.as_ref().map(|last| {
+            let name = last.branch.clone().unwrap_or_else(|| {
+                last.path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            });
+            format!("↺ {name}")
+        });
+        (place.join(" · "), last)
+    }
+
+    fn todo_selected(&self, key: ConnectionKey, task: TaskId) -> bool {
+        self.task_form
+            .as_ref()
+            .is_some_and(|form| form.home == Some((key, task)))
+    }
+
+    /// Makes a To do card draggable onto its Device's other To do cards.
+    fn todo_drag(
+        &self,
+        element: Stateful<Div>,
+        key: ConnectionKey,
+        task: &TaskRecord,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let (id, name) = (task.id, SharedString::from(task.title.clone()));
+        let primary = cx.theme().primary;
+        element
+            .on_drag(DraggedTodo { key, task: id }, move |_, offset, _, cx| {
+                cx.new(|_| super::sidebar::DragPreview {
+                    icon: None,
+                    name: name.clone(),
+                    offset,
+                })
+            })
+            .drag_over::<DraggedTodo>(move |style, drag, _, _| {
+                if drag.key == key {
+                    style.border_color(primary)
+                } else {
+                    style
+                }
+            })
+            .on_drop(cx.listener(move |this, drag: &DraggedTodo, _, cx| {
+                if drag.key == key {
+                    this.reorder_todo(key, drag.task, id, cx);
+                }
+            }))
+    }
+
+    fn render_todo_card(
+        &self,
+        key: ConnectionKey,
+        task: &TaskRecord,
+        compact: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let id = task.id;
+        let selected = self.todo_selected(key, id);
+        let (place, last) = self.todo_place(key, task);
+        let on_click = cx.listener(move |this, _: &ClickEvent, window, cx| {
+            this.click_todo_card(key, id, window, cx)
+        });
+        let theme = cx.theme().clone();
+        let selector = format!("tasks-todo-{key}-{}", id.as_u64());
+        let starting = task.starting.then(|| {
+            div()
+                .debug_selector(move || format!("tasks-todo-starting-{key}-{}", id.as_u64()))
+                .flex_none()
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .child(t!("tasks.todo.starting").into_owned())
+        });
+        let mark = Icon::new(CondrIconName::Circle)
+            .size_3p5()
+            .text_color(theme.muted_foreground);
+        let card = v_flex()
+            .id(SharedString::from(selector.clone()))
+            .debug_selector(move || selector.clone())
+            .w_full()
+            .rounded(theme.radius)
+            .border_1()
+            .border_color(if selected {
+                theme.primary
+            } else if compact {
+                gpui_kit::transparent_black()
+            } else {
+                theme.border
+            })
+            .cursor_pointer()
+            .on_click(on_click);
+        let card = if compact {
+            card.px_1().py_0p5().child(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .text_sm()
+                    .child(mark)
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .child(task.title.clone()),
+                    )
+                    .children(starting),
+            )
+        } else {
+            card.gap_1()
+                .p_2()
+                .bg(theme.sidebar)
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .items_start()
+                        .child(mark)
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .text_sm()
+                                .font_semibold()
+                                .line_clamp(2)
+                                .child(task.title.clone()),
+                        )
+                        .children(starting),
+                )
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .min_w_0()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(div().min_w_0().truncate().child(place))
+                        .children(last.map(|last| div().flex_none().child(last))),
+                )
+        };
+        self.todo_drag(card, key, task, cx).into_any_element()
+    }
+
+    fn render_todo_row(
+        &self,
+        key: ConnectionKey,
+        task: &TaskRecord,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let id = task.id;
+        let selected = self.todo_selected(key, id);
+        let on_click = cx.listener(move |this, _: &ClickEvent, window, cx| {
+            this.click_todo_card(key, id, window, cx)
+        });
+        let theme = cx.theme().clone();
+        let connection = self.connection(key);
+        let repository = task
+            .repository
+            .as_deref()
+            .map(|root| super::task_form::repository_name(connection, root))
+            .unwrap_or_default();
+        let (_, last) = self.todo_place(key, task);
+        let state = div().text_color(theme.muted_foreground).children(
+            task.starting
+                .then(|| t!("tasks.todo.starting").into_owned()),
+        );
+        let row = list_row(
+            format!("tasks-todo-{key}-{}", id.as_u64()),
+            Icon::new(CondrIconName::Circle)
+                .size_3p5()
+                .text_color(theme.muted_foreground),
+            task.title.clone(),
+            repository,
+            last.unwrap_or_default(),
+            connection
+                .map(|connection| connection.label.clone())
+                .unwrap_or_default(),
+            div(),
+            state,
+        )
+        .text_sm()
+        .rounded(theme.radius)
+        .border_1()
+        .border_color(if selected {
+            theme.primary
+        } else {
+            gpui_kit::transparent_black()
+        })
+        .cursor_pointer()
+        .on_click(on_click);
+        self.todo_drag(row, key, task, cx).into_any_element()
+    }
+
+    /// The folded Archived list at the bottom of To do, fetched when it unfolds, with
+    /// Restore and Delete on each Task.
+    fn render_archived(&self, scope: TasksScope, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme().clone();
+        let open = self.tasks_archived_open;
+        let owner = cx.weak_entity();
+        let toggle = h_flex()
+            .id("tasks-archived")
+            .debug_selector(|| "tasks-archived".into())
+            .gap_1()
+            .px_1()
+            .pt_2()
+            .items_center()
+            .text_xs()
+            .text_color(theme.muted_foreground)
+            .cursor_pointer()
+            .child(
+                Icon::new(IconName::ChevronRight)
+                    .size_3()
+                    .when(open, |icon| icon.rotate(percentage(90. / 360.))),
+            )
+            .child(t!("tasks.todo.archived").into_owned())
+            .on_click(move |_, _, cx| {
+                let _ = owner.update(cx, |this, cx| this.toggle_archived_tasks(cx));
+            });
+        let mut rows = Vec::new();
+        if open {
+            for connection in self.task_devices() {
+                let in_scope = match scope {
+                    TasksScope::All => true,
+                    TasksScope::Device(server) | TasksScope::Workspace(server, _) => {
+                        connection.model.server_id == Some(server)
+                    }
+                };
+                let Some(archived) = connection
+                    .device_tasks
+                    .archived
+                    .as_ref()
+                    .filter(|_| in_scope)
+                else {
+                    continue;
+                };
+                for task in archived {
+                    rows.push(self.render_archived_row(connection.key, task, &theme, cx));
+                }
+            }
+        }
+        v_flex()
+            .w_full()
+            .gap_0p5()
+            .child(toggle)
+            .children(rows)
+            .into_any_element()
+    }
+
+    fn render_archived_row(
+        &self,
+        key: ConnectionKey,
+        task: &TaskRecord,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let id = task.id;
+        let (restore_owner, delete_owner) = (cx.weak_entity(), cx.weak_entity());
+        let title = task.title.clone();
+        h_flex()
+            .debug_selector(move || format!("tasks-archived-{key}-{}", id.as_u64()))
+            .w_full()
+            .gap_1()
+            .pl(rems(1.))
+            .items_center()
+            .text_sm()
+            .text_color(theme.muted_foreground)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .child(task.title.clone()),
+            )
+            .child(
+                Button::new(SharedString::from(format!(
+                    "tasks-restore-{key}-{}",
+                    id.as_u64()
+                )))
+                .debug_selector(move || format!("tasks-restore-{key}-{}", id.as_u64()))
+                .ghost()
+                .xsmall()
+                .label(t!("tasks.todo.restore"))
+                .on_click(move |_, _, cx| {
+                    let _ = restore_owner.update(cx, |this, cx| this.restore_task(key, id, cx));
+                }),
+            )
+            .child(
+                Button::new(SharedString::from(format!(
+                    "tasks-archived-delete-{key}-{}",
+                    id.as_u64()
+                )))
+                .debug_selector(move || format!("tasks-archived-delete-{key}-{}", id.as_u64()))
+                .ghost()
+                .xsmall()
+                .label(t!("tasks.form.delete"))
+                .on_click(move |_, window, cx| {
+                    let title = title.clone();
+                    let _ = delete_owner.update(cx, |this, cx| {
+                        this.confirm_delete_task(key, id, title, window, cx)
+                    });
+                }),
+            )
+            .into_any_element()
+    }
+
+    /// A started Task's title, `Workspace · branch` and Device, and what it waits for.
+    fn task_card_facts(
+        &self,
+        card: &TaskCard,
+        task: TaskId,
+    ) -> Option<(String, String, String, String)> {
+        let connection = self.connection(card.key)?;
+        let task = connection.model.tasks.as_ref()?.get(&task)?;
+        let workspace = connection.session()?.workspace(card.workspace_id)?;
+        let mut place = vec![workspace.name().to_owned()];
+        place.extend(
+            connection
+                .model
+                .workspace_git
+                .get(&card.workspace_id)
+                .and_then(|git| git.branch.clone()),
+        );
+        let state = if self.task_starting(card.key, task.id) {
+            t!("tasks.todo.starting")
+        } else {
+            t!("tasks.todo.no_agent")
+        };
+        Some((
+            task.title.clone(),
+            place.join(" · "),
+            connection.label.clone(),
+            state.into_owned(),
+        ))
+    }
+
+    fn task_card_selected(&self, card: &TaskCard, task: TaskId) -> bool {
+        self.main_view()
+            .tasks_selection
+            .is_some_and(|selected| selected.key == card.key && selected.task == Some(task))
+    }
+
+    fn render_task_card(
+        &self,
+        card: &TaskCard,
+        task: TaskId,
+        compact: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some((title, place, device, state)) = self.task_card_facts(card, task) else {
+            return div().into_any_element();
+        };
+        let selected = self.task_card_selected(card, task);
+        let (key, pane_id) = (card.key, card.pane_id);
+        let on_click = cx.listener(move |this, _: &ClickEvent, window, cx| {
+            this.click_task_card(key, pane_id, Some(task), window, cx)
+        });
+        let theme = cx.theme().clone();
+        let selector = format!("tasks-task-{key}-{}", task.as_u64());
+        let mark = Icon::new(CondrIconName::Circle)
+            .size_3p5()
+            .text_color(card.status.tone.color(cx));
+        let state = div()
+            .debug_selector({
+                let selector = selector.clone();
+                move || format!("{selector}-state")
+            })
+            .flex_none()
+            .text_xs()
+            .text_color(theme.muted_foreground)
+            .child(state);
+        let element = v_flex()
+            .id(SharedString::from(selector.clone()))
+            .debug_selector(move || selector.clone())
+            .w_full()
+            .rounded(theme.radius)
+            .border_1()
+            .cursor_pointer()
+            .on_click(on_click);
+        if compact {
+            element
+                .px_1()
+                .py_0p5()
+                .border_color(if selected {
+                    theme.primary
+                } else {
+                    gpui_kit::transparent_black()
+                })
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .items_center()
+                        .text_sm()
+                        .child(mark)
+                        .child(div().flex_1().min_w_0().truncate().child(title))
+                        .child(state),
+                )
+                .into_any_element()
+        } else {
+            element
+                .gap_1()
+                .p_2()
+                .bg(theme.sidebar)
+                .border_color(if selected {
+                    theme.primary
+                } else {
+                    theme.border
+                })
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .items_start()
+                        .child(mark)
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .text_sm()
+                                .font_semibold()
+                                .line_clamp(2)
+                                .child(title),
+                        )
+                        .child(state),
+                )
+                .child(
+                    h_flex()
+                        .gap_1()
+                        .min_w_0()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(div().min_w_0().truncate().child(place))
+                        .child(device_tag(device, &theme)),
+                )
+                .into_any_element()
+        }
+    }
+
+    fn render_task_row(&self, card: &TaskCard, task: TaskId, cx: &mut Context<Self>) -> AnyElement {
+        let Some((title, _, device, state)) = self.task_card_facts(card, task) else {
+            return div().into_any_element();
+        };
+        let selected = self.task_card_selected(card, task);
+        let (key, pane_id) = (card.key, card.pane_id);
+        let on_click = cx.listener(move |this, _: &ClickEvent, window, cx| {
+            this.click_task_card(key, pane_id, Some(task), window, cx)
+        });
+        let theme = cx.theme().clone();
+        let connection = self.connection(key);
+        let workspace = connection
+            .and_then(|connection| connection.session()?.workspace(card.workspace_id))
+            .map(|workspace| workspace.name().to_owned())
+            .unwrap_or_default();
+        let branch = connection
+            .and_then(|connection| connection.model.workspace_git.get(&card.workspace_id))
+            .and_then(|git| git.branch.clone())
+            .unwrap_or_default();
+        list_row(
+            format!("tasks-task-{key}-{}", task.as_u64()),
+            Icon::new(CondrIconName::Circle)
+                .size_3p5()
+                .text_color(card.status.tone.color(cx)),
+            title,
+            workspace,
+            branch,
+            device,
+            div(),
+            div().text_color(theme.muted_foreground).child(state),
         )
         .text_sm()
         .rounded(theme.radius)
@@ -1204,10 +1883,33 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // An open form with changes asks before it goes (ADR 0068).
+        self.leave_task_form(
+            Box::new(move |this, window, cx| {
+                this.select_card(key, pane_id, None, keyboard, window, cx)
+            }),
+            window,
+            cx,
+        );
+    }
+
+    /// Selects an Agent's card, or with `task` a started Task's own card on `pane_id`.
+    pub(super) fn select_card(
+        &mut self,
+        key: ConnectionKey,
+        pane_id: PaneId,
+        task: Option<TaskId>,
+        keyboard: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.task_form = None;
         let Some(connection) = self.connection(key) else {
             return;
         };
-        let column = pane_sidebar_status(&connection.model, pane_id).map(TasksColumn::of);
+        let column = pane_sidebar_status(&connection.model, pane_id)
+            .filter(|_| task.is_none())
+            .map(TasksColumn::of);
         let shown = connection
             .presented_session()
             .and_then(|session| session.workspace_for_pane(pane_id))
@@ -1225,11 +1927,14 @@ impl Condr {
         }
         let kept = view
             .tasks_selection
-            .filter(|selected| (selected.key, selected.pane_id) == (key, pane_id))
+            .filter(|selected| {
+                (selected.key, selected.pane_id) == (key, pane_id) && selected.task == task
+            })
             .and_then(|selected| selected.column);
         view.tasks_selection = Some(TasksSelection {
             key,
             pane_id,
+            task,
             column: kept.or(column),
             keyboard,
         });
@@ -1267,8 +1972,17 @@ impl Condr {
     }
 
     /// Closes the interaction area, which ends the selection and leaves no terminal
-    /// with the keyboard.
+    /// with the keyboard; a form with changes asks first.
     pub(super) fn close_task_area(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.leave_task_form(
+            Box::new(|this, window, cx| this.close_task_area_now(window, cx)),
+            window,
+            cx,
+        );
+    }
+
+    fn close_task_area_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.task_form = None;
         let view = self.main_view_mut();
         view.tasks_selection = None;
         view.tasks_dock = None;
@@ -1279,22 +1993,32 @@ impl Condr {
     }
 
     /// A click on a card: the selected one closes the area, another opens it with the
-    /// keyboard in its terminal.
+    /// keyboard in its terminal. A started Task's own card is known by its Task.
     fn click_task_card(
         &mut self,
         key: ConnectionKey,
         pane_id: PaneId,
+        task: Option<TaskId>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let selected = self
             .main_view()
             .tasks_selection
-            .is_some_and(|selected| (selected.key, selected.pane_id) == (key, pane_id));
+            .is_some_and(|selected| match task {
+                Some(task) => selected.key == key && selected.task == Some(task),
+                None => (selected.key, selected.pane_id) == (key, pane_id),
+            });
         if selected {
             self.close_task_area(window, cx);
         } else {
-            self.select_task_card(key, pane_id, true, window, cx);
+            self.leave_task_form(
+                Box::new(move |this, window, cx| {
+                    this.select_card(key, pane_id, task, true, window, cx)
+                }),
+                window,
+                cx,
+            );
         }
     }
 
@@ -1308,6 +2032,7 @@ impl Condr {
         )
         .into_iter()
         .flat_map(|(_, cards)| cards)
+        .filter(|card| card.task.is_none())
         .map(|card| (card.key, card.pane_id))
         .collect()
     }
@@ -1357,7 +2082,8 @@ impl Condr {
             "down" | "right" => self.step_task_card(1, false, window, cx),
             "enter" => {
                 if let Some(selected) = self.main_view().tasks_selection {
-                    self.select_task_card(selected.key, selected.pane_id, true, window, cx);
+                    let (key, pane_id, task) = (selected.key, selected.pane_id, selected.task);
+                    self.select_card(key, pane_id, task, true, window, cx);
                 }
             }
             _ => return,
@@ -1497,10 +2223,11 @@ impl Condr {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let cards = AnyView::from(board).cached(StyleRefinement::default().size_full());
-        let Some(selected) = view.tasks_selection else {
-            return div().size_full().child(cards).into_any_element();
+        let area = match (&self.task_form, view.tasks_selection) {
+            (Some(form), _) => self.render_task_form_area(form, cx),
+            (None, Some(selected)) => self.render_tasks_area(view, selected, cx),
+            (None, None) => return div().size_full().child(cards).into_any_element(),
         };
-        let area = self.render_tasks_area(view, selected, cx);
         let board_layout = view.tasks.layout == TasksLayout::Board;
         let split = if board_layout {
             view.tasks.split_board.unwrap_or(DEFAULT_SPLIT_BOARD)
@@ -1578,7 +2305,26 @@ impl Condr {
                 workspace_id: workspace.id(),
                 pane_id: pane,
                 status: pane_sidebar_status(&connection.model, pane)?,
+                task: None,
             })
+        });
+        // The Task whose Workspace the Pane is in, for its title and Archive task.
+        let held = connection.and_then(|connection| {
+            let workspace = connection.presented_session()?.workspace_for_pane(pane)?;
+            let task = connection.model.workspace_task(workspace.id())?;
+            Some((task.id, task.title.clone(), workspace.id()))
+        });
+        let task_card = selected.task.and_then(|task| {
+            self.task_card_facts(
+                &TaskCard {
+                    key,
+                    workspace_id: held.as_ref()?.2,
+                    pane_id: pane,
+                    status: super::sidebar::agent_sidebar_status(AgentDisplayState::Idle),
+                    task: Some(task),
+                },
+                task,
+            )
         });
         let facts = card.as_ref().and_then(|card| self.card_facts(card));
         let icon = card
@@ -1586,18 +2332,40 @@ impl Condr {
             .zip(facts.as_ref())
             .map(|(card, facts)| self.card_icon(card, facts.kind, cx));
         let theme = cx.theme();
-        let title = match (&facts, agent) {
-            (Some(facts), Some(_)) => facts.title.clone(),
+        let title = match (&facts, agent, &held) {
+            (Some(facts), Some(_), _) => facts.title.clone(),
+            (_, _, Some((_, title, _))) => title.clone(),
             _ => connection
                 .and_then(|connection| connection.model.terminal_titles.get(&pane).cloned())
                 .unwrap_or_default(),
         };
-        let place = facts.as_ref().map(|facts| {
-            let mut place = vec![facts.workspace.clone()];
-            place.extend(facts.branch.clone());
-            place.push(facts.kind.label().to_owned());
-            place.push(facts.device.clone());
-            place.join(" · ")
+        let place = match (&facts, &task_card) {
+            (Some(facts), _) => Some({
+                let mut place = vec![facts.workspace.clone()];
+                place.extend(facts.branch.clone());
+                place.push(facts.kind.label().to_owned());
+                place.push(facts.device.clone());
+                place.join(" · ")
+            }),
+            (None, Some((_, place, device, _))) => Some(format!("{place} · {device}")),
+            (None, None) => None,
+        };
+        let absent = match &task_card {
+            Some((_, _, _, state)) => state.clone(),
+            None => t!("tasks.area.agent_exited").into_owned(),
+        };
+        let archive = held.map(|(task, _, _)| {
+            let owner = cx.weak_entity();
+            Button::new("tasks-archive-task")
+                .debug_selector(|| "tasks-archive-task".into())
+                .ghost()
+                .xsmall()
+                .label(t!("tasks.archive.button"))
+                .on_click(move |_, window, cx| {
+                    let _ = owner.update(cx, |this, cx| {
+                        this.confirm_archive_task(key, task, window, cx)
+                    });
+                })
         });
         let open_owner = cx.weak_entity();
         let close_owner = cx.weak_entity();
@@ -1635,10 +2403,11 @@ impl Condr {
                         .flex_none()
                         .text_xs()
                         .text_color(theme.muted_foreground)
-                        .child(t!("tasks.area.agent_exited").into_owned()),
+                        .child(absent),
                 )
             })
             .child(div().flex_1())
+            .children(archive)
             .child(
                 Button::new("tasks-open-in-workspace")
                     .debug_selector(|| "tasks-open-in-workspace".into())
@@ -1733,6 +2502,7 @@ mod tests {
             workspace_id: WorkspaceId::from_u64(1),
             pane_id: PaneId::from_u64(pane),
             status: status(key),
+            task: None,
         };
         let mut cards = [
             card(1, "error"),

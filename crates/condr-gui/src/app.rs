@@ -38,6 +38,7 @@ mod settings;
 mod sidebar;
 mod startup;
 mod syntax;
+mod task_form;
 mod tasks;
 mod terminal_images;
 mod terminal_input;
@@ -195,6 +196,7 @@ actions!(
         ToggleSidebar,
         ToggleChanges,
         ToggleTasks,
+        NewTask,
         NextWorkspace,
         PreviousWorkspace,
         NextAgent,
@@ -295,6 +297,13 @@ pub(crate) struct Condr {
     /// How many times Tasks mode's card area was built (ADR 0068).
     #[cfg(feature = "test-support")]
     tasks_board_render_count: std::cell::Cell<usize>,
+    /// The form of a To do Task, or of a new one, which the interaction area shows in
+    /// place of a terminal (ADR 0068).
+    task_form: Option<task_form::TaskForm>,
+    /// Whether To do's Archived list is unfolded; it is fetched each time it unfolds.
+    tasks_archived_open: bool,
+    /// The Agent a Task was last started with, which Start offers first.
+    last_task_agent: Option<AgentKind>,
     panels: HashMap<(ConnectionKey, PaneId), Entity<TerminalPanel>>,
     /// Every window this Client draws in, the main window first (ADR 0043).
     windows: Vec<WindowView>,
@@ -545,6 +554,9 @@ impl Condr {
             tasks_needs_you: HashSet::new(),
             #[cfg(feature = "test-support")]
             tasks_board_render_count: std::cell::Cell::new(0),
+            task_form: None,
+            tasks_archived_open: false,
+            last_task_agent: None,
             panels: HashMap::new(),
             windows: vec![main_view],
             last_active: window.window_handle(),

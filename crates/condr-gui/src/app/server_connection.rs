@@ -58,6 +58,9 @@ pub(super) struct ServerConnection {
     pub(super) hooks: Vec<HooksReport>,
     /// Why the last hooks request failed, until the next report.
     pub(super) hooks_error: Option<String>,
+    /// What this Client asked about the Device's Tasks and Agents, and what came back
+    /// beyond the Session model (ADR 0068).
+    pub(super) device_tasks: super::task_form::DeviceTasks,
     pub(super) listen: Option<String>,
     /// `[server.p2p] enabled` on the Server, as its last `Status` or `P2pSaved` said.
     pub(super) p2p: bool,
@@ -208,6 +211,7 @@ impl ServerConnection {
             resources: WorkspaceResources::default(),
             hooks: Vec::new(),
             hooks_error: None,
+            device_tasks: Default::default(),
             listen: None,
             p2p: false,
             running_listen: None,
@@ -443,11 +447,48 @@ impl ServerConnection {
         else {
             return;
         };
-        self.send(ClientMessage::Agent {
+        if self.send(ClientMessage::Agent {
             server_id,
             session_id,
             command: AgentCommand::Hooks { agent, action },
-        });
+        }) {
+            self.device_tasks
+                .agent_requests
+                .push_back(super::task_form::AgentRequest::Hooks);
+        }
+    }
+
+    /// Asks which Agents the Device has on its PATH; the reply comes back as an
+    /// `AgentResult`, which carries no request id, so the order sent tells it apart.
+    pub(super) fn send_agents_available(&mut self) {
+        let (Some(server_id), Some(session_id)) = (self.model.server_id, self.model.session_id)
+        else {
+            return;
+        };
+        if self.send(ClientMessage::Agent {
+            server_id,
+            session_id,
+            command: AgentCommand::Available,
+        }) {
+            self.device_tasks
+                .agent_requests
+                .push_back(super::task_form::AgentRequest::Available);
+        }
+    }
+
+    /// Sends one Task request (ADR 0068) and remembers what it was for.
+    pub(super) fn send_task(
+        &mut self,
+        command: condr_core::TaskCommand,
+        request: super::task_form::TaskRequest,
+    ) -> Option<u64> {
+        let request_id = self.send_request(|server_id, _, request_id| ClientMessage::Task {
+            server_id,
+            request_id,
+            command,
+        })?;
+        self.device_tasks.pending.insert(request_id, request);
+        Some(request_id)
     }
 
     /// Enqueues a message without changing lifecycle state. The incoming task owns

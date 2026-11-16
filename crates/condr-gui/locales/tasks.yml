@@ -25,6 +25,9 @@ tasks:
       en: Compact
       zh-CN: 紧凑
   column:
+    to_do:
+      en: To do
+      zh-CN: To do
     needs_you:
       en: Needs you
       zh-CN: Needs you
@@ -79,3 +82,200 @@ tasks:
     reconnect:
       en: Reconnect
       zh-CN: 重新连接
+  request_failed:
+    en: "The Task request failed: %{error}"
+    zh-CN: "Task 请求失败：%{error}"
+  todo:
+    new:
+      en: New task
+      zh-CN: 新建 Task
+    archived:
+      en: Archived
+      zh-CN: 已归档
+    restore:
+      en: Restore
+      zh-CN: 恢复
+    starting:
+      en: Starting…
+      zh-CN: 正在开始…
+    no_agent:
+      en: No agent running
+      zh-CN: 没有运行中的 Agent
+  form:
+    new_title:
+      en: New task
+      zh-CN: 新建 Task
+    title:
+      en: Title
+      zh-CN: 标题
+    title_placeholder:
+      en: What needs doing?
+      zh-CN: 要做什么？
+    description:
+      en: Description
+      zh-CN: 描述
+    description_hint:
+      en: — sent to the Agent with the title
+      zh-CN: —— 和标题一起发给 Agent
+    description_placeholder:
+      en: What should the Agent do?
+      zh-CN: Agent 该做什么？
+    loading:
+      en: Loading…
+      zh-CN: 正在载入…
+    device:
+      en: Device
+      zh-CN: 设备
+    repository:
+      en: Repository (optional)
+      zh-CN: 仓库（可选）
+    no_repository:
+      en: None
+      zh-CN: 无
+    save:
+      en: Save
+      zh-CN: 保存
+    cancel:
+      en: Cancel
+      zh-CN: 取消
+    archive:
+      en: Archive
+      zh-CN: 归档
+    delete:
+      en: Delete
+      zh-CN: 删除
+    save_to_start:
+      en: Save the task to start it.
+      zh-CN: 保存 Task 之后才能开始。
+    no_device:
+      en: No connected Device keeps Tasks.
+      zh-CN: 没有已连接的设备保存 Task。
+    save_failed:
+      en: "Couldn't save ‘%{title}’: %{error}"
+      zh-CN: "无法保存“%{title}”：%{error}"
+    move_failed:
+      en: "‘%{title}’ is on both %{device} and %{old}: deleting it from %{old} failed: %{error}"
+      zh-CN: "“%{title}”现在同时在 %{device} 和 %{old} 上：从 %{old} 删除失败：%{error}"
+    unsaved:
+      title:
+        en: Save changes to ‘%{title}’?
+        zh-CN: 保存对“%{title}”的修改？
+      description:
+        en: Your changes are lost if you don't save them.
+        zh-CN: 不保存的话，修改会丢失。
+      discard:
+        en: Discard
+        zh-CN: 放弃
+  delete:
+    title:
+      en: Delete ‘%{title}’?
+      zh-CN: 删除“%{title}”？
+    description:
+      en: This can't be undone.
+      zh-CN: 删除后无法恢复。
+  start:
+    heading:
+      en: Start
+      zh-CN: 开始
+    where:
+      en: Where
+      zh-CN: 位置
+    continue:
+      en: Continue in ↺ %{branch}
+      zh-CN: 在 ↺ %{branch} 继续
+    folder_missing:
+      en: The folder no longer exists
+      zh-CN: 文件夹已不存在
+    held:
+      en: ‘%{title}’ holds its Workspace
+      zh-CN: “%{title}”占用着它的 Workspace
+    existing:
+      en: Existing Workspace
+      zh-CN: 已有 Workspace
+    has_agents:
+      one:
+        en: Its %{count} Agent will show this Task's title.
+        zh-CN: 其中的 %{count} 个 Agent 会显示这个 Task 的标题。
+      other:
+        en: Its %{count} Agents will show this Task's title.
+        zh-CN: 其中的 %{count} 个 Agent 会显示这个 Task 的标题。
+    new_worktree:
+      en: New worktree
+      zh-CN: 新建 Worktree
+    from:
+      en: from %{repository} · branch
+      zh-CN: 从 %{repository} 新建 · 分支
+    no_repository:
+      en: Choose a repository first.
+      zh-CN: 先选一个仓库。
+    open_first:
+      en: Open %{repository} first
+      zh-CN: 先打开 %{repository}
+    nowhere:
+      en: Open a Workspace on %{device} first.
+      zh-CN: 先在 %{device} 上打开一个 Workspace。
+    agent:
+      en: Agent
+      zh-CN: Agent
+    checking:
+      en: Checking…
+      zh-CN: 正在检查…
+    no_agents:
+      en: No Agent that can start a Task is on %{device}'s PATH.
+      zh-CN: "%{device} 的 PATH 上没有能开始 Task 的 Agent。"
+    hooks_missing:
+      en: "Hooks not installed: the conversation won't resume after a restart."
+      zh-CN: 未安装 Hook：重启后对话不会恢复。
+    install:
+      en: Install
+      zh-CN: 安装
+    button:
+      en: Start %{agent}
+      zh-CN: 用 %{agent} 开始
+    save_first:
+      en: Save your changes first.
+      zh-CN: 请先保存修改。
+    failed:
+      en: "Couldn't start ‘%{title}’: %{error}"
+      zh-CN: "无法开始“%{title}”：%{error}"
+    no_agent_started:
+      en: The Agent for ‘%{title}’ did not start; look at its Pane.
+      zh-CN: “%{title}”的 Agent 没有启动，请查看它的 Pane。
+  archive:
+    button:
+      en: Archive task
+      zh-CN: 归档 Task
+    title:
+      en: Archive ‘%{title}’
+      zh-CN: 归档“%{title}”
+    ok:
+      en: Archive
+      zh-CN: 归档
+    close:
+      en: Close its Workspace
+      zh-CN: 关闭它的 Workspace
+    agents_end:
+      one:
+        en: "%{count} Agent will end."
+        zh-CN: "%{count} 个 Agent 会结束。"
+      other:
+        en: "%{count} Agents will end."
+        zh-CN: "%{count} 个 Agent 会结束。"
+    working:
+      en: "%{agent} is working."
+      zh-CN: "%{agent} 正在工作。"
+    waiting:
+      en: "%{agent} is waiting for you."
+      zh-CN: "%{agent} 正在等你。"
+    remove:
+      en: Remove the worktree (keeps branch %{branch})
+      zh-CN: 移除 Worktree（保留分支 %{branch}）
+    remove_no_branch:
+      en: Remove the worktree
+      zh-CN: 移除 Worktree
+    dirty:
+      en: It has uncommitted changes.
+      zh-CN: 它有未提交的修改。
+    kept:
+      en: The Workspace stays open; its Agents become cards of their own.
+      zh-CN: Workspace 保持打开，其中的 Agent 变成不属于 Task 的卡片。

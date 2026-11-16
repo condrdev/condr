@@ -119,6 +119,14 @@ pub(super) const GROUPS: &[(&str, &[Shortcut])] = &[
                 Needs::MainWindow,
                 on(&["cmd-0"], &["alt-0"]),
             ),
+            // No default key, as New Workspace has none (ADR 0068).
+            shortcut(
+                "new-task",
+                "keymap.action.new_task",
+                &NewTask,
+                Needs::MainWindow,
+                &[],
+            ),
             // VS Code's Command Palette and Go to File; Ctrl+P stays the terminal's, and
             // herdr-app takes Ctrl+Shift+K for its Go to.
             shortcut(

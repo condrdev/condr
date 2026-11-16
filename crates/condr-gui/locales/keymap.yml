@@ -32,6 +32,9 @@ keymap:
     toggle_tasks:
       en: Toggle Tasks
       zh-CN: 切换 Tasks
+    new_task:
+      en: New Task
+      zh-CN: 新建 Task
     command_palette:
       en: 'Command Palette: Actions'
       zh-CN: '命令面板：操作'

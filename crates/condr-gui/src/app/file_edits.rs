@@ -91,14 +91,14 @@ pub(super) fn to_crlf(text: &str) -> String {
 }
 
 #[derive(Clone, Copy)]
-enum ChoiceStyle {
+pub(super) enum ChoiceStyle {
     Primary,
     Danger,
     Plain,
 }
 
 #[derive(Clone)]
-struct Choice {
+pub(super) struct Choice {
     /// Names the button's debug selector, which the translated label cannot.
     id: &'static str,
     label: SharedString,
@@ -108,7 +108,7 @@ struct Choice {
 }
 
 impl Choice {
-    fn new(
+    pub(super) fn new(
         id: &'static str,
         label: impl Into<SharedString>,
         style: ChoiceStyle,
@@ -126,14 +126,14 @@ impl Choice {
 }
 
 /// A continuation the dialog's buttons share; whichever runs first takes it.
-fn shared(then: Continuation) -> Rc<RefCell<Option<Continuation>>> {
+pub(super) fn shared(then: Continuation) -> Rc<RefCell<Option<Continuation>>> {
     Rc::new(RefCell::new(Some(then)))
 }
 
 impl Condr {
     /// A dialog that must be answered by one of `choices`: unsaved text is never dropped
     /// by a click beside it or Escape.
-    fn open_choice(
+    pub(super) fn open_choice(
         &self,
         title: String,
         description: String,

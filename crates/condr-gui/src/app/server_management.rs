@@ -235,6 +235,7 @@ impl Condr {
         .map_err(|error| ConnectionInstallError::Unavailable(error.to_string()))?;
         connection.io = Some(io);
         connection.resources.connection_closed();
+        connection.device_tasks.connection_closed();
         connection.reset_sync_state();
         Ok(application)
     }
@@ -483,6 +484,7 @@ impl Condr {
             self.sync_local_settings(key, cx);
             self.send_terminal_colors(Some(key), cx);
             self.refresh_target_pane(key);
+            self.tasks_bootstrapped(key, cx);
             if self.presents(key) {
                 self.rebuild_dock(window, cx);
             }
@@ -522,6 +524,7 @@ impl Condr {
         connection.reset_sync_state();
         connection.resources.clear_pending();
         connection.resources.connection_closed();
+        connection.device_tasks.connection_closed();
         connection.error = Some(message);
         connection.disconnected_at = Some(Instant::now());
         connection.cancellation.cancel();

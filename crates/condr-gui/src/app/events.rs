@@ -97,6 +97,7 @@ impl Condr {
                 }
                 self.refresh_target_pane(key);
                 self.fetch_terminal_images(key, cx);
+                self.tasks_bootstrapped(key, cx);
                 let target_changed = self.terminal_input.target != target_before_refresh;
                 return IncomingEffect {
                     rebuild: application.rebuild
@@ -220,11 +221,16 @@ impl Condr {
                         self.sync_sidebar_workspace_open(cx);
                         return self.settle_layout(key, sequence, layout_changed);
                     }
-                    // Stands in for an event this build's protocol does not include. The GUI
-                    // does not say `tasks` yet, so no Task event reaches it (ADR 0068).
-                    SessionEvent::Omitted
-                    | SessionEvent::TaskChanged(_)
-                    | SessionEvent::TaskRemoved { .. } => return IncomingEffect::default(),
+                    // Stands in for an event this build's protocol does not include.
+                    SessionEvent::Omitted => return IncomingEffect::default(),
+                    SessionEvent::TaskChanged(task) => {
+                        self.task_changed(key, task, cx);
+                        notify = true;
+                    }
+                    SessionEvent::TaskRemoved { task } => {
+                        self.task_removed(key, task, cx);
+                        notify = true;
+                    }
                     SessionEvent::Activated {
                         workspace_id,
                         tab_id,
@@ -254,6 +260,9 @@ impl Condr {
                         let change = self.connections[index]
                             .model
                             .apply_agent(pane_id, agent.clone());
+                        if agent.is_none() {
+                            self.agent_left_task(key, pane_id);
+                        }
                         if let Some(agent) = agent {
                             // A new process reopens the Workspace row; a repeat does not
                             // undo a manual collapse.
@@ -866,10 +875,19 @@ impl Condr {
                 self.write_terminal_copy(text, cx);
                 IncomingEffect::default()
             }
-            // The GUI's only agent requests are hooks, so every result is one of theirs.
+            // The GUI asks about hooks and, for a Task's Start, the Agents on PATH; the
+            // Server answers both in the order asked (ADR 0068).
             ServerMessage::AgentResult { result } => {
                 let connection = &mut self.connections[index];
+                let request = connection.device_tasks.agent_requests.pop_front();
                 match result {
+                    Ok(AgentResponse::Available(installations)) => {
+                        connection.device_tasks.agents_available(installations);
+                    }
+                    Err(error) if request == Some(super::task_form::AgentRequest::Available) => {
+                        connection.device_tasks.available = Some(Vec::new());
+                        self.report_error(error.message, cx);
+                    }
                     Ok(AgentResponse::Hooks(report)) => {
                         connection.hooks_error = None;
                         match connection
@@ -893,10 +911,15 @@ impl Condr {
                     ..IncomingEffect::default()
                 }
             }
-            // Only the CLI asks for Pane text or administers devices, and only the CLI asks
-            // about Tasks yet (ADR 0068).
-            ServerMessage::Task { .. }
-            | ServerMessage::Overview(_)
+            ServerMessage::Task { request_id, result } => {
+                self.task_answered(key, request_id, result, cx);
+                IncomingEffect {
+                    notify: true,
+                    ..IncomingEffect::default()
+                }
+            }
+            // Only the CLI asks for Pane text or administers devices.
+            ServerMessage::Overview(_)
             | ServerMessage::OverviewTerminals { .. }
             | ServerMessage::PaneText { .. }
             | ServerMessage::DevicesRevoked { .. }

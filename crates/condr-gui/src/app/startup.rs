@@ -24,6 +24,7 @@ pub(super) fn bind_keys(cx: &mut App) {
         KeyBinding::new("tab", TerminalTab, Some("CondrTerminal")),
         KeyBinding::new("shift-tab", TerminalBackTab, Some("CondrTerminal")),
         KeyBinding::new(secondary!("s"), SaveFile, Some("CondrPreview")),
+        KeyBinding::new(secondary!("s"), SaveFile, Some("CondrTaskForm")),
     ]);
     cx.bind_keys(super::directory_browser::key_bindings());
     cx.bind_keys(super::new_workspace::key_bindings());
@@ -115,6 +116,14 @@ pub(super) fn connect_to_server_with<T>(
     }
 }
 
+/// The GUI's `Hello`: its name, and the hint that it takes the Server's Tasks (ADR 0068).
+pub(super) fn gui_hello(client_name: impl Into<String>) -> condr_core::protocol::Hello {
+    condr_core::protocol::Hello {
+        tasks: true,
+        ..condr_core::protocol::Hello::new(client_name)
+    }
+}
+
 /// The GUI introduces itself by host name, so a paired device is recognisable in
 /// `condr server clients`.
 pub(super) fn connect_to_server(
@@ -125,7 +134,7 @@ pub(super) fn connect_to_server(
     connect_to_server_with(endpoint, condr_server::ensure_local_server, |endpoint| {
         ClientConnection::connect_cancellable(
             endpoint,
-            condr_server::noise::device_name(),
+            gui_hello(condr_server::noise::device_name()),
             cancellation,
         )
         .map_err(|error| {
