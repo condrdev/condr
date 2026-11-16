@@ -1,5 +1,7 @@
 use super::*;
 use gpui_kit::component::clipboard::Clipboard;
+use rust_i18n::t;
+use std::borrow::Cow;
 
 /// Wide enough for a connect error to wrap into two or three readable lines.
 const DISCONNECTED_COLUMN_WIDTH: Rems = rems(30.);
@@ -12,40 +14,36 @@ fn connection_advice(
     reason: &str,
     endpoint: &Endpoint,
     refusal: Option<&condr_core::protocol::Refusal>,
-) -> &'static str {
+) -> Cow<'static, str> {
     if let Some(condr_core::protocol::Refusal::IncompatibleProtocol) = refusal {
-        return "Condr there and here speak different protocol versions, so trying again \
-                will not help. Update both to the same version.";
+        return t!("connection.advice.incompatible_protocol");
     }
+    // The reasons stay English (ADR 0066), so the matching works under every locale.
     if reason.contains("Failed to start Condr on this device") {
-        return "Condr's own server could not start on this device. Connect tries again.";
+        return t!("connection.advice.local_start_failed");
     }
     if reason.contains("start the remote Server with") {
-        return "SSH reached the device, but Condr is not running there. Start it with \
-                `condr server start` on the device.";
+        return t!("connection.advice.ssh_not_running");
     }
     if reason.contains("nothing is listening") {
-        return "Nothing answers at this address. Check that Condr is running there and \
-                that the address is right.";
+        return t!("connection.advice.nothing_listening");
     }
     if reason.contains("did not answer") || reason.contains("stopped answering") {
-        return "The device did not answer. Check that it is awake and on the network.";
+        return t!("connection.advice.no_answer");
     }
     if reason.contains("is unreachable") {
-        return "This device cannot reach that address. Check the network and any VPN.";
+        return t!("connection.advice.unreachable");
     }
     if reason.contains("refused this connection") {
-        return "The device refused this connection. Check that this device is still paired \
-                there.";
+        return t!("connection.advice.refused");
     }
     if reason.contains("closed the connection") {
-        return "The device closed the connection. Condr there may have stopped or restarted.";
+        return t!("connection.advice.closed");
     }
     if matches!(endpoint, Endpoint::Ssh(_)) {
-        return "SSH could not reach the device. Try the same `ssh` destination from a \
-                terminal on this device.";
+        return t!("connection.advice.ssh_failed");
     }
-    "Connect tries again. The reason below says what went wrong."
+    t!("connection.advice.retry")
 }
 
 impl Condr {
@@ -59,19 +57,19 @@ impl Condr {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let key = connection.key;
-        let label = &connection.label;
+        let device = &connection.label;
         let reconnecting = connection.reconnect_deadline.is_some();
         let busy = connection.status == ConnectionStatus::Connecting || reconnecting;
         // No reason means nothing failed: the user disconnected, or never connected.
         let deliberate = connection.error.is_none();
         let title = if reconnecting {
-            format!("Reconnecting to {label}…")
+            t!("connection.title.reconnecting", device = device)
         } else if busy {
-            format!("Connecting to {label}…")
+            t!("connection.title.connecting", device = device)
         } else if deliberate {
-            format!("Disconnected from {label}")
+            t!("connection.title.disconnected", device = device)
         } else {
-            format!("Can't reach {label}")
+            t!("connection.title.unreachable", device = device)
         };
         // A stale reason under a spinner reads as a fresh failure; show it when settled.
         let reason = (!busy).then(|| connection.error.clone()).flatten();
@@ -131,7 +129,7 @@ impl Condr {
                                 .child(
                                     Clipboard::new(("connection-error-copy", key))
                                         .value(reason)
-                                        .tooltip("Copy error"),
+                                        .tooltip(t!("connection.copy_error")),
                                 ),
                         )
                     })
@@ -145,7 +143,7 @@ impl Condr {
                                         .debug_selector(move || format!("connect-server-{key}"))
                                         .small()
                                         .primary()
-                                        .label("Connect")
+                                        .label(t!("connection.connect"))
                                         .on_click(move |_, window, cx| {
                                             let _ = connect_owner.update(cx, |this, cx| {
                                                 this.connect_server(key, window, cx)
@@ -157,7 +155,7 @@ impl Condr {
                                         Button::new(("edit-server", key))
                                             .small()
                                             .outline()
-                                            .label("Edit device")
+                                            .label(t!("connection.edit_device"))
                                             .on_click(move |_, window, cx| {
                                                 let _ = edit_owner.update(cx, |this, cx| {
                                                     this.prompt_edit_server_on(key, window, cx)

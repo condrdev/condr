@@ -7,10 +7,14 @@ mod apca;
 mod app;
 mod assets;
 mod color_scheme;
+mod i18n;
 mod interface_colors;
 mod terminal_element;
 
 pub(crate) use app::{Condr, ConnectionKey};
+
+// Every message in `locales/*.yml`, English when a key has no translation (ADR 0066).
+rust_i18n::i18n!("locales", fallback = "en");
 
 fn main() {
     // The one flag the GUI answers on the command line, so a package can be asked

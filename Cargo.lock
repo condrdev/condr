@@ -1467,6 +1467,7 @@ dependencies = [
  "qrcode",
  "relative-path",
  "resvg 0.46.0",
+ "rust-i18n",
  "serde",
  "serde_json",
  "similar",

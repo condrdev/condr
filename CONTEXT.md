@@ -152,3 +152,34 @@ _Avoid_: Git Workspace, any detected worktree
 **Session Snapshot**:
 A durable description of Session structure and references to Agent Conversations, including an empty Session, used to rebuild the arrangement after a Server restart. It contains neither terminal history nor live processes nor conversation contents; those contents remain owned by the native CLI.
 _Avoid_: Backup, process snapshot
+
+## In the Chinese interface
+
+The GUI's Simplified Chinese keeps Condr's own concepts in English, as condr.dev's Chinese documentation does, and translates the rest (ADR 0066).
+
+| English | zh-CN |
+|---|---|
+| Workspace, Tab, Pane, Session, Agent, Worktree, Managed Worktree, Diff Tab, Preview Tab, Needs you | unchanged |
+| Unknown, Idle, Working, Blocked, Done, Error (Agent states) | unchanged |
+| Condr, Condr Cloud, Companion, Shell, agent CLI and editor names | unchanged |
+| Device | 设备 |
+| Paired devices | 已配对设备 |
+| Client | 客户端 |
+| Agent Conversation | Agent 会话 |
+| Session Snapshot | Session 快照 |
+| Invite | 邀请 |
+| Relay | 中继 |
+| Forward | 端口转发 |
+| Settings | 设置 |
+| Appearance | 外观 |
+| Color Scheme | 配色方案 |
+| Command Palette | 命令面板 |
+| Start Page | 起始页 |
+| Terminal | 终端 |
+| Shell Integration | Shell 集成 |
+| Root Directory | 根目录 |
+| Base Branch | 基准分支 |
+| Changes, Files, History | 变更、文件、历史 |
+| Start Condr at login (Autostart) | 登录时启动 Condr |
+| Update Channel | 更新通道 |
+| View | 视图 |

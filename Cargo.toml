@@ -45,6 +45,9 @@ gpui-pre-http-client-tls = "0.3"
 # The Preview Tab's line diff for its change marks (ADR 0050); Kit already builds it into
 # the GUI for its `Diff`, so this adds no code. Keep it on Kit's version.
 similar = "2.7"
+# The GUI's translations (ADR 0066); Kit already builds it for its components' own
+# strings and switches them with the same locale. Keep it on Kit's version.
+rust-i18n = "4.2"
 # The Command Palette's fuzzy matching and its highlights (ADR 0064).
 nucleo-matcher = { version = "0.3", default-features = false, features = ["unicode-normalization", "unicode-casefold"] }
 # Which Option key is held, for Option as Meta on one side only (ADR 0063): GPUI's
