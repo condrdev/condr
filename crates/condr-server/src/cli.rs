@@ -1,5 +1,5 @@
-//! `condr workspace …`, `condr tab …`, and `condr agent …`: how a program in a Pane
-//! changes or coordinates the Session it lives in. Shaped after herdr's CLI: JSON on
+//! `condr workspace …`, `condr tab …`, `condr agent …` and `condr task …`: how a program
+//! in a Pane changes or coordinates the Session it lives in. Shaped after herdr's CLI: JSON on
 //! stdout, a JSON error on stderr with exit 1, and usage errors from clap with exit 2.
 //! Agent targets are numeric Pane ids or names assigned by `agent start`.
 
@@ -9,6 +9,7 @@ mod file;
 mod interrupt;
 mod pane;
 mod port;
+mod task;
 mod workspace;
 
 use clap::{Subcommand, ValueEnum};
@@ -31,6 +32,7 @@ pub(crate) use device::{DeviceCommand, run_device};
 pub(crate) use file::{FileCommand, run_file};
 pub(crate) use pane::{PaneCommand, run_pane};
 pub(crate) use port::{PortCommand, run_port};
+pub(crate) use task::{TaskCommand, run_task};
 pub(crate) use workspace::{TabCommand, WorkspaceCommand, run_tab, run_workspace};
 
 /// What stderr gets: `{"error":{"code":…,"message":…}}`.
@@ -38,6 +40,9 @@ pub(crate) use workspace::{TabCommand, WorkspaceCommand, run_tab, run_workspace}
 struct CliError {
     code: String,
     message: String,
+    /// Which step of a Task's Start failed (ADR 0068).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    step: Option<String>,
 }
 
 impl CliError {
@@ -45,6 +50,7 @@ impl CliError {
         Self {
             code: code.into(),
             message: message.into(),
+            step: None,
         }
     }
 

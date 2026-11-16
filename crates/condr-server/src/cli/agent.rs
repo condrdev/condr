@@ -171,6 +171,7 @@ fn agent(client: &mut ClientConnection, command: AgentCommand) -> Result<Value, 
     .map_err(|error| CliError {
         code: error.code,
         message: error.message,
+        step: None,
     })?;
     match response {
         AgentResponse::Available(agents) => Ok(json!({

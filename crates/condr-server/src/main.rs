@@ -51,6 +51,9 @@ enum Command {
     /// Agents detected in Panes and their prompt lifecycle
     #[command(subcommand)]
     Agent(cli::AgentCommand),
+    /// Tasks of the Server this Pane belongs to: written work an Agent starts on
+    #[command(subcommand)]
+    Task(cli::TaskCommand),
     /// Remote Devices saved in config.toml, the targets of `--device`
     #[command(subcommand)]
     Device(cli::DeviceCommand),
@@ -268,6 +271,7 @@ fn main() {
         Command::Tab(command) => cli::run_tab(device, command),
         Command::Pane(command) => cli::run_pane(device, command),
         Command::Agent(command) => cli::run_agent(device, command),
+        Command::Task(command) => cli::run_task(device, command),
         Command::Device(command) => cli::run_device(device, command),
         Command::Port(command) => cli::run_port(device, command),
         Command::File(command) => cli::run_file(device, command),
