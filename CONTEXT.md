@@ -78,7 +78,7 @@ A named Terminal palette (background, foreground, cursor, selection and the 16 A
 _Avoid_: Terminal theme, palette (as a user-facing name)
 
 **Workspace**:
-A project- or task-level container with a stable identity and Root Directory. It owns an ordered set of Tabs. Closing it terminates its terminals but never removes files or a Git worktree checkout.
+A project-level container, where the code is, with a stable identity and Root Directory. A started Task holds one (ADR 0068). It owns an ordered set of Tabs. Closing it terminates its terminals but never removes files or a Git worktree checkout.
 _Avoid_: Project, space
 
 **Root Directory**:
@@ -141,6 +141,21 @@ _Avoid_: inbox, queue
 The collapsible section at the bottom of the GUI's left sidebar that lists every Agent the window's tree lists, grouped under their Workspaces with the most urgent first, in a height the person drags (ADR 0067). A row shows the Agent's title and, while it wants something or works, its state, with its `detail` below while it has one; choosing a row selects its Pane, as a row of "Needs you" does, and `next-agent` / `previous-agent` step through the same order. It adds to the Workspace tree and replaces none of it.
 _Avoid_: Agents panel, Agents view, dashboard
 
+**Tasks mode**:
+The main window's whole-window view of every Agent on every connected Device, entered from the Tasks row at the top of the left sidebar or with `toggle-tasks` (ADR 0068). Its columns, To do, Needs you, Done, Working and Idle, are derived from state and never dragged between; it shows as a Board, in cards or compact rows, or as a List, narrowed to one Device or one Workspace with its worktrees. A selected card opens its Agent's Pane alone in the interaction area beside the cards, without changing the window's View. Both sidebars are hidden while it shows.
+_Avoid_: Overview, Board (one of its layouts), dashboard, Agents view
+
+**Task**:
+A piece of work the person wrote down, which an Agent does once it is started (ADR 0068). It lives on one Device's Server; a started Task holds one Workspace, and every Agent in that Workspace works on it and carries its title. Its status follows from whether it holds a Workspace and whether it is archived; nothing stores "in progress".
+_Avoid_: issue, ticket, job
+
+**To do**:
+Tasks mode's column, and group, of Tasks not started, first in its order; a Task returns to it when its Workspace closes, keeping where it was last worked.
+
+**Archive**:
+Ending a Task, finished or dropped, which can be undone with Restore (ADR 0068). Archiving a started Task can close its Workspace and remove its Managed Worktree, and asks first.
+_Avoid_: Close (which ends a Workspace's terminals), Done and 完成 (an Agent's state)
+
 **Command Palette**:
 The GUI's one overlay for running a window action or going to a place by typing part of its name, opened by pressing Shift twice (ADR 0064). Its pages are All, Actions and Go to: Actions lists every window action with its current key, greyed where it cannot run in that window; Go to lists every connected Device and its Workspaces, Tabs and Agents, the most urgent Agents first. It searches names, never terminal output or file contents, and is the Client's own: nothing is sent until a choice is made.
 _Avoid_: Search Everywhere, quick open, palette (alone, that word is the Color Scheme's)
@@ -163,7 +178,7 @@ The GUI's Simplified Chinese keeps Condr's own concepts in English, as condr.dev
 
 | English | zh-CN |
 |---|---|
-| Workspace, Tab, Pane, Session, Server, Agent, Worktree, Managed Worktree, Diff Tab, Preview Tab, Needs you, Peer-to-peer | unchanged |
+| Workspace, Tab, Pane, Session, Server, Agent, Worktree, Managed Worktree, Diff Tab, Preview Tab, Needs you, Peer-to-peer, Task, Tasks, To do | unchanged |
 | Unknown, Idle, Working, Blocked, Done, Error (Agent states), Bell | unchanged |
 | Condr, Condr Cloud, Companion, Shell, agent CLI and editor names, `Local` (this machine's Device name) | unchanged |
 | Device | 设备 |
