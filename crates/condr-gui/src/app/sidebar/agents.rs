@@ -10,6 +10,14 @@ use rust_i18n::t;
 #[derive(Clone)]
 pub(in crate::app) struct DraggedAgents;
 
+/// The section's heading, all of it that shows folded.
+const HEADING_HEIGHT: Rems = rems(2.25);
+/// Critically damped, so the section never bounces past its height: about 90% of the
+/// way in 130 ms, settled by 250 ms.
+const FOLD_SPRING: SpringConfig = SpringConfig::new(900., 60., 1.);
+/// Settled within half a percent of the way, under two pixels on a tall section.
+const FOLD_EPSILON: f32 = 0.005;
+
 /// One Agent the section lists: where it lives and how it shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::app) struct AgentRow {
@@ -139,16 +147,16 @@ impl Condr {
         } else {
             Vec::new()
         };
+        // Folding slides the section and turns its chevron on one spring, which an
+        // interrupting click reverses from where it is (none under reduced motion).
+        let open = SpringAnimation::new(FOLD_SPRING)
+            .with_epsilon(FOLD_EPSILON)
+            .to(!collapsed);
         let toggle_owner = owner.clone();
         let chevron = Button::new("agents-fold")
             .debug_selector(|| "agents-fold".into())
             .xsmall()
             .ghost()
-            .icon(
-                Icon::new(IconName::ChevronRight)
-                    .size_3p5()
-                    .when(!collapsed, |icon| icon.rotate(percentage(90. / 360.))),
-            )
             .tooltip(if collapsed {
                 t!("sidebar.expand", name = label)
             } else {
@@ -157,13 +165,20 @@ impl Condr {
             .on_click(move |_, window, cx| {
                 cx.stop_propagation();
                 let _ = toggle_owner.update(cx, |this, cx| this.toggle_agents_section(window, cx));
+            })
+            .with_spring("agents-chevron", open.clone(), |button, phase| {
+                button.icon(
+                    Icon::new(IconName::ChevronRight)
+                        .size_3p5()
+                        .rotate(percentage(phase.interpolate_clamped(0., 0.25))),
+                )
             });
         let heading_owner = owner.clone();
         // Styled as a Device heading is, which a click folds the same way.
         let heading = h_flex()
             .id("agents-heading")
             .debug_selector(|| "agents-heading".into())
-            .h_9()
+            .h(HEADING_HEIGHT)
             .w_full()
             .flex_shrink_0()
             .items_center()
@@ -186,12 +201,12 @@ impl Condr {
             .id("agents-section")
             .debug_selector(|| "agents-section".into())
             .relative()
-            .w_full()
+            // Out through the footer's padding so the border spans the sidebar; the
+            // padding comes back inside, keeping the rows in line with the tree's.
+            .mx_neg_3()
+            .px_3()
             .border_t_1()
             .border_color(cx.theme().sidebar_border);
-        if collapsed {
-            return section.child(heading).into_any_element();
-        }
 
         let several_devices = self.connections.len() > 1;
         let mut items = Vec::new();
@@ -288,8 +303,10 @@ impl Condr {
         } else {
             v_flex().gap_1().children(items).into_any_element()
         };
+        // Folded, the section is its heading over its top border.
+        let folded_height = HEADING_HEIGHT.to_pixels(window.rem_size()) + px(1.);
+        let open_height = agents_height(view);
         section
-            .h(agents_height(view))
             .on_drag_move(
                 cx.listener(|this, event: &DragMoveEvent<DraggedAgents>, window, cx| {
                     // The section grows upward from its bottom edge, which stays put.
@@ -302,31 +319,44 @@ impl Condr {
                 }),
             )
             .child(heading)
-            .child(
-                div()
-                    .id("agents-list")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .pb_2()
-                    .child(list),
-            )
-            // Over the border, as the sidebar's own handle sits over its edge; it swallows
-            // the press so the row under it is not clicked.
-            .child(
-                div()
-                    .id("agents-resize")
-                    .debug_selector(|| "agents-resize".into())
-                    .absolute()
-                    .left_0()
-                    .right_0()
-                    .top(-SIDEBAR_RESIZE_HANDLE_WIDTH / 2.)
-                    .h(SIDEBAR_RESIZE_HANDLE_WIDTH)
-                    .occlude()
-                    .cursor_row_resize()
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .on_drag(DraggedAgents, |_, _, _, cx| cx.new(|_| EmptyView)),
-            )
+            .with_spring("agents-open", open, move |section, phase| {
+                let phase = phase.clamp(0.0..=1.0);
+                section
+                    .h(phase.interpolate(folded_height, open_height))
+                    // Only while it slides, so the open handle reaches over the border.
+                    .when(phase.0 < 1., |section| section.overflow_hidden())
+                    // The list stays until the section has closed over it.
+                    .when(phase.0 > 0., |section| {
+                        section
+                            .child(
+                                div()
+                                    .id("agents-list")
+                                    .flex_1()
+                                    .min_h_0()
+                                    .overflow_y_scroll()
+                                    .pb_2()
+                                    .child(list),
+                            )
+                            // Over the border, as the sidebar's own handle sits over its
+                            // edge; it swallows the press so the row under it is not clicked.
+                            .child(
+                                div()
+                                    .id("agents-resize")
+                                    .debug_selector(|| "agents-resize".into())
+                                    .absolute()
+                                    .left_0()
+                                    .right_0()
+                                    .top(-SIDEBAR_RESIZE_HANDLE_WIDTH / 2.)
+                                    .h(SIDEBAR_RESIZE_HANDLE_WIDTH)
+                                    .occlude()
+                                    .cursor_row_resize()
+                                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                        cx.stop_propagation()
+                                    })
+                                    .on_drag(DraggedAgents, |_, _, _, cx| cx.new(|_| EmptyView)),
+                            )
+                    })
+            })
             .into_any_element()
     }
 }

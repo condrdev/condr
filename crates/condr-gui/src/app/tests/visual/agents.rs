@@ -180,11 +180,35 @@ fn the_agents_section_lists_every_workspaces_agents_most_urgent_first() {
         "a click selects the Agent's Pane"
     );
 
+    let open = window.debug_bounds("agents-section").unwrap();
     let heading = window.debug_bounds("agents-heading").unwrap();
     window.simulate_click(heading.center(), Modifiers::default());
     window.run_until_parked();
-    window.update(|window, cx| _ = window.draw(cx));
+    let draw_after = |window: &mut VisualTestContext, millis| {
+        window
+            .executor()
+            .advance_clock(Duration::from_millis(millis));
+        window.update(|window, cx| _ = window.draw(cx));
+    };
+    // The frame the click asks for turns the spring; time then moves it.
+    draw_after(window, 0);
+    draw_after(window, 60);
+    let sliding = window.debug_bounds("agents-section").unwrap();
+    assert!(
+        sliding.size.height < open.size.height && sliding.size.height > heading.size.height,
+        "folding slides the section closed"
+    );
+    assert!(
+        window.debug_bounds(row_selector(blocked)).is_some(),
+        "the rows stay while the section closes over them"
+    );
+    draw_after(window, 500);
     assert!(window.debug_bounds(row_selector(blocked)).is_none());
+    assert_eq!(
+        window.debug_bounds("agents-section").unwrap().size.height,
+        heading.size.height + px(1.),
+        "folded, the section is its heading and border"
+    );
     assert!(
         window.debug_bounds("agents-heading").is_some(),
         "folded, the heading stays"
