@@ -38,7 +38,8 @@ pub mod task_error {
     pub const AGENT_START_FAILED: &str = "agent_start_failed";
     pub const WORKTREE_NOT_REMOVABLE: &str = "worktree_not_removable";
     pub const SERVER_STOPPING: &str = "server_stopping";
-    pub const STORE_FAILED: &str = "store_failed";
+    /// The Server hit an error of its own; its log has the details.
+    pub const INTERNAL_ERROR: &str = "internal_error";
 }
 
 /// A Task's number, per Device and never reused.
@@ -244,10 +245,16 @@ pub fn default_task_branch(title: &str, repository: &std::path::Path) -> String 
     format!("worktree/{repository}-{}", &hash[..8])
 }
 
+/// The longest slug a default branch takes, so a long title still names a worktree
+/// folder well under a file system's 255-byte limit.
+#[cfg(feature = "runtime")]
+const MAX_SLUG_CHARACTERS: usize = 60;
+
 #[cfg(feature = "runtime")]
 fn slug(text: &str) -> Option<String> {
     let slug = text
         .chars()
+        .take(MAX_SLUG_CHARACTERS)
         .map(|character| {
             if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
                 character.to_ascii_lowercase()
@@ -273,6 +280,9 @@ mod tests {
             "worktree/fix-the-login-bug"
         );
         assert_eq!(default_task_branch("!!!", repository), "worktree/change");
+        let long = default_task_branch(&"Make it faster ".repeat(40), repository);
+        assert_eq!(long.len(), "worktree/".len() + 59, "{long}");
+        assert!(!long.ends_with('-'));
         // SHA-256("abc") is ba7816bf…, so a non-ASCII title is checked against the rule
         // with the digest computed the same way.
         use sha2::Digest as _;
