@@ -1,6 +1,6 @@
 //! Kimi Code, recognized only (ADR 0035).
 
-use super::{AgentSpec, AgentSupport};
+use super::{AgentSpec, AgentSupport, InitialPrompt};
 
 pub(super) const SPEC: AgentSpec = AgentSpec {
     id: "kimi",
@@ -13,6 +13,7 @@ pub(super) const SPEC: AgentSpec = AgentSpec {
     resume: &["--session", "{id}"],
     reports_at_startup: false,
     reads_kitty_keys: false,
+    initial_prompt: InitialPrompt::None,
     support: AgentSupport::RecognitionOnly(
         "Kimi 1.50 hooks cannot distinguish a subagent's Stop from the main agent's Stop; status integration is unavailable until native hooks identify their agent",
     ),

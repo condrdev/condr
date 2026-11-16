@@ -2,7 +2,7 @@
 
 use super::hook::HookInput;
 use super::hooks::{HookEntry, HookFormat, HookSpec, HookTarget, entry};
-use super::{AgentEventKind, AgentSpec, AgentSupport};
+use super::{AgentEventKind, AgentSpec, AgentSupport, InitialPrompt};
 
 pub(super) const SPEC: AgentSpec = AgentSpec {
     id: "copilot",
@@ -16,6 +16,7 @@ pub(super) const SPEC: AgentSpec = AgentSpec {
     // sessionStart waits for the first prompt.
     reports_at_startup: false,
     reads_kitty_keys: false,
+    initial_prompt: InitialPrompt::Flag("-i"),
     support: AgentSupport::Full(HookSpec {
         format: HookFormat::FlatList {
             events: HOOKS,

@@ -1,7 +1,7 @@
 //! OpenCode.
 
 use super::hooks::{HookFormat, HookSpec, HookTarget};
-use super::{AgentSpec, AgentSupport};
+use super::{AgentSpec, AgentSupport, InitialPrompt};
 
 pub(super) const SPEC: AgentSpec = AgentSpec {
     id: "opencode",
@@ -14,6 +14,7 @@ pub(super) const SPEC: AgentSpec = AgentSpec {
     resume: &["--session", "{id}"],
     reports_at_startup: true,
     reads_kitty_keys: false,
+    initial_prompt: InitialPrompt::Flag("--prompt"),
     support: AgentSupport::Full(HookSpec {
         // OpenCode's TUI owns the selected conversation; backend events may belong to
         // other roots or subagents. The plugin reads the current route and its native

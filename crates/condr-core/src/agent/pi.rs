@@ -1,7 +1,7 @@
 //! Pi.
 
 use super::hooks::{HookFormat, HookSpec, HookTarget};
-use super::{AgentSpec, AgentSupport};
+use super::{AgentSpec, AgentSupport, InitialPrompt};
 
 /// The extension Pi and Oh My Pi both load, named for the agent it is installed into.
 pub(super) const EXTENSION: &str = include_str!("pi-extension.js");
@@ -20,6 +20,7 @@ pub(super) const SPEC: AgentSpec = AgentSpec {
     resume: &["--session", "{id}"],
     reports_at_startup: true,
     reads_kitty_keys: false,
+    initial_prompt: InitialPrompt::Positional,
     support: AgentSupport::Full(HookSpec {
         format: HookFormat::Script {
             template: EXTENSION,

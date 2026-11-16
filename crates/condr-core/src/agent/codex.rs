@@ -1,7 +1,7 @@
 //! Codex.
 
 use super::hooks::{HookEntry, HookFormat, HookShell, HookSpec, HookTarget, entry};
-use super::{AgentEventKind, AgentKind, AgentSpec, AgentSupport};
+use super::{AgentEventKind, AgentKind, AgentSpec, AgentSupport, InitialPrompt};
 
 pub(super) const SPEC: AgentSpec = AgentSpec {
     id: "codex",
@@ -15,6 +15,7 @@ pub(super) const SPEC: AgentSpec = AgentSpec {
     // SessionStart waits for the first prompt.
     reports_at_startup: false,
     reads_kitty_keys: false,
+    initial_prompt: InitialPrompt::Positional,
     support: AgentSupport::Full(HookSpec {
         format: HookFormat::NestedMap {
             events: HOOKS,

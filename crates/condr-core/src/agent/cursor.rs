@@ -1,7 +1,7 @@
 //! Cursor CLI.
 
 use super::hooks::{HookEntry, HookFormat, HookSpec, HookTarget, entry};
-use super::{AgentEventKind, AgentSpec, AgentSupport};
+use super::{AgentEventKind, AgentSpec, AgentSupport, InitialPrompt};
 
 pub(super) const SPEC: AgentSpec = AgentSpec {
     id: "cursor",
@@ -15,6 +15,7 @@ pub(super) const SPEC: AgentSpec = AgentSpec {
     // A resumed session reports no start.
     reports_at_startup: false,
     reads_kitty_keys: false,
+    initial_prompt: InitialPrompt::Positional,
     support: AgentSupport::Full(HookSpec {
         format: HookFormat::FlatList {
             events: HOOKS,

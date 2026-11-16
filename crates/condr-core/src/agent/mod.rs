@@ -70,7 +70,32 @@ pub struct AgentSpec {
     /// agent started has the terminal, so that editor receives the report too; set it
     /// only for an agent seen to decode one.
     pub reads_kitty_keys: bool,
+    /// How it takes the prompt it starts on, which a Task's Start types (ADR 0068).
+    pub initial_prompt: InitialPrompt,
     pub support: AgentSupport,
+}
+
+/// How an agent CLI takes the prompt it starts on (ADR 0068). Riding the CLI's own
+/// argument, the prompt waits out the CLI's trust dialog before it is submitted.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InitialPrompt {
+    /// The first positional argument.
+    Positional,
+    /// The value of this flag.
+    Flag(&'static str),
+    /// It takes none, so a Task cannot start it.
+    None,
+}
+
+impl InitialPrompt {
+    /// The arguments that start the CLI on `prompt`; `None` when it takes none.
+    pub fn args(self, prompt: &str) -> Option<Vec<String>> {
+        match self {
+            Self::Positional => Some(vec![prompt.to_owned()]),
+            Self::Flag(flag) => Some(vec![flag.to_owned(), prompt.to_owned()]),
+            Self::None => None,
+        }
+    }
 }
 
 impl AgentSpec {
@@ -106,6 +131,7 @@ const OTHER: AgentSpec = AgentSpec {
     resume: &[],
     reports_at_startup: false,
     reads_kitty_keys: false,
+    initial_prompt: InitialPrompt::None,
     support: AgentSupport::RecognitionOnly("this build does not know that agent"),
 };
 

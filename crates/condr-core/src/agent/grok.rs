@@ -1,7 +1,7 @@
 //! Grok Build.
 
 use super::hooks::{HookEntry, HookFormat, HookShell, HookSpec, HookTarget, entry};
-use super::{AgentEventKind, AgentSpec, AgentSupport};
+use super::{AgentEventKind, AgentSpec, AgentSupport, InitialPrompt};
 
 pub(super) const SPEC: AgentSpec = AgentSpec {
     id: "grok",
@@ -14,6 +14,7 @@ pub(super) const SPEC: AgentSpec = AgentSpec {
     resume: &["--resume", "{id}"],
     reports_at_startup: true,
     reads_kitty_keys: false,
+    initial_prompt: InitialPrompt::Positional,
     support: AgentSupport::Full(HookSpec {
         format: HookFormat::NestedMap {
             events: HOOKS,

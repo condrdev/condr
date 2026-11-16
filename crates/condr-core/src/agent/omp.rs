@@ -1,7 +1,7 @@
 //! Oh My Pi, which loads Pi's extension from its own agent directory.
 
 use super::hooks::{HookFormat, HookSpec, HookTarget};
-use super::{AgentSpec, AgentSupport};
+use super::{AgentSpec, AgentSupport, InitialPrompt};
 use std::path::PathBuf;
 
 pub(super) const SPEC: AgentSpec = AgentSpec {
@@ -15,6 +15,7 @@ pub(super) const SPEC: AgentSpec = AgentSpec {
     resume: &["--session", "{id}"],
     reports_at_startup: true,
     reads_kitty_keys: false,
+    initial_prompt: InitialPrompt::Positional,
     support: AgentSupport::Full(HookSpec {
         format: HookFormat::Script {
             template: super::pi::EXTENSION,
