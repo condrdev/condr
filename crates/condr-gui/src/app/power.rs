@@ -1,5 +1,6 @@
 use super::sidebar::CondrIconName;
 use super::*;
+use rust_i18n::t;
 
 impl Condr {
     pub(in crate::app) fn set_keep_awake(&mut self, enabled: bool, cx: &mut Context<Self>) {
@@ -30,7 +31,7 @@ impl Condr {
         match keepawake::Builder::default()
             .display(true)
             .idle(true)
-            .reason("Waiting on agents")
+            .reason(t!("power.reason"))
             .app_name(condr_core::APP_NAME)
             .app_reverse_domain("dev.condr.gui")
             .create()
@@ -38,7 +39,7 @@ impl Condr {
             Ok(handle) => self._keep_awake = Some(handle),
             Err(error) => {
                 self.keep_awake = false;
-                self.report_error(format!("Failed to keep the screen awake: {error}"), cx);
+                self.report_error(t!("power.keep_awake_failed", error = error), cx);
             }
         }
     }
@@ -48,9 +49,9 @@ impl Condr {
 /// the request is held. It flips the same switch as Settings > Power.
 pub(super) fn keep_awake_button(keep_awake: bool, owner: WeakEntity<Condr>, cx: &App) -> Button {
     let label = if keep_awake {
-        "Keeping the screen awake"
+        t!("power.keeping_awake")
     } else {
-        "Keep the screen awake"
+        t!("power.keep_awake")
     };
     Button::new("toggle-keep-awake")
         .debug_selector(|| "toggle-keep-awake".into())
@@ -63,7 +64,7 @@ pub(super) fn keep_awake_button(keep_awake: bool, owner: WeakEntity<Condr>, cx: 
         } else {
             cx.theme().muted_foreground
         })
-        .tooltip(label)
+        .tooltip(label.clone())
         .accessibility_label(label)
         .on_click(move |_, _, cx| {
             let _ = owner.update(cx, |this, cx| this.set_keep_awake(!this.keep_awake, cx));

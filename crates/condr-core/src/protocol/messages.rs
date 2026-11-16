@@ -236,28 +236,78 @@ pub struct ServerLogRecord {
     pub message: String,
 }
 
-/// A duration as `1d 2h 3m`, dropping leading zero units; seconds only under a minute.
-pub fn uptime_text(secs: u64) -> String {
-    let (days, hours, minutes) = (secs / 86_400, secs / 3_600 % 24, secs / 60 % 60);
-    match (days, hours, minutes) {
-        (0, 0, 0) => format!("{secs}s"),
-        (0, 0, m) => format!("{m}m"),
-        (0, h, m) => format!("{h}h {m}m"),
-        (d, h, m) => format!("{d}d {h}h {m}m"),
+/// A duration in the units `uptime_text` shows: seconds alone under a minute, otherwise
+/// minutes with the larger units that are not zero in front.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Uptime {
+    Seconds(u64),
+    Minutes(u64),
+    Hours { hours: u64, minutes: u64 },
+    Days { days: u64, hours: u64, minutes: u64 },
+}
+
+impl Uptime {
+    pub fn of(secs: u64) -> Self {
+        let (days, hours, minutes) = (secs / 86_400, secs / 3_600 % 24, secs / 60 % 60);
+        match (days, hours, minutes) {
+            (0, 0, 0) => Self::Seconds(secs),
+            (0, 0, minutes) => Self::Minutes(minutes),
+            (0, hours, minutes) => Self::Hours { hours, minutes },
+            (days, hours, minutes) => Self::Days {
+                days,
+                hours,
+                minutes,
+            },
+        }
     }
 }
 
-/// How long ago a unix timestamp was, as the CLI and GUI both print it.
+/// A duration as `1d 2h 3m`, dropping leading zero units; seconds only under a minute.
+pub fn uptime_text(secs: u64) -> String {
+    match Uptime::of(secs) {
+        Uptime::Seconds(seconds) => format!("{seconds}s"),
+        Uptime::Minutes(minutes) => format!("{minutes}m"),
+        Uptime::Hours { hours, minutes } => format!("{hours}h {minutes}m"),
+        Uptime::Days {
+            days,
+            hours,
+            minutes,
+        } => format!("{days}d {hours}h {minutes}m"),
+    }
+}
+
+/// How long ago a unix timestamp was, in the coarse steps the CLI and GUI both show.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RelativeAge {
+    JustNow,
+    Minutes(u64),
+    Hours(u64),
+    Days(u64),
+}
+
+impl RelativeAge {
+    /// A time in the future, from a clock skew, is now.
+    pub fn since(unix_seconds: u64) -> Self {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_secs());
+        let elapsed = now.saturating_sub(unix_seconds);
+        match elapsed {
+            0..60 => Self::JustNow,
+            60..3_600 => Self::Minutes(elapsed / 60),
+            3_600..86_400 => Self::Hours(elapsed / 3_600),
+            _ => Self::Days(elapsed / 86_400),
+        }
+    }
+}
+
+/// How long ago a unix timestamp was, as the CLI prints it.
 pub fn relative_age(unix_seconds: u64) -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_secs());
-    let elapsed = now.saturating_sub(unix_seconds);
-    let (amount, unit) = match elapsed {
-        0..60 => return "just now".into(),
-        60..3_600 => (elapsed / 60, "minute"),
-        3_600..86_400 => (elapsed / 3_600, "hour"),
-        _ => (elapsed / 86_400, "day"),
+    let (amount, unit) = match RelativeAge::since(unix_seconds) {
+        RelativeAge::JustNow => return "just now".into(),
+        RelativeAge::Minutes(amount) => (amount, "minute"),
+        RelativeAge::Hours(amount) => (amount, "hour"),
+        RelativeAge::Days(amount) => (amount, "day"),
     };
     format!("{amount} {unit}{} ago", if amount == 1 { "" } else { "s" })
 }

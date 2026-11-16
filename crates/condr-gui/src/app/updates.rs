@@ -5,6 +5,8 @@ use super::*;
 use condr_core::BuildComparison;
 use futures_lite::AsyncReadExt as _;
 use gpui_kit::http_client::{AsyncBody, HttpClient};
+use rust_i18n::t;
+use std::borrow::Cow;
 
 /// The first check waits this long after start, so it never competes with startup.
 pub(super) const FIRST_CHECK_DELAY: Duration = Duration::from_secs(5);
@@ -27,10 +29,10 @@ impl UpdateChannel {
         }
     }
 
-    pub(in crate::app) fn label(self) -> &'static str {
+    pub(in crate::app) fn label(self) -> Cow<'static, str> {
         match self {
-            Self::Stable => "Stable",
-            Self::Nightly => "Nightly",
+            Self::Stable => t!("updates.stable"),
+            Self::Nightly => t!("updates.nightly"),
         }
     }
 
@@ -201,7 +203,7 @@ async fn fetch_latest(
         .await
         .map_err(|error| error.to_string())?;
     if !response.status().is_success() {
-        return Err(format!("{url} answered {}", response.status()));
+        return Err(t!("updates.answered", url = url, status = response.status()).into_owned());
     }
     let mut body = Vec::new();
     response
@@ -210,14 +212,15 @@ async fn fetch_latest(
         .await
         .map_err(|error| error.to_string())?;
     let Some(field) = field else {
-        return plain_version(&body).ok_or_else(|| format!("no version in {url}'s answer"));
+        return plain_version(&body)
+            .ok_or_else(|| t!("updates.no_version", url = url).into_owned());
     };
     let json: serde_json::Value =
         serde_json::from_slice(&body).map_err(|error| error.to_string())?;
     json.pointer(field)
         .and_then(serde_json::Value::as_str)
         .map(str::to_owned)
-        .ok_or_else(|| format!("no {field} in {url}'s answer"))
+        .ok_or_else(|| t!("updates.no_field", field = field, url = url).into_owned())
 }
 
 /// Owns the update preferences, result, acknowledgement and repeating check task.
@@ -367,7 +370,7 @@ impl UpdateCheck {
                 .map_or(UpdateState::UpToDate, UpdateState::Available);
             }
             Err(error) if manual => {
-                return Err(format!("Failed to check for updates: {error}"));
+                return Err(t!("updates.check_failed", error = error).into_owned());
             }
             Err(error) => tracing::warn!(
                 "Update check on the {} channel failed: {error}",

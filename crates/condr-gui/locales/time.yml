@@ -1,0 +1,39 @@
+_version: 2
+time:
+  just_now:
+    en: just now
+    zh-CN: 刚刚
+  minutes_ago:
+    one:
+      en: '%{count} minute ago'
+      zh-CN: '%{count} 分钟前'
+    other:
+      en: '%{count} minutes ago'
+      zh-CN: '%{count} 分钟前'
+  hours_ago:
+    one:
+      en: '%{count} hour ago'
+      zh-CN: '%{count} 小时前'
+    other:
+      en: '%{count} hours ago'
+      zh-CN: '%{count} 小时前'
+  days_ago:
+    one:
+      en: '%{count} day ago'
+      zh-CN: '%{count} 天前'
+    other:
+      en: '%{count} days ago'
+      zh-CN: '%{count} 天前'
+  uptime:
+    seconds:
+      en: '%{seconds}s'
+      zh-CN: '%{seconds} 秒'
+    minutes:
+      en: '%{minutes}m'
+      zh-CN: '%{minutes} 分钟'
+    hours:
+      en: '%{hours}h %{minutes}m'
+      zh-CN: '%{hours} 小时 %{minutes} 分钟'
+    days:
+      en: '%{days}d %{hours}h %{minutes}m'
+      zh-CN: '%{days} 天 %{hours} 小时 %{minutes} 分钟'

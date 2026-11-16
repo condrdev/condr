@@ -6,7 +6,9 @@ mod text_field;
 
 use super::*;
 use gpui_kit::component::kbd::Kbd;
+use rust_i18n::t;
 use shortcuts::shortcuts_page;
+use std::borrow::Cow;
 
 pub(super) use appearance::*;
 pub(super) use server::*;
@@ -108,7 +110,7 @@ impl Condr {
                         }
                     }));
                 }
-                Err(error) => this.report_error(format!("Failed to open Settings: {error}"), cx),
+                Err(error) => this.report_error(t!("settings.open_failed", error = error), cx),
             });
         });
     }
@@ -308,7 +310,9 @@ impl SettingsWindow {
             window,
             cx,
         );
-        let invite_host = cx.new(|cx| InputState::new(window, cx).placeholder("Address or name"));
+        let invite_host = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(t!("settings.pair.host_placeholder"))
+        });
         cx.subscribe(&invite_host, |this, input, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Change) {
                 let key = this.selected_server;
@@ -505,31 +509,33 @@ impl SettingsWindow {
 
 fn licenses_page(licenses: &Entity<EditorState>) -> SettingPage {
     let licenses = licenses.clone();
-    SettingPage::new("Licenses").icon(IconName::BookOpen).group(
-        SettingGroup::new().item(
-            SettingItem::render(move |_, _, cx| {
-                // Plain text: no border, background or line numbers. It stays an
-                // Editor only because a 900 KB text needs virtualized rendering.
-                // Prose, not code: the UI font rather than the terminal font.
-                Editor::new(&licenses)
-                    .readonly(true)
-                    .appearance(false)
-                    .bordered(false)
-                    .font_family(cx.theme().font_family.clone())
-                    .text_size(cx.theme().font_size)
-                    .h(rems(26.))
-            })
-            // Settings search only matches custom items by keyword.
-            .keywords([
-                "licenses",
-                "license",
-                "third-party",
-                "open source",
-                "notices",
-                "attribution",
-            ]),
-        ),
-    )
+    SettingPage::new(t!("settings.licenses.title"))
+        .icon(IconName::BookOpen)
+        .group(
+            SettingGroup::new().item(
+                SettingItem::render(move |_, _, cx| {
+                    // Plain text: no border, background or line numbers. It stays an
+                    // Editor only because a 900 KB text needs virtualized rendering.
+                    // Prose, not code: the UI font rather than the terminal font.
+                    Editor::new(&licenses)
+                        .readonly(true)
+                        .appearance(false)
+                        .bordered(false)
+                        .font_family(cx.theme().font_family.clone())
+                        .text_size(cx.theme().font_size)
+                        .h(rems(26.))
+                })
+                // Settings search only matches custom items by keyword.
+                .keywords([
+                    "licenses",
+                    "license",
+                    "third-party",
+                    "open source",
+                    "notices",
+                    "attribution",
+                ]),
+            ),
+        )
 }
 
 impl Render for SettingsWindow {
@@ -595,7 +601,7 @@ impl Render for SettingsWindow {
                 .p_4()
                 .text_sm()
                 .text_color(cx.theme().muted_foreground)
-                .child("This device's settings appear once it connects.")
+                .child(t!("settings.device_offline"))
                 .into_any_element()
         } else {
             // Kit keeps the selection per id, so each Device, connected or not, and each
@@ -665,13 +671,13 @@ fn button_field(button: impl Fn() -> Button + 'static) -> SettingField<SharedStr
 
 fn notifications_page(owner: &WeakEntity<Condr>) -> SettingPage {
     let test_owner = owner.clone();
-    SettingPage::new("Notifications")
+    SettingPage::new(t!("settings.notifications.title"))
         .icon(IconName::Bell)
         .group(
             SettingGroup::new()
                 .item(
                     SettingItem::new(
-                        "Enable notifications",
+                        t!("settings.notifications.enable"),
                         condr_switch(
                             owner,
                             true,
@@ -679,15 +685,15 @@ fn notifications_page(owner: &WeakEntity<Condr>) -> SettingPage {
                             |condr, enabled, cx| condr.set_notifications(enabled, cx),
                         ),
                     )
-                    .description("Agent finished or needs input."),
+                    .description(t!("settings.notifications.enable_description").to_string()),
                 )
                 .item(SettingItem::new(
-                    "Send a test notification",
+                    t!("settings.notifications.test"),
                     button_field(move || {
                         let owner = test_owner.clone();
                         Button::new("send-test-notification")
                             .debug_selector(|| "send-test-notification".into())
-                            .label("Send")
+                            .label(t!("settings.notifications.send"))
                             .on_click(move |_, _, cx| {
                                 let _ =
                                     owner.update(cx, |owner, cx| owner.send_test_notification(cx));
@@ -698,12 +704,12 @@ fn notifications_page(owner: &WeakEntity<Condr>) -> SettingPage {
 }
 
 fn power_page(owner: &WeakEntity<Condr>) -> SettingPage {
-    SettingPage::new("Power")
+    SettingPage::new(t!("settings.power.title"))
         .icon(IconName::BatteryCharging)
         .group(
             SettingGroup::new().item(
                 SettingItem::new(
-                    "Keep the screen awake",
+                    t!("power.keep_awake"),
                     condr_switch(
                         owner,
                         false,
@@ -711,70 +717,87 @@ fn power_page(owner: &WeakEntity<Condr>) -> SettingPage {
                         |condr, enabled, cx| condr.set_keep_awake(enabled, cx),
                     ),
                 )
-                .description("No screen blanking, lock or idle sleep while Condr is running."),
+                .description(t!("settings.power.keep_awake_description").to_string()),
             ),
         )
 }
 
 fn developer_page(owner: &WeakEntity<Condr>) -> SettingPage {
-    SettingPage::new("Developer")
+    SettingPage::new(t!("settings.developer.title"))
         .icon(IconName::Inspector)
         .group(
-            SettingGroup::new().title("Diagnostics").item(
-                SettingItem::new(
-                    "FPS monitor",
-                    condr_switch(
-                        owner,
-                        false,
-                        |condr| condr.fps_monitor,
-                        |condr, enabled, cx| condr.set_fps_monitor(enabled, cx),
-                    ),
-                )
-                .description("Show GPUI frame rate and resource telemetry."),
-            ),
+            SettingGroup::new()
+                .title(t!("settings.developer.diagnostics"))
+                .item(
+                    SettingItem::new(
+                        t!("settings.developer.fps_monitor"),
+                        condr_switch(
+                            owner,
+                            false,
+                            |condr| condr.fps_monitor,
+                            |condr, enabled, cx| condr.set_fps_monitor(enabled, cx),
+                        ),
+                    )
+                    .description(t!("settings.developer.fps_monitor_description").to_string()),
+                ),
         )
         .group(
             SettingGroup::new()
-                .title("Locations")
+                .title(t!("settings.developer.locations"))
                 .item(location_row(
                     owner,
-                    "Application",
+                    "settings.developer.application",
                     std::env::current_exe()
                         .ok()
                         .and_then(|exe| exe.parent().map(std::path::Path::to_path_buf)),
                 ))
                 .item(location_row(
                     owner,
-                    "Config",
+                    "settings.developer.config",
                     condr_core::config_directory(),
                 ))
-                .item(location_row(owner, "Data", condr_core::data_directory()))
-                .item(location_row(owner, "State", condr_core::state_directory()))
-                .item(location_row(owner, "Logs", condr_core::log_directory())),
+                .item(location_row(
+                    owner,
+                    "settings.developer.data",
+                    condr_core::data_directory(),
+                ))
+                .item(location_row(
+                    owner,
+                    "settings.developer.state",
+                    condr_core::state_directory(),
+                ))
+                .item(location_row(
+                    owner,
+                    "settings.developer.logs",
+                    condr_core::log_directory(),
+                )),
         )
 }
 
 /// One directory of this machine's Condr, its path as the description and an Open
 /// button that shows it in the file manager. A directory the platform cannot name
-/// has no button. Only this machine: the protocol carries no Server paths.
+/// has no button. Only this machine: the protocol carries no Server paths. `key` names
+/// the label's message and the button.
 fn location_row(
     owner: &WeakEntity<Condr>,
-    label: &'static str,
+    key: &'static str,
     path: Option<PathBuf>,
 ) -> SettingItem {
+    let label = t!(key);
     let Some(path) = path else {
         return SettingItem::new(label, SettingField::render(|_, _, _| div()))
-            .description("Not available on this platform.");
+            .description(t!("settings.developer.unavailable").to_string());
     };
     let description = SharedString::from(path.display().to_string());
     let owner = owner.clone();
     SettingItem::new(
-        label,
+        label.clone(),
         button_field(move || {
             let owner = owner.clone();
             let path = path.clone();
-            Button::new(SharedString::from(format!("open-location-{label}")))
-                .label("Open")
+            let label = label.clone();
+            Button::new(SharedString::from(format!("open-location-{key}")))
+                .label(t!("settings.developer.open"))
                 .on_click(move |_, _, cx| {
                     let path = path.clone();
                     let _ = owner.update(cx, |owner, cx| {
@@ -797,18 +820,19 @@ fn location_row(
 /// shows as soon as the owner notifies. `open_on_update` unfolds its Updates entry in
 /// the page list, where the window's first draw selects it.
 fn about_page(owner: &WeakEntity<Condr>, open_on_update: bool, cx: &App) -> SettingPage {
-    let link_row = |label: &'static str, button: &'static str, url: &'static str| {
-        SettingItem::new(
-            label,
-            button_field(move || {
-                Button::new(SharedString::from(format!("about-{button}")))
-                    .label(button)
-                    .on_click(move |_, _, cx| cx.open_url(url))
-            }),
-        )
-        .description(url)
-    };
-    SettingPage::new("About")
+    let link_row =
+        |label: Cow<'static, str>, id: &'static str, button: SharedString, url: &'static str| {
+            SettingItem::new(
+                label,
+                button_field(move || {
+                    Button::new(SharedString::from(format!("about-{id}")))
+                        .label(button.clone())
+                        .on_click(move |_, _, cx| cx.open_url(url))
+                }),
+            )
+            .description(url)
+        };
+    SettingPage::new(t!("settings.about.title"))
         .icon(IconName::Info)
         .default_open(open_on_update)
         .group(
@@ -824,19 +848,32 @@ fn about_page(owner: &WeakEntity<Condr>, open_on_update: bool, cx: &App) -> Sett
                                     div()
                                         .text_sm()
                                         .text_color(cx.theme().muted_foreground)
-                                        .child(format!("Version {}", condr_core::build_identity())),
+                                        .child(t!(
+                                            "settings.about.version",
+                                            version = condr_core::build_identity()
+                                        )),
                                 ),
                             )
                     })
                     .keywords(["about", "version"]),
                 )
                 .item(
-                    link_row("Source code", "GitHub", REPOSITORY_URL)
-                        .keywords(["github", "repository"]),
+                    link_row(
+                        t!("settings.about.source_code"),
+                        "GitHub",
+                        "GitHub".into(),
+                        REPOSITORY_URL,
+                    )
+                    .keywords(["github", "repository"]),
                 )
                 .item(
-                    link_row("Documentation", "Docs", DOCS_URL)
-                        .keywords(["docs", "website", "help"]),
+                    link_row(
+                        t!("settings.about.documentation"),
+                        "Docs",
+                        t!("settings.about.docs").into(),
+                        DOCS_URL,
+                    )
+                    .keywords(["docs", "website", "help"]),
                 ),
         )
         .group(updates_group(owner, cx))
@@ -859,24 +896,24 @@ fn updates_group(owner: &WeakEntity<Condr>, cx: &App) -> SettingGroup {
         .map(|channel| (channel.as_str().into(), channel.label().into()))
         .to_vec();
     let check_now_status = match &state {
-        UpdateState::UpToDate => "Condr is up to date.",
-        UpdateState::Unknown | UpdateState::Available(_) => "Look for a newer build now.",
+        UpdateState::UpToDate => t!("settings.updates.up_to_date"),
+        UpdateState::Unknown | UpdateState::Available(_) => t!("settings.updates.look_now"),
     };
     let available = match state {
         UpdateState::Available(update) => Some(update),
         UpdateState::Unknown | UpdateState::UpToDate => None,
     };
     SettingGroup::new()
-        .title("Updates")
+        .title(t!("settings.updates.title"))
         .items(available.map(|update| {
             let url = update.url.clone();
             SettingItem::new(
-                format!("{} is available", update.name),
+                t!("settings.updates.available", name = update.name),
                 button_field(move || {
                     let url = url.clone();
                     Button::new("about-view-update")
                         .debug_selector(|| "about-view-update".into())
-                        .label("View")
+                        .label(t!("settings.updates.view"))
                         .on_click(move |_, _, cx| cx.open_url(&url))
                 }),
             )
@@ -885,7 +922,7 @@ fn updates_group(owner: &WeakEntity<Condr>, cx: &App) -> SettingGroup {
         }))
         .item(
             SettingItem::new(
-                "Check automatically",
+                t!("settings.updates.automatic"),
                 condr_switch(
                     owner,
                     true,
@@ -893,12 +930,12 @@ fn updates_group(owner: &WeakEntity<Condr>, cx: &App) -> SettingGroup {
                     |condr, enabled, cx| condr.set_auto_check_updates(enabled, cx),
                 ),
             )
-            .description("Every five hours while Condr runs.")
+            .description(t!("settings.updates.automatic_description").to_string())
             .keywords(["update", "version"]),
         )
         .item(
             SettingItem::new(
-                "Update channel",
+                t!("settings.updates.channel"),
                 SettingField::dropdown(
                     options,
                     move |cx| {
@@ -918,24 +955,24 @@ fn updates_group(owner: &WeakEntity<Condr>, cx: &App) -> SettingGroup {
                 )
                 .default_value(UpdateChannel::of_this_build().as_str()),
             )
-            .description("Stable releases, or the daily build of main.")
+            .description(t!("settings.updates.channel_description").to_string())
             .keywords(["update", "nightly", "stable", "version"]),
         )
         .item(
             SettingItem::new(
-                "Check now",
+                t!("settings.updates.check_now"),
                 button_field(move || {
                     let owner = check_now_owner.clone();
                     Button::new("about-check-updates")
                         .debug_selector(|| "about-check-updates".into())
-                        .label("Check")
+                        .label(t!("settings.updates.check"))
                         .loading(checking)
                         .on_click(move |_, _, cx| {
                             let _ = owner.update(cx, |owner, cx| owner.check_for_updates_now(cx));
                         })
                 }),
             )
-            .description(check_now_status)
+            .description(check_now_status.to_string())
             .keywords(["update", "version"]),
         )
 }
@@ -959,7 +996,7 @@ fn scheme_select<'a>(
     window: &mut Window,
     cx: &mut Context<SettingsWindow>,
 ) -> Entity<ColorSchemeSelect> {
-    let labels = std::iter::once(DEFAULT_COLOR_SCHEME_LABEL.into())
+    let labels = std::iter::once(default_color_scheme_label())
         .chain(names.map(|name| SharedString::from(name.to_owned())))
         .collect::<Vec<SharedString>>();
     let selected = labels

@@ -6,11 +6,13 @@ use super::change_tree::{TreeRow, directory_row, file_row, row_highlight, tree_r
 use super::placeholders::{empty_state, failed_state, list_note};
 use super::sidebar::{upstream_counts, upstream_label};
 use super::*;
-use condr_core::protocol::{DiffBase, relative_age};
+use condr_core::protocol::{DiffBase, RelativeAge};
 use condr_core::{GitChangeEntry, HISTORY_PAGE, MAX_GIT_CHANGES};
 use gpui_kit::base::text::TextView;
 use gpui_kit::component::resizable::{resizable_panel, v_resizable};
 use gpui_kit::component::scroll::ScrollableElement as _;
+use rust_i18n::t;
+use std::borrow::Cow;
 
 /// The commit this Client's Diff Tab shows for one path, chosen in History. Any other path
 /// in the Tab, whoever put it there, is the working tree's.
@@ -47,7 +49,11 @@ pub(super) fn history_branch(git: &WorkspaceGitSnapshot, cx: &App) -> AnyElement
                 } else {
                     cx.theme().muted_foreground.opacity(0.5)
                 })
-                .child(git.branch.clone().unwrap_or_else(|| "detached".to_owned())),
+                .child(
+                    git.branch
+                        .clone()
+                        .unwrap_or_else(|| t!("history.detached").into_owned()),
+                ),
         )
         .children(git.upstream.and_then(upstream_counts).map(|counts| {
             div()
@@ -70,7 +76,7 @@ impl Condr {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(connection) = self.connection(key) else {
-            return empty_state("No Workspace", cx);
+            return empty_state(t!("history.no_workspace"), cx);
         };
         let resources = &connection.resources;
         let Some(log) = resources.logs.get(&workspace_id) else {
@@ -83,10 +89,10 @@ impl Condr {
                     });
                 });
             }
-            return empty_state("Loading history…", cx);
+            return empty_state(t!("history.loading"), cx);
         };
         if log.commits.is_empty() {
-            return empty_state("No commits yet", cx);
+            return empty_state(t!("history.no_commits"), cx);
         }
         let shown = self
             .files_view
@@ -119,7 +125,7 @@ impl Condr {
                         .debug_selector(|| "history-more".into())
                         .ghost()
                         .xsmall()
-                        .label("Show more")
+                        .label(t!("history.show_more"))
                         .loading(loading)
                         .on_click(move |_, _, cx| {
                             let _ = owner.update(cx, |this, cx| {
@@ -193,7 +199,7 @@ impl Condr {
             .context_menu(move |menu, _, _| {
                 let copy_id = copy_id.clone();
                 menu.item(
-                    PopupMenuItem::new("Copy Commit ID")
+                    PopupMenuItem::new(t!("history.copy_commit_id"))
                         .icon(menu_icon(Glyph::Copy))
                         .on_click(move |_, _, cx| {
                             cx.write_to_clipboard(ClipboardItem::new_string(copy_id.clone()));
@@ -236,7 +242,7 @@ impl Condr {
         };
         let slot = (workspace_id, commit.id.clone());
         let Some(connection) = self.connection(key) else {
-            return empty_state("No Workspace", cx);
+            return empty_state(t!("history.no_workspace"), cx);
         };
         let resources = &connection.resources;
         let details = match resources.commits.get(&slot) {
@@ -253,7 +259,7 @@ impl Condr {
                         });
                     });
                 }
-                return empty_state("Loading…", cx);
+                return empty_state(t!("history.loading_commit"), cx);
             }
             Some(Err(error)) => return failed_state(error.clone(), cx),
             Some(Ok(details)) => details,
@@ -268,12 +274,12 @@ impl Condr {
             .overflow_y_scrollbar();
         if details.changes.truncated {
             list = list.child(list_note(
-                format!("Only the first {MAX_GIT_CHANGES} files are listed."),
+                t!("history.truncated", limit = MAX_GIT_CHANGES),
                 warning,
             ));
         }
         if details.changes.entries.is_empty() {
-            list = list.child(list_note("No file changes", muted));
+            list = list.child(list_note(t!("history.no_file_changes"), muted));
         }
         let entries: Vec<&GitChangeEntry> = details.changes.entries.iter().collect();
         let folded = |path: &RelativePath| {
@@ -298,7 +304,10 @@ impl Condr {
                     .items_center()
                     .text_xs()
                     .text_color(muted)
-                    .child(format!("Changed files ({})", details.changes.entries.len())),
+                    .child(t!(
+                        "history.changed_files",
+                        count = details.changes.entries.len()
+                    )),
             )
             .child(list)
             .into_any_element()
@@ -411,8 +420,8 @@ impl Condr {
                     .xsmall()
                     .icon(Icon::new(IconName::Copy))
                     .debug_selector(|| "diff-copy-commit".into())
-                    .tooltip("Copy Commit ID")
-                    .accessibility_label("Copy Commit ID")
+                    .tooltip(t!("history.copy_commit_id"))
+                    .accessibility_label(t!("history.copy_commit_id"))
                     .on_click(move |_, _, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(copy_id.clone()));
                     }),
@@ -428,7 +437,11 @@ impl Condr {
                             IconName::ChevronDown
                         }))
                         .debug_selector(|| "diff-commit-message".into())
-                        .tooltip(if open { "Hide Message" } else { "Show Message" })
+                        .tooltip(if open {
+                            t!("history.hide_message")
+                        } else {
+                            t!("history.show_message")
+                        })
                         .on_click(move |_, _, cx| {
                             let _ = owner.update(cx, |this, cx| {
                                 this.files_view.commit_message_open ^= true;
@@ -626,8 +639,22 @@ pub(super) fn short_id(id: &str) -> &str {
     &id[..id.len().min(7)]
 }
 
-fn age(time: i64) -> String {
+fn age(time: i64) -> Cow<'static, str> {
     relative_age(u64::try_from(time).unwrap_or_default())
+}
+
+/// How long ago `unix_seconds` was, in the steps the CLI's `relative_age` takes and the
+/// interface's words; Settings uses it too.
+pub(super) fn relative_age(unix_seconds: u64) -> Cow<'static, str> {
+    match RelativeAge::since(unix_seconds) {
+        RelativeAge::JustNow => t!("time.just_now"),
+        RelativeAge::Minutes(count) if count == 1 => t!("time.minutes_ago.one", count = count),
+        RelativeAge::Minutes(count) => t!("time.minutes_ago.other", count = count),
+        RelativeAge::Hours(count) if count == 1 => t!("time.hours_ago.one", count = count),
+        RelativeAge::Hours(count) => t!("time.hours_ago.other", count = count),
+        RelativeAge::Days(count) if count == 1 => t!("time.days_ago.one", count = count),
+        RelativeAge::Days(count) => t!("time.days_ago.other", count = count),
+    }
 }
 
 /// A message without its subject line and the blank line after it.

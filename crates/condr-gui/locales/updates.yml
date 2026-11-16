@@ -1,0 +1,20 @@
+_version: 2
+updates:
+  stable:
+    en: Stable
+    zh-CN: 稳定版
+  nightly:
+    en: Nightly
+    zh-CN: Nightly 版
+  answered:
+    en: '%{url} answered %{status}'
+    zh-CN: '%{url} 返回了 %{status}'
+  no_version:
+    en: 'no version in %{url}''s answer'
+    zh-CN: '%{url} 的响应中没有版本号'
+  no_field:
+    en: 'no %{field} in %{url}''s answer'
+    zh-CN: '%{url} 的响应中没有 %{field}'
+  check_failed:
+    en: 'Failed to check for updates: %{error}'
+    zh-CN: '无法检查更新：%{error}'

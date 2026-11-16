@@ -66,7 +66,7 @@ use condr_core::protocol::{
     AgentCommand, AgentResponse, ClientMessage, LayoutCommand, LayoutResult, RuntimeEpoch,
     ServerAdminCommand, ServerAdminResponse, ServerClientInfo, ServerId, ServerLogRecord,
     ServerMessage, ServerSetting, SessionBootstrap, SessionEvent, SessionId, UnknownMessage,
-    WorkspaceGitSnapshot, relative_age, uptime_text,
+    WorkspaceGitSnapshot,
 };
 use condr_core::{
     AgentAlert, AgentDisplayState, AgentKind, AgentSnapshot, BrowsedDirectory, CommitDetails,

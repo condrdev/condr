@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use gpui_kit::component::theme::ThemeMode;
 use gpui_kit::{AppContext as _, Context, SharedString};
+use rust_i18n::t;
 use serde::Deserialize;
 
 use condr_server::{DeviceKey, SavedServer, load_saved_servers, save_saved_servers};
@@ -97,9 +98,7 @@ impl LoadedConfig {
             Ok(key) => (Some(key), None),
             Err(error) => (
                 None,
-                Some(format!(
-                    "Failed to load the device key, so TCP devices are unavailable: {error}"
-                )),
+                Some(t!("config.device_key_failed", error = error).into_owned()),
             ),
         };
         let file = path.as_deref().map_or_else(
@@ -134,23 +133,23 @@ impl LoadedConfig {
             ),
             Err(error) => (
                 Vec::new(),
-                Some(format!(
-                    "Failed to load {file}: {error}. Device list changes are disabled; fix the file and restart Condr."
-                )),
+                Some(t!("config.devices_failed", file = file, error = error).into_owned()),
             ),
         };
         let skipped_error = (!skipped.is_empty()).then(|| {
-            format!(
-                "Skipped saved devices with an address Condr cannot read; they stay in {file} until you re-add or remove them: {}",
-                skipped.join("; ")
+            t!(
+                "config.devices_skipped",
+                file = file,
+                devices = skipped.join("; ")
             )
+            .into_owned()
         });
         // A malformed `[[client.editors]]` is reported, not silently dropped.
         let (custom_editors, editors_error) = match decode_list(value(EDITORS_KEY)) {
             Ok(editors) => (editors, None),
             Err(error) => (
                 Vec::new(),
-                Some(format!("Failed to load [[client.editors]]: {error}")),
+                Some(t!("config.editors_failed", error = error).into_owned()),
             ),
         };
         let updates = value("updates");
@@ -458,8 +457,9 @@ impl Condr {
             if let Some(previous) = previous {
                 previous.await;
             }
-            let result =
-                write(&path).map_err(|error| format!("Failed to save {}: {error}", path.display()));
+            let result = write(&path).map_err(|error| {
+                t!("config.save_failed", path = path.display(), error = error).into_owned()
+            });
             let _ = result_tx.try_send(result);
         }));
         cx.spawn(async move |this, cx| {

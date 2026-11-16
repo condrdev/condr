@@ -1,0 +1,17 @@
+_version: 2
+config:
+  device_key_failed:
+    en: 'Failed to load the device key, so TCP devices are unavailable: %{error}'
+    zh-CN: '无法加载设备密钥，TCP 设备不可用：%{error}'
+  devices_failed:
+    en: 'Failed to load %{file}: %{error}. Device list changes are disabled; fix the file and restart Condr.'
+    zh-CN: '无法加载 %{file}：%{error}。设备列表已禁止更改；请修复该文件后重启 Condr。'
+  devices_skipped:
+    en: 'Skipped saved devices with an address Condr cannot read; they stay in %{file} until you re-add or remove them: %{devices}'
+    zh-CN: '已跳过 Condr 无法读取其地址的已保存设备；在你重新添加或移除它们之前，它们会留在 %{file} 中：%{devices}'
+  editors_failed:
+    en: 'Failed to load [[client.editors]]: %{error}'
+    zh-CN: '无法加载 [[client.editors]]：%{error}'
+  save_failed:
+    en: 'Failed to save %{path}: %{error}'
+    zh-CN: '无法保存 %{path}：%{error}'

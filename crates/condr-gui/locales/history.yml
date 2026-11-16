@@ -1,0 +1,38 @@
+_version: 2
+history:
+  detached:
+    en: detached
+    zh-CN: 分离头指针
+  no_workspace:
+    en: No Workspace
+    zh-CN: 没有 Workspace
+  loading:
+    en: Loading history…
+    zh-CN: 正在加载历史…
+  no_commits:
+    en: No commits yet
+    zh-CN: 还没有提交
+  show_more:
+    en: Show more
+    zh-CN: 显示更多
+  copy_commit_id:
+    en: Copy Commit ID
+    zh-CN: 复制提交 ID
+  loading_commit:
+    en: Loading…
+    zh-CN: 正在加载…
+  truncated:
+    en: 'Only the first %{limit} files are listed.'
+    zh-CN: '仅列出前 %{limit} 个文件。'
+  no_file_changes:
+    en: No file changes
+    zh-CN: 没有文件变更
+  changed_files:
+    en: 'Changed files (%{count})'
+    zh-CN: '变更的文件（%{count}）'
+  hide_message:
+    en: Hide Message
+    zh-CN: 隐藏提交说明
+  show_message:
+    en: Show Message
+    zh-CN: 显示提交说明

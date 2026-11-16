@@ -1,19 +1,24 @@
 use super::sidebar::CondrIconName;
 use super::*;
 use crate::app::dialogs::{DangerConfirm, confirm_danger};
+use crate::app::history::relative_age;
+use condr_core::protocol::Uptime;
 use gpui_kit::component::setting::RenderOptions;
 use gpui_kit::component::switch::Switch;
+use rust_i18n::t;
+use std::borrow::Cow;
 
 /// Why a TCP or Peer-to-peer window may not change how other devices reach a Device: the
 /// change could cut the very connection that made it (ADR 0038).
-pub(super) const REACHABILITY_LOCKED: &str =
-    "Change this on the device or over SSH. It can cut this connection.";
+pub(super) fn reachability_locked() -> SharedString {
+    t!("settings.reachability_locked").into()
+}
 
 /// `field` while this window may change how other devices reach the Device; otherwise
 /// `locked`, the same control greyed out with why on hover, since Kit's setting fields
 /// take no tooltip.
 fn reachability_item<F, E>(
-    title: &'static str,
+    title: Cow<'static, str>,
     allowed: bool,
     field: F,
     locked: impl Fn(&RenderOptions) -> E + 'static,
@@ -114,23 +119,23 @@ pub(super) fn server_general_page(
     settings: &Entity<SettingsWindow>,
     cx: &App,
 ) -> SettingPage {
-    SettingPage::new("General")
+    SettingPage::new(t!("settings.general.title"))
         .icon(IconName::Settings2)
         .default_open(true)
         .group(server_status_group(this, cx))
         .group(
             SettingGroup::new()
-                .title("Terminal")
+                .title(t!("settings.terminal"))
                 .item(
                     SettingItem::new(
                         "Shell",
                         text_field_row(settings, TextFieldId::Shell, Some("".into())),
                     )
-                    .description("Empty uses the system default."),
+                    .description(t!("settings.general.shell_description").to_string()),
                 )
                 .item(
                     SettingItem::new(
-                        "Shell integration",
+                        t!("settings.general.shell_integration"),
                         SettingField::switch(
                             {
                                 let settings = settings.clone();
@@ -147,30 +152,32 @@ pub(super) fn server_general_page(
                             },
                         ),
                     )
-                    .description("Prompt jumps and long-command alerts.")
+                    .description(t!("settings.general.shell_integration_description").to_string())
                     .keywords(["prompt", "osc 133", "zsh", "bash", "fish"]),
                 ),
         )
         .group(
             SettingGroup::new()
-                .title("Startup")
+                .title(t!("settings.general.startup"))
                 .item(autostart_item(this, settings, cx)),
         )
         // Restart is the Device's own lifecycle, so it lives here for good, apart from
         // the read-only Status; Connections repeats it only while a change waits for it.
         .group(
             SettingGroup::new()
-                .title("Restart")
+                .title(t!("settings.restart.title"))
                 .item(server_restart_row(this, settings, cx)),
         )
 }
 
 /// What Autostart is called here (ADR 0057): Linux starts the Server at boot.
-const AUTOSTART_TITLE: &str = if cfg!(target_os = "linux") {
-    "Start Condr at boot"
-} else {
-    "Start Condr at login"
-};
+fn autostart_title() -> Cow<'static, str> {
+    if cfg!(target_os = "linux") {
+        t!("settings.general.autostart_boot")
+    } else {
+        t!("settings.general.autostart_login")
+    }
+}
 
 /// Whether this machine's login item starts its Server (ADR 0057).
 pub(super) fn autostart_registered() -> bool {
@@ -189,18 +196,18 @@ fn autostart_item(
         .unwrap_or(false);
     if !local {
         return SettingItem::new(
-            AUTOSTART_TITLE,
+            autostart_title(),
             SettingField::render(|_, _, cx| {
                 div()
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Run `condr server autostart on` on that device.")
+                    .child(t!("settings.general.autostart_remote"))
             }),
         )
         .disabled(true);
     }
     SettingItem::new(
-        AUTOSTART_TITLE,
+        autostart_title(),
         SettingField::switch(
             {
                 let settings = settings.clone();
@@ -212,7 +219,7 @@ fn autostart_item(
             },
         ),
     )
-    .description("Reachable after a restart. No window opens.")
+    .description(t!("settings.general.autostart_description").to_string())
     .keywords([
         "autostart",
         "login",
@@ -232,7 +239,11 @@ pub(in crate::app) fn set_autostart(settings: &Entity<SettingsWindow>, on: bool,
         cx.notify();
     });
     let owner = settings.read(cx).owner.clone();
-    let what = format!("turn {} {AUTOSTART_TITLE}", if on { "on" } else { "off" });
+    let what = format!(
+        "turn {} {}",
+        if on { "on" } else { "off" },
+        autostart_title()
+    );
     let Ok(done) = owner.update(cx, |owner, cx| {
         owner.spawn_launch(
             what,
@@ -298,25 +309,30 @@ pub(super) fn network_page(
     )
     .default_value(ProxyMode::System.as_str());
     let mut group = SettingGroup::new().item(
-        reachability_item("Proxy", allowed, mode, move |options| {
-            Button::new("proxy-mode")
-                .label(proxy_mode_label(current))
-                .dropdown_caret(true)
-                .outline()
-                .with_size(options.size())
-                .disabled(true)
-                .tooltip(REACHABILITY_LOCKED)
-        })
-        .description("The proxy to use for network requests.")
+        reachability_item(
+            t!("settings.network.proxy"),
+            allowed,
+            mode,
+            move |options| {
+                Button::new("proxy-mode")
+                    .label(proxy_mode_label(current))
+                    .dropdown_caret(true)
+                    .outline()
+                    .with_size(options.size())
+                    .disabled(true)
+                    .tooltip(reachability_locked())
+            },
+        )
+        .description(t!("settings.network.proxy_description").to_string())
         .keywords(["proxy", "https_proxy", "network"]),
     );
     if current == ProxyMode::Manual {
         group = group.item(
             SettingItem::new(
-                "Proxy URL",
+                t!("settings.network.proxy_url"),
                 text_field_row(settings, TextFieldId::ProxyUrl, Some("".into())),
             )
-            .description("http:// or https://, with user:password@ if the proxy asks.")
+            .description(t!("settings.network.proxy_url_description").to_string())
             .disabled(!allowed)
             .keywords(["proxy"]),
         );
@@ -324,16 +340,16 @@ pub(super) fn network_page(
     if pending {
         group = group.item(server_restart_row(this, settings, cx));
     }
-    SettingPage::new("Network")
+    SettingPage::new(t!("settings.network.title"))
         .icon(IconName::Globe)
         .group(group)
 }
 
-fn proxy_mode_label(mode: ProxyMode) -> &'static str {
+fn proxy_mode_label(mode: ProxyMode) -> Cow<'static, str> {
     match mode {
-        ProxyMode::System => "System",
-        ProxyMode::None => "None",
-        ProxyMode::Manual => "Manual",
+        ProxyMode::System => t!("settings.network.proxy_system"),
+        ProxyMode::None => t!("settings.network.proxy_none"),
+        ProxyMode::Manual => t!("settings.network.proxy_manual"),
     }
 }
 
@@ -402,7 +418,7 @@ pub(super) fn server_clients_page(
     settings: &Entity<SettingsWindow>,
     cx: &App,
 ) -> SettingPage {
-    SettingPage::new("Paired devices")
+    SettingPage::new(t!("settings.paired.title"))
         .icon(IconName::Network)
         .group(pairing_group(this, settings, cx))
         .group(server_devices_group(this, settings, cx))
@@ -502,17 +518,20 @@ pub(super) fn server_header(
         .selected_connection(cx, |c| {
             let route = match &c.endpoint {
                 Endpoint::Local(_) => None,
-                Endpoint::Ssh(_) => Some("over SSH"),
-                Endpoint::Tcp(_) => Some("over TCP"),
-                Endpoint::P2p(_) => Some("over Peer-to-peer"),
+                Endpoint::Ssh(_) => Some(t!("settings.header.over_ssh")),
+                Endpoint::Tcp(_) => Some(t!("settings.header.over_tcp")),
+                Endpoint::P2p(_) => Some(t!("settings.header.over_p2p")),
             };
             (c.status, route)
         })
         .unwrap_or((ConnectionStatus::Disconnected, None));
     let (color, state) = match status {
-        ConnectionStatus::Connected => (cx.theme().success, "Connected"),
-        ConnectionStatus::Connecting => (cx.theme().warning, "Connecting"),
-        ConnectionStatus::Disconnected => (cx.theme().muted_foreground, "Disconnected"),
+        ConnectionStatus::Connected => (cx.theme().success, t!("settings.connected")),
+        ConnectionStatus::Connecting => (cx.theme().warning, t!("settings.header.connecting")),
+        ConnectionStatus::Disconnected => (
+            cx.theme().muted_foreground,
+            t!("settings.header.disconnected"),
+        ),
     };
     h_flex()
         .gap_3()
@@ -549,14 +568,14 @@ pub(super) fn server_header(
 /// `warn`/`error` records it kept. Refreshed every `STATUS_REFRESH` while Settings is
 /// open.
 fn server_status_group(this: &SettingsWindow, cx: &App) -> SettingGroup {
-    let group = SettingGroup::new().title("Status");
+    let group = SettingGroup::new().title(t!("settings.status.title"));
     let health = this.selected_connection(cx, |c| c.health.clone()).flatten();
     let Some(health) = health else {
         return group.item(SettingItem::render(|_, _, cx| {
             div()
                 .text_sm()
                 .text_color(cx.theme().muted_foreground)
-                .child("Waiting for the Server's status…")
+                .child(t!("settings.status.waiting"))
         }));
     };
     let value =
@@ -565,7 +584,7 @@ fn server_status_group(this: &SettingsWindow, cx: &App) -> SettingGroup {
     let mismatch = health.version != this_version;
     let version = health.version.clone();
     let version = SettingItem::new(
-        "Version",
+        t!("settings.status.version"),
         SettingField::render(move |_, _, cx| {
             div()
                 .text_sm()
@@ -575,31 +594,27 @@ fn server_status_group(this: &SettingsWindow, cx: &App) -> SettingGroup {
     )
     .keywords(["version"]);
     let version = if mismatch {
-        version.description(SharedString::from(format!(
-            "Differs from this window, which is {this_version}."
-        )))
+        version
+            .description(t!("settings.status.version_differs", version = this_version).to_string())
     } else {
         version
     };
-    let session = [
-        count(health.workspaces, "workspace"),
-        count(health.tabs, "tab"),
-        count(health.panes, "pane"),
-        count(health.agents, "agent"),
-        count(health.clients, "client"),
-    ]
-    .join(" · ");
+    let session = session_counts(&health);
     let errors = health.recent_errors;
     let mut group = group
         .item(version)
         .item(
-            SettingItem::new("Uptime", value(uptime_text(health.uptime_secs))).keywords(["uptime"]),
+            SettingItem::new(
+                t!("settings.status.uptime"),
+                value(uptime_text(health.uptime_secs).into_owned()),
+            )
+            .keywords(["uptime"]),
         )
         .item(SettingItem::new("Session", value(session)).keywords(["workspaces", "panes"]));
     if !errors.is_empty() {
         group = group.item(
             SettingItem::new(
-                "Recent errors",
+                t!("settings.status.recent_errors"),
                 SettingField::render(move |_, _, cx| {
                     let muted = cx.theme().muted_foreground;
                     // Newest first, a repeat folded into its latest line.
@@ -639,8 +654,64 @@ fn server_status_group(this: &SettingsWindow, cx: &App) -> SettingGroup {
     group
 }
 
-fn count(n: u32, noun: &str) -> String {
-    format!("{n} {noun}{}", if n == 1 { "" } else { "s" })
+/// "1 workspace · 2 tabs · …" for the Session row, in the Server's report order.
+fn session_counts(health: &ServerHealth) -> String {
+    let (workspaces, tabs, panes, agents, clients) = (
+        health.workspaces,
+        health.tabs,
+        health.panes,
+        health.agents,
+        health.clients,
+    );
+    [
+        if workspaces == 1 {
+            t!("settings.status.workspaces.one", count = workspaces)
+        } else {
+            t!("settings.status.workspaces.other", count = workspaces)
+        },
+        if tabs == 1 {
+            t!("settings.status.tabs.one", count = tabs)
+        } else {
+            t!("settings.status.tabs.other", count = tabs)
+        },
+        if panes == 1 {
+            t!("settings.status.panes.one", count = panes)
+        } else {
+            t!("settings.status.panes.other", count = panes)
+        },
+        if agents == 1 {
+            t!("settings.status.agents.one", count = agents)
+        } else {
+            t!("settings.status.agents.other", count = agents)
+        },
+        if clients == 1 {
+            t!("settings.status.clients.one", count = clients)
+        } else {
+            t!("settings.status.clients.other", count = clients)
+        },
+    ]
+    .join(" · ")
+}
+
+/// The Server's uptime as `uptime_text` buckets it, in the interface's words.
+fn uptime_text(secs: u64) -> Cow<'static, str> {
+    match Uptime::of(secs) {
+        Uptime::Seconds(seconds) => t!("time.uptime.seconds", seconds = seconds),
+        Uptime::Minutes(minutes) => t!("time.uptime.minutes", minutes = minutes),
+        Uptime::Hours { hours, minutes } => {
+            t!("time.uptime.hours", hours = hours, minutes = minutes)
+        }
+        Uptime::Days {
+            days,
+            hours,
+            minutes,
+        } => t!(
+            "time.uptime.days",
+            days = days,
+            hours = hours,
+            minutes = minutes
+        ),
+    }
 }
 
 /// The saved TCP listener, Peer-to-peer or proxy setting differs from what the Server
@@ -666,8 +737,10 @@ fn confirm_restart(settings: &Entity<SettingsWindow>, window: &mut Window, cx: &
     confirm_danger(
         owner,
         DangerConfirm::new(
-            "Restart Condr on this device?",
-            "Every pane and agent on this device stops; Condr windows reconnect on their own.",
+            t!("settings.restart.confirm_title"),
+            t!("settings.restart.confirm_description"),
+            // shortcut: English, as `DangerConfirm::ok` is a `&'static str`; translate it
+            // once dialogs.rs takes owned text.
             "Restart",
         ),
         move |owner, _, cx| owner.restart_server(key, cx),
@@ -684,7 +757,7 @@ fn server_restart_row(
     let restart = settings.clone();
     let pending = restart_pending(this, cx);
     SettingItem::new(
-        "Restart Condr",
+        t!("settings.restart.row"),
         SettingField::render(move |_, _, cx| {
             let settings = restart.clone();
             let allowed = reach_allowed(settings.read(cx), cx);
@@ -698,18 +771,18 @@ fn server_restart_row(
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Waiting for Condr to come back…"),
+                            .child(t!("settings.restart.waiting")),
                     )
                 })
                 .child(
                     Button::new("server-restart")
                         .debug_selector(|| "server-restart".into())
                         .label(if restarting {
-                            "Restarting…"
+                            t!("settings.restart.restarting")
                         } else if pending {
-                            "Restart to apply"
+                            t!("settings.restart.to_apply")
                         } else {
-                            "Restart"
+                            t!("settings.restart.button")
                         })
                         .small()
                         .map(|button| {
@@ -720,16 +793,19 @@ fn server_restart_row(
                             }
                         })
                         .disabled(!allowed || restarting)
-                        .when(!allowed, |button| button.tooltip(REACHABILITY_LOCKED))
+                        .when(!allowed, |button| button.tooltip(reachability_locked()))
                         .on_click(move |_, window, cx| confirm_restart(&settings, window, cx)),
                 )
         }),
     )
-    .description(if pending {
-        "Saved changes apply once Condr restarts. Every pane and agent on this device stops."
-    } else {
-        "Stops every pane and agent on this device."
-    })
+    .description(
+        if pending {
+            t!("settings.restart.pending_description")
+        } else {
+            t!("settings.restart.description")
+        }
+        .to_string(),
+    )
     .keywords(["restart", "apply"])
 }
 
@@ -751,15 +827,15 @@ fn server_connections_group(
                 .checked(checked)
                 .with_size(options.size())
                 .disabled(true)
-                .tooltip(REACHABILITY_LOCKED)
+                .tooltip(reachability_locked())
         }
     };
     // No reset to defaults here: it would cut every device off at once.
     let mut group = SettingGroup::new()
-        .title("Connections")
+        .title(t!("settings.connections.title"))
         .item(
             reachability_item(
-                "Peer-to-peer",
+                t!("settings.connections.p2p"),
                 allowed,
                 SettingField::switch(
                     {
@@ -773,12 +849,12 @@ fn server_connections_group(
                 ),
                 locked_switch("p2p", p2p),
             )
-            .description("Works from any network. No port to open.")
+            .description(t!("settings.connections.p2p_description").to_string())
             .keywords(["p2p", "peer-to-peer", "relay", "remote access"]),
         )
         .item(
             reachability_item(
-                "TCP",
+                "TCP".into(),
                 allowed,
                 SettingField::switch(
                     {
@@ -792,16 +868,16 @@ fn server_connections_group(
                 ),
                 locked_switch("tcp-listener", listening),
             )
-            .description("Devices dial this computer's address.")
+            .description(t!("settings.connections.tcp_description").to_string())
             .keywords(["tcp", "listener", "lan", "remote access"]),
         );
     if listening {
         group = group.item(
             SettingItem::new(
-                "Listen on",
+                t!("settings.connections.listen"),
                 text_field_row(settings, TextFieldId::Listen, None),
             )
-            .description("0.0.0.0 answers on every network.")
+            .description(t!("settings.connections.listen_description").to_string())
             .disabled(!allowed)
             .keywords(["listen", "address", "port", "tcp"]),
         );
@@ -877,7 +953,7 @@ fn pairing_group(
 ) -> SettingGroup {
     let state = pairing_state(this, cx);
     let settings = settings.clone();
-    SettingGroup::new().title("Pair").item(
+    SettingGroup::new().title(t!("settings.pair.title")).item(
         SettingItem::render(move |_, window, cx| pairing_card(&state, &settings, window, cx))
             .keywords(["invite", "pair", "qr", "code", "phone", "link"]),
     )
@@ -910,7 +986,7 @@ fn pairing_card(
             .child(icon.size(px(28.)).text_color(color))
             .into_any_element()
     };
-    let show_code = |label: &'static str, primary: bool| {
+    let show_code = |label: Cow<'static, str>, primary: bool| {
         let settings = settings.clone();
         Button::new("pairing-show-code")
             .debug_selector(|| "pairing-show-code".into())
@@ -929,17 +1005,17 @@ fn pairing_card(
     let (code, title, body, detail, actions): (
         AnyElement,
         SharedString,
-        Option<&'static str>,
+        Option<Cow<'static, str>>,
         Vec<AnyElement>,
         Vec<AnyElement>,
     ) = match state {
         Pairing::Closed { allowed } => (
             tile(Icon::new(CondrIconName::QrCode), muted, cx),
-            "Add a phone or computer".into(),
+            t!("settings.pair.add").into(),
             Some(if *allowed {
-                "Other devices can't connect to this one yet."
+                t!("settings.pair.closed")
             } else {
-                "Other devices can't connect to this one yet. Allow it on the device itself."
+                t!("settings.pair.closed_elsewhere")
             }),
             Vec::new(),
             allowed
@@ -947,7 +1023,7 @@ fn pairing_card(
                     let settings = settings.clone();
                     Button::new("pairing-allow")
                         .debug_selector(|| "pairing-allow".into())
-                        .label("Allow connections")
+                        .label(t!("settings.pair.allow"))
                         .small()
                         .primary()
                         .on_click(move |_, _, cx| set_server_p2p_enabled(&settings, true, cx))
@@ -958,17 +1034,15 @@ fn pairing_card(
         ),
         Pairing::RestartPending { allowed } => (
             tile(Icon::new(Glyph::RefreshCw), muted, cx),
-            "Restart Condr to finish".into(),
-            Some(
-                "Devices can connect once Condr restarts. Every pane and agent on this device stops.",
-            ),
+            t!("settings.pair.restart_title").into(),
+            Some(t!("settings.pair.restart_body")),
             Vec::new(),
             allowed
                 .then(|| {
                     let settings = settings.clone();
                     Button::new("pairing-restart")
                         .debug_selector(|| "pairing-restart".into())
-                        .label("Restart")
+                        .label(t!("settings.restart.button"))
                         .small()
                         .primary()
                         .on_click(move |_, window, cx| confirm_restart(&settings, window, cx))
@@ -979,38 +1053,38 @@ fn pairing_card(
         ),
         Pairing::Unknown => (
             tile(Icon::new(CondrIconName::QrCode), muted, cx),
-            "Add a phone or computer".into(),
+            t!("settings.pair.add").into(),
             None,
             Vec::new(),
             Vec::new(),
         ),
         Pairing::Restarting => (
             tile(Icon::new(Glyph::RefreshCw), muted, cx),
-            "Restarting Condr…".into(),
+            t!("settings.pair.restarting").into(),
             None,
             Vec::new(),
             Vec::new(),
         ),
         Pairing::Ready => (
             tile(Icon::new(CondrIconName::QrCode), muted, cx),
-            "Add a phone or computer".into(),
-            Some("Condr on your phone scans a code; another computer pastes its link."),
+            t!("settings.pair.add").into(),
+            Some(t!("settings.pair.ready")),
             Vec::new(),
-            vec![show_code("Show pairing code", true)],
+            vec![show_code(t!("settings.pair.show_code"), true)],
         ),
         Pairing::Expired => (
             tile(Icon::new(CondrIconName::QrCode), muted, cx),
-            "The code expired".into(),
-            Some("Show a new one when the device is ready."),
+            t!("settings.pair.expired").into(),
+            Some(t!("settings.pair.expired_body")),
             Vec::new(),
-            vec![show_code("Show a new code", true)],
+            vec![show_code(t!("settings.pair.show_new_code"), true)],
         ),
         Pairing::Paired(name) => (
             tile(Icon::new(Glyph::CircleCheck), cx.theme().success, cx),
-            format!("{name} is paired").into(),
-            Some("It's listed under Devices and connects from now on."),
+            t!("settings.pair.paired", name = name).into(),
+            Some(t!("settings.pair.paired_body")),
             Vec::new(),
-            vec![show_code("Pair another device", false)],
+            vec![show_code(t!("settings.pair.pair_another"), false)],
         ),
         Pairing::Showing(invite) => {
             let link = invite.link(tcp);
@@ -1038,7 +1112,11 @@ fn pairing_card(
                 let settings = settings.clone();
                 Button::new("pairing-copy")
                     .debug_selector(|| "pairing-copy".into())
-                    .label(if copied { "Copied" } else { "Copy link" })
+                    .label(if copied {
+                        t!("settings.pair.copied")
+                    } else {
+                        t!("settings.pair.copy_link")
+                    })
                     .icon(if copied { Glyph::Check } else { Glyph::Copy })
                     .small()
                     .outline()
@@ -1049,16 +1127,15 @@ fn pairing_card(
             let expires = div()
                 .text_xs()
                 .text_color(muted)
-                .child(format!(
-                    "Expires in {}:{:02}",
-                    remaining / 60,
-                    remaining % 60
+                .child(t!(
+                    "settings.pair.expires_in",
+                    time = format!("{}:{:02}", remaining / 60, remaining % 60)
                 ))
                 .into_any_element();
             let new_code = {
                 let settings = settings.clone();
                 Button::new("pairing-new-code")
-                    .label("New code")
+                    .label(t!("settings.pair.new_code"))
                     .icon(Glyph::RefreshCw)
                     .small()
                     .ghost()
@@ -1068,9 +1145,9 @@ fn pairing_card(
             (
                 code,
                 if link.is_some() {
-                    "Scan with Condr on your phone".into()
+                    t!("settings.pair.scan").into()
                 } else {
-                    "Choose the address the new device dials".into()
+                    t!("settings.pair.choose_address").into()
                 },
                 None,
                 detail,
@@ -1114,7 +1191,7 @@ fn pairing_card(
 /// Which link the code holds when both transports are on: Peer-to-peer, the default,
 /// which needs no address, or TCP at one the new device dials.
 fn pairing_route(settings: &Entity<SettingsWindow>, tcp: bool, cx: &App) -> AnyElement {
-    let side = |id: &'static str, label: &'static str, side_tcp: bool| {
+    let side = |id: &'static str, label: Cow<'static, str>, side_tcp: bool| {
         let settings = settings.clone();
         Button::new(id)
             .debug_selector(move || id.into())
@@ -1141,8 +1218,12 @@ fn pairing_route(settings: &Entity<SettingsWindow>, tcp: bool, cx: &App) -> AnyE
         .gap_0p5()
         .rounded(cx.theme().radius)
         .bg(cx.theme().muted)
-        .child(side("pairing-route-p2p", "Peer-to-peer", false))
-        .child(side("pairing-route-tcp", "TCP", true))
+        .child(side(
+            "pairing-route-p2p",
+            t!("settings.connections.p2p"),
+            false,
+        ))
+        .child(side("pairing-route-tcp", "TCP".into(), true))
         .into_any_element()
 }
 
@@ -1241,7 +1322,7 @@ fn invite_host_field(
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Reach this computer at"),
+                    .child(t!("settings.pair.reach_at")),
             )
             .child(
                 div()
@@ -1277,14 +1358,14 @@ fn server_devices_group(
     let (mut clients, connected) = this
         .selected_connection(cx, |c| (c.clients.clone(), c.connected_devices.clone()))
         .unwrap_or_default();
-    let mut group = SettingGroup::new().title("Devices");
+    let mut group = SettingGroup::new().title(t!("settings.devices.title"));
     if clients.is_empty() {
         return group.item(
             SettingItem::render(|_, _, cx| {
                 div()
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
-                    .child("No devices yet. Pair one with the code above.")
+                    .child(t!("settings.devices.empty"))
             })
             .keywords(["clients", "devices"]),
         );
@@ -1308,7 +1389,7 @@ fn server_devices_group(
                                 .size_2()
                                 .text_color(cx.theme().success),
                         )
-                        .child("Connected")
+                        .child(t!("settings.connected"))
                         .into_any_element()
                 } else {
                     div()
@@ -1342,7 +1423,7 @@ fn server_devices_group(
                                     .child("·")
                                     .child(div().font_family("monospace").child(short))
                                     .when(is_this_device, |row| {
-                                        row.child("·").child("This window")
+                                        row.child("·").child(t!("settings.devices.this_window"))
                                     }),
                             ),
                     )
@@ -1363,12 +1444,12 @@ fn revoke_button(
     let key = client.fingerprint.clone();
     let name = client.name.clone();
     Button::new(format!("revoke-{key}"))
-        .label("Revoke")
+        .label(t!("settings.devices.revoke"))
         .small()
         .ghost()
         .disabled(this_device)
         .when(this_device, |button| {
-            button.tooltip("It is how this window connects.")
+            button.tooltip(t!("settings.devices.revoke_this_window"))
         })
         .on_click(move |_, window, cx| {
             let (owner, selected) = {
@@ -1379,8 +1460,10 @@ fn revoke_button(
             confirm_danger(
                 owner,
                 DangerConfirm::new(
-                    format!("Revoke “{name}”?"),
-                    "It disconnects now and needs a new pairing code to connect again.",
+                    t!("settings.devices.revoke_title", name = name),
+                    t!("settings.devices.revoke_description"),
+                    // shortcut: English, as `DangerConfirm::ok` is a `&'static str`; translate
+                    // it once dialogs.rs takes owned text.
                     "Revoke",
                 ),
                 move |owner, _, _| {
@@ -1496,7 +1579,7 @@ pub(super) fn agents_page(
             SettingItem::render(move |_, _, cx| {
                 div()
                     .text_color(cx.theme().danger)
-                    .child(format!("Hooks request failed: {error}"))
+                    .child(t!("settings.agents.hooks_failed", error = error))
             })
             .keywords(["hooks", "error"]),
         );
@@ -1526,7 +1609,7 @@ pub(super) fn agents_page(
             .keywords([agent.label(), "hooks"]),
         );
     }
-    SettingPage::new("Agent integrations")
+    SettingPage::new(t!("settings.agents.title"))
         .icon(IconName::Bot)
         .group(group)
 }
@@ -1542,18 +1625,21 @@ pub(super) fn agent_hooks_field(
 ) -> AnyElement {
     let state = report.map(|report| report.state);
     let (state_label, color) = match state {
-        Some(HooksState::Installed) => ("Installed", cx.theme().success),
-        Some(HooksState::Outdated) => ("Outdated", cx.theme().warning),
-        Some(HooksState::Missing) => ("Not installed", cx.theme().muted_foreground),
-        Some(HooksState::Unsupported) => ("Recognition only", cx.theme().muted_foreground),
-        None => ("Checking…", cx.theme().muted_foreground),
+        Some(HooksState::Installed) => (t!("settings.agents.installed"), cx.theme().success),
+        Some(HooksState::Outdated) => (t!("settings.agents.outdated"), cx.theme().warning),
+        Some(HooksState::Missing) => (t!("settings.agents.missing"), cx.theme().muted_foreground),
+        Some(HooksState::Unsupported) => (
+            t!("settings.agents.unsupported"),
+            cx.theme().muted_foreground,
+        ),
+        None => (t!("settings.agents.checking"), cx.theme().muted_foreground),
     };
     let install_label = if state == Some(HooksState::Outdated) {
-        "Update"
+        t!("settings.agents.update")
     } else {
-        "Install"
+        t!("settings.agents.install")
     };
-    let action = |id: &'static str, label: &'static str, action: HooksAction| {
+    let action = |id: &'static str, label: Cow<'static, str>, action: HooksAction| {
         let settings = settings.clone();
         Button::new(format!("agent-hooks-{}-{id}", agent.id()))
             .label(label)
@@ -1579,7 +1665,13 @@ pub(super) fn agent_hooks_field(
         )
         .when(
             matches!(state, Some(HooksState::Installed | HooksState::Outdated)),
-            |this| this.child(action("uninstall", "Uninstall", HooksAction::Uninstall)),
+            |this| {
+                this.child(action(
+                    "uninstall",
+                    t!("settings.agents.uninstall"),
+                    HooksAction::Uninstall,
+                ))
+            },
         )
         .into_any_element()
 }

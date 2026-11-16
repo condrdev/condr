@@ -1,4 +1,5 @@
 use super::*;
+use rust_i18n::t;
 
 /// How long "Saved" stays beside a field after its value went out.
 const SAVED_HINT: Duration = Duration::from_secs(2);
@@ -118,7 +119,9 @@ impl SettingsWindow {
     /// Why the draft was refused, beside the field until it is fixed.
     pub(super) fn refusal(&self, id: TextFieldId) -> Option<SharedString> {
         match id {
-            TextFieldId::Listen if self.listen_refused => Some("Enter host:port".into()),
+            TextFieldId::Listen if self.listen_refused => {
+                Some(t!("settings.text_field.enter_host_port").into())
+            }
             TextFieldId::ProxyUrl => self.proxy_url_refused.clone(),
             _ => None,
         }
@@ -205,7 +208,7 @@ pub(super) fn text_field_row(
                 row.child(
                     Button::new(format!("save-{id:?}"))
                         .debug_selector(move || format!("settings-save-{id:?}"))
-                        .label("Save")
+                        .label(t!("settings.text_field.save"))
                         .small()
                         .outline()
                         .on_click(move |_, _, cx| {
@@ -219,7 +222,7 @@ pub(super) fn text_field_row(
                         .debug_selector(move || format!("settings-saved-{id:?}"))
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Saved"),
+                        .child(t!("settings.text_field.saved")),
                 )
             })
             .child(
@@ -228,7 +231,7 @@ pub(super) fn text_field_row(
                     .id("text-field")
                     .when(options.is_disabled(), |field| {
                         field.tooltip(|window, cx| {
-                            Tooltip::new(super::server::REACHABILITY_LOCKED).build(window, cx)
+                            Tooltip::new(super::server::reachability_locked()).build(window, cx)
                         })
                     })
                     .child(Input::new(&input).w_64().disabled(options.is_disabled())),

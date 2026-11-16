@@ -1,0 +1,505 @@
+_version: 2
+settings:
+  open_failed:
+    en: 'Failed to open Settings: %{error}'
+    zh-CN: '无法打开设置：%{error}'
+  device_offline:
+    en: This device's settings appear once it connects.
+    zh-CN: 这台设备连接后，这里会显示它的设置。
+  terminal:
+    en: Terminal
+    zh-CN: 终端
+  connected:
+    en: Connected
+    zh-CN: 已连接
+  reachability_locked:
+    en: Change this on the device or over SSH. It can cut this connection.
+    zh-CN: 请在那台设备上或通过 SSH 更改。此更改可能切断当前连接。
+  licenses:
+    title:
+      en: Licenses
+      zh-CN: 许可证
+  notifications:
+    title:
+      en: Notifications
+      zh-CN: 通知
+    enable:
+      en: Enable notifications
+      zh-CN: 启用通知
+    enable_description:
+      en: Agent finished or needs input.
+      zh-CN: Agent 完成或需要你输入时。
+    test:
+      en: Send a test notification
+      zh-CN: 发送测试通知
+    send:
+      en: Send
+      zh-CN: 发送
+  power:
+    title:
+      en: Power
+      zh-CN: 电源
+    keep_awake_description:
+      en: No screen blanking, lock or idle sleep while Condr is running.
+      zh-CN: Condr 运行期间不熄屏、不锁屏，也不因闲置而睡眠。
+  developer:
+    title:
+      en: Developer
+      zh-CN: 开发者
+    diagnostics:
+      en: Diagnostics
+      zh-CN: 诊断
+    fps_monitor:
+      en: FPS monitor
+      zh-CN: FPS 监视器
+    fps_monitor_description:
+      en: Show GPUI frame rate and resource telemetry.
+      zh-CN: 显示 GPUI 帧率和资源遥测。
+    locations:
+      en: Locations
+      zh-CN: 位置
+    application:
+      en: Application
+      zh-CN: 应用程序
+    config:
+      en: Config
+      zh-CN: 配置
+    data:
+      en: Data
+      zh-CN: 数据
+    state:
+      en: State
+      zh-CN: 状态
+    logs:
+      en: Logs
+      zh-CN: 日志
+    unavailable:
+      en: Not available on this platform.
+      zh-CN: 此平台不支持。
+    open:
+      en: Open
+      zh-CN: 打开
+  about:
+    title:
+      en: About
+      zh-CN: 关于
+    version:
+      en: 'Version %{version}'
+      zh-CN: '版本 %{version}'
+    source_code:
+      en: Source code
+      zh-CN: 源代码
+    documentation:
+      en: Documentation
+      zh-CN: 文档
+    docs:
+      en: Docs
+      zh-CN: 查看文档
+  updates:
+    title:
+      en: Updates
+      zh-CN: 更新
+    up_to_date:
+      en: Condr is up to date.
+      zh-CN: Condr 已是最新版本。
+    look_now:
+      en: Look for a newer build now.
+      zh-CN: 立即查找更新的版本。
+    available:
+      en: '%{name} is available'
+      zh-CN: '%{name} 已发布'
+    view:
+      en: View
+      zh-CN: 查看
+    automatic:
+      en: Check automatically
+      zh-CN: 自动检查
+    automatic_description:
+      en: Every five hours while Condr runs.
+      zh-CN: Condr 运行期间每五小时检查一次。
+    channel:
+      en: Update channel
+      zh-CN: 更新通道
+    channel_description:
+      en: Stable releases, or the daily build of main.
+      zh-CN: 稳定版，或 main 分支的每日构建。
+    check_now:
+      en: Check now
+      zh-CN: 立即检查
+    check:
+      en: Check
+      zh-CN: 检查
+  appearance:
+    title:
+      en: Appearance
+      zh-CN: 外观
+    theme:
+      en: Theme
+      zh-CN: 主题
+    theme_description:
+      en: Follow the system appearance, or pick one.
+      zh-CN: 跟随系统外观，或自选一种。
+    system:
+      en: System
+      zh-CN: 跟随系统
+    light:
+      en: Light
+      zh-CN: 浅色
+    dark:
+      en: Dark
+      zh-CN: 深色
+    default_scheme:
+      en: Default
+      zh-CN: 默认
+    font:
+      en: Font
+      zh-CN: 字体
+    font_description:
+      en: Font family used by every terminal.
+      zh-CN: 所有终端使用的字体。
+    font_size:
+      en: Font size
+      zh-CN: 字号
+    font_size_description:
+      en: In pixels.
+      zh-CN: 单位为像素。
+    decrease_font_size:
+      en: Decrease font size
+      zh-CN: 减小字号
+    increase_font_size:
+      en: Increase font size
+      zh-CN: 增大字号
+    syntax:
+      en: Syntax
+      zh-CN: 语法高亮
+    dark_colors:
+      en: Dark colors
+      zh-CN: 深色配色
+    dark_colors_description:
+      en: Terminals and window in dark mode.
+      zh-CN: 深色模式下的终端和窗口。
+    light_colors:
+      en: Light colors
+      zh-CN: 浅色配色
+    light_colors_description:
+      en: Terminals and window in light mode.
+      zh-CN: 浅色模式下的终端和窗口。
+    highlight_theme:
+      en: Highlight theme
+      zh-CN: 高亮主题
+    highlight_theme_description:
+      en: Syntax themes for files and diffs.
+      zh-CN: 文件和 Diff 的语法高亮主题。
+  text_field:
+    enter_host_port:
+      en: Enter host:port
+      zh-CN: 请输入 host:port
+    save:
+      en: Save
+      zh-CN: 保存
+    saved:
+      en: Saved
+      zh-CN: 已保存
+  general:
+    title:
+      en: General
+      zh-CN: 通用
+    shell_description:
+      en: Empty uses the system default.
+      zh-CN: 留空则使用系统默认值。
+    shell_integration:
+      en: Shell integration
+      zh-CN: Shell 集成
+    shell_integration_description:
+      en: Prompt jumps and long-command alerts.
+      zh-CN: 提示符跳转和长命令提醒。
+    startup:
+      en: Startup
+      zh-CN: 启动
+    autostart_boot:
+      en: Start Condr at boot
+      zh-CN: 开机时启动 Condr
+    autostart_login:
+      en: Start Condr at login
+      zh-CN: 登录时启动 Condr
+    autostart_remote:
+      en: 'Run `condr server autostart on` on that device.'
+      zh-CN: '在那台设备上运行 `condr server autostart on`。'
+    autostart_description:
+      en: Reachable after a restart. No window opens.
+      zh-CN: 重启后仍可连接，不会打开窗口。
+  restart:
+    title:
+      en: Restart
+      zh-CN: 重启
+    row:
+      en: Restart Condr
+      zh-CN: 重启 Condr
+    button:
+      en: Restart
+      zh-CN: 重启
+    waiting:
+      en: Waiting for Condr to come back…
+      zh-CN: 正在等待 Condr 恢复…
+    restarting:
+      en: Restarting…
+      zh-CN: 正在重启…
+    to_apply:
+      en: Restart to apply
+      zh-CN: 重启以应用
+    description:
+      en: Stops every pane and agent on this device.
+      zh-CN: 这会停止这台设备上的所有 Pane 和 Agent。
+    pending_description:
+      en: Saved changes apply once Condr restarts. Every pane and agent on this device stops.
+      zh-CN: 已保存的更改将在 Condr 重启后生效。这台设备上的所有 Pane 和 Agent 都会停止。
+    confirm_title:
+      en: Restart Condr on this device?
+      zh-CN: 要重启这台设备上的 Condr 吗？
+    confirm_description:
+      en: Every pane and agent on this device stops; Condr windows reconnect on their own.
+      zh-CN: 这台设备上的所有 Pane 和 Agent 都会停止；Condr 窗口会自动重新连接。
+  network:
+    title:
+      en: Network
+      zh-CN: 网络
+    proxy:
+      en: Proxy
+      zh-CN: 代理
+    proxy_description:
+      en: The proxy to use for network requests.
+      zh-CN: 网络请求所用的代理。
+    proxy_url:
+      en: Proxy URL
+      zh-CN: 代理 URL
+    proxy_url_description:
+      en: http:// or https://, with user:password@ if the proxy asks.
+      zh-CN: http:// 或 https://，代理需要认证时加上 user:password@。
+    proxy_system:
+      en: System
+      zh-CN: 系统
+    proxy_none:
+      en: 'None'
+      zh-CN: 不使用
+    proxy_manual:
+      en: Manual
+      zh-CN: 手动
+  paired:
+    title:
+      en: Paired devices
+      zh-CN: 已配对设备
+  header:
+    over_ssh:
+      en: over SSH
+      zh-CN: 通过 SSH
+    over_tcp:
+      en: over TCP
+      zh-CN: 通过 TCP
+    over_p2p:
+      en: over Peer-to-peer
+      zh-CN: 通过 Peer-to-peer
+    connecting:
+      en: Connecting
+      zh-CN: 正在连接
+    disconnected:
+      en: Disconnected
+      zh-CN: 已断开
+  status:
+    title:
+      en: Status
+      zh-CN: 状态
+    waiting:
+      en: Waiting for the Server's status…
+      zh-CN: 正在等待 Server 的状态…
+    version:
+      en: Version
+      zh-CN: 版本
+    version_differs:
+      en: 'Differs from this window, which is %{version}.'
+      zh-CN: '与此窗口的版本 %{version} 不同。'
+    uptime:
+      en: Uptime
+      zh-CN: 运行时长
+    recent_errors:
+      en: Recent errors
+      zh-CN: 最近的错误
+    workspaces:
+      one:
+        en: '%{count} workspace'
+        zh-CN: '%{count} 个 Workspace'
+      other:
+        en: '%{count} workspaces'
+        zh-CN: '%{count} 个 Workspace'
+    tabs:
+      one:
+        en: '%{count} tab'
+        zh-CN: '%{count} 个 Tab'
+      other:
+        en: '%{count} tabs'
+        zh-CN: '%{count} 个 Tab'
+    panes:
+      one:
+        en: '%{count} pane'
+        zh-CN: '%{count} 个 Pane'
+      other:
+        en: '%{count} panes'
+        zh-CN: '%{count} 个 Pane'
+    agents:
+      one:
+        en: '%{count} agent'
+        zh-CN: '%{count} 个 Agent'
+      other:
+        en: '%{count} agents'
+        zh-CN: '%{count} 个 Agent'
+    clients:
+      one:
+        en: '%{count} client'
+        zh-CN: '%{count} 个客户端'
+      other:
+        en: '%{count} clients'
+        zh-CN: '%{count} 个客户端'
+  connections:
+    title:
+      en: Connections
+      zh-CN: 连接
+    p2p:
+      en: Peer-to-peer
+      zh-CN: Peer-to-peer
+    p2p_description:
+      en: Works from any network. No port to open.
+      zh-CN: 在任何网络下都能连接，无需开放端口。
+    tcp_description:
+      en: Devices dial this computer's address.
+      zh-CN: 其他设备直接连接这台电脑的地址。
+    listen:
+      en: Listen on
+      zh-CN: 监听地址
+    listen_description:
+      en: '0.0.0.0 answers on every network.'
+      zh-CN: '0.0.0.0 会在所有网络上响应。'
+  pair:
+    title:
+      en: Pair
+      zh-CN: 配对
+    host_placeholder:
+      en: Address or name
+      zh-CN: 地址或名称
+    add:
+      en: Add a phone or computer
+      zh-CN: 添加手机或电脑
+    closed:
+      en: Other devices can't connect to this one yet.
+      zh-CN: 其他设备还无法连接到这台设备。
+    closed_elsewhere:
+      en: Other devices can't connect to this one yet. Allow it on the device itself.
+      zh-CN: 其他设备还无法连接到这台设备。请在这台设备本机上允许连接。
+    allow:
+      en: Allow connections
+      zh-CN: 允许连接
+    restart_title:
+      en: Restart Condr to finish
+      zh-CN: 重启 Condr 以完成设置
+    restart_body:
+      en: Devices can connect once Condr restarts. Every pane and agent on this device stops.
+      zh-CN: Condr 重启后其他设备即可连接。这台设备上的所有 Pane 和 Agent 都会停止。
+    restarting:
+      en: Restarting Condr…
+      zh-CN: 正在重启 Condr…
+    ready:
+      en: Condr on your phone scans a code; another computer pastes its link.
+      zh-CN: 手机上的 Condr 扫描配对码；其他电脑粘贴它的链接。
+    show_code:
+      en: Show pairing code
+      zh-CN: 显示配对码
+    expired:
+      en: The code expired
+      zh-CN: 配对码已过期
+    expired_body:
+      en: Show a new one when the device is ready.
+      zh-CN: 等设备准备好后，再显示一个新的配对码。
+    show_new_code:
+      en: Show a new code
+      zh-CN: 显示新的配对码
+    paired:
+      en: '%{name} is paired'
+      zh-CN: '%{name} 已配对'
+    paired_body:
+      en: It's listed under Devices and connects from now on.
+      zh-CN: 它已列在“设备”下，今后会自动连接。
+    pair_another:
+      en: Pair another device
+      zh-CN: 配对其他设备
+    copied:
+      en: Copied
+      zh-CN: 已复制
+    copy_link:
+      en: Copy link
+      zh-CN: 复制链接
+    expires_in:
+      en: 'Expires in %{time}'
+      zh-CN: '%{time} 后过期'
+    new_code:
+      en: New code
+      zh-CN: 换一个配对码
+    scan:
+      en: Scan with Condr on your phone
+      zh-CN: 用手机上的 Condr 扫描
+    choose_address:
+      en: Choose the address the new device dials
+      zh-CN: 选择新设备要连接的地址
+    reach_at:
+      en: Reach this computer at
+      zh-CN: 通过此地址访问这台电脑
+  devices:
+    title:
+      en: Devices
+      zh-CN: 设备
+    empty:
+      en: No devices yet. Pair one with the code above.
+      zh-CN: 还没有设备。用上方的配对码配对一台。
+    this_window:
+      en: This window
+      zh-CN: 此窗口
+    revoke:
+      en: Revoke
+      zh-CN: 撤销
+    revoke_this_window:
+      en: It is how this window connects.
+      zh-CN: 此窗口正是通过它连接的。
+    revoke_title:
+      en: 'Revoke “%{name}”?'
+      zh-CN: '要撤销“%{name}”吗？'
+    revoke_description:
+      en: It disconnects now and needs a new pairing code to connect again.
+      zh-CN: 它会立即断开，之后需要新的配对码才能再次连接。
+  agents:
+    title:
+      en: Agent integrations
+      zh-CN: Agent 集成
+    hooks_failed:
+      en: 'Hooks request failed: %{error}'
+      zh-CN: '无法完成 Hook 请求：%{error}'
+    installed:
+      en: Installed
+      zh-CN: 已安装
+    outdated:
+      en: Outdated
+      zh-CN: 已过时
+    missing:
+      en: Not installed
+      zh-CN: 未安装
+    unsupported:
+      en: Recognition only
+      zh-CN: 仅识别
+    checking:
+      en: Checking…
+      zh-CN: 正在检查…
+    install:
+      en: Install
+      zh-CN: 安装
+    update:
+      en: Update
+      zh-CN: 更新
+    uninstall:
+      en: Uninstall
+      zh-CN: 卸载

@@ -1,0 +1,14 @@
+_version: 2
+power:
+  keep_awake:
+    en: Keep the screen awake
+    zh-CN: 保持屏幕常亮
+  keeping_awake:
+    en: Keeping the screen awake
+    zh-CN: 正在保持屏幕常亮
+  reason:
+    en: Waiting on agents
+    zh-CN: 正在等待 Agent
+  keep_awake_failed:
+    en: 'Failed to keep the screen awake: %{error}'
+    zh-CN: '无法保持屏幕常亮：%{error}'

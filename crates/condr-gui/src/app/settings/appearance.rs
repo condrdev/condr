@@ -1,6 +1,8 @@
 use super::*;
 use crate::app::syntax::{self, CodeTheme};
 use crate::interface_colors;
+use rust_i18n::t;
+use std::borrow::Cow;
 use std::rc::Rc;
 
 /// How long after the last font change the config file is written, so a run of
@@ -27,11 +29,11 @@ impl Appearance {
         }
     }
 
-    pub(in crate::app) fn label(self) -> &'static str {
+    pub(in crate::app) fn label(self) -> Cow<'static, str> {
         match self {
-            Self::System => "System",
-            Self::Light => "Light",
-            Self::Dark => "Dark",
+            Self::System => t!("settings.appearance.system"),
+            Self::Light => t!("settings.appearance.light"),
+            Self::Dark => t!("settings.appearance.dark"),
         }
     }
 
@@ -183,10 +185,12 @@ pub(in crate::app) fn sync_theme_with_system(window: &mut Window, cx: &mut App) 
 }
 
 /// The Colors entry standing for the built-in palette, stored as an empty name.
-pub(super) const DEFAULT_COLOR_SCHEME_LABEL: &str = "Default";
+pub(super) fn default_color_scheme_label() -> SharedString {
+    t!("settings.appearance.default_scheme").into()
+}
 
 pub(super) fn color_scheme_name(label: &SharedString) -> SharedString {
-    if label == DEFAULT_COLOR_SCHEME_LABEL {
+    if *label == default_color_scheme_label() {
         SharedString::default()
     } else {
         label.clone()
@@ -288,7 +292,7 @@ pub(in crate::app) fn reset_color_scheme(
         this.set_color_scheme(mode, SharedString::default(), cx)
     });
     select.update(cx, |select, cx| {
-        select.set_selected_value(&DEFAULT_COLOR_SCHEME_LABEL.into(), window, cx);
+        select.set_selected_value(&default_color_scheme_label(), window, cx);
     });
 }
 
@@ -310,12 +314,12 @@ pub(super) fn appearance_page(
     let size_set = settings.clone();
     let size_dirty = settings.clone();
     let default_size = default_font.size;
-    SettingPage::new("Appearance")
+    SettingPage::new(t!("settings.appearance.title"))
         .icon(IconName::Palette)
         .group(
             SettingGroup::new().item(
                 SettingItem::new(
-                    "Theme",
+                    t!("settings.appearance.theme"),
                     SettingField::dropdown(
                         options,
                         move |cx| selected_appearance(&selected_owner, cx),
@@ -323,26 +327,26 @@ pub(super) fn appearance_page(
                     )
                     .default_value(Appearance::default().as_str()),
                 )
-                .description("Follow the system appearance, or pick one."),
+                .description(t!("settings.appearance.theme_description").to_string()),
             ),
         )
         .group(
             SettingGroup::new()
-                .title("Terminal")
+                .title(t!("settings.terminal"))
                 .item(
                     SettingItem::new(
-                        "Font",
+                        t!("settings.appearance.font"),
                         text_field_row(
                             settings,
                             TextFieldId::FontFamily,
                             Some(default_font.family.clone()),
                         ),
                     )
-                    .description("Font family used by every terminal."),
+                    .description(t!("settings.appearance.font_description").to_string()),
                 )
                 .item(
                     SettingItem::new(
-                        "Font size",
+                        t!("settings.appearance.font_size"),
                         SettingField::render(move |_, _, cx| {
                             let settings = size_get.clone();
                             font_size_stepper(
@@ -360,7 +364,7 @@ pub(super) fn appearance_page(
                             },
                         ),
                     )
-                    .description("In pixels."),
+                    .description(t!("settings.appearance.font_size_description").to_string()),
                 )
                 .item(color_scheme_item(owner, ThemeMode::Dark, dark_color_scheme))
                 .item(color_scheme_item(
@@ -371,7 +375,7 @@ pub(super) fn appearance_page(
         )
         .group(
             SettingGroup::new()
-                .title("Syntax")
+                .title(t!("settings.appearance.syntax"))
                 .item(code_font_size_item(owner))
                 .item(code_theme_item(owner, code_theme)),
         )
@@ -388,9 +392,9 @@ fn font_size_stepper(
     let button = |direction: &'static str, icon, delta: f32, enabled: bool| {
         let step = step.clone();
         let label = if delta < 0. {
-            "Decrease font size"
+            t!("settings.appearance.decrease_font_size")
         } else {
-            "Increase font size"
+            t!("settings.appearance.increase_font_size")
         };
         div()
             .debug_selector(move || format!("{id}-{direction}"))
@@ -399,7 +403,7 @@ fn font_size_stepper(
                     .icon(icon)
                     .small()
                     .outline()
-                    .tooltip(label)
+                    .tooltip(label.clone())
                     .accessibility_label(label)
                     .disabled(!enabled)
                     .on_click(move |_, _, cx| step(delta, cx)),
@@ -436,7 +440,7 @@ fn code_font_size_item(owner: &WeakEntity<Condr>) -> SettingItem {
     let reset = owner.clone();
     let default_size = TerminalFont::default().size;
     SettingItem::new(
-        "Font size",
+        t!("settings.appearance.font_size"),
         SettingField::render(move |_, _, cx| {
             let owner = get.clone();
             font_size_stepper(
@@ -452,7 +456,7 @@ fn code_font_size_item(owner: &WeakEntity<Condr>) -> SettingItem {
             },
         ),
     )
-    .description("In pixels.")
+    .description(t!("settings.appearance.font_size_description").to_string())
 }
 
 /// What the Syntax Font size stepper shows.
@@ -621,15 +625,15 @@ fn color_scheme_item(
     // below its text's width.
     let (label, selector, description) = if mode.is_dark() {
         (
-            "Dark colors",
+            t!("settings.appearance.dark_colors"),
             "dark-color-scheme",
-            "Terminals and window in dark mode.",
+            t!("settings.appearance.dark_colors_description"),
         )
     } else {
         (
-            "Light colors",
+            t!("settings.appearance.light_colors"),
             "light-color-scheme",
-            "Terminals and window in light mode.",
+            t!("settings.appearance.light_colors_description"),
         )
     };
     SettingItem::new(
@@ -639,7 +643,7 @@ fn color_scheme_item(
             move |window, cx| reset_color_scheme(&reset_owner, mode, &reset_select, window, cx),
         ),
     )
-    .description(description)
+    .description(description.to_string())
 }
 
 /// A searchable Select, as a scheme list needs filtering, which opens scrolled to the
@@ -663,13 +667,13 @@ fn code_theme_item(owner: &WeakEntity<Condr>, select: &Entity<ColorSchemeSelect>
     let reset_select = select.clone();
     let reset_owner = owner.clone();
     SettingItem::new(
-        "Highlight theme",
+        t!("settings.appearance.highlight_theme"),
         SettingField::render(move |_, _, _| scheme_select_field("code-theme", &shown))
             .on_reset(code_theme_is_dirty, move |window, cx| {
                 reset_code_theme(&reset_owner, &reset_select, window, cx)
             }),
     )
-    .description("Syntax themes for files and diffs.")
+    .description(t!("settings.appearance.highlight_theme_description").to_string())
 }
 
 /// Whether Reset All has anything to do for the code theme.
@@ -687,7 +691,7 @@ pub(in crate::app) fn reset_code_theme(
 ) {
     select_code_theme(owner, SharedString::default(), cx);
     select.update(cx, |select, cx| {
-        select.set_selected_value(&DEFAULT_COLOR_SCHEME_LABEL.into(), window, cx);
+        select.set_selected_value(&default_color_scheme_label(), window, cx);
     });
 }
 
