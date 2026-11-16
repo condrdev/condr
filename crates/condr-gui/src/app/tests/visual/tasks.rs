@@ -677,3 +677,937 @@ fn a_disconnected_device_shows_a_band_and_its_open_pane_a_veil() {
     assert!(window.debug_bounds("tasks-band-reconnect-1").is_some());
     assert!(inside(window, "reconnect-veil-1", "tasks-area"));
 }
+
+// Tasks (ADR 0068): To do, the form, Start and the archive dialog.
+
+use condr_core::{StartPlace, TaskCommand, TaskId, TaskResponse};
+
+const SAVE: &str = if cfg!(target_os = "macos") {
+    "cmd-s"
+} else {
+    "ctrl-s"
+};
+
+/// A GUI on a fresh Server that keeps its Tasks in memory, and another Client of it, as
+/// the CLI would be.
+fn tasks_gui(
+    cx: &mut TestAppContext,
+) -> (
+    Entity<Condr>,
+    &mut VisualTestContext,
+    TestServer,
+    ClientConnection,
+) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        super::super::super::startup::bind_keys(cx);
+    });
+    let (server, endpoint) = start_server();
+    let cli = ClientConnection::connect_overview(&endpoint, "cli").unwrap();
+    let (view, window, server) = connected_condr_with(cx, server, endpoint);
+    (view, window, server, cli)
+}
+
+fn create_task(
+    cli: &mut ClientConnection,
+    title: &str,
+    repository: Option<std::path::PathBuf>,
+) -> TaskId {
+    let Ok(Ok(TaskResponse::Task(task))) = cli.task(TaskCommand::Create {
+        title: title.into(),
+        description: format!("{title}, described"),
+        repository,
+    }) else {
+        panic!("the Server keeps Tasks");
+    };
+    task.id
+}
+
+fn gui_tasks(
+    window: &mut VisualTestContext,
+    view: &Entity<Condr>,
+) -> std::collections::BTreeMap<TaskId, condr_core::Task> {
+    window.read(|app| {
+        view.read(app)
+            .connection(1)
+            .and_then(|connection| connection.model.tasks.clone())
+            .unwrap_or_default()
+    })
+}
+
+fn click(window: &mut VisualTestContext, selector: &'static str) {
+    let bounds = window
+        .debug_bounds(selector)
+        .unwrap_or_else(|| panic!("{selector} is drawn"));
+    window.simulate_click(bounds.center(), Modifiers::default());
+    window.run_until_parked();
+    draw(window);
+}
+
+fn todo_card(task: TaskId) -> &'static str {
+    leaked_selector(format!("tasks-todo-1-{}", task.as_u64()))
+}
+
+fn form_home(window: &mut VisualTestContext, view: &Entity<Condr>) -> Option<(u64, TaskId)> {
+    window.read(|app| view.read(app).task_form.as_ref().and_then(|form| form.home))
+}
+
+/// A message from the Server, made by hand.
+fn incoming(window: &mut VisualTestContext, view: &Entity<Condr>, message: ServerMessage) {
+    window.update(|_, cx| {
+        view.update(cx, |this, cx| {
+            let generation = this.connection(1).unwrap().connect_generation;
+            this.handle_incoming(1, generation, Incoming::Message(message), cx);
+            cx.notify();
+        });
+    });
+    window.run_until_parked();
+    draw(window);
+}
+
+/// A Session event made by hand, after the Client's last.
+fn event(window: &mut VisualTestContext, view: &Entity<Condr>, event: SessionEvent) {
+    let message = window.read(|app| {
+        let connection = view.read(app).connection(1).unwrap();
+        ServerMessage::Event {
+            server_id: connection.model.server_id.unwrap(),
+            session_id: connection.model.session_id.unwrap(),
+            sequence: connection.model.sequence + 1,
+            event,
+        }
+    });
+    incoming(window, view, message);
+}
+
+/// What the GUI sends from here on, which then never reaches the Server.
+fn capture(
+    window: &mut VisualTestContext,
+    view: &Entity<Condr>,
+) -> std::sync::mpsc::Receiver<ClientMessage> {
+    let (outgoing, sent) = std::sync::mpsc::channel();
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.connection_mut(1).unwrap().io = Some(ClientIo {
+                outgoing,
+                _incoming_task: Task::ready(()),
+            });
+        });
+    });
+    sent
+}
+
+/// Puts a Task in the GUI's model as an event would, without one.
+fn put_task(window: &mut VisualTestContext, view: &Entity<Condr>, task: condr_core::Task) {
+    window.update(|_, cx| {
+        view.update(cx, |this, cx| {
+            this.connection_mut(1).unwrap().model.apply_task(task);
+            cx.notify();
+        });
+    });
+    draw(window);
+}
+
+#[test]
+fn to_do_heads_tasks_mode_newest_first_with_its_count_and_drags_to_reorder() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    let (view, window, _server, mut cli) = tasks_gui(&mut cx);
+    let first = create_task(&mut cli, "Fix the login redirect", None);
+    let second = create_task(&mut cli, "Write the release notes", None);
+    assert!(wait_until(window, |window| gui_tasks(window, &view).len() == 2));
+    draw(window);
+    assert!(
+        window.debug_bounds("sidebar-tasks-count").is_some(),
+        "the sidebar's row counts To do"
+    );
+    assert_eq!(window.read(|app| view.read(app).todo_count()), 2);
+
+    // The Command Palette's New Task enters Tasks mode with the form; an empty one's
+    // Cancel asks nothing.
+    window.update(|window, cx| {
+        // From the window's focus, as the palette runs it.
+        let focus = view.read(cx).main_view().focus_handle.clone();
+        focus.focus(window, cx);
+        window.dispatch_action(Box::new(super::super::super::NewTask), cx)
+    });
+    window.run_until_parked();
+    draw(window);
+    assert!(window.debug_bounds("tasks-mode").is_some());
+    assert!(window.debug_bounds("task-form").is_some());
+    click(window, "task-form-cancel");
+    assert!(!window.update(|window, cx| window.has_active_dialog(cx)));
+    assert!(window.debug_bounds("task-form").is_none());
+    assert!(inside(window, todo_card(first), "tasks-column-to-do"));
+    assert!(inside(window, todo_card(second), "tasks-column-to-do"));
+    let (top, below) = (
+        window.debug_bounds(todo_card(second)).unwrap(),
+        window.debug_bounds(todo_card(first)).unwrap(),
+    );
+    assert!(top.top() < below.top(), "a new Task heads To do");
+    let to_do = window.debug_bounds("tasks-column-to-do").unwrap();
+    let needs_you = window.debug_bounds("tasks-column-needs-you").unwrap();
+    assert!(to_do.left() < needs_you.left(), "To do is the first column");
+
+    // Dragging the lower card onto the upper one moves it up, on the Server.
+    window.simulate_mouse_down(below.center(), MouseButton::Left, Modifiers::default());
+    for _ in 0..2 {
+        window.simulate_mouse_move(top.center(), MouseButton::Left, Modifiers::default());
+        window.run_until_parked();
+        draw(window);
+    }
+    window.simulate_mouse_up(top.center(), MouseButton::Left, Modifiers::default());
+    assert!(wait_until(window, |window| {
+        let tasks = gui_tasks(window, &view);
+        tasks[&first].order < tasks[&second].order
+    }));
+
+    // The List carries To do as its first group.
+    click(window, "tasks-layout-list");
+    assert!(window.debug_bounds(todo_card(first)).is_some());
+    assert!(window.debug_bounds("tasks-new-task").is_some());
+}
+
+#[test]
+fn a_device_whose_server_keeps_no_tasks_offers_no_to_do() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    let (view, window, _server, mut cli) = tasks_gui(&mut cx);
+    create_task(&mut cli, "Fix the login redirect", None);
+    assert!(wait_until(window, |window| gui_tasks(window, &view).len() == 1));
+    // An older Server, or one built without Tasks, sends no Tasks record.
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| {
+            this.connection_mut(1).unwrap().model.tasks = None;
+            this.toggle_tasks(window, cx);
+        })
+    });
+    draw(window);
+    assert!(window.debug_bounds("tasks-mode").is_some());
+    assert!(window.debug_bounds("tasks-column-to-do").is_none());
+    assert!(window.debug_bounds("tasks-column-needs-you").is_some());
+    assert_eq!(window.read(|app| view.read(app).todo_count()), 0);
+    window.update(|window, cx| view.update(cx, |this, cx| this.new_task(window, cx)));
+    window.run_until_parked();
+    assert!(
+        window.read(|app| view.read(app).task_form.is_none()),
+        "no Device takes a new Task"
+    );
+    assert!(window.read(|app| view.read(app).last_error.is_some()));
+}
+
+#[test]
+fn a_new_task_saves_with_the_shortcut_and_unsaved_changes_ask_before_they_go() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    let (view, window, _server, mut cli) = tasks_gui(&mut cx);
+    // A Workspace to start in, so Start waits only for the changes.
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                root_directory: std::env::temp_dir(),
+            });
+        });
+    });
+    assert!(wait_until(window, |window| presented(window, &view).is_some()));
+    window.update(|window, cx| view.update(cx, |this, cx| this.toggle_tasks(window, cx)));
+    draw(window);
+
+    // A new Task has no card and no Start until it is saved.
+    click(window, "tasks-new-task");
+    assert!(window.debug_bounds("task-form").is_some());
+    assert!(window.debug_bounds("task-start-unsaved").is_some());
+    assert!(window.debug_bounds("task-start").is_none());
+    assert!(gui_tasks(window, &view).is_empty());
+    window.simulate_input("Write the release notes");
+    window.simulate_keystrokes(SAVE);
+    assert!(wait_until(window, |window| form_home(window, &view).is_some()));
+    draw(window);
+    let (_, saved) = form_home(window, &view).unwrap();
+    assert_eq!(
+        gui_tasks(window, &view)[&saved].title,
+        "Write the release notes"
+    );
+    assert!(inside(window, todo_card(saved), "tasks-column-to-do"));
+    assert!(window.debug_bounds("task-start").is_some());
+    assert!(window.debug_bounds("task-start-blocked").is_none());
+
+    // A change disables Start until it is saved.
+    click(window, "task-form-title");
+    window.simulate_input(" now");
+    draw(window);
+    assert!(window.debug_bounds("task-start-blocked").is_some());
+
+    // Leaving asks: Cancel stays, Discard goes and keeps the Task as it was.
+    let other = create_task(&mut cli, "Fix the login redirect", None);
+    assert!(wait_until(window, |window| gui_tasks(window, &view).len() == 2));
+    draw(window);
+    click(window, todo_card(other));
+    assert!(window.update(|window, cx| window.has_active_dialog(cx)));
+    click(window, "file-choice-cancel");
+    assert_eq!(form_home(window, &view), Some((1, saved)));
+    click(window, todo_card(other));
+    click(window, "file-choice-discard");
+    assert_eq!(form_home(window, &view), Some((1, other)));
+    assert_eq!(
+        gui_tasks(window, &view)[&saved].title,
+        "Write the release notes"
+    );
+
+    // The form fetched the description; Save from the dialog keeps a change on the way out.
+    assert!(wait_until(window, |window| window.read(|app| {
+        view.read(app)
+            .task_form
+            .as_ref()
+            .and_then(|form| form.saved.as_ref())
+            .is_some_and(|saved| saved.description.is_some())
+    })));
+    click(window, "task-form-title");
+    window.simulate_input("!");
+    click(window, "tasks-area-close");
+    click(window, "file-choice-save");
+    assert!(window.read(|app| view.read(app).task_form.is_none()));
+    assert!(wait_until(window, |window| gui_tasks(window, &view)
+        [&other]
+        .title
+        .ends_with('!')));
+    let Ok(Ok(TaskResponse::Task(task))) = cli.task(TaskCommand::Get { task: other }) else {
+        panic!("the Task is there");
+    };
+    assert_eq!(
+        task.description.as_deref(),
+        Some("Fix the login redirect, described"),
+        "saving a title leaves the description as it was"
+    );
+
+    // Archive asks nothing; Delete asks first.
+    click(window, todo_card(saved));
+    click(window, "task-form-delete");
+    assert!(window.update(|window, cx| window.has_active_dialog(cx)));
+    window.update(|window, cx| window.dispatch_action(Box::new(Confirm { secondary: false }), cx));
+    assert!(wait_until(window, |window| !gui_tasks(window, &view)
+        .contains_key(&saved)));
+    click(window, todo_card(other));
+    click(window, "task-form-archive");
+    assert!(wait_until(window, |window| gui_tasks(window, &view).is_empty()));
+    assert!(window.read(|app| view.read(app).task_form.is_none()));
+
+    // The Archived list unfolds with it, to restore.
+    click(window, "tasks-archived");
+    let restore = leaked_selector(format!("tasks-restore-1-{}", other.as_u64()));
+    assert!(wait_until(window, |window| {
+        draw(window);
+        window.debug_bounds(restore).is_some()
+    }));
+    click(window, restore);
+    assert!(wait_until(window, |window| gui_tasks(window, &view)
+        .contains_key(&other)));
+}
+
+#[test]
+fn a_form_closes_when_another_client_deletes_its_task_and_follows_one_that_starts() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    let (view, window, _server, mut cli) = tasks_gui(&mut cx);
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                root_directory: std::env::temp_dir(),
+            });
+        });
+    });
+    assert!(wait_until(window, |window| presented(window, &view).is_some()));
+    let (workspace_id, _) = presented(window, &view).unwrap();
+    let deleted = create_task(&mut cli, "Fix the login redirect", None);
+    let started = create_task(&mut cli, "Write the release notes", None);
+    assert!(wait_until(window, |window| gui_tasks(window, &view).len() == 2));
+    window.update(|window, cx| view.update(cx, |this, cx| this.toggle_tasks(window, cx)));
+    draw(window);
+
+    click(window, todo_card(deleted));
+    assert_eq!(form_home(window, &view), Some((1, deleted)));
+    let Ok(Ok(_)) = cli.task(TaskCommand::Delete { task: deleted }) else {
+        panic!("the other Client deletes it");
+    };
+    assert!(wait_until(window, |window| form_home(window, &view).is_none()));
+
+    // Another Client starts it: the selection follows to its card, which reads
+    // "Starting…" in Working until an Agent comes, and then "No agent running".
+    click(window, todo_card(started));
+    let mut task = gui_tasks(window, &view)[&started].clone();
+    task.workspace = Some(workspace_id);
+    event(window, &view, SessionEvent::TaskChanged(task));
+    let card = leaked_selector(format!("tasks-task-1-{}", started.as_u64()));
+    assert!(window.read(|app| view.read(app).task_form.is_none()));
+    assert_eq!(
+        window.read(|app| view.read(app).main_view().tasks_selection.unwrap().task),
+        Some(started)
+    );
+    assert!(inside(window, card, "tasks-column-working"));
+    assert!(window.debug_bounds("tasks-archive-task").is_some());
+    assert!(window.debug_bounds("tasks-area-dock").is_some());
+
+    window.update(|_, cx| view.update(cx, |this, cx| this.task_start_settled(1, started, cx)));
+    draw(window);
+    assert!(inside(window, card, "tasks-column-idle"));
+    assert!(
+        window.read(|app| view.read(app).last_error.is_none()),
+        "only the Client that started it says the Agent did not come"
+    );
+}
+
+#[test]
+fn start_takes_its_defaults_and_a_successful_start_selects_the_agent() {
+    let _serial_guard = acquire_visual_test_lock();
+    let repository = TestDirectory::new("tasks-start");
+    run_git(&repository.0, ["init"]);
+    let mut cx = TestAppContext::single();
+    let (view, window, _server, mut cli) = tasks_gui(&mut cx);
+    let other_root = std::env::temp_dir().join("condr-tasks-start-other");
+    std::fs::create_dir_all(&other_root).unwrap();
+    for root in [repository.0.clone(), other_root] {
+        window.update(|_, cx| {
+            view.update(cx, |this, _| {
+                this.send_layout(LayoutCommand::CreateWorkspace {
+                    name: None,
+                    root_directory: root.clone(),
+                });
+            });
+        });
+        let root = root.clone();
+        assert!(wait_until(window, |window| window.read(|app| {
+            view.read(app)
+                .active_session()
+                .is_some_and(|session| session.workspace_by_root(&root).is_some())
+        })));
+    }
+    // A repository Workspace is one whose Git state the Server reported.
+    assert!(wait_until(window, |window| window.read(|app| {
+        view.read(app)
+            .connection(1)
+            .is_some_and(|connection| !connection.model.workspace_git.is_empty())
+    })));
+    let (repository_workspace, other_workspace) = window.read(|app| {
+        let session = view.read(app).active_session().unwrap();
+        (
+            session.workspace_by_root(&repository.0).unwrap().id(),
+            session.workspaces()[1].id(),
+        )
+    });
+    let title = "Fix the login redirect";
+    let task_id = create_task(&mut cli, title, Some(repository.0.clone()));
+    assert!(wait_until(window, |window| gui_tasks(window, &view).len() == 1));
+    window.update(|window, cx| view.update(cx, |this, cx| this.toggle_tasks(window, cx)));
+    draw(window);
+    click(window, todo_card(task_id));
+    assert!(wait_until(window, |window| window.read(|app| {
+        view.read(app)
+            .connection(1)
+            .unwrap()
+            .device_tasks
+            .available
+            .is_some()
+    })));
+    // Whatever this machine has on PATH, the Device offers one Agent here.
+    window.update(|_, cx| {
+        view.update(cx, |this, cx| {
+            this.connection_mut(1).unwrap().device_tasks.available = Some(vec![AgentKind::Claude]);
+            cx.notify();
+        })
+    });
+    draw(window);
+    let plan = |window: &mut VisualTestContext| {
+        window.read(|app| {
+            let view = view.read(app);
+            let plan = view
+                .start_plan(view.task_form.as_ref().unwrap(), app)
+                .unwrap();
+            (plan.place, plan.workspace, plan.blocked.is_some())
+        })
+    };
+    use super::super::super::task_form::Where;
+    assert_eq!(
+        plan(window),
+        (Where::Existing, Some(repository_workspace), false),
+        "the repository's own Workspace, which no Task holds"
+    );
+
+    // Another Task holds it: greyed with that Task's title, and a new worktree on the
+    // Server's branch is the default.
+    let mut holder = gui_tasks(window, &view)[&task_id].clone();
+    holder.id = TaskId::from_u64(99);
+    holder.title = "Another task".into();
+    holder.workspace = Some(repository_workspace);
+    put_task(window, &view, holder.clone());
+    assert_eq!(plan(window).0, Where::NewWorktree);
+    assert!(window.debug_bounds("task-start-branch").is_some());
+    let branch = window.read(|app| {
+        view.read(app)
+            .task_form
+            .as_ref()
+            .unwrap()
+            .start
+            .branch
+            .read(app)
+            .value()
+            .to_string()
+    });
+    assert_eq!(branch, "worktree/fix-the-login-redirect");
+    let held = window.read(|app| {
+        let view = view.read(app);
+        view.start_plan(view.task_form.as_ref().unwrap(), app)
+            .unwrap()
+            .options
+            .workspaces
+    });
+    assert_eq!(held[0].holder.as_deref(), Some("Another task"));
+    assert_eq!(held[1].holder, None);
+
+    // A branch checked out elsewhere is refused under its field.
+    let sent = capture(window, &view);
+    click(window, "task-start-button");
+    let request_id = sent
+        .try_iter()
+        .find_map(|message| match message {
+            ClientMessage::Task {
+                request_id,
+                command:
+                    TaskCommand::Start {
+                        task,
+                        place: Some(StartPlace::NewWorktree { branch }),
+                        agent: AgentKind::Claude,
+                    },
+                ..
+            } if task == task_id
+                && branch.as_deref() == Some("worktree/fix-the-login-redirect") =>
+            {
+                Some(request_id)
+            }
+            _ => None,
+        })
+        .expect("Start sends the place and the Agent");
+    incoming(
+        window,
+        &view,
+        ServerMessage::Task {
+            request_id,
+            result: Err(condr_core::TaskError::new(
+                condr_core::task_error::BRANCH_CHECKED_OUT,
+                "worktree/fix-the-login-redirect is checked out elsewhere",
+            )),
+        },
+    );
+    assert!(inside(window, "field-error", "task-start"));
+    assert!(window.read(|app| view.read(app).last_error.is_none()));
+
+    // The other Workspace instead; with nothing free, Start says where to open one.
+    window.update(|_, cx| {
+        view.update(cx, |this, cx| {
+            this.choose_task_workspace(other_workspace, cx)
+        })
+    });
+    assert_eq!(
+        plan(window),
+        (Where::Existing, Some(other_workspace), false)
+    );
+    let mut second = holder.clone();
+    second.id = TaskId::from_u64(98);
+    second.workspace = Some(other_workspace);
+    put_task(window, &view, second.clone());
+    window.update(|_, cx| {
+        view.update(cx, |this, cx| {
+            let tasks = this
+                .connection_mut(1)
+                .unwrap()
+                .model
+                .tasks
+                .as_mut()
+                .unwrap();
+            tasks.get_mut(&task_id).unwrap().repository = Some("/nowhere/cli".into());
+            cx.notify();
+        })
+    });
+    draw(window);
+    assert!(window.debug_bounds("task-start-open-first").is_some());
+    assert!(plan(window).2, "nothing to offer disables Start");
+    window.update(|_, cx| {
+        view.update(cx, |this, cx| {
+            let tasks = this
+                .connection_mut(1)
+                .unwrap()
+                .model
+                .tasks
+                .as_mut()
+                .unwrap();
+            tasks.remove(&holder.id);
+            tasks.remove(&second.id);
+            tasks.get_mut(&task_id).unwrap().repository = Some(repository.0.clone());
+            cx.notify();
+        })
+    });
+    draw(window);
+
+    // Start again, in the repository's Workspace: a Start under way reads "Starting…"
+    // in To do.
+    window.update(|_, cx| {
+        view.update(cx, |this, cx| {
+            this.choose_task_workspace(repository_workspace, cx)
+        })
+    });
+    draw(window);
+    click(window, "task-start-button");
+    let request_id = sent
+        .try_iter()
+        .find_map(|message| match message {
+            ClientMessage::Task {
+                request_id,
+                command:
+                    TaskCommand::Start {
+                        place: Some(StartPlace::Workspace(workspace)),
+                        ..
+                    },
+                ..
+            } if workspace == repository_workspace => Some(request_id),
+            _ => None,
+        })
+        .expect("Start sends the Workspace chosen");
+    let mut starting = gui_tasks(window, &view)[&task_id].clone();
+    starting.starting = true;
+    event(window, &view, SessionEvent::TaskChanged(starting.clone()));
+    assert!(
+        window
+            .debug_bounds(leaked_selector(format!(
+                "tasks-todo-starting-1-{}",
+                task_id.as_u64()
+            )))
+            .is_some()
+    );
+    assert!(window.debug_bounds("task-start-blocked").is_some());
+
+    // It started: the card is selected with the keyboard in the new Pane, and the
+    // Agent's card carries the Task's title once it comes.
+    let (tab_id, pane_id) = window.read(|app| {
+        let tab = &view
+            .read(app)
+            .active_session()
+            .unwrap()
+            .workspace(repository_workspace)
+            .unwrap()
+            .tabs()[0];
+        (tab.id(), tab.panes()[0].id())
+    });
+    let mut started = starting;
+    started.starting = false;
+    started.workspace = Some(repository_workspace);
+    event(window, &view, SessionEvent::TaskChanged(started));
+    incoming(
+        window,
+        &view,
+        ServerMessage::Task {
+            request_id,
+            result: Ok(TaskResponse::Started {
+                workspace_id: repository_workspace,
+                tab_id,
+                pane_id,
+            }),
+        },
+    );
+    assert!(window.read(|app| view.read(app).task_form.is_none()));
+    let task_card = leaked_selector(format!("tasks-task-1-{}", task_id.as_u64()));
+    assert!(inside(window, task_card, "tasks-column-working"));
+    assert_eq!(target(window, &view), Some((1, pane_id)));
+    // No Agent within the wait: "No agent running", and one toast for this Start.
+    assert!(window.read(|app| view.read(app).last_error.is_none()));
+    window
+        .executor()
+        .advance_clock(super::super::super::task_form::AGENT_WAIT);
+    window.run_until_parked();
+    draw(window);
+    assert!(inside(window, task_card, "tasks-column-idle"));
+    assert!(window.read(|app| view.read(app).last_error.is_some()));
+    agent_changed(
+        window,
+        &view,
+        pane_id,
+        Some(AgentSnapshot {
+            session_id: None,
+            kind: AgentKind::Claude,
+            state: AgentState::Working,
+            detail: None,
+        }),
+    );
+    let agent_card = leaked_selector(format!("tasks-card-1-{}", pane_id.as_u64()));
+    assert!(window.debug_bounds(task_card).is_none());
+    assert!(inside(window, agent_card, "tasks-column-working"));
+    assert_eq!(
+        window.read(|app| view.read(app).main_view().tasks_selection.unwrap().pane_id),
+        pane_id
+    );
+    assert!(window.debug_bounds("tasks-archive-task").is_some());
+}
+
+#[test]
+fn archiving_a_started_task_closes_a_workspace_its_start_made_and_keeps_a_borrowed_one() {
+    let _serial_guard = acquire_visual_test_lock();
+    let directory = TestDirectory::new("tasks-archive");
+    let mut session = Session::new();
+    let repository = session.create_workspace(directory.0.clone()).unwrap();
+    let worktree = session.create_workspace(directory.0.clone()).unwrap();
+    let snapshot_path = directory.0.join("session.snapshot");
+    std::fs::write(&snapshot_path, session.snapshot().to_bytes().unwrap()).unwrap();
+    let endpoint = Endpoint::local(directory.0.join("server.sock"));
+    let server = start_server_with_config(
+        ServerConfig::ephemeral(endpoint.as_local_path().unwrap())
+            .with_snapshot_path(snapshot_path),
+    );
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr_with(&mut cx, server, endpoint);
+    let pane = |window: &mut VisualTestContext, workspace_id: WorkspaceId| {
+        window.read(|app| {
+            let session = view.read(app).connection(1)?.session()?;
+            Some(session.workspace(workspace_id)?.tabs()[0].panes()[0].id())
+        })
+    };
+    assert!(wait_until(window, |window| pane(window, worktree).is_some()));
+    let in_worktree = pane(window, worktree).unwrap();
+    let sent = capture(window, &view);
+    // The test Server's directory is no Git worktree, so the Client is told it is one.
+    let snapshot = window.read(|app| {
+        let mut session = view
+            .read(app)
+            .connection(1)
+            .unwrap()
+            .session()
+            .unwrap()
+            .clone();
+        assert!(session.associate_worktree(worktree, repository, directory.0.clone(), true, None));
+        session.snapshot()
+    });
+    event(
+        window,
+        &view,
+        SessionEvent::LayoutChanged {
+            snapshot,
+            zoomed_panes: Vec::new(),
+        },
+    );
+    let task = |id: u64, title: &str, workspace_id| condr_core::Task {
+        id: TaskId::from_u64(id),
+        title: title.into(),
+        description: None,
+        repository: Some(directory.0.clone()),
+        order: 0,
+        archived: false,
+        workspace: Some(workspace_id),
+        starting: false,
+        last: Some(condr_core::LastPlace {
+            path: directory.0.clone(),
+            branch: Some("worktree/fix".into()),
+            base_branch: None,
+            managed: true,
+            repository: Some(directory.0.clone()),
+        }),
+    };
+    put_task(window, &view, task(1, "Made by its Start", worktree));
+    put_task(
+        window,
+        &view,
+        task(2, "Borrowed the repository", repository),
+    );
+    agent_changed(
+        window,
+        &view,
+        in_worktree,
+        Some(AgentSnapshot {
+            session_id: None,
+            kind: AgentKind::Codex,
+            state: AgentState::Blocked,
+            detail: Some("Bash: cargo test".into()),
+        }),
+    );
+    window.update(|window, cx| view.update(cx, |this, cx| this.toggle_tasks(window, cx)));
+    draw(window);
+
+    // The Agent in the worktree carries its Task's title; the repository's Task, with
+    // no Agent, is a card of its own.
+    let facts = window.read(|app| {
+        view.read(app)
+            .archive_facts(1, TaskId::from_u64(1))
+            .unwrap()
+    });
+    assert!(facts.created && facts.managed);
+    assert_eq!(facts.agents, 1);
+    assert_eq!(
+        facts.busy,
+        Some((AgentKind::Codex, condr_core::AgentDisplayState::Blocked))
+    );
+    click(
+        window,
+        leaked_selector(format!("tasks-card-1-{}", in_worktree.as_u64())),
+    );
+    click(window, "tasks-archive-task");
+    assert!(window.update(|window, cx| window.has_active_dialog(cx)));
+    draw(window);
+    assert!(window.debug_bounds("task-archive-remove").is_some());
+    window.update(|window, cx| window.dispatch_action(Box::new(Confirm { secondary: false }), cx));
+    window.run_until_parked();
+    let archived = |sent: &std::sync::mpsc::Receiver<ClientMessage>| {
+        sent.try_iter().find_map(|message| match message {
+            ClientMessage::Task {
+                command:
+                    TaskCommand::Archive {
+                        task,
+                        close_workspace,
+                        remove_worktree,
+                    },
+                ..
+            } => Some((task.as_u64(), close_workspace, remove_worktree)),
+            _ => None,
+        })
+    };
+    assert_eq!(
+        archived(&sent),
+        Some((1, true, false)),
+        "a Workspace its Start made closes by default; the worktree stays"
+    );
+
+    let borrowed = leaked_selector("tasks-task-1-2".into());
+    assert!(inside(window, borrowed, "tasks-column-idle"));
+    click(window, borrowed);
+    click(window, "tasks-archive-task");
+    draw(window);
+    assert!(
+        window.debug_bounds("task-archive-remove").is_none(),
+        "only a Managed Worktree can be removed"
+    );
+    window.update(|window, cx| window.dispatch_action(Box::new(Confirm { secondary: false }), cx));
+    window.run_until_parked();
+    assert_eq!(
+        archived(&sent),
+        Some((2, false, false)),
+        "a borrowed Workspace stays open by default"
+    );
+}
+
+#[test]
+fn a_new_device_for_a_to_do_task_creates_it_there_and_deletes_it_here() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    let (view, window, _server, mut cli) = tasks_gui(&mut cx);
+    let task_id = create_task(&mut cli, "Fix the login redirect", None);
+    assert!(wait_until(window, |window| gui_tasks(window, &view).len() == 1));
+    // A second Device that keeps Tasks, whose messages the test answers.
+    let (outgoing, box_sent) = std::sync::mpsc::channel();
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| {
+            let mut device =
+                ServerConnection::new(2, "box".into(), crate::app::tests::tcp("127.0.0.1:9"));
+            device.status = ConnectionStatus::Connected;
+            device.model.server_id = Some(condr_core::protocol::ServerId(77));
+            device.model.session_id = Some(condr_core::protocol::SessionId(1));
+            device.model.tasks = Some(Default::default());
+            device.io = Some(ClientIo {
+                outgoing,
+                _incoming_task: Task::ready(()),
+            });
+            this.connections.push(device);
+            this.toggle_tasks(window, cx);
+        })
+    });
+    draw(window);
+    click(window, todo_card(task_id));
+    assert!(wait_until(window, |window| window.read(|app| {
+        view.read(app)
+            .task_form
+            .as_ref()
+            .and_then(|form| form.saved.as_ref())
+            .is_some_and(|saved| saved.description.is_some())
+    })));
+    window.update(|_, cx| view.update(cx, |this, cx| this.choose_task_device(2, cx)));
+    draw(window);
+    assert!(
+        window.debug_bounds("task-start-blocked").is_some(),
+        "a move is a change to save before Start"
+    );
+    click(window, "task-form-save");
+    let (request_id, title, description) = box_sent
+        .try_iter()
+        .find_map(|message| match message {
+            ClientMessage::Task {
+                request_id,
+                command:
+                    TaskCommand::Create {
+                        title,
+                        description,
+                        repository: None,
+                    },
+                ..
+            } => Some((request_id, title, description)),
+            _ => None,
+        })
+        .expect("the new Device is asked to create it");
+    assert_eq!(description, "Fix the login redirect, described");
+    let moved = condr_core::Task {
+        id: TaskId::from_u64(5),
+        title,
+        description: Some(description),
+        repository: None,
+        order: 0,
+        archived: false,
+        workspace: None,
+        starting: false,
+        last: None,
+    };
+    let answer = |window: &mut VisualTestContext, request_id, result| {
+        window.update(|_, cx| {
+            view.update(cx, |this, cx| {
+                this.handle_incoming(
+                    2,
+                    0,
+                    Incoming::Message(ServerMessage::Task { request_id, result }),
+                    cx,
+                );
+            })
+        });
+        window.run_until_parked();
+    };
+    // Its event comes before its answer, as the Server sends them.
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.connection_mut(2)
+                .unwrap()
+                .model
+                .apply_task(moved.clone());
+        })
+    });
+    answer(window, request_id, Ok(TaskResponse::Task(moved)));
+    assert_eq!(form_home(window, &view), Some((2, TaskId::from_u64(5))));
+    assert!(
+        wait_until(window, |window| gui_tasks(window, &view).is_empty()),
+        "then the old Device deletes its copy"
+    );
+
+    // A delete that fails leaves both copies and says so.
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.connection_mut(2).unwrap().device_tasks.pending.insert(
+                900,
+                super::super::super::task_form::TaskRequest::DeleteMoved {
+                    title: "Fix the login redirect".into(),
+                    device: "Local".into(),
+                },
+            );
+        })
+    });
+    answer(
+        window,
+        900,
+        Err(condr_core::TaskError::new(
+            condr_core::task_error::TASK_STARTED,
+            "Task 5 is started; archive it first",
+        )),
+    );
+    assert!(window.read(|app| view.read(app).last_error.is_some()));
+}

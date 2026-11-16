@@ -85,7 +85,8 @@ pub(crate) fn run(directory: PathBuf) {
     else {
         panic!("expected a Workspace");
     };
-    let initial = ClientConnection::connect(&endpoint, "condr-screenshots");
+    let initial =
+        ClientConnection::connect(&endpoint, super::startup::gui_hello("condr-screenshots"));
 
     let holder: Rc<RefCell<Option<Entity<Condr>>>> = Rc::default();
     let window = {
@@ -180,6 +181,8 @@ pub(crate) fn run(directory: PathBuf) {
         });
         settle(&mut cx, window);
     }
+
+    tasks(&mut cx, window, &view, &mut admin, workspace_id, &directory);
 
     update(&mut cx, window, &view, |this, window, cx| {
         this.open_ports(PortsScope::All, window, cx)
@@ -307,6 +310,76 @@ pub(crate) fn run(directory: PathBuf) {
     let _ = server_thread.join();
     let _ = std::fs::remove_dir_all(&root);
     eprintln!("screenshots saved in {}", directory.display());
+}
+
+/// Tasks mode with Tasks (ADR 0068): To do, a To do Task's form with Start, a new Task's
+/// form, and a started Task whose Workspace has no Agent.
+fn tasks(
+    cx: &mut VisualTestAppContext,
+    window: AnyWindowHandle,
+    view: &Entity<Condr>,
+    admin: &mut ClientConnection,
+    workspace_id: WorkspaceId,
+    directory: &std::path::Path,
+) {
+    let mut created = Vec::new();
+    for (title, description) in [
+        (
+            "Fix the login redirect",
+            "Users land on /home after signing in.",
+        ),
+        ("修复输入法的候选框位置", ""),
+    ] {
+        let Ok(Ok(condr_core::TaskResponse::Task(task))) =
+            admin.task(condr_core::TaskCommand::Create {
+                title: title.into(),
+                description: description.into(),
+                repository: None,
+            })
+        else {
+            panic!("the Server keeps Tasks");
+        };
+        created.push(task);
+    }
+    wait(cx, "the Tasks arrived", |app| {
+        view.read(app)
+            .connection(1)
+            .and_then(|connection| connection.model.tasks.as_ref())
+            .is_some_and(|tasks| tasks.len() == 2)
+    });
+    update(cx, window, view, |this, window, cx| {
+        this.toggle_tasks(window, cx)
+    });
+    shot(cx, window, directory, "10-tasks-todo");
+    let first = created[0].id;
+    update(cx, window, view, move |this, window, cx| {
+        this.open_task_form(1, first, window, cx)
+    });
+    wait(cx, "the description arrived", |app| {
+        view.read(app)
+            .task_form
+            .as_ref()
+            .and_then(|form| form.saved.as_ref())
+            .is_some_and(|saved| saved.description.is_some())
+    });
+    shot(cx, window, directory, "10b-task-form");
+    update(cx, window, view, |this, window, cx| {
+        this.new_task(window, cx)
+    });
+    cx.simulate_input(window, "Write the release notes");
+    shot(cx, window, directory, "10c-task-new");
+    let mut started = created[1].clone();
+    started.workspace = Some(workspace_id);
+    update(cx, window, view, move |this, window, cx| {
+        this.task_form = None;
+        this.connection_mut(1).unwrap().model.apply_task(started);
+        this.toggle_tasks(window, cx);
+        this.toggle_tasks(window, cx);
+    });
+    shot(cx, window, directory, "10d-task-no-agent");
+    update(cx, window, view, |this, window, cx| {
+        this.toggle_tasks(window, cx)
+    });
 }
 
 fn local_path(root: &std::path::Path, name: &str) -> PathBuf {

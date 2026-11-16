@@ -163,7 +163,9 @@ fn connected_condr_at(
     let mut initial = None;
     let deadline = Instant::now() + TEST_TIMEOUT;
     while Instant::now() < deadline {
-        if let Ok(connection) = ClientConnection::connect(&endpoint, "condr-test") {
+        if let Ok(connection) =
+            ClientConnection::connect(&endpoint, super::super::startup::gui_hello("condr-test"))
+        {
             initial = Some(connection);
             break;
         }
