@@ -345,11 +345,21 @@ fn worktree_actions_use_the_workspace_context_and_real_server() {
     window.simulate_mouse_down(workspace.center(), MouseButton::Right, Modifiers::default());
     window.run_until_parked();
     window.update(|window, cx| _ = window.draw(cx));
+    assert_eq!(
+        window.debug_bounds("row-menu-ring"),
+        Some(workspace),
+        "the row a menu acts on keeps a ring while the menu is open"
+    );
     window.simulate_keystrokes("down down enter");
     window.run_until_parked();
     assert!(
         window.update(|window, cx| window.has_active_dialog(cx)),
         "Create Worktree should open its branch dialog"
+    );
+    window.update(|window, cx| _ = window.draw(cx));
+    assert!(
+        window.debug_bounds("row-menu-ring").is_none(),
+        "the ring goes with the menu"
     );
     submit_text_dialog(window, &created_branch);
 

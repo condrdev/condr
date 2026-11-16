@@ -3,7 +3,7 @@
 //! Everything shown here is Server data; the Client only asks and draws.
 
 use super::change_tree::{
-    TreeRow, diff_stat, directory_row, disclosure, file_row, row_highlight, tree_rows,
+    TreeRow, diff_stat, directory_row, disclosure, file_row, row_highlight, row_menu, tree_rows,
 };
 use super::files::language_for;
 use super::history::history_branch;
@@ -811,13 +811,11 @@ impl Condr {
                         this.show_diff_on(key, workspace_id, path.clone(), window, cx);
                     });
                 })
-                .context_menu(self.file_context_menu(
-                    key,
-                    workspace_id,
-                    &entry.path,
-                    Some(!deleted),
-                    cx,
-                ))
+                .map(|row| {
+                    let menu =
+                        self.file_context_menu(key, workspace_id, &entry.path, Some(!deleted), cx);
+                    row_menu(row, selected, menu, cx)
+                })
                 .into_any_element()
             }
         }

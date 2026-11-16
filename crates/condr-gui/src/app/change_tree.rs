@@ -5,6 +5,7 @@
 use super::sidebar::CondrIconName;
 use super::*;
 use condr_core::{GitChangeEntry, GitChangeStatus, GitDiffStat};
+use gpui_kit::component::menu::ContextMenu;
 
 /// The glyph and colour a status shows, as Zed draws them: a square with a plus, a dot or
 /// a minus in the theme's success, warning and danger colours; a conflict warns.
@@ -268,6 +269,66 @@ pub(super) fn row_highlight<E: Styled + InteractiveElement + FluentBuilder>(
                 style.bg(soft)
             };
             style.text_color(text)
+        })
+}
+
+/// The row whose context menu is open, by its element id.
+struct OpenRowMenu(Option<ElementId>);
+
+impl Global for OpenRowMenu {}
+
+/// `menu` as the row's context menu. The menu opens under the pointer and so takes the
+/// hover off the row; while it is open the row keeps that highlight and gains a ring in
+/// the focus colour, as VS Code and Zed mark the row a menu acts on.
+pub(super) fn row_menu<E: ParentElement + Styled + InteractiveElement + FluentBuilder>(
+    mut row: E,
+    selected: bool,
+    menu: impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static,
+    cx: &App,
+) -> ContextMenu<E> {
+    let id = row
+        .interactivity()
+        .element_id
+        .clone()
+        .expect("a row with a menu has an id");
+    let open = cx
+        .try_global::<OpenRowMenu>()
+        .is_some_and(|OpenRowMenu(row)| row.as_ref() == Some(&id));
+    let theme = cx.theme();
+    let (soft, text, ring, radius) = (
+        theme.sidebar_accent.opacity(0.8),
+        theme.sidebar_accent_foreground,
+        theme.ring,
+        theme.radius,
+    );
+    row.relative()
+        .when(open, |row| {
+            row.when(!selected, |row| row.bg(soft))
+                .text_color(text)
+                // Drawn over the row rather than as its border, so nothing in it moves.
+                .child(
+                    div()
+                        .debug_selector(|| "row-menu-ring".into())
+                        .absolute()
+                        .inset_0()
+                        .rounded(radius)
+                        .border_1()
+                        .border_color(ring),
+                )
+        })
+        .context_menu(move |popup, window, cx| {
+            cx.set_global(OpenRowMenu(Some(id.clone())));
+            let id = id.clone();
+            cx.subscribe_self(move |_, _: &DismissEvent, cx| {
+                let OpenRowMenu(row) = cx.global_mut::<OpenRowMenu>();
+                // Another row's menu may have opened since.
+                if row.as_ref() == Some(&id) {
+                    *row = None;
+                }
+                cx.refresh_windows();
+            })
+            .detach();
+            menu(popup, window, cx)
         })
 }
 

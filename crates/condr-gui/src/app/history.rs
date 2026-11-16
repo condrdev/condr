@@ -2,7 +2,7 @@
 //! the files a selected one changed, and one of those files in the Workspace's Diff Tab. It
 //! reads only; nothing here acts on the repository.
 
-use super::change_tree::{TreeRow, directory_row, file_row, row_highlight, tree_rows};
+use super::change_tree::{TreeRow, directory_row, file_row, row_highlight, row_menu, tree_rows};
 use super::placeholders::{empty_state, failed_state, list_note};
 use super::sidebar::{upstream_counts, upstream_label};
 use super::*;
@@ -196,15 +196,18 @@ impl Condr {
                     cx.notify();
                 });
             })
-            .context_menu(move |menu, _, _| {
-                let copy_id = copy_id.clone();
-                menu.item(
-                    PopupMenuItem::new(t!("history.copy_commit_id"))
-                        .icon(menu_icon(Glyph::Copy))
-                        .on_click(move |_, _, cx| {
-                            cx.write_to_clipboard(ClipboardItem::new_string(copy_id.clone()));
-                        }),
-                )
+            .map(|row| {
+                let menu = move |menu: PopupMenu, _: &mut Window, _: &mut Context<PopupMenu>| {
+                    let copy_id = copy_id.clone();
+                    menu.item(
+                        PopupMenuItem::new(t!("history.copy_commit_id"))
+                            .icon(menu_icon(Glyph::Copy))
+                            .on_click(move |_, _, cx| {
+                                cx.write_to_clipboard(ClipboardItem::new_string(copy_id.clone()));
+                            }),
+                    )
+                };
+                row_menu(row, selected, menu, cx)
             })
             .child(
                 v_flex()

@@ -1,5 +1,5 @@
 use super::*;
-use crate::app::change_tree::row_highlight;
+use crate::app::change_tree::{row_highlight, row_menu};
 use rust_i18n::t;
 
 pub(super) type SidebarClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
@@ -397,8 +397,13 @@ impl CondrSidebarTreeItem {
                 })
             });
         let row = if let Some(context_menu) = context_menu {
-            row.context_menu(move |menu, window, cx| context_menu(menu, window, cx))
-                .into_any_element()
+            row_menu(
+                row,
+                active,
+                move |menu, window, cx| context_menu(menu, window, cx),
+                cx,
+            )
+            .into_any_element()
         } else {
             row.into_any_element()
         };
@@ -710,9 +715,13 @@ impl SidebarItem for CondrSidebarSection {
                 })
             });
         let heading = if let Some(context_menu) = self.context_menu {
-            heading
-                .context_menu(move |menu, window, cx| context_menu(menu, window, cx))
-                .into_any_element()
+            row_menu(
+                heading,
+                self.active,
+                move |menu, window, cx| context_menu(menu, window, cx),
+                cx,
+            )
+            .into_any_element()
         } else {
             heading.into_any_element()
         };

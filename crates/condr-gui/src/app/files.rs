@@ -3,7 +3,7 @@
 //! rendered when it is Markdown or an image (ADR 0037). The Editor saves what it edits
 //! back to the Server (ADR 0045); `file_edits` holds that side.
 
-use super::change_tree::{RowKind, status_color, tree_indent, tree_row};
+use super::change_tree::{RowKind, row_menu, status_color, tree_indent, tree_row};
 use super::placeholders::{Oversized, empty_state, failed_state, list_note, too_large};
 use super::preview::{
     DecodedImage, NoImage, PreviewImages, Rendering, image_summary, release_images, render_image,
@@ -509,7 +509,7 @@ impl Condr {
             })
             .drag_over::<ExternalPaths>(|style, _, _, cx| style.bg(cx.theme().accent))
             .on_drop(self.upload_drop(key, workspace_id, path.to_relative_path_buf(), cx))
-            .context_menu(menu)
+            .map(|row| row_menu(row, false, menu, cx))
             .child(type_icon(file_icons::folder_icon(theme.is_dark()), ignored))
             .child(
                 div()
@@ -575,7 +575,7 @@ impl Condr {
             // Dropped on a file, uploads go beside it, as New File does (ADR 0045).
             .drag_over::<ExternalPaths>(|style, _, _, cx| style.bg(cx.theme().accent))
             .on_drop(drop)
-            .context_menu(menu)
+            .map(|row| row_menu(row, selected, menu, cx))
             .child(type_icon(
                 file_icons::file_icon(name, theme.is_dark()),
                 ignored,
