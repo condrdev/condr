@@ -20,6 +20,7 @@ mod handshake;
 mod messages;
 mod session;
 mod stream;
+mod task;
 mod terminal;
 
 pub(crate) use messages::decode_bootstrap_record;

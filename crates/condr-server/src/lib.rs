@@ -15,6 +15,8 @@ mod poison;
 mod server;
 pub mod ssh;
 pub mod supervisor;
+#[cfg(feature = "tasks")]
+pub(crate) mod task_store;
 #[cfg(test)]
 pub(crate) mod test_support;
 

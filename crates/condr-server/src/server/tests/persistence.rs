@@ -86,6 +86,7 @@ fn invalid_snapshot_inputs_yield_an_empty_session() {
             test_endpoint().as_local_path().unwrap(),
             Some(path.clone()),
             None,
+            None,
         )
         .unwrap();
         assert_eq!(

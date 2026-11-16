@@ -1186,6 +1186,8 @@ fn apply_message(
                 SessionEvent::Activated { .. }
                 | SessionEvent::WorkspaceFilesChanged { .. }
                 | SessionEvent::Omitted => {}
+                // The phone does not say `tasks` (ADR 0068).
+                SessionEvent::TaskChanged(_) | SessionEvent::TaskRemoved { .. } => {}
             }
         }
         ServerMessage::Subscribed { .. } => device.subscription = Subscription::Active,

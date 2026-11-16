@@ -69,6 +69,7 @@ fn handshake_frames_from_protocol_1_keep_decoding() {
             min_server_protocol: 1,
             // Absent on the wire from a Client that predates it.
             push: false,
+            tasks: false,
         })
     );
 
@@ -562,6 +563,7 @@ fn bootstrap_assembler_finishes_an_empty_bootstrap() {
         agents: Vec::new(),
         workspace_git: Vec::new(),
         zoomed_panes: Vec::new(),
+        tasks: None,
     };
     assert_eq!(
         BootstrapAssembler::new(header).unwrap().finish().unwrap(),

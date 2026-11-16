@@ -8,10 +8,10 @@ use condr_core::protocol::{
     WorkspaceGitSnapshot,
 };
 use condr_core::{
-    AgentDisplayState, AgentSnapshot, AgentState, PaneId, Session, SessionSnapshot,
+    AgentDisplayState, AgentSnapshot, AgentState, PaneId, Session, SessionSnapshot, Task, TaskId,
     TerminalHyperlinkBudget, TerminalProgress, TerminalViewFrame, Workspace, WorkspaceId,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 #[derive(Default)]
@@ -42,6 +42,10 @@ pub struct SessionModel {
     pub zoomed_panes: HashSet<PaneId>,
     /// Server-owned preferences from the Bootstrap, kept current by events.
     pub settings: ServerSettings,
+    /// The Device's To do and started Tasks, without descriptions (ADR 0068); `None` until
+    /// a Bootstrap carries them, which only a Server that keeps Tasks sends to a Client
+    /// that said `tasks`.
+    pub tasks: Option<BTreeMap<TaskId, Task>>,
 }
 
 /// What a Bootstrap changed beyond the model itself.
@@ -137,6 +141,9 @@ impl SessionModel {
             .collect();
         self.zoomed_panes = bootstrap.zoomed_panes.into_iter().collect();
         self.settings = bootstrap.settings;
+        self.tasks = bootstrap
+            .tasks
+            .map(|tasks| tasks.into_iter().map(|task| (task.id, task)).collect());
         Ok(BootstrapChange {
             authority_changed,
             previous,
@@ -248,6 +255,31 @@ impl SessionModel {
             .as_ref()
             .is_none_or(|previous| previous.kind != agent.kind);
         AgentChange { previous, started }
+    }
+
+    /// Applies a `TaskChanged`: an archived Task leaves, as the Bootstrap leaves it out.
+    pub fn apply_task(&mut self, task: Task) {
+        let Some(tasks) = &mut self.tasks else { return };
+        if task.archived {
+            tasks.remove(&task.id);
+        } else {
+            tasks.insert(task.id, task);
+        }
+    }
+
+    /// Applies a `TaskRemoved`.
+    pub fn remove_task(&mut self, task: TaskId) {
+        if let Some(tasks) = &mut self.tasks {
+            tasks.remove(&task);
+        }
+    }
+
+    /// The Task that holds `workspace_id` (ADR 0068).
+    pub fn workspace_task(&self, workspace_id: WorkspaceId) -> Option<&Task> {
+        self.tasks
+            .as_ref()?
+            .values()
+            .find(|task| task.workspace == Some(workspace_id))
     }
 
     /// Applies an `AgentUnseenChanged` and reports whether it changed anything. The Pane
@@ -446,6 +478,7 @@ mod tests {
                 agents: Vec::new(),
                 workspace_git: Vec::new(),
                 zoomed_panes: Vec::new(),
+                tasks: None,
             })
             .unwrap();
         assert!(model.terminals.is_empty());
@@ -511,5 +544,53 @@ mod tests {
                 .apply_agent(pane_id, snapshot(AgentState::Unknown))
                 .started
         );
+    }
+
+    /// ADR 0068: the Bootstrap's Tasks, kept current by events; an archived Task leaves
+    /// as it would leave the next Bootstrap, and a Server without Tasks leaves `None`.
+    #[test]
+    fn tasks_follow_the_bootstrap_and_their_events() {
+        let task = |id, archived| Task {
+            id: TaskId::from_u64(id),
+            title: "t".into(),
+            description: None,
+            repository: None,
+            order: 0,
+            archived,
+            workspace: (id == 2).then(|| WorkspaceId::from_u64(9)),
+            starting: false,
+            last: None,
+        };
+        let bootstrap = |tasks| SessionBootstrap {
+            server_id: ServerId(1),
+            runtime_epoch: RuntimeEpoch(1),
+            session_id: SessionId(1),
+            sequence: 0,
+            snapshot: Session::new().snapshot(),
+            settings: ServerSettings::default(),
+            terminals: Vec::new(),
+            agents: Vec::new(),
+            workspace_git: Vec::new(),
+            zoomed_panes: Vec::new(),
+            tasks,
+        };
+        let mut model = SessionModel::default();
+        model.apply_bootstrap(bootstrap(None)).unwrap();
+        model.apply_task(task(1, false));
+        assert!(model.tasks.is_none(), "no Tasks from a Server without them");
+
+        model
+            .apply_bootstrap(bootstrap(Some(vec![task(1, false)])))
+            .unwrap();
+        model.apply_task(task(2, false));
+        assert_eq!(
+            model
+                .workspace_task(WorkspaceId::from_u64(9))
+                .map(|task| task.id),
+            Some(TaskId::from_u64(2))
+        );
+        model.apply_task(task(2, true));
+        model.remove_task(TaskId::from_u64(1));
+        assert_eq!(model.tasks, Some(BTreeMap::new()));
     }
 }

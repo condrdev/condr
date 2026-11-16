@@ -3,6 +3,9 @@
 use super::session::{
     agent_state, command_agent_kind, hooks_action, pane_direction, split_direction,
 };
+use super::task::{
+    decode_task, decode_task_reply, decode_tasks, encode_task, encode_task_reply, encode_tasks,
+};
 use super::*;
 use crate::agent_discovery::AgentInstallation;
 use crate::agent_hooks::HooksReport;
@@ -549,6 +552,15 @@ impl TryFrom<&ClientMessage> for super::ClientMessage {
                     ansi: colors.ansi.to_vec(),
                 })
             }
+            ClientMessage::Task {
+                server_id,
+                request_id,
+                command,
+            } => Message::Task(TaskRequest {
+                server_id: server_id.0,
+                request_id: *request_id,
+                command: Some(command.try_into()?),
+            }),
             ClientMessage::Unknown => return Err("an unknown message cannot be sent".into()),
         };
         Ok(Self {
@@ -728,6 +740,11 @@ fn decode_client_message(message: super::ClientMessage) -> WireResult<ClientMess
                 command: required(admin.command, "admin command")?.try_into()?,
             },
             Message::Detach(_) => ClientMessage::Detach,
+            Message::Task(request) => ClientMessage::Task {
+                server_id: ServerId(request.server_id),
+                request_id: request.request_id,
+                command: required(request.command, "task command")?.try_into()?,
+            },
             Message::WatchTerminals(watch) => {
                 bounded(watch.panes.len(), MAX_SNAPSHOT_PANES, "watched Panes")?;
                 ClientMessage::WatchTerminals {
@@ -1308,10 +1325,12 @@ impl TryFrom<super::SessionOverview> for SessionOverview {
     }
 }
 
-impl From<&BootstrapRecord> for super::BootstrapRecord {
-    fn from(record: &BootstrapRecord) -> Self {
+impl TryFrom<&BootstrapRecord> for super::BootstrapRecord {
+    type Error = String;
+
+    fn try_from(record: &BootstrapRecord) -> Result<Self, String> {
         use bootstrap_record::Record;
-        Self {
+        Ok(Self {
             record: Some(match record {
                 BootstrapRecord::Terminal(terminal) => {
                     Record::Terminal(super::PaneTerminalSnapshot {
@@ -1326,8 +1345,9 @@ impl From<&BootstrapRecord> for super::BootstrapRecord {
                 BootstrapRecord::Agent(agent) => Record::Agent(encode_pane_agent(agent)),
                 BootstrapRecord::WorkspaceGit(git) => Record::WorkspaceGit(encode_git(git)),
                 BootstrapRecord::ZoomedPane(pane) => Record::ZoomedPane(pane.as_u64()),
+                BootstrapRecord::Tasks(tasks) => Record::Tasks(encode_tasks(tasks)?),
             }),
-        }
+        })
     }
 }
 
@@ -1351,6 +1371,7 @@ pub(crate) fn decode_bootstrap_record(
         Record::Agent(agent) => BootstrapRecord::Agent(decode_pane_agent(agent)?),
         Record::WorkspaceGit(git) => BootstrapRecord::WorkspaceGit(decode_git(git)?),
         Record::ZoomedPane(id) => BootstrapRecord::ZoomedPane(pane(id)),
+        Record::Tasks(tasks) => BootstrapRecord::Tasks(decode_tasks(tasks)?),
     }))
 }
 
@@ -1459,6 +1480,8 @@ impl TryFrom<&SessionEvent> for super::SessionEvent {
                 workspace_id: workspace_id.as_u64(),
                 tab_id: tab_id.map(TabId::as_u64),
             }),
+            SessionEvent::TaskChanged(task) => Event::TaskChanged(encode_task(task)?),
+            SessionEvent::TaskRemoved { task } => Event::TaskRemoved(task.as_u64()),
             SessionEvent::Omitted => Event::Omitted(Empty {}),
         };
         Ok(Self { event: Some(event) })
@@ -1521,6 +1544,10 @@ impl TryFrom<super::SessionEvent> for SessionEvent {
             Event::Activated(activated) => Self::Activated {
                 workspace_id: workspace(activated.workspace_id),
                 tab_id: activated.tab_id.map(tab),
+            },
+            Event::TaskChanged(task) => Self::TaskChanged(decode_task(task)?),
+            Event::TaskRemoved(id) => Self::TaskRemoved {
+                task: crate::TaskId::from_u64(id),
             },
             Event::Omitted(_) => Self::Omitted,
         })
@@ -1995,6 +2022,9 @@ impl TryFrom<&ServerMessage> for super::ServerMessage {
             ServerMessage::AgentResult { result } => {
                 Message::AgentResult(encode_agent_result(result)?)
             }
+            ServerMessage::Task { request_id, result } => {
+                Message::Task(encode_task_reply(*request_id, result)?)
+            }
             ServerMessage::TerminalClipboard { pane_id, text } => {
                 Message::TerminalClipboard(super::PaneText {
                     pane_id: pane_id.as_u64(),
@@ -2210,6 +2240,10 @@ fn decode_server_message(message: server_message::Message) -> WireResult<ServerM
         },
         Message::AgentResult(result) => ServerMessage::AgentResult {
             result: decode_agent_result(result)?,
+        },
+        Message::Task(reply) => ServerMessage::Task {
+            request_id: reply.request_id,
+            result: decode_task_reply(reply)?,
         },
         Message::TerminalClipboard(text) => ServerMessage::TerminalClipboard {
             pane_id: pane(text.pane_id),

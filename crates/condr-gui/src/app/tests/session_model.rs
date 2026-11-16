@@ -22,6 +22,7 @@ fn bootstrap(session: &Session) -> SessionBootstrap {
         agents: Vec::new(),
         workspace_git: Vec::new(),
         zoomed_panes: Vec::new(),
+        tasks: None,
     }
 }
 

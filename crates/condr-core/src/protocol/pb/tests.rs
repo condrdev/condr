@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::protocol::{
-    BootstrapRecord, ClientMessage, ServerMessage, SessionEvent, UnknownMessage,
+    BootstrapRecord, ClientMessage, ServerId, ServerMessage, SessionEvent, UnknownMessage,
 };
 use crate::{AgentKind, TerminalMouseTracking, TerminalView};
 
@@ -427,8 +427,162 @@ fn a_watched_set_and_a_terminal_record_without_a_view_round_trip() {
         }),
     });
     assert_eq!(
-        decode_bootstrap_record((&record).into()).unwrap(),
+        decode_bootstrap_record((&record).try_into().unwrap()).unwrap(),
         Some(record)
+    );
+}
+
+fn task(id: u64, description: Option<&str>) -> crate::Task {
+    crate::Task {
+        id: crate::TaskId::from_u64(id),
+        title: "Fix the login bug".into(),
+        description: description.map(str::to_owned),
+        repository: Some("/src/api".into()),
+        order: -2,
+        archived: false,
+        workspace: Some(crate::WorkspaceId::from_u64(9)),
+        starting: true,
+        last: Some(crate::LastPlace {
+            path: "/src/api-fix".into(),
+            branch: Some("worktree/fix".into()),
+            base_branch: Some("main".into()),
+            managed: true,
+            repository: Some("/src/api".into()),
+        }),
+    }
+}
+
+/// ADR 0068: the Tasks record, its events, every request and every reply round trip.
+#[test]
+fn tasks_round_trip_in_records_events_requests_and_replies() {
+    let record = BootstrapRecord::Tasks(vec![task(1, None), task(2, None)]);
+    assert_eq!(
+        decode_bootstrap_record((&record).try_into().unwrap()).unwrap(),
+        Some(record)
+    );
+    let empty = BootstrapRecord::Tasks(Vec::new());
+    assert_eq!(
+        decode_bootstrap_record((&empty).try_into().unwrap()).unwrap(),
+        Some(empty),
+        "an empty record still says the Server keeps Tasks"
+    );
+    for event in [
+        SessionEvent::TaskChanged(task(3, None)),
+        SessionEvent::TaskRemoved {
+            task: crate::TaskId::from_u64(3),
+        },
+    ] {
+        let wire = super::SessionEvent::try_from(&event).unwrap();
+        assert_eq!(SessionEvent::try_from(wire).unwrap(), event);
+    }
+    let id = crate::TaskId::from_u64(4);
+    for command in [
+        crate::TaskCommand::Create {
+            title: "t".into(),
+            description: "d".into(),
+            repository: None,
+        },
+        crate::TaskCommand::Edit {
+            task: id,
+            title: None,
+            description: Some("d".into()),
+            repository: Some(None),
+        },
+        crate::TaskCommand::Edit {
+            task: id,
+            title: Some("t".into()),
+            description: None,
+            repository: Some(Some("/src/api".into())),
+        },
+        crate::TaskCommand::Edit {
+            task: id,
+            title: None,
+            description: None,
+            repository: None,
+        },
+        crate::TaskCommand::Delete { task: id },
+        crate::TaskCommand::Archive {
+            task: id,
+            close_workspace: true,
+            remove_worktree: false,
+        },
+        crate::TaskCommand::Restore { task: id },
+        crate::TaskCommand::Reorder { task: id, index: 3 },
+        crate::TaskCommand::Get { task: id },
+        crate::TaskCommand::List { archived: true },
+        crate::TaskCommand::Start {
+            task: id,
+            place: None,
+            agent: crate::AgentKind::Codex,
+        },
+        crate::TaskCommand::Start {
+            task: id,
+            place: Some(crate::StartPlace::Continue),
+            agent: crate::AgentKind::Claude,
+        },
+        crate::TaskCommand::Start {
+            task: id,
+            place: Some(crate::StartPlace::Workspace(crate::WorkspaceId::from_u64(
+                2,
+            ))),
+            agent: crate::AgentKind::OpenCode,
+        },
+        crate::TaskCommand::Start {
+            task: id,
+            place: Some(crate::StartPlace::NewWorktree {
+                branch: Some("worktree/x".into()),
+            }),
+            agent: crate::AgentKind::Copilot,
+        },
+    ] {
+        let message = ClientMessage::Task {
+            server_id: ServerId(1),
+            request_id: 5,
+            command,
+        };
+        let wire = super::ClientMessage::try_from(&message).unwrap();
+        assert_eq!(ClientMessage::try_from(wire).unwrap(), message);
+    }
+    for result in [
+        Ok(crate::TaskResponse::Task(task(1, Some("body")))),
+        Ok(crate::TaskResponse::Tasks(vec![task(1, None)])),
+        Ok(crate::TaskResponse::Started {
+            workspace_id: crate::WorkspaceId::from_u64(1),
+            tab_id: crate::TabId::from_u64(2),
+            pane_id: crate::PaneId::from_u64(3),
+        }),
+        Ok(crate::TaskResponse::Done),
+        Err(crate::TaskError::new(crate::task_error::TASK_STARTING, "busy").at("workspace")),
+    ] {
+        let message = ServerMessage::Task {
+            request_id: 7,
+            result,
+        };
+        let wire = super::ServerMessage::try_from(&message).unwrap();
+        assert_eq!(ServerMessage::try_from(wire).unwrap(), message);
+    }
+}
+
+/// A Start naming an agent this build does not know is a request it cannot answer,
+/// not a malformed one (ADR 0028).
+#[test]
+fn a_start_with_an_unknown_agent_is_an_unknown_request() {
+    let message = super::ClientMessage {
+        message: Some(client_message::Message::Task(TaskRequest {
+            server_id: 1,
+            request_id: 1,
+            command: Some(super::TaskCommand {
+                command: Some(task_command::Command::Start(TaskStart {
+                    task: 1,
+                    place: None,
+                    agent: 99,
+                })),
+            }),
+        })),
+    };
+    assert_eq!(
+        ClientMessage::try_from(message).unwrap(),
+        ClientMessage::Unknown
     );
 }
 

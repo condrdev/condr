@@ -172,6 +172,7 @@ fn typed_subscription_rejection_requests_one_authoritative_bootstrap_then_resubs
             agents: Vec::new(),
             workspace_git: Vec::new(),
             zoomed_panes: Vec::new(),
+            tasks: None,
         };
         let mut same_authority = connection_with_io();
         same_authority.subscribed = true;
@@ -202,6 +203,7 @@ fn typed_subscription_rejection_requests_one_authoritative_bootstrap_then_resubs
             agents: Vec::new(),
             workspace_git: Vec::new(),
             zoomed_panes: Vec::new(),
+            tasks: None,
         })
         .unwrap();
     assert!(application.resubscribe);
@@ -308,6 +310,7 @@ fn ordinary_runtime_bootstrap_keeps_subscription_baseline_and_attention() {
             agents: Vec::new(),
             workspace_git: Vec::new(),
             zoomed_panes: Vec::new(),
+            tasks: None,
         })
         .unwrap();
 
@@ -424,6 +427,7 @@ fn lag_notice_during_a_visual_gap_resync_still_recovers() {
             agents: Vec::new(),
             workspace_git: Vec::new(),
             zoomed_panes: Vec::new(),
+            tasks: None,
         })
         .unwrap();
     assert!(application.recovery);

@@ -33,6 +33,7 @@ fn rejects_invalid_model(as_bootstrap: bool) {
                     agents: Vec::new(),
                     workspace_git: Vec::new(),
                     zoomed_panes: Vec::new(),
+                    tasks: None,
                 })
             } else {
                 Incoming::Message(ServerMessage::Event {

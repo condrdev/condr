@@ -110,6 +110,39 @@ impl ClientLayouts {
         }
     }
 
+    /// Runs `command` for the Server's own reasons, such as archiving a Task (ADR 0068),
+    /// as this connection's Layout request would run it, and returns the result instead of
+    /// answering with `LayoutApplied`.
+    pub(in crate::server) fn apply(&self, command: LayoutCommand) -> Result<LayoutResult, String> {
+        let (request, plan, launch) = {
+            let state = self.state.lock().or_abort();
+            let request = LayoutRequest {
+                server_id: state.server_id,
+                session_id: state.session_id,
+                request_id: 0,
+            };
+            (
+                request,
+                external_layout_plan(&state, &command)?,
+                state.shell_launch(),
+            )
+        };
+        let applied = match plan {
+            Some(plan) => {
+                let _operation = self
+                    .lifecycle
+                    .begin_operation()
+                    .ok_or_else(|| "Server is stopping".to_string())?;
+                self.execute_external(request, plan, &launch)?
+            }
+            None => self.execute_local(request, command)?,
+        };
+        match applied {
+            ServerMessage::LayoutApplied { result, .. } => Ok(result),
+            _ => Err("the layout change was not applied".into()),
+        }
+    }
+
     pub(in crate::server) fn snapshot(&self, session_id: SessionId) -> bool {
         // A capture may materialize outside the Session lock. Do not let this
         // connection's Layout commit overtake its older Bootstrap, even when the
@@ -298,21 +331,7 @@ impl ClientLayouts {
     }
 
     fn start_monitors(&self, started: Vec<StartedTerminal>) {
-        for (pane_id, instance_id, updates, agent_probe, cwd_probe, notice_probe, view_source) in
-            started
-        {
-            monitor_terminal(TerminalMonitor {
-                pane_id,
-                instance_id,
-                updates,
-                agent_probe,
-                cwd_probe,
-                notice_probe,
-                view_source,
-                state: Arc::clone(&self.state),
-                lifecycle: Arc::clone(&self.lifecycle),
-            });
-        }
+        start_monitors(&self.state, &self.lifecycle, started);
     }
 }
 

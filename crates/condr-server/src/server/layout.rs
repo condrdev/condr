@@ -792,7 +792,12 @@ pub(super) fn commit_layout_candidate(
     let next_snapshot = candidate.snapshot();
     validate_persistable_snapshot(&next_snapshot)?;
     let durable_changed = next_snapshot != state.session.snapshot();
+    // In the same step: a Task whose Workspace closes lets go of it (ADR 0068).
+    let released_tasks = state.release_closed_task_workspaces(&candidate);
     state.session = candidate;
+    for task in released_tasks {
+        state.task_changed(task);
+    }
     let session = &state.session;
     state
         .workspace_git
@@ -827,6 +832,29 @@ pub(super) fn commit_layout_candidate(
         started_terminals: started_terminals.into_iter().collect(),
         removed_terminals,
     })
+}
+
+/// Starts the monitors of the terminals a layout change started.
+pub(super) fn start_monitors(
+    state: &Arc<Mutex<RuntimeState>>,
+    lifecycle: &Arc<ServerLifecycle>,
+    started: Vec<StartedTerminal>,
+) {
+    for (pane_id, instance_id, updates, agent_probe, cwd_probe, notice_probe, view_source) in
+        started
+    {
+        monitor_terminal(TerminalMonitor {
+            pane_id,
+            instance_id,
+            updates,
+            agent_probe,
+            cwd_probe,
+            notice_probe,
+            view_source,
+            state: Arc::clone(state),
+            lifecycle: Arc::clone(lifecycle),
+        });
+    }
 }
 
 impl LayoutEffect {

@@ -14,6 +14,7 @@ fn encode_hello(hello: &Hello) -> super::Hello {
         client_name: hello.client_name.clone(),
         min_server_protocol: hello.min_server_protocol,
         push: hello.push,
+        tasks: hello.tasks,
     }
 }
 
@@ -24,6 +25,7 @@ fn decode_hello(hello: super::Hello) -> Hello {
         client_name: hello.client_name,
         min_server_protocol: hello.min_server_protocol,
         push: hello.push,
+        tasks: hello.tasks,
     }
 }
 

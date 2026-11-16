@@ -38,6 +38,9 @@ pub struct Hello {
     /// Condr Cloud (ADR 0047). Only the Companion says it; `false` from a peer that
     /// predates the field.
     pub push: bool,
+    /// This Client takes the Server's Tasks (ADR 0068): the Bootstrap's Tasks record and
+    /// the Task events. `false` from a peer that predates the field.
+    pub tasks: bool,
 }
 
 impl Hello {
@@ -49,6 +52,7 @@ impl Hello {
             client_name: client_name.into(),
             min_server_protocol: MIN_SERVER_PROTOCOL,
             push: false,
+            tasks: false,
         }
     }
 }

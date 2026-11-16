@@ -928,7 +928,8 @@ fn bootstrap_fence_keeps_an_unsent_clipboard_copy_and_lets_newer_copies_replace_
     state.subscribers.insert(7, subscriber(writer));
     state.broadcast_clipboard(pane_id, "before".into());
     state.begin_bootstrap(7);
-    let framed = frame_bootstrap_messages(state.capture_bootstrap(None).materialize()).unwrap();
+    let framed =
+        frame_bootstrap_messages(state.capture_bootstrap(None, false).materialize()).unwrap();
     assert!(state.finish_bootstrap(7, framed).is_ok());
     assert!(matches!(
         receiver.recv(),
@@ -942,7 +943,8 @@ fn bootstrap_fence_keeps_an_unsent_clipboard_copy_and_lets_newer_copies_replace_
     state.broadcast_clipboard(pane_id, "old".into());
     state.begin_bootstrap(8);
     state.broadcast_clipboard(pane_id, "newer".into());
-    let framed = frame_bootstrap_messages(state.capture_bootstrap(None).materialize()).unwrap();
+    let framed =
+        frame_bootstrap_messages(state.capture_bootstrap(None, false).materialize()).unwrap();
     assert!(state.finish_bootstrap(8, framed).is_ok());
     assert!(matches!(
         receiver.recv(),
@@ -965,7 +967,7 @@ fn bootstrap_fence_queues_concurrent_events_after_the_complete_bootstrap() {
         .focused_pane()
         .unwrap()
         .id();
-    let capture = state.capture_bootstrap(None);
+    let capture = state.capture_bootstrap(None, false);
     let (writer, receiver) = ClientWriter::channel();
     state.subscribers.insert(
         7,
@@ -1264,6 +1266,7 @@ fn bootstrap_dynamic_records_are_split_and_reassembled() {
             head: None,
         }],
         zoomed_panes: vec![first_pane],
+        tasks: Some(Vec::new()),
     };
     let frames = frame_bootstrap_messages(expected.clone()).unwrap().frames;
 

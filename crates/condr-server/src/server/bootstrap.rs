@@ -77,7 +77,10 @@ pub(super) fn queue_runtime_bootstrap(
             });
         }
         state.record_terminal_cwd_observations(observations);
-        let capture = state.capture_bootstrap(state.watched_terminals.get(&client_id));
+        let capture = state.capture_bootstrap(
+            state.watched_terminals.get(&client_id),
+            state.task_clients.contains(&client_id),
+        );
         let fenced = state.subscribers.contains_key(&client_id);
         if fenced {
             state.begin_bootstrap(client_id);
@@ -185,6 +188,7 @@ pub(super) fn frame_bootstrap_messages(bootstrap: SessionBootstrap) -> io::Resul
         agents,
         workspace_git,
         zoomed_panes,
+        tasks,
     } = bootstrap;
     let mut records = Vec::with_capacity(
         terminals.len() + agents.len() + workspace_git.len() + zoomed_panes.len(),
@@ -193,6 +197,7 @@ pub(super) fn frame_bootstrap_messages(bootstrap: SessionBootstrap) -> io::Resul
     records.extend(agents.into_iter().map(BootstrapRecord::Agent));
     records.extend(workspace_git.into_iter().map(BootstrapRecord::WorkspaceGit));
     records.extend(zoomed_panes.into_iter().map(BootstrapRecord::ZoomedPane));
+    records.extend(tasks.map(BootstrapRecord::Tasks));
     let (batches, baselines) = split_bootstrap_records(server_id, session_id, records)?;
     let batch_count =
         u32::try_from(batches.len()).map_err(|_| io::Error::other("too many Bootstrap batches"))?;
@@ -291,9 +296,11 @@ pub(super) fn send_framed(stream: &mut EndpointStream, data: &[u8]) -> io::Resul
 impl RuntimeState {
     /// Every Pane's record, with a view only for the Panes in `watched` when a Client
     /// limited its frames to them (ADR 0041).
+    /// The Tasks go only to a Client that said `tasks` (ADR 0068).
     pub(super) fn capture_bootstrap(
         &self,
         watched: Option<&std::collections::HashSet<PaneId>>,
+        takes_tasks: bool,
     ) -> BootstrapCapture {
         #[cfg(test)]
         self.bootstrap_captures.fetch_add(1, Ordering::Relaxed);
@@ -334,6 +341,7 @@ impl RuntimeState {
                 .map(|(&workspace_id, repository)| workspace_git_snapshot(workspace_id, repository))
                 .collect(),
             zoomed_panes: self.zoomed_panes(),
+            tasks: self.bootstrap_tasks(takes_tasks),
         }
     }
 
@@ -356,6 +364,6 @@ impl RuntimeState {
 
     #[cfg(test)]
     pub(super) fn bootstrap(&self) -> SessionBootstrap {
-        self.capture_bootstrap(None).materialize()
+        self.capture_bootstrap(None, true).materialize()
     }
 }

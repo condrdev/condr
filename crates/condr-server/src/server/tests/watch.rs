@@ -304,7 +304,7 @@ fn a_set_changed_during_a_bootstrap_applies_when_it_finishes() {
     state.watch_terminals(7, [first].into());
     state.ensure_subscriber(7, writer);
 
-    let capture = state.capture_bootstrap(state.watched_terminals.get(&7));
+    let capture = state.capture_bootstrap(state.watched_terminals.get(&7), false);
     state.begin_bootstrap(7);
     state.watch_terminals(7, [second].into());
     assert!(

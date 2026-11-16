@@ -95,6 +95,7 @@ fn disconnect_retires_a_bootstrap_already_in_the_batch() {
                 agents: Vec::new(),
                 workspace_git: Vec::new(),
                 zoomed_panes: Vec::new(),
+                tasks: None,
             };
             this.mark_disconnected(1, 0, "writer closed".into());
             this.handle_incoming(1, generation, Incoming::Bootstrap(bootstrap), cx);

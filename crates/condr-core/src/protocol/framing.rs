@@ -99,7 +99,7 @@ fn frame_body<M: prost::Message>(message: &M, limit: usize) -> Result<Vec<u8>, F
 }
 
 pub fn encode_bootstrap_record(record: &BootstrapRecord) -> Result<Vec<u8>, String> {
-    encode_chunked_value(&pb::BootstrapRecord::from(record), "Bootstrap record")
+    encode_chunked_value(&pb::BootstrapRecord::try_from(record)?, "Bootstrap record")
 }
 
 /// `None` is a record kind this build does not know; the Bootstrap skips it (ADR 0028).

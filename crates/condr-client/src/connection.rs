@@ -495,6 +495,41 @@ impl<S: ServerStream> ClientConnection<S> {
         }
     }
 
+    /// One request about the Server's Tasks (ADR 0068). A Server that predates Tasks, or
+    /// one built without them, answers with an `Err` whose message is
+    /// [`condr_core::protocol::UNSUPPORTED_REQUEST`].
+    pub fn task(
+        &mut self,
+        command: condr_core::TaskCommand,
+    ) -> io::Result<Result<condr_core::TaskResponse, condr_core::TaskError>> {
+        let request_id = self.next_request_id;
+        self.next_request_id += 1;
+        condr_core::protocol::write_message(
+            &mut self.stream,
+            &ClientMessage::Task {
+                server_id: self.overview.server_id,
+                request_id,
+                command,
+            },
+        )
+        .map_err(|error| io::Error::other(error.to_string()))?;
+        loop {
+            match condr_core::protocol::read_message(&mut self.stream)
+                .map_err(|error| io::Error::other(error.to_string()))?
+            {
+                ServerMessage::Task {
+                    request_id: answered,
+                    result,
+                } if answered == request_id => return Ok(result),
+                ServerMessage::Error { message } => return Err(io::Error::other(message)),
+                ServerMessage::ServerStopping => {
+                    return Err(io::Error::other("Server is stopping"));
+                }
+                _ => {}
+            }
+        }
+    }
+
     /// Hello/Welcome only: enough to know a compatible Server answers, without pulling
     /// its whole Bootstrap. The local probe uses this so startup does not transfer every
     /// terminal view once for the probe and again for the real connection.

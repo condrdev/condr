@@ -29,6 +29,11 @@ fn endpoint_file(
         .map(|directory| directory.join(format!("{}.{extension}", server_log_stem(socket_path))))
 }
 
+/// Where a Server with no data directory, as tests start, writes its task files.
+pub(super) fn temporary_task_files(socket_path: &Path) -> PathBuf {
+    std::env::temp_dir().join(format!("{}-tasks", server_log_stem(socket_path)))
+}
+
 /// The file stem this Server's stderr redirect and its rolling log files share.
 pub(super) fn server_log_stem(socket_path: &Path) -> String {
     format!("condr-server-{:016x}", stable_endpoint_id(socket_path))

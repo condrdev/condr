@@ -233,7 +233,10 @@ pub(super) fn handle_client(
         return;
     }
     let (server_id, session_id) = {
-        let state = state.lock().or_abort();
+        let mut state = state.lock().or_abort();
+        if hello.tasks {
+            state.task_clients.insert(client_id);
+        }
         (state.server_id, state.session_id)
     };
     tracing::info!(name = %hello.client_name, build = %hello.build, "connected");
@@ -425,6 +428,7 @@ pub(super) fn handle_client(
                             false,
                         )
                     } else {
+                        let takes_tasks = state.task_clients.contains(&client_id);
                         let mut responses = state
                             .events
                             .iter()
@@ -433,7 +437,11 @@ pub(super) fn handle_client(
                                 server_id: state.server_id,
                                 session_id: state.session_id,
                                 sequence: event.sequence,
-                                event: event.event.clone(),
+                                event: if event.event.is_task() && !takes_tasks {
+                                    SessionEvent::Omitted
+                                } else {
+                                    event.event.clone()
+                                },
                             })
                             .collect::<Vec<_>>();
                         responses.push(ServerMessage::Subscribed {
@@ -1160,6 +1168,13 @@ pub(super) fn handle_client(
                 state.lock().or_abort().set_terminal_colors(colors);
                 false
             }
+            ClientMessage::Task {
+                server_id,
+                request_id,
+                command,
+            } => tasks::handle_task_request(
+                &state, &lifecycle, &layouts, &outbound, server_id, request_id, command,
+            ),
             ClientMessage::Detach => true,
         };
         if should_close {
@@ -1171,6 +1186,7 @@ pub(super) fn handle_client(
     state.agent_control.waiters.remove(&client_id);
     state.subscribers.remove(&client_id);
     state.watched_terminals.remove(&client_id);
+    state.task_clients.remove(&client_id);
     if let Some(staged) = state.staged_images.remove(&client_id) {
         clipboard_image::remove(staged);
     }

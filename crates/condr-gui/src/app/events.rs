@@ -220,8 +220,11 @@ impl Condr {
                         self.sync_sidebar_workspace_open(cx);
                         return self.settle_layout(key, sequence, layout_changed);
                     }
-                    // Stands in for an event this build's protocol does not include.
-                    SessionEvent::Omitted => return IncomingEffect::default(),
+                    // Stands in for an event this build's protocol does not include. The GUI
+                    // does not say `tasks` yet, so no Task event reaches it (ADR 0068).
+                    SessionEvent::Omitted
+                    | SessionEvent::TaskChanged(_)
+                    | SessionEvent::TaskRemoved { .. } => return IncomingEffect::default(),
                     SessionEvent::Activated {
                         workspace_id,
                         tab_id,
@@ -890,8 +893,10 @@ impl Condr {
                     ..IncomingEffect::default()
                 }
             }
-            // Only the CLI asks for Pane text or administers devices.
-            ServerMessage::Overview(_)
+            // Only the CLI asks for Pane text or administers devices, and only the CLI asks
+            // about Tasks yet (ADR 0068).
+            ServerMessage::Task { .. }
+            | ServerMessage::Overview(_)
             | ServerMessage::OverviewTerminals { .. }
             | ServerMessage::PaneText { .. }
             | ServerMessage::DevicesRevoked { .. }

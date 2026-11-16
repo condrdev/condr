@@ -12,7 +12,8 @@ name = "condr-gui"
 path = "src/main.rs"
 
 [features]
-test-support = ["gpui-kit/test-support"]
+# The GUI's tests run a Server in process, Tasks and all (ADR 0068).
+test-support = ["gpui-kit/test-support", "condr-server/tasks"]
 
 [dependencies]
 async-channel.workspace = true
@@ -29,7 +30,8 @@ sys-locale.workspace = true
 image = { workspace = true, features = ["gif", "webp"] }
 condr-core = { path = "../condr-core" }
 condr-client = { path = "../condr-client" }
-condr-server = { path = "../condr-server" }
+# Without the task store: the GUI never opens it (ADR 0068).
+condr-server = { path = "../condr-server", default-features = false }
 relative-path.workspace = true
 syntect.workspace = true
 two-face.workspace = true

@@ -39,7 +39,111 @@ message ClientMessage {
     GitCommitRequest git_commit = 26;
     TerminalColors terminal_colors = 27;
     GitOldFileRequest git_old_file = 28;
+    TaskRequest task = 29;
   }
+}
+
+// A request about the Server's Tasks (ADR 0068), answered with TaskReply. Any Client may
+// send one, whether or not it said `tasks` in Hello. A Server that predates it answers
+// with the frozen UNSUPPORTED_REQUEST error.
+message TaskRequest {
+  uint64 server_id = 1;
+  uint64 request_id = 2;
+  TaskCommand command = 3;
+}
+
+message TaskCommand {
+  oneof command {
+    TaskCreate create = 1;
+    TaskEdit edit = 2;
+    uint64 delete = 3;
+    TaskArchive archive = 4;
+    uint64 restore = 5;
+    TaskReorder reorder = 6;
+    uint64 get = 7;
+    TaskList list = 8;
+    TaskStart start = 9;
+  }
+}
+
+message TaskCreate {
+  string title = 1;
+  string description = 2;
+  optional string repository = 3;
+}
+
+// Absent fields stay as they are.
+message TaskEdit {
+  uint64 task = 1;
+  optional string title = 2;
+  optional string description = 3;
+  TaskRepository repository = 4;
+}
+
+// A repository change: absent `path` clears it.
+message TaskRepository {
+  optional string path = 1;
+}
+
+message TaskArchive {
+  uint64 task = 1;
+  bool close_workspace = 2;
+  bool remove_worktree = 3;
+}
+
+message TaskReorder {
+  uint64 task = 1;
+  uint32 index = 2;
+}
+
+message TaskList {
+  bool archived = 1;
+}
+
+message TaskStart {
+  uint64 task = 1;
+  // Absent: the Server's default.
+  StartPlace place = 2;
+  AgentKind agent = 3;
+}
+
+message StartPlace {
+  oneof place {
+    Empty continue = 1;
+    uint64 workspace = 2;
+    NewWorktree new_worktree = 3;
+  }
+}
+
+message NewWorktree {
+  // Absent: the default branch.
+  optional string branch = 1;
+}
+
+// A Task (ADR 0068). The Bootstrap, events and lists carry it without its description.
+message Task {
+  uint64 id = 1;
+  string title = 2;
+  optional string description = 3;
+  optional string repository = 4;
+  sint64 order = 5;
+  bool archived = 6;
+  optional uint64 workspace = 7;
+  bool starting = 8;
+  // Absent until it was first worked.
+  TaskPlace last = 9;
+}
+
+message TaskPlace {
+  string path = 1;
+  optional string branch = 2;
+  optional string base_branch = 3;
+  bool managed = 4;
+  optional string repository = 5;
+}
+
+message Tasks {
+  repeated Task tasks = 1;
 }
 
 // The colours a desktop Client draws terminals with, as 0xRRGGBB (ADR 0054). The Server
@@ -473,7 +577,38 @@ message ServerMessage {
     GitLogReply git_log = 31;
     GitCommitReply git_commit = 32;
     GitOldFileReply git_old_file = 33;
+    TaskReply task = 34;
   }
+}
+
+message TaskReply {
+  uint64 request_id = 1;
+  oneof result {
+    TaskResponse ok = 2;
+    TaskError err = 3;
+  }
+}
+
+message TaskResponse {
+  oneof response {
+    Task task = 1;
+    Tasks tasks = 2;
+    TaskStarted started = 3;
+    Empty done = 4;
+  }
+}
+
+message TaskStarted {
+  uint64 workspace_id = 1;
+  uint64 tab_id = 2;
+  uint64 pane_id = 3;
+}
+
+message TaskError {
+  string code = 1;
+  string message = 2;
+  // The step of a Start that failed: workspace, task_file or agent.
+  optional string step = 3;
 }
 
 message SessionSequence {
@@ -614,6 +749,9 @@ message BootstrapRecord {
     PaneAgentSnapshot agent = 2;
     WorkspaceGitSnapshot workspace_git = 3;
     uint64 zoomed_pane = 4;
+    // Every To do and started Task, without descriptions, only for a Client that said
+    // `tasks` in Hello; present even when empty, which says this Server keeps Tasks.
+    Tasks tasks = 5;
   }
 }
 
@@ -663,6 +801,11 @@ message SessionEvent {
     TerminalProgressChanged terminal_progress_changed = 12;
     TerminalNotification terminal_notification = 13;
     CommandFinished command_finished = 14;
+    // A Task was created or changed, without its description; only to a Client that said
+    // `tasks` in Hello, every other one receives `omitted` in its place (ADR 0068).
+    Task task_changed = 15;
+    // A Task was deleted. Sent like `task_changed`.
+    uint64 task_removed = 16;
   }
 }
 

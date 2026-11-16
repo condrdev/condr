@@ -15,6 +15,7 @@ mod push;
 mod shutdown;
 mod streams;
 mod subscriptions;
+mod tasks;
 mod unit;
 mod viewers;
 mod watch;

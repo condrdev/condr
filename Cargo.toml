@@ -92,6 +92,8 @@ url = "2"
 syntect = { version = "5.3", default-features = false, features = ["plist-load"] }
 two-face = { version = "0.5", default-features = false, features = ["syntect-onig"] }
 relative-path = { version = "2.0", features = ["serde"] }
+# The Server's Tasks (ADR 0068), SQLite compiled from source; only `condr` builds it.
+rusqlite = { version = "0.43", default-features = false, features = ["bundled"] }
 # Plain-text URL detection in terminal frames; already built for gix and tracing-subscriber.
 regex-automata = "0.4"
 # Which emoji characters Unicode draws as text, for the terminal's font on Windows; already

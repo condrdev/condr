@@ -11,6 +11,8 @@ mod push;
 mod recovery;
 mod streams;
 mod subscriptions;
+mod task_start;
+mod tasks;
 mod terminal_monitor;
 mod terminal_state;
 mod terminal_stream;
@@ -54,7 +56,7 @@ use config::{
 use layout::*;
 #[cfg(test)]
 use local::snapshot_path_for_endpoint;
-use local::{default_snapshot_path, runtime_epoch, stable_endpoint_id};
+use local::{default_snapshot_path, runtime_epoch, stable_endpoint_id, temporary_task_files};
 use recovery::{observe_terminal_cwds, shutdown_cwd};
 use relative_path::RelativePathBuf;
 use std::io::{self, Write};
@@ -201,6 +203,7 @@ impl BoundServer {
             &config.socket_path,
             config.snapshot_path,
             config.config_path,
+            config.data_directory,
         ) {
             Ok(restored) => restored,
             Err(error) => {
@@ -432,14 +435,17 @@ impl BoundServer {
                 final_resumes.push((pane_id, resume));
             }
         }
-        let mut persistence = {
+        let (mut persistence, mut tasks) = {
             let mut state = self.state.lock().or_abort();
             state.record_terminal_cwds(final_cwds);
             for (pane_id, resume) in final_resumes {
                 state.record_agent_resume(pane_id, resume);
             }
-            state.persistence.take()
+            (state.persistence.take(), state.tasks.take())
         };
+        if let Some(Err(error)) = tasks.as_mut().map(tasks::Tasks::shutdown) {
+            tracing::error!("the last Task changes were not written: {error}");
+        }
         let persistence_result = persistence
             .as_mut()
             .map_or(Ok(()), SnapshotPersistence::shutdown);
@@ -566,6 +572,10 @@ struct RuntimeState {
     sizing_client: Option<u64>,
     events: std::collections::VecDeque<SequencedEvent>,
     subscribers: std::collections::HashMap<u64, ClientSubscriber>,
+    /// The Device's Tasks (ADR 0068); `None` on a Server built without the task store.
+    tasks: Option<tasks::Tasks>,
+    /// The connections that said `tasks` in `Hello`, which alone receive Tasks (ADR 0068).
+    task_clients: std::collections::HashSet<u64>,
     /// The Panes each connection limited its terminal frames to (ADR 0041). It is the
     /// connection's, not its subscription's, so it outlives a `SubscriptionRejected`; a
     /// Client absent here gets every Pane.
@@ -645,6 +655,7 @@ struct BootstrapCapture {
     workspace_git: Vec<WorkspaceGitSnapshot>,
     zoomed_panes: Vec<PaneId>,
     settings: ServerSettings,
+    tasks: Option<Vec<condr_core::Task>>,
 }
 
 struct BootstrapTerminalCapture {
@@ -681,6 +692,7 @@ impl BootstrapCapture {
             agents: self.agents,
             workspace_git: self.workspace_git,
             zoomed_panes: self.zoomed_panes,
+            tasks: self.tasks,
         }
     }
 }
@@ -700,13 +712,15 @@ impl RuntimeState {
 
     #[cfg(test)]
     fn new(socket_path: &std::path::Path) -> Self {
-        Self::with_session(
+        let mut state = Self::with_session(
             socket_path,
             Session::new(),
             None,
             ServerSettings::default(),
             None,
-        )
+        );
+        state.tasks = Some(tasks::Tasks::in_memory(temporary_task_files(socket_path)));
+        state
     }
 
     fn with_session(
@@ -748,6 +762,8 @@ impl RuntimeState {
             events: std::collections::VecDeque::new(),
             subscribers: std::collections::HashMap::new(),
             watched_terminals: std::collections::HashMap::new(),
+            tasks: None,
+            task_clients: std::collections::HashSet::new(),
             terminal_colors: None,
             shell_integration_dir: None,
             tcp_peers: std::collections::HashMap::new(),

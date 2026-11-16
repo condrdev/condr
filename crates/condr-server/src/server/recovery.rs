@@ -25,6 +25,7 @@ impl RuntimeState {
         socket_path: &std::path::Path,
         snapshot_path: Option<PathBuf>,
         config_path: Option<PathBuf>,
+        data_directory: Option<PathBuf>,
     ) -> io::Result<(Self, Vec<StartedTerminal>)> {
         let settings = ServerSettings {
             shell: load_shell(config_path.as_deref()),
@@ -170,6 +171,13 @@ impl RuntimeState {
         let mut state =
             Self::with_session(socket_path, session, persistence, settings, config_path);
         state.shell_integration_dir = shell_integration_dir;
+        // A Server without a data directory keeps its task files with its other temporaries.
+        let files = data_directory.as_ref().map_or_else(
+            || temporary_task_files(socket_path),
+            |directory| directory.join("tasks"),
+        );
+        state.tasks = tasks::Tasks::open(data_directory.as_deref(), files);
+        state.release_lost_task_workspaces();
         let workspace_roots = state
             .session
             .workspaces()

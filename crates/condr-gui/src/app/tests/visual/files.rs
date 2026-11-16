@@ -459,6 +459,7 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
                 agents: Vec::new(),
                 workspace_git: Vec::new(),
                 zoomed_panes: Vec::new(),
+                tasks: None,
             };
             let generation = connection.connect_generation;
             this.handle_incoming(1, generation, Incoming::Bootstrap(bootstrap), cx);

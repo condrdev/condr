@@ -33,6 +33,9 @@ message Hello {
   // The first Client hint (ADR 0028): this Client takes the Server's pushes through Condr
   // Cloud (ADR 0047). False from the GUI, the CLI and a Client that predates it.
   bool push = 5;
+  // This Client takes the Server's Tasks (ADR 0068): the Bootstrap's Tasks record and
+  // the Task events, which an older Client never receives. False from one that predates it.
+  bool tasks = 6;
 }
 
 message Credential {

@@ -18,6 +18,9 @@ pub struct ServerConfig {
     /// Condr Cloud's base URL, where pushes to the Companion go (ADR 0047); `None` sends
     /// none. Only `condr server run` sets it, so no Server a test starts pushes by chance.
     pub(super) cloud_url: Option<String>,
+    /// Where the task store and the task files live (ADR 0068); `None` keeps Tasks in
+    /// memory only.
+    pub(super) data_directory: Option<PathBuf>,
 }
 
 impl ServerConfig {
@@ -42,6 +45,7 @@ impl Default for ServerConfig {
             identity: None,
             test_device: None,
             cloud_url: None,
+            data_directory: condr_core::data_directory(),
         }
     }
 }
@@ -164,6 +168,7 @@ impl ServerConfig {
             identity: None,
             test_device: None,
             cloud_url: None,
+            data_directory: condr_core::data_directory(),
         }
     }
 
@@ -178,6 +183,7 @@ impl ServerConfig {
             identity: None,
             test_device: None,
             cloud_url: None,
+            data_directory: None,
         }
     }
 
@@ -205,6 +211,7 @@ impl ServerConfig {
             identity: Some(Arc::new(identity)),
             test_device: Some(client_key),
             cloud_url: None,
+            data_directory: None,
         })
     }
 
@@ -229,6 +236,12 @@ impl ServerConfig {
 
     pub fn with_snapshot_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.snapshot_path = Some(path.into());
+        self
+    }
+
+    /// Keeps the task store and the task files under `path` (ADR 0068).
+    pub fn with_data_directory(mut self, path: impl Into<PathBuf>) -> Self {
+        self.data_directory = Some(path.into());
         self
     }
 

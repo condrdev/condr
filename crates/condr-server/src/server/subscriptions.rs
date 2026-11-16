@@ -36,25 +36,40 @@ impl RuntimeState {
         while self.events.len() > EVENT_HISTORY_LIMIT {
             self.events.pop_front();
         }
-        let message = ServerMessage::Event {
-            server_id: self.server_id,
-            session_id: self.session_id,
-            sequence: self.sequence,
-            event,
+        let frame = |event| {
+            frame_message(&ServerMessage::Event {
+                server_id: self.server_id,
+                session_id: self.session_id,
+                sequence: self.sequence,
+                event,
+            })
+            .expect("Session event must fit a protocol frame")
         };
-        let data = frame_message(&message).expect("Session event must fit a protocol frame");
+        // A Task event reaches only the Clients that said `tasks`; every other one gets
+        // `Omitted` under its sequence (ADR 0068).
+        let omitted = event.is_task().then(|| frame(SessionEvent::Omitted));
+        let data = frame(event);
+        let task_clients = &self.task_clients;
+        let data_for = |client_id: u64| match &omitted {
+            Some(omitted) if !task_clients.contains(&client_id) => omitted.clone(),
+            _ => data.clone(),
+        };
         // The event is already committed; a lagged origin merely leaves the subscriber set
         // and recovers through its Bootstrap. Only a dead writer closes the connection.
-        let origin_result = origin.map(|(_, writer)| writer.send_reliable(data.clone()));
+        let origin_result =
+            origin.map(|(client_id, writer)| writer.send_reliable(data_for(client_id)));
         let origin_lost = origin_result.is_some_and(|result| result.is_err());
         self.subscribers.retain(|client_id, subscriber| {
             if origin.is_some_and(|(origin_client_id, _)| *client_id == origin_client_id) {
                 !origin_lost
             } else if subscriber.bootstrap_pending {
-                subscriber.deferred_reliable.push_back(data.clone());
+                subscriber.deferred_reliable.push_back(data_for(*client_id));
                 true
             } else {
-                subscriber.writer.send_reliable(data.clone()).is_ok()
+                subscriber
+                    .writer
+                    .send_reliable(data_for(*client_id))
+                    .is_ok()
             }
         });
         origin_result == Some(Err(ReliableSendError::Disconnected))

@@ -187,6 +187,12 @@ pub enum ClientMessage {
         session_id: SessionId,
         workspace_id: WorkspaceId,
     },
+    /// A request about the Server's Tasks (ADR 0068), answered with [`ServerMessage::Task`].
+    Task {
+        server_id: ServerId,
+        request_id: u64,
+        command: crate::TaskCommand,
+    },
     /// A message from a newer Client that this Server does not know. It is answered with
     /// an error and the connection goes on (ADR 0028). Never sent.
     Unknown,
@@ -637,6 +643,9 @@ pub struct SessionBootstrap {
     pub agents: Vec<PaneAgentSnapshot>,
     pub workspace_git: Vec<WorkspaceGitSnapshot>,
     pub zoomed_panes: Vec<PaneId>,
+    /// The To do and started Tasks without descriptions (ADR 0068); `None` for a Client
+    /// that did not say `tasks` in `Hello`, or from a Server that keeps none.
+    pub tasks: Option<Vec<crate::Task>>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -708,6 +717,8 @@ pub enum BootstrapRecord {
     Agent(PaneAgentSnapshot),
     WorkspaceGit(WorkspaceGitSnapshot),
     ZoomedPane(PaneId),
+    /// Every To do and started Task, sent only to a Client that said `tasks` (ADR 0068).
+    Tasks(Vec<crate::Task>),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -807,9 +818,23 @@ pub enum SessionEvent {
         workspace_id: WorkspaceId,
         tab_id: Option<TabId>,
     },
+    /// A Task was created or changed, without its description (ADR 0068). Only a Client
+    /// that said `tasks` receives it; any other receives [`Self::Omitted`] instead.
+    TaskChanged(crate::Task),
+    /// A Task was deleted. Sent like [`Self::TaskChanged`].
+    TaskRemoved {
+        task: crate::TaskId,
+    },
     /// An event this Client's protocol does not include, sent under its sequence so the
     /// cursor stays contiguous (ADR 0028). Nothing to apply.
     Omitted,
+}
+
+impl SessionEvent {
+    /// Whether only a Client that said `tasks` in `Hello` receives it (ADR 0068).
+    pub fn is_task(&self) -> bool {
+        matches!(self, Self::TaskChanged(_) | Self::TaskRemoved { .. })
+    }
 }
 
 /// The image encodings a pasted clipboard image may arrive in. The Server names the
@@ -965,6 +990,11 @@ pub enum ServerMessage {
     },
     AgentResult {
         result: Result<AgentResponse, AgentError>,
+    },
+    /// The reply to [`ClientMessage::Task`].
+    Task {
+        request_id: u64,
+        result: Result<crate::TaskResponse, crate::TaskError>,
     },
     /// A program in the Pane copied text with OSC 52; every subscribed client receives it.
     TerminalClipboard {

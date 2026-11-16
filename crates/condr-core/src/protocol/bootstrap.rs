@@ -13,6 +13,7 @@ pub struct BootstrapAssembler {
     agents: Vec<PaneAgentSnapshot>,
     workspace_git: Vec<WorkspaceGitSnapshot>,
     zoomed_panes: Vec<PaneId>,
+    tasks: Option<Vec<crate::Task>>,
     terminal_ids: HashSet<PaneId>,
     agent_ids: HashSet<PaneId>,
     workspace_git_ids: HashSet<WorkspaceId>,
@@ -52,6 +53,7 @@ impl BootstrapAssembler {
             agents: Vec::new(),
             workspace_git: Vec::new(),
             zoomed_panes: Vec::new(),
+            tasks: None,
             terminal_ids: HashSet::new(),
             agent_ids: HashSet::new(),
             workspace_git_ids: HashSet::new(),
@@ -173,6 +175,7 @@ impl BootstrapAssembler {
             agents: self.agents,
             workspace_git: self.workspace_git,
             zoomed_panes: self.zoomed_panes,
+            tasks: self.tasks,
         })
     }
 
@@ -201,6 +204,11 @@ impl BootstrapAssembler {
                     return Err("Bootstrap contains a duplicate zoomed Pane ID".into());
                 }
                 self.zoomed_panes.push(pane_id);
+            }
+            BootstrapRecord::Tasks(tasks) => {
+                if self.tasks.replace(tasks).is_some() {
+                    return Err("Bootstrap contains a second Tasks record".into());
+                }
             }
         }
         Ok(())
