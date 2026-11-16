@@ -241,6 +241,7 @@ impl RuntimeState {
             let last = self.last_place(workspace_id);
             let task = self.tasks_mut().items.get_mut(&id).expect("listed above");
             task.workspace = None;
+            task.made_workspace = false;
             if last.is_some() {
                 task.last = last;
             }
@@ -297,6 +298,7 @@ impl RuntimeState {
                     order: tasks.top(),
                     archived: false,
                     workspace: None,
+                    made_workspace: false,
                     starting: false,
                     last: None,
                 };
@@ -386,6 +388,7 @@ impl RuntimeState {
             .expect("checked by the caller");
         task.archived = true;
         task.workspace = None;
+        task.made_workspace = false;
         if last.is_some() {
             task.last = last;
         }

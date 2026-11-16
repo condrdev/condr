@@ -16,6 +16,7 @@ pub(super) fn encode_task(task: &Task) -> Result<super::Task, String> {
         order: task.order,
         archived: task.archived,
         workspace: task.workspace.map(WorkspaceId::as_u64),
+        made_workspace: task.made_workspace,
         starting: task.starting,
         last: task
             .last
@@ -49,6 +50,7 @@ pub(super) fn decode_task(task: super::Task) -> WireResult<Task> {
         order: task.order,
         archived: task.archived,
         workspace: task.workspace.map(WorkspaceId::from_u64),
+        made_workspace: task.made_workspace,
         starting: task.starting,
         last: task.last.map(|last| LastPlace {
             path: PathBuf::from(last.path),

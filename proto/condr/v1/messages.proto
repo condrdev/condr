@@ -132,6 +132,8 @@ message Task {
   bool starting = 8;
   // Absent until it was first worked.
   TaskPlace last = 9;
+  // A Start of it made the Workspace it holds rather than borrowing an open one.
+  bool made_workspace = 10;
 }
 
 message TaskPlace {

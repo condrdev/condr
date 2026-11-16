@@ -1399,11 +1399,7 @@ impl Condr {
         let git = connection.model.workspace_git.get(&workspace.id());
         Some(ArchiveFacts {
             title: task.title.clone(),
-            created: managed
-                && task
-                    .last
-                    .as_ref()
-                    .is_some_and(|last| last.path == workspace.root_directory()),
+            created: task.made_workspace,
             agents: agents.len(),
             busy,
             managed,
@@ -2147,7 +2143,7 @@ pub(super) struct StartPlan {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct ArchiveFacts {
     pub(super) title: String,
-    /// A Start of this Task made the Workspace: a Managed Worktree on its last place.
+    /// A Start of this Task made the Workspace, as the Server recorded at its commit.
     pub(super) created: bool,
     pub(super) agents: usize,
     /// One Agent that waits for the person, else one that works.
@@ -2340,6 +2336,7 @@ mod tests {
             order: 0,
             archived: false,
             workspace,
+            made_workspace: false,
             starting: false,
             last: None,
         }

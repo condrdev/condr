@@ -1353,7 +1353,9 @@ fn archiving_a_started_task_closes_a_workspace_its_start_made_and_keeps_a_borrow
     let directory = TestDirectory::new("tasks-archive");
     let mut session = Session::new();
     let repository = session.create_workspace(directory.0.clone()).unwrap();
-    let worktree = session.create_workspace(directory.0.clone()).unwrap();
+    let made = session.create_workspace(directory.0.clone()).unwrap();
+    let borrowed = session.create_workspace(directory.0.clone()).unwrap();
+    let reopened = session.create_workspace(directory.0.clone()).unwrap();
     let snapshot_path = directory.0.join("session.snapshot");
     std::fs::write(&snapshot_path, session.snapshot().to_bytes().unwrap()).unwrap();
     let endpoint = Endpoint::local(directory.0.join("server.sock"));
@@ -1370,10 +1372,11 @@ fn archiving_a_started_task_closes_a_workspace_its_start_made_and_keeps_a_borrow
             Some(session.workspace(workspace_id)?.tabs()[0].panes()[0].id())
         })
     };
-    assert!(wait_until(window, |window| pane(window, worktree).is_some()));
-    let in_worktree = pane(window, worktree).unwrap();
+    assert!(wait_until(window, |window| pane(window, reopened).is_some()));
+    let in_made = pane(window, made).unwrap();
     let sent = capture(window, &view);
-    // The test Server's directory is no Git worktree, so the Client is told it is one.
+    // The test Server's directory is no Git worktree, so the Client is told two are
+    // Managed Worktrees of the repository.
     let snapshot = window.read(|app| {
         let mut session = view
             .read(app)
@@ -1382,7 +1385,15 @@ fn archiving_a_started_task_closes_a_workspace_its_start_made_and_keeps_a_borrow
             .session()
             .unwrap()
             .clone();
-        assert!(session.associate_worktree(worktree, repository, directory.0.clone(), true, None));
+        for worktree in [made, borrowed] {
+            assert!(session.associate_worktree(
+                worktree,
+                repository,
+                directory.0.clone(),
+                true,
+                None
+            ));
+        }
         session.snapshot()
     });
     event(
@@ -1393,14 +1404,18 @@ fn archiving_a_started_task_closes_a_workspace_its_start_made_and_keeps_a_borrow
             zoomed_panes: Vec::new(),
         },
     );
-    let task = |id: u64, title: &str, workspace_id| condr_core::Task {
+    // What the Server recorded at each Start's commit: a new worktree and a plain folder
+    // opened again are the Start's own; an open Workspace, Managed Worktree or not, is
+    // borrowed.
+    let task = |id: u64, workspace_id, made_workspace| condr_core::Task {
         id: TaskId::from_u64(id),
-        title: title.into(),
+        title: format!("task {id}"),
         description: None,
         repository: Some(directory.0.clone()),
         order: 0,
         archived: false,
         workspace: Some(workspace_id),
+        made_workspace,
         starting: false,
         last: Some(condr_core::LastPlace {
             path: directory.0.clone(),
@@ -1410,16 +1425,14 @@ fn archiving_a_started_task_closes_a_workspace_its_start_made_and_keeps_a_borrow
             repository: Some(directory.0.clone()),
         }),
     };
-    put_task(window, &view, task(1, "Made by its Start", worktree));
-    put_task(
-        window,
-        &view,
-        task(2, "Borrowed the repository", repository),
-    );
+    put_task(window, &view, task(1, made, true));
+    put_task(window, &view, task(2, borrowed, false));
+    put_task(window, &view, task(3, reopened, true));
+    put_task(window, &view, task(4, repository, false));
     agent_changed(
         window,
         &view,
-        in_worktree,
+        in_made,
         Some(AgentSnapshot {
             session_id: None,
             kind: AgentKind::Codex,
@@ -1430,8 +1443,8 @@ fn archiving_a_started_task_closes_a_workspace_its_start_made_and_keeps_a_borrow
     window.update(|window, cx| view.update(cx, |this, cx| this.toggle_tasks(window, cx)));
     draw(window);
 
-    // The Agent in the worktree carries its Task's title; the repository's Task, with
-    // no Agent, is a card of its own.
+    // The Agent carries its Task's title; the others, with no Agent, are cards of their
+    // own.
     let facts = window.read(|app| {
         view.read(app)
             .archive_facts(1, TaskId::from_u64(1))
@@ -1443,16 +1456,6 @@ fn archiving_a_started_task_closes_a_workspace_its_start_made_and_keeps_a_borrow
         facts.busy,
         Some((AgentKind::Codex, condr_core::AgentDisplayState::Blocked))
     );
-    click(
-        window,
-        leaked_selector(format!("tasks-card-1-{}", in_worktree.as_u64())),
-    );
-    click(window, "tasks-archive-task");
-    assert!(window.update(|window, cx| window.has_active_dialog(cx)));
-    draw(window);
-    assert!(window.debug_bounds("task-archive-remove").is_some());
-    window.update(|window, cx| window.dispatch_action(Box::new(Confirm { secondary: false }), cx));
-    window.run_until_parked();
     let archived = |sent: &std::sync::mpsc::Receiver<ClientMessage>| {
         sent.try_iter().find_map(|message| match message {
             ClientMessage::Task {
@@ -1467,28 +1470,54 @@ fn archiving_a_started_task_closes_a_workspace_its_start_made_and_keeps_a_borrow
             _ => None,
         })
     };
-    assert_eq!(
-        archived(&sent),
-        Some((1, true, false)),
-        "a Workspace its Start made closes by default; the worktree stays"
-    );
-
-    let borrowed = leaked_selector("tasks-task-1-2".into());
-    assert!(inside(window, borrowed, "tasks-column-idle"));
-    click(window, borrowed);
-    click(window, "tasks-archive-task");
-    draw(window);
-    assert!(
-        window.debug_bounds("task-archive-remove").is_none(),
-        "only a Managed Worktree can be removed"
-    );
-    window.update(|window, cx| window.dispatch_action(Box::new(Confirm { secondary: false }), cx));
-    window.run_until_parked();
-    assert_eq!(
-        archived(&sent),
-        Some((2, false, false)),
-        "a borrowed Workspace stays open by default"
-    );
+    // Archives a Task from its card's area with the dialog's defaults; says whether the
+    // dialog offered to remove the worktree.
+    let archive = |window: &mut VisualTestContext, card: &'static str| {
+        click(window, card);
+        click(window, "tasks-archive-task");
+        assert!(window.update(|window, cx| window.has_active_dialog(cx)));
+        draw(window);
+        let removable = window.debug_bounds("task-archive-remove").is_some();
+        window.update(|window, cx| {
+            window.dispatch_action(Box::new(Confirm { secondary: false }), cx)
+        });
+        window.run_until_parked();
+        draw(window);
+        removable
+    };
+    for (card, removable, expected, why) in [
+        (
+            leaked_selector(format!("tasks-card-1-{}", in_made.as_u64())),
+            true,
+            (1, true, false),
+            "a new worktree its Start made closes by default; the worktree stays",
+        ),
+        (
+            "tasks-task-1-2",
+            true,
+            (2, false, false),
+            "a borrowed Managed Worktree stays open by default",
+        ),
+        (
+            "tasks-task-1-3",
+            false,
+            (3, true, false),
+            "a plain folder its Start opened again closes by default",
+        ),
+        (
+            "tasks-task-1-4",
+            false,
+            (4, false, false),
+            "the repository's own Workspace, borrowed, stays open",
+        ),
+    ] {
+        assert_eq!(
+            archive(window, card),
+            removable,
+            "only a Managed Worktree can be removed: {why}"
+        );
+        assert_eq!(archived(&sent), Some(expected), "{why}");
+    }
 }
 
 #[test]
@@ -1557,6 +1586,7 @@ fn a_new_device_for_a_to_do_task_creates_it_there_and_deletes_it_here() {
         order: 0,
         archived: false,
         workspace: None,
+        made_workspace: false,
         starting: false,
         last: None,
     };

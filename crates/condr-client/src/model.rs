@@ -558,6 +558,7 @@ mod tests {
             order: 0,
             archived,
             workspace: (id == 2).then(|| WorkspaceId::from_u64(9)),
+            made_workspace: false,
             starting: false,
             last: None,
         };

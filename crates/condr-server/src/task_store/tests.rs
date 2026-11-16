@@ -44,6 +44,7 @@ fn task(id: u64, title: &str, order: i64) -> Task {
         order,
         archived: false,
         workspace: None,
+        made_workspace: false,
         starting: false,
         last: None,
     }
@@ -80,6 +81,7 @@ fn the_store_keeps_every_change_across_a_restart_and_never_reuses_a_number() {
     first.title = "Fix the login bug on Safari".into();
     first.order = 5;
     first.workspace = Some(WorkspaceId::from_u64(7));
+    first.made_workspace = true;
     first.last = Some(LastPlace {
         path: "/src/api-login".into(),
         branch: Some("worktree/fix-the-login-bug".into()),

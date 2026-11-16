@@ -238,6 +238,7 @@ fn a_task_starts_in_a_new_tab_with_its_file_and_one_sentence() {
     );
     let started = get(&mut connection, task);
     assert_eq!(started.workspace, Some(workspace));
+    assert!(!started.made_workspace, "an open Workspace is borrowed");
     assert!(!started.starting);
     assert_eq!(started.last.unwrap().path, folder);
 
@@ -271,7 +272,7 @@ fn a_task_starts_in_a_new_tab_with_its_file_and_one_sentence() {
             remove_worktree: false,
         },
     );
-    assert!(archived.archived && archived.workspace.is_none());
+    assert!(archived.archived && archived.workspace.is_none() && !archived.made_workspace);
     assert!(!file.exists(), "archiving removes the task file");
     assert!(
         fixture.session().workspace(workspace).is_some(),
@@ -386,6 +387,7 @@ fn a_new_worktree_start_commits_and_continue_follows_the_record() {
     assert!(branch_exists(&repository, &branch));
     let started = get(&mut connection, task);
     assert_eq!(started.workspace, Some(workspace));
+    assert!(started.made_workspace, "a new worktree is this Start's own");
     let last = started.last.unwrap();
     assert!(last.managed);
     assert_eq!(last.branch.as_deref(), Some(branch.as_str()));
@@ -399,8 +401,13 @@ fn a_new_worktree_start_commits_and_continue_follows_the_record() {
             .unwrap();
     };
     close(&mut connection, workspace);
-    assert_eq!(get(&mut connection, task).workspace, None);
+    let closed = get(&mut connection, task);
+    assert!(closed.workspace.is_none() && !closed.made_workspace);
     let (reopened, _, _) = start_task(&mut connection, task, None).unwrap();
+    assert!(
+        get(&mut connection, task).made_workspace,
+        "reopened by this Start"
+    );
     let association = fixture
         .session()
         .workspace(reopened)
@@ -414,6 +421,10 @@ fn a_new_worktree_start_commits_and_continue_follows_the_record() {
     close(&mut connection, reopened);
     close(&mut connection, repository_workspace);
     let (plain, _, _) = start_task(&mut connection, task, Some(StartPlace::Continue)).unwrap();
+    assert!(
+        get(&mut connection, task).made_workspace,
+        "a plain folder opened again"
+    );
     assert!(
         fixture
             .session()
@@ -429,6 +440,10 @@ fn a_new_worktree_start_commits_and_continue_follows_the_record() {
     let (used, _, _) = start_task(&mut connection, task, Some(StartPlace::Continue)).unwrap();
     assert_eq!(used, open);
     assert_eq!(fixture.session().workspace(open).unwrap().tabs().len(), 2);
+    assert!(
+        !get(&mut connection, task).made_workspace,
+        "Continue onto an open Workspace borrows it"
+    );
 
     // A folder that is gone cannot be continued.
     close(&mut connection, open);

@@ -156,7 +156,7 @@ fn run(
             id,
             agent,
             &files,
-            workspace_id,
+            (workspace_id, made.workspace.is_some()),
             pane_id,
         )
         .map_err(|error| error.at("agent"))?;
@@ -613,7 +613,8 @@ fn type_agent(
     id: TaskId,
     agent: AgentKind,
     file: &std::path::Path,
-    workspace_id: WorkspaceId,
+    // The Workspace, and whether this Start made it rather than borrowing it.
+    (workspace_id, made_workspace): (WorkspaceId, bool),
     pane_id: PaneId,
 ) -> Result<(), TaskError> {
     let installation = installation(state, agent)?;
@@ -695,6 +696,7 @@ fn type_agent(
             .expect("a starting Task is never deleted");
         task.starting = false;
         task.workspace = Some(workspace_id);
+        task.made_workspace = made_workspace;
         task.last = last;
         state.task_changed(id);
         tracing::info!(

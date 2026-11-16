@@ -31,6 +31,7 @@ CREATE TABLE tasks (
     position INTEGER NOT NULL,
     archived INTEGER NOT NULL,
     workspace INTEGER,
+    made_workspace INTEGER NOT NULL,
     last_path TEXT,
     last_branch TEXT,
     last_base_branch TEXT,
@@ -228,8 +229,8 @@ fn load(path: &Path) -> Result<(Connection, Vec<Task>, u64), LoadError> {
         let mut statement = connection
             .prepare(
                 "SELECT id, title, description, repository, position, archived, workspace, \
-                 last_path, last_branch, last_base_branch, last_managed, last_repository \
-                 FROM tasks",
+                 last_path, last_branch, last_base_branch, last_managed, last_repository, \
+                 made_workspace FROM tasks",
             )
             .map_err(sqlite)?;
         let rows = statement
@@ -245,6 +246,7 @@ fn load(path: &Path) -> Result<(Connection, Vec<Task>, u64), LoadError> {
                     workspace: row
                         .get::<_, Option<i64>>(6)?
                         .map(|id| WorkspaceId::from_u64(id as u64)),
+                    made_workspace: row.get(12)?,
                     starting: false,
                     last: match last_path {
                         Some(path) => Some(LastPlace {
@@ -359,7 +361,8 @@ fn write(connection: &mut Connection, writes: &Writes) -> rusqlite::Result<()> {
         transaction.execute(
             "INSERT OR REPLACE INTO tasks (id, title, description, repository, position, \
              archived, workspace, last_path, last_branch, last_base_branch, last_managed, \
-             last_repository) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+             last_repository, made_workspace) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 id.as_u64() as i64,
                 task.title,
@@ -373,6 +376,7 @@ fn write(connection: &mut Connection, writes: &Writes) -> rusqlite::Result<()> {
                 last.and_then(|last| last.base_branch.clone()),
                 last.is_some_and(|last| last.managed),
                 last.and_then(|last| text(&last.repository)),
+                task.made_workspace,
             ],
         )?;
     }

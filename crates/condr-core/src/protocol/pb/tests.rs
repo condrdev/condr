@@ -441,6 +441,7 @@ fn task(id: u64, description: Option<&str>) -> crate::Task {
         order: -2,
         archived: false,
         workspace: Some(crate::WorkspaceId::from_u64(9)),
+        made_workspace: true,
         starting: true,
         last: Some(crate::LastPlace {
             path: "/src/api-fix".into(),

@@ -69,6 +69,10 @@ pub struct Task {
     pub archived: bool,
     /// The Workspace a started Task holds.
     pub workspace: Option<WorkspaceId>,
+    /// A Start of this Task made that Workspace, a new worktree or its folder opened
+    /// again, rather than borrowing one already open; archiving it closes the Workspace
+    /// by default (ADR 0068). False while it holds none.
+    pub made_workspace: bool,
     /// A Start of it is under way. The Server's alone; not stored.
     pub starting: bool,
     /// Where it was last worked.
@@ -310,6 +314,7 @@ mod tests {
             order: 0,
             archived: false,
             workspace: None,
+            made_workspace: false,
             starting: false,
             last: None,
         };
