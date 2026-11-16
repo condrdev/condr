@@ -27,13 +27,13 @@ Condr 采用分层配置架构：
 | **电源**（Power） | 本机 | 保持屏幕常亮（与侧边栏底部的咖啡杯图标联动） |
 | **快捷键**（Shortcuts） | 本机 | 改绑或删除窗口级快捷键，macOS 上选择 **将 Option 用作 Meta 键**（Option as Meta），并列出终端自身的按键（只读） |
 | **网络**（Network） | 设备 | 该设备用于 Peer-to-peer 连接和检查更新的代理：**系统**（System）、**不使用**（None），或选择 **手动**（Manual）并填写 URL |
-| **已配对设备**（Paired devices） | 设备 | **配对**（Pair）：点击 **显示配对码**（Show pairing code）显示一次性配对码，用手机上的 Condr 扫描；另一台电脑可点击 **复制链接**（Copy link）复制链接。配对码 10 分钟后过期，设备配对成功后卡片会显示它的名字。同时开启 Peer-to-peer 和 TCP 时，可选择配对码使用哪一种；TCP 配对码使用这台电脑提供的地址，可从输入框的列表中选择，也可以自行输入。**设备**（Devices）：已配对设备，在线设备排在前面，每行都有 **撤销**（Revoke）。**连接**（Connections）：**Peer-to-peer** 和 **TCP** 两个开关，以及 TCP 的监听地址；有修改等待重启时会出现 **重启 Condr**（Restart Condr） |
+| **已配对设备**（Paired devices） | 设备 | **配对**（Pair）：点击 **显示配对码**（Show pairing code）显示一次性配对码，用手机上的 Condr 扫描；另一台电脑可点击 **复制链接**（Copy link）复制链接。配对码 10 分钟后过期，设备配对成功后卡片会显示它的名字。同时开启 Peer-to-peer 和 TCP 时，可选择配对码使用哪一种；TCP 配对码使用这台电脑提供的地址，可从输入框的列表中选择，也可以自行输入。**设备**（Devices）：已配对设备，在线设备排在前面，每行都有 **取消配对**（Revoke）。**连接方式**（Connections）：**Peer-to-peer** 和 **TCP** 两个开关，以及 TCP 的监听地址；有修改等待重启时会出现 **重启 Condr**（Restart Condr） |
 | **Agent 集成**（Agent integrations） | 设备 | 查看各 Agent 的 Hook 状态，支持一键安装、更新或卸载 |
 | **开发者**（Developer） | 本机 | 帧率监控开关，以及快速打开应用、配置、数据、状态和日志目录的按钮 |
 | **许可证**（Licenses） | 本机 | 第三方开源依赖及开源协议 |
 | **关于**（About） | 本机 | 版本信息、更新通道选择、手动检查更新及自动检查开关 |
 
-> **权限限制**：通过 TCP 或 P2P 连接时，决定其他设备如何连入这台设备的设置（`网络`（Network）中的代理，以及 `已配对设备`（Paired devices）页 **连接**（Connections）中的所有项，包括 **重启 Condr**（Restart Condr））会置灰禁用，以防止改动导致当前连接中断；悬停可查看说明。如需修改，请在该设备上操作或通过 SSH 连接修改。其余设置均可正常调整，包括 **显示配对码**（Show pairing code），以及对当前所用设备之外的任意设备执行 **Remove**。
+> **权限限制**：通过 TCP 或 P2P 连接时，决定其他设备如何连入这台设备的设置（`网络`（Network）中的代理，以及 `已配对设备`（Paired devices）页 **连接方式**（Connections）中的所有项，包括 **重启 Condr**（Restart Condr））会置灰禁用，以防止改动导致当前连接中断；悬停可查看说明。如需修改，请在该设备上操作或通过 SSH 连接修改。其余设置均可正常调整，包括 **显示配对码**（Show pairing code），以及对当前所用设备之外的任意设备执行 **Remove**。
 
 ---
 
@@ -43,7 +43,7 @@ GUI 客户端、后台 Server 与 `condr` CLI 共用位于配置目录下的 `co
 
 * **写入机制**：Condr 写入配置时使用文件锁规避并发竞争，并完整保留文件内的自定义注释与排版结构。
 * **生效规则**：
-  * 在图形界面修改的设置通常立即生效，但 `已配对设备`（Paired devices）页 **连接**（Connections）中的设置和 Peer-to-peer 代理除外。
+  * 在图形界面修改的设置通常立即生效，但 `已配对设备`（Paired devices）页 **连接方式**（Connections）中的设置和 Peer-to-peer 代理除外。
   * 手动编辑 `[client]` 及其子表后，重启 GUI 窗口生效。
   * 手动编辑 `[server]` 及其子表后，需在终端运行 `condr server restart` 重启 Server。
   * 手动编辑 `[network]` 后，上述两项操作均需执行。

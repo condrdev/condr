@@ -382,7 +382,7 @@ settings:
   connections:
     title:
       en: Connections
-      zh-CN: 连接
+      zh-CN: 连接方式
     p2p:
       en: Peer-to-peer
       zh-CN: Peer-to-peer
@@ -483,19 +483,19 @@ settings:
       zh-CN: 此窗口
     revoke:
       en: Revoke
-      zh-CN: 撤销
+      zh-CN: 取消配对
     revoke_this_window:
       en: It is how this window connects.
       zh-CN: 此窗口正是通过它连接的。
     revoke_title:
       en: 'Revoke “%{name}”?'
-      zh-CN: '要撤销“%{name}”吗？'
+      zh-CN: '要取消与“%{name}”的配对吗？'
     revoke_description:
       en: It disconnects now and needs a new pairing code to connect again.
       zh-CN: 它会立即断开，之后需要新的配对码才能再次连接。
     revoke_ok:
       en: Revoke
-      zh-CN: 撤销
+      zh-CN: 取消配对
   agents:
     title:
       en: Agent integrations

@@ -3,10 +3,10 @@ changes:
   toggle:
     hide:
       en: Hide Changes & Files
-      zh-CN: 隐藏变更和文件
+      zh-CN: 隐藏变更与文件
     show:
       en: Show Changes & Files
-      zh-CN: 显示变更和文件
+      zh-CN: 显示变更与文件
   tab:
     files:
       en: Files

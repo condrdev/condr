@@ -99,7 +99,7 @@ Server 通过 Condr Cloud（`push.condr.dev`，一个 Cloudflare Worker）向每
 
 ## 撤销设备
 
-执行 `condr server revoke <指纹或前缀>`，或在界面打开 **设置 › 已配对设备**（Settings › Paired devices）点击 **撤销**（Revoke）。
+执行 `condr server revoke <指纹或前缀>`，或在界面打开 **设置 › 已配对设备**（Settings › Paired devices）点击 **取消配对**（Revoke）。
 
 * **生效时效**：Condr 会立即从 `authorized-clients.json` 中移除目标记录，并同步切断该设备当前建立的所有活跃连接。
 * **后续接入表现**：后续 TCP 连接请求将在 Noise 握手阶段阻断；Peer-to-peer 连接将在 QUIC 握手完成后予以拒绝。
