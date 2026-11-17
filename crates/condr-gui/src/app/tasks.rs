@@ -269,7 +269,7 @@ impl Condr {
         let owner = cx.weak_entity();
         let todo = self.todo_count();
         let muted = cx.theme().muted_foreground;
-        h_flex()
+        let row = h_flex()
             .id("sidebar-tasks")
             .debug_selector(|| "sidebar-tasks".into())
             .h_8()
@@ -294,7 +294,17 @@ impl Condr {
             })
             .on_click(move |_, window, cx| {
                 let _ = owner.update(cx, |this, cx| this.toggle_tasks(window, cx));
-            })
+            });
+        // Out through the header's padding so the rule spans the sidebar, as the Agents
+        // section's does; the padding comes back inside.
+        v_flex()
+            .flex_1()
+            .mx_neg_3()
+            .px_3()
+            .pb_2()
+            .border_b_1()
+            .border_color(cx.theme().sidebar_border)
+            .child(row)
             .into_any_element()
     }
 
@@ -527,9 +537,8 @@ impl Condr {
             .debug_selector(|| "tasks-back".into())
             .ghost()
             .small()
-            // One run of text, not an icon beside it: Segoe UI sets its lowercase low in
-            // the line, which left a centred icon riding high.
-            .label(format!("\u{2039} {back_label}"))
+            .icon(Icon::new(IconName::ChevronLeft))
+            .label(back_label.clone())
             .tooltip_with_action(back_label, &ToggleTasks, Some(SHORTCUT_CONTEXT))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(move |_, window, cx| {
