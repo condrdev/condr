@@ -11,19 +11,25 @@ tasks:
     en: Workspaces
     zh-CN: Workspace
   layout:
+    button:
+      en: Layout
+      zh-CN: 布局
     list:
       en: List
       zh-CN: 列表
     board:
       en: Board
       zh-CN: 看板
-  density:
-    cards:
-      en: Cards
-      zh-CN: 卡片
-    compact:
-      en: Compact
-      zh-CN: 紧凑
+  compact_cards:
+    label:
+      en: Compact cards
+      zh-CN: 紧凑卡片
+    "on":
+      en: "On"
+      zh-CN: 开
+    "off":
+      en: "Off"
+      zh-CN: 关
   column:
     to_do:
       en: To do

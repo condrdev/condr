@@ -448,6 +448,11 @@ fn agents(
         this.toggle_tasks(window, cx);
     });
     shot(cx, window, directory, "11-tasks-agents");
+    // Layout opens from the toolbar's right end, under the title row.
+    let layout = point(px(1235.), WORKSPACE_TITLE_BAR_HEIGHT + px(16.));
+    cx.simulate_click(window, layout, Modifiers::default());
+    shot(cx, window, directory, "11a-tasks-layout");
+    cx.simulate_click(window, point(px(640.), px(700.)), Modifiers::default());
     update(cx, window, view, |this, _, cx| {
         this.main_view_mut().tasks.density = TasksDensity::Compact;
         cx.notify();

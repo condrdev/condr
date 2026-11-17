@@ -84,6 +84,10 @@ gpui_kit::assets::icon_assets!(
         BrushCleaning,
         // The sidebar's Command Palette button.
         Command,
+        // Tasks mode's scope and Layout (ADR 0068).
+        ListFilter,
+        List,
+        Kanban,
     ]
 );
 

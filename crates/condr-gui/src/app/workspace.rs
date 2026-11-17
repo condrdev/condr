@@ -1017,7 +1017,7 @@ impl Render for Condr {
                         .child(workspace)
                 } else if let Some(tasks_board) = tasks_board {
                     // Tasks mode takes the whole window, both sidebars too (ADR 0068).
-                    this.child(self.tasks_title_bar(view, cx)).child(
+                    this.child(self.tasks_title_bar(cx)).child(
                         div()
                             .debug_selector(|| "tasks-mode".into())
                             .flex_1()

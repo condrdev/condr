@@ -116,6 +116,12 @@ impl Render for TerminalPanel {
             ));
         }
         let owner = self.owner.upgrade();
+        // Tasks mode's area shows one Pane whose layout and Tab actions do nothing there
+        // (ADR 0068), so its header offers none of them.
+        let in_tasks_mode = owner.as_ref().is_some_and(|owner| {
+            let app = owner.read(cx);
+            app.in_tasks_mode(app.window_view(window))
+        });
         let (
             terminal,
             active,
@@ -463,7 +469,7 @@ impl Render for TerminalPanel {
                     })
                     // Dragging the header rearranges the Tab (see `DraggedPane`). A zoomed
                     // Pane has nothing beside it to land on.
-                    .when(can_mutate && !zoomed, |this| {
+                    .when(can_mutate && !zoomed && !in_tasks_mode, |this| {
                         let name = pane_title.clone();
                         this.on_drag(
                             AnyDrag::new(super::dock::DraggedPane { key, pane_id }),
@@ -579,8 +585,9 @@ impl Render for TerminalPanel {
                                         .child(t!("terminal.pasting_image")),
                                 )
                             })
-                            .child(pane_zoom)
-                            .child(pane_menu),
+                            .when(!in_tasks_mode, |this| {
+                                this.child(pane_zoom).child(pane_menu)
+                            }),
                     ),
             )
             .child(body)

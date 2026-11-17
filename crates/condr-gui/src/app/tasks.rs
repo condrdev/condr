@@ -5,9 +5,11 @@ use super::sidebar::{
     CondrIconName, CondrSidebarIcon, SidebarStatusVisual, pane_sidebar_status, urgency,
 };
 use super::task_form::{todo_tasks, workspace_focused_pane};
-use super::viewer_header::mode_toggle;
 use super::*;
 use condr_core::TaskId;
+use gpui_kit::component::button::ButtonGroup;
+use gpui_kit::component::popover::Popover;
+use gpui_kit::component::switch::Switch;
 use rust_i18n::t;
 use std::any::TypeId;
 
@@ -503,10 +505,10 @@ impl Condr {
         })
     }
 
-    /// Tasks mode's title row: back to the Workspaces, the mode's name, and how it shows.
-    pub(super) fn tasks_title_bar(&self, view: &WindowView, cx: &mut Context<Self>) -> TitleBar {
+    /// Tasks mode's title row: back to the Workspaces and the mode's name. The scope and
+    /// the layout sit in the toolbar over the cards, as a project board has them.
+    pub(super) fn tasks_title_bar(&self, cx: &mut Context<Self>) -> TitleBar {
         let theme = cx.theme();
-        let prefs = view.tasks;
         let back_owner = cx.weak_entity();
         let back_label = t!("tasks.back");
         let back = Button::new("tasks-back")
@@ -520,47 +522,6 @@ impl Condr {
             .on_click(move |_, window, cx| {
                 let _ = back_owner.update(cx, |this, cx| this.toggle_tasks(window, cx));
             });
-        let layout_owner = cx.weak_entity();
-        let layout = mode_toggle(
-            "tasks-layout",
-            Button::new("tasks-layout-list")
-                .debug_selector(|| "tasks-layout-list".into())
-                .label(t!("tasks.layout.list")),
-            Button::new("tasks-layout-board")
-                .debug_selector(|| "tasks-layout-board".into())
-                .label(t!("tasks.layout.board")),
-            prefs.layout == TasksLayout::Board,
-            move |board, cx| {
-                let layout = if board {
-                    TasksLayout::Board
-                } else {
-                    TasksLayout::List
-                };
-                let _ = layout_owner.update(cx, |this, cx| this.set_tasks_layout(layout, cx));
-            },
-        );
-        let density_owner = cx.weak_entity();
-        let density = (prefs.layout == TasksLayout::Board).then(|| {
-            mode_toggle(
-                "tasks-density",
-                Button::new("tasks-density-cards")
-                    .debug_selector(|| "tasks-density-cards".into())
-                    .label(t!("tasks.density.cards")),
-                Button::new("tasks-density-compact")
-                    .debug_selector(|| "tasks-density-compact".into())
-                    .label(t!("tasks.density.compact")),
-                prefs.density == TasksDensity::Compact,
-                move |compact, cx| {
-                    let density = if compact {
-                        TasksDensity::Compact
-                    } else {
-                        TasksDensity::Cards
-                    };
-                    let _ =
-                        density_owner.update(cx, |this, cx| this.set_tasks_density(density, cx));
-                },
-            )
-        });
         TitleBar::new()
             .h(WORKSPACE_TITLE_BAR_HEIGHT)
             .bg(theme.sidebar)
@@ -575,15 +536,125 @@ impl Condr {
                     .pr_2()
                     .items_center()
                     .child(back)
-                    .child(claim_press(self.render_scope_menu(prefs.scope, cx)))
-                    .child(div().flex_1())
-                    .child(claim_press(
-                        h_flex().gap_2().children(density).child(layout),
-                    )),
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_semibold()
+                            .child(t!("tasks.title").into_owned()),
+                    ),
             )
     }
 
-    /// `Tasks › MacBook › api-server ▾`: the scope as a breadcrumb that opens a tree of
+    /// Over the cards and the interaction area: the scope on the left, Layout on the right.
+    fn tasks_toolbar(&self, prefs: TasksPrefs, cx: &mut Context<Self>) -> impl IntoElement {
+        h_flex()
+            .debug_selector(|| "tasks-toolbar".into())
+            .flex_none()
+            .w_full()
+            .gap_2()
+            .px_2()
+            .py_1()
+            .items_center()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .child(self.render_scope_menu(prefs.scope, cx))
+            .child(div().flex_1())
+            .child(self.render_layout_popover(cx))
+    }
+
+    /// Layout: List or Board, and whether the Board's cards are compact; the List's rows
+    /// always are.
+    fn render_layout_popover(&self, cx: &mut Context<Self>) -> AnyElement {
+        let owner = cx.weak_entity();
+        Popover::new("tasks-layout-popover")
+            .anchor(Anchor::TopRight)
+            .trigger(
+                Button::new("tasks-layout")
+                    .debug_selector(|| "tasks-layout".into())
+                    .ghost()
+                    .small()
+                    .icon(Icon::new(IconName::LayoutDashboard))
+                    .label(t!("tasks.layout.button")),
+            )
+            .content(move |_, _, cx| {
+                let prefs = owner
+                    .upgrade()
+                    .map(|owner| owner.read(cx).main_view().tasks)
+                    .unwrap_or_default();
+                let board = prefs.layout == TasksLayout::Board;
+                let (layout_owner, density_owner) = (owner.clone(), owner.clone());
+                let layout = ButtonGroup::new("tasks-layout-toggle")
+                    .outline()
+                    .small()
+                    .w_full()
+                    .child(
+                        Button::new("tasks-layout-list")
+                            .debug_selector(|| "tasks-layout-list".into())
+                            .flex_1()
+                            .icon(Icon::new(gpui_kit::assets::IconName::List))
+                            .label(t!("tasks.layout.list"))
+                            .selected(!board),
+                    )
+                    .child(
+                        Button::new("tasks-layout-board")
+                            .debug_selector(|| "tasks-layout-board".into())
+                            .flex_1()
+                            .icon(Icon::new(gpui_kit::assets::IconName::Kanban))
+                            .label(t!("tasks.layout.board"))
+                            .selected(board),
+                    )
+                    .on_click(move |selected, _, cx| {
+                        let layout = if selected.first() == Some(&1) {
+                            TasksLayout::Board
+                        } else {
+                            TasksLayout::List
+                        };
+                        let _ =
+                            layout_owner.update(cx, |this, cx| this.set_tasks_layout(layout, cx));
+                    });
+                let compact = Switch::new("tasks-compact")
+                    .checked(prefs.density == TasksDensity::Compact)
+                    .disabled(!board)
+                    .on_click(move |compact, _, cx| {
+                        let density = if *compact {
+                            TasksDensity::Compact
+                        } else {
+                            TasksDensity::Cards
+                        };
+                        let _ = density_owner
+                            .update(cx, |this, cx| this.set_tasks_density(density, cx));
+                    });
+                v_flex().w(rems(16.)).gap_3().child(layout).child(
+                    h_flex()
+                        .gap_2()
+                        .items_center()
+                        .text_sm()
+                        .when(!board, |row| row.text_color(cx.theme().muted_foreground))
+                        .child(t!("tasks.compact_cards.label").into_owned())
+                        .child(div().flex_1())
+                        // Kit's unchecked track all but vanishes on a popover; the word
+                        // says the state.
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(if prefs.density == TasksDensity::Compact {
+                                    t!("tasks.compact_cards.on").into_owned()
+                                } else {
+                                    t!("tasks.compact_cards.off").into_owned()
+                                }),
+                        )
+                        .child(
+                            div()
+                                .debug_selector(|| "tasks-compact".into())
+                                .child(compact),
+                        ),
+                )
+            })
+            .into_any_element()
+    }
+
+    /// `MacBook › api-server ▾`: the scope as a breadcrumb that opens a tree of
     /// All, the Devices and their Workspaces, worktrees under their repository, each
     /// with its Agent count.
     fn render_scope_menu(&self, scope: TasksScope, cx: &mut Context<Self>) -> AnyElement {
@@ -594,7 +665,7 @@ impl Condr {
                 .map(|(_, cards)| cards.len())
                 .sum()
         };
-        let mut crumbs = vec![t!("tasks.title").into_owned()];
+        let mut crumbs = Vec::new();
         let mut options = vec![(t!("tasks.scope.all").into_owned(), TasksScope::All)];
         for connection in &self.connections {
             let Some(server) = connection.model.server_id else {
@@ -655,6 +726,7 @@ impl Condr {
             .debug_selector(|| "tasks-scope".into())
             .ghost()
             .small()
+            .icon(Icon::new(gpui_kit::assets::IconName::ListFilter))
             .label(crumbs.join(" › "))
             .dropdown_caret(true)
             .dropdown_menu(move |menu, _, _| {
@@ -1827,15 +1899,6 @@ fn change_counts(added: u32, deleted: u32, ahead: u32, theme: &Theme) -> Option<
     })
 }
 
-/// Inside the title bar a press that no control claims starts a window move, which
-/// swallows the click; Kit's `Button` and `ButtonGroup` leave it unclaimed.
-fn claim_press(control: impl IntoElement) -> Div {
-    div()
-        .flex_none()
-        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-        .child(control)
-}
-
 /// How many of the List's optional columns fit its width, taken in the order
 /// Workspace, Device, Changes, Branch; the mark, Title and State always show, so a List
 /// beside the interaction area keeps its titles.
@@ -2292,6 +2355,26 @@ impl Condr {
     /// The cards, and below the Board or beside the List the interaction area, with a
     /// handle between them.
     pub(super) fn render_tasks_body(
+        &self,
+        view: &WindowView,
+        board: Entity<TasksBoard>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        v_flex()
+            .size_full()
+            .child(self.tasks_toolbar(view.tasks, cx))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .child(self.render_tasks_split(view, board, cx)),
+            )
+            .into_any_element()
+    }
+
+    /// The cards, and with a card selected the interaction area beside or below them.
+    fn render_tasks_split(
         &self,
         view: &WindowView,
         board: Entity<TasksBoard>,

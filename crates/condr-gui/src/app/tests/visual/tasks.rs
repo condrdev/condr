@@ -138,17 +138,18 @@ fn tasks_mode_takes_the_window_sorts_agents_into_columns_and_leaves_the_view() {
         "entering marks nothing seen"
     );
 
-    // Compact, then the List, whose rows carry the same Agents and no density switch.
-    let compact = window.debug_bounds("tasks-density-compact").unwrap();
-    window.simulate_click(compact.center(), Modifiers::default());
-    draw(window);
+    // The scope and Layout sit in the toolbar over the cards, not in the title row.
+    assert!(inside(window, "tasks-scope", "tasks-toolbar"));
+    assert!(inside(window, "tasks-layout", "tasks-toolbar"));
+    assert!(!inside(window, "tasks-layout", "tasks-title"));
+
+    // Layout: compact cards, then the List, whose rows carry the same Agents.
+    click(window, "tasks-layout");
+    click(window, "tasks-compact");
     assert!(inside(window, card(blocked), "tasks-column-needs-you"));
-    let list = window.debug_bounds("tasks-layout-list").unwrap();
-    window.simulate_click(list.center(), Modifiers::default());
-    draw(window);
+    click(window, "tasks-layout-list");
     assert!(window.debug_bounds("tasks-list").is_some());
     assert!(window.debug_bounds("tasks-board").is_none());
-    assert!(window.debug_bounds("tasks-density-cards").is_none());
     assert!(
         window
             .debug_bounds(leaked_selector(format!("tasks-row-1-{}", blocked.as_u64())))
@@ -678,6 +679,30 @@ fn a_disconnected_device_shows_a_band_and_its_open_pane_a_veil() {
     assert!(inside(window, "reconnect-veil-1", "tasks-area"));
 }
 
+/// The area's Pane keeps its header but offers no zoom or Pane menu, whose actions do
+/// nothing in Tasks mode.
+#[test]
+fn the_area_pane_offers_no_zoom_or_pane_menu() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    let (_view, window, _server, pane_id) = tasks_mode_with_an_agent(&mut cx);
+    let pane = pane_id.as_u64();
+    click(window, leaked_selector(format!("tasks-card-1-{pane}")));
+    assert!(
+        window
+            .debug_bounds(leaked_selector(format!("terminal-pane-header-{pane}")))
+            .is_some()
+    );
+    for button in ["zoom", "menu"] {
+        assert!(
+            window
+                .debug_bounds(leaked_selector(format!("terminal-pane-{button}-{pane}")))
+                .is_none(),
+            "{button}"
+        );
+    }
+}
+
 /// A Device the person disconnected from its menu needs no band saying so.
 #[test]
 fn a_device_the_person_disconnected_shows_no_band() {
@@ -880,6 +905,7 @@ fn to_do_heads_tasks_mode_newest_first_with_its_count_and_drags_to_reorder() {
     }));
 
     // The List carries To do as its first group.
+    click(window, "tasks-layout");
     click(window, "tasks-layout-list");
     assert!(window.debug_bounds(todo_card(first)).is_some());
     assert!(window.debug_bounds("tasks-new-task").is_some());
