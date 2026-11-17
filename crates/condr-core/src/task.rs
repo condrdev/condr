@@ -192,6 +192,8 @@ pub enum TaskCommand {
     },
 }
 
+// A one-off reply, never stored in bulk; Windows' larger `PathBuf` is what trips the lint.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TaskResponse {
     Task(Task),

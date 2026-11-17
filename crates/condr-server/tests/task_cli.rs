@@ -430,23 +430,16 @@ fn a_task_starts_in_a_new_worktree_that_archiving_removes() {
     let repository = server.root.join("api");
     std::fs::create_dir_all(&repository).unwrap();
     git(&repository, &["init", "-q", "-b", "main"]);
-    std::fs::write(repository.join("README.md"), "api\n").unwrap();
-    git(&repository, &["add", "README.md"]);
+    // The worktree's reflog needs a committer, and CI has no global one.
+    git(&repository, &["config", "user.name", "Condr Tests"]);
     git(
         &repository,
-        &[
-            "-c",
-            "user.name=Condr Tests",
-            "-c",
-            "user.email=condr@example.invalid",
-            "-c",
-            "commit.gpgsign=false",
-            "commit",
-            "-q",
-            "-m",
-            "initial",
-        ],
+        &["config", "user.email", "condr@example.invalid"],
     );
+    git(&repository, &["config", "commit.gpgsign", "false"]);
+    std::fs::write(repository.join("README.md"), "api\n").unwrap();
+    git(&repository, &["add", "README.md"]);
+    git(&repository, &["commit", "-q", "-m", "initial"]);
     let workspace = server.ok(&["workspace", "create", "--cwd", repository.to_str().unwrap()]);
     let parent = workspace["workspace"]["workspace_id"].as_u64().unwrap();
     let root = workspace["workspace"]["root_directory"].clone();
