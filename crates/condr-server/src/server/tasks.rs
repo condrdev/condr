@@ -8,6 +8,9 @@ use condr_core::{LastPlace, Task, TaskCommand, TaskError, TaskId, TaskResponse};
 use condr_core::{MAX_TASK_DESCRIPTION_BYTES, MAX_TASK_TITLE_BYTES, task_error};
 use std::collections::{BTreeMap, HashMap};
 
+/// A Start, from reserving its Task to the Agent taking it (ADR 0068).
+pub(super) mod start;
+
 pub(super) struct Tasks {
     /// Every Task, archived ones included, each with its description.
     items: BTreeMap<TaskId, Task>,
@@ -510,7 +513,7 @@ pub(super) fn handle_task_request(
             let (state, lifecycle, outbound) =
                 (Arc::clone(state), Arc::clone(lifecycle), outbound.clone());
             thread::spawn(move || {
-                let result = super::task_start::start(&state, &lifecycle, task, place, agent);
+                let result = start::start(&state, &lifecycle, task, place, agent);
                 reply_task(&outbound, request_id, result);
             });
             false

@@ -33,13 +33,13 @@ enum Plan {
 
 /// What this Start made, which a failure before the commit point undoes.
 #[derive(Default)]
-pub(super) struct Made {
-    pub(super) workspace: Option<WorkspaceId>,
-    pub(super) tab: Option<TabId>,
+pub(in crate::server) struct Made {
+    pub(in crate::server) workspace: Option<WorkspaceId>,
+    pub(in crate::server) tab: Option<TabId>,
     /// The repository and the worktree created in it.
-    pub(super) worktree: Option<(GitRepository, GitRepository)>,
+    pub(in crate::server) worktree: Option<(GitRepository, GitRepository)>,
     /// A branch created for the worktree, with the commit it was made at.
-    pub(super) branch: Option<(GitRepository, String, String)>,
+    pub(in crate::server) branch: Option<(GitRepository, String, String)>,
 }
 
 /// Holds the Task in "Starting" and the Workspace it chose; dropping it before the
@@ -72,7 +72,7 @@ fn error(code: &str, message: impl Into<String>) -> TaskError {
 
 /// Runs one Start to its answer. It belongs to the Server, not to the connection that
 /// asked: a requester that leaves does not stop it (ADR 0068).
-pub(super) fn start(
+pub(in crate::server) fn start(
     state: &Arc<Mutex<RuntimeState>>,
     lifecycle: &Arc<ServerLifecycle>,
     task: TaskId,
@@ -537,12 +537,12 @@ fn write_task_file(
 }
 
 /// The one short sentence the Agent starts on (ADR 0068).
-pub(super) fn initial_prompt(file: &std::path::Path) -> String {
+pub(in crate::server) fn initial_prompt(file: &std::path::Path) -> String {
     format!("Read {} and do the task it describes.", file.display())
 }
 
 /// Refuses a prompt an npm `.cmd` shim would refuse, saying why (ADR 0068).
-pub(super) fn check_shim(
+pub(in crate::server) fn check_shim(
     installation: &AgentInstallation,
     file: &std::path::Path,
 ) -> Result<(), TaskError> {
@@ -713,7 +713,11 @@ fn type_agent(
 /// the worktree, then a branch still where it was made. A stopping Server keeps a
 /// Workspace it made, which returns without a Task (ADR 0068), and only takes back a
 /// worktree and branch no Workspace was made for.
-pub(super) fn undo_failed(state: &Arc<Mutex<RuntimeState>>, mut made: Made, stopping: bool) {
+pub(in crate::server) fn undo_failed(
+    state: &Arc<Mutex<RuntimeState>>,
+    mut made: Made,
+    stopping: bool,
+) {
     if stopping {
         if made.workspace.is_some() {
             return;

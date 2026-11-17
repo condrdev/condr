@@ -11,7 +11,6 @@ mod push;
 mod recovery;
 mod streams;
 mod subscriptions;
-mod task_start;
 mod tasks;
 mod terminal_monitor;
 mod terminal_state;

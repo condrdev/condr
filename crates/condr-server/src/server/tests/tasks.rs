@@ -312,9 +312,9 @@ fn undoing_a_start_never_closes_a_workspace_by_its_last_tab() {
     let opened = state.session.create_tab(workspace, None).unwrap();
     let state = Arc::new(Mutex::new(state));
     let undo = |tab| {
-        task_start::undo_failed(
+        crate::server::tasks::start::undo_failed(
             &state,
-            task_start::Made {
+            crate::server::tasks::start::Made {
                 tab: Some(tab),
                 ..Default::default()
             },
@@ -390,7 +390,7 @@ fn a_stopping_server_undoes_only_a_worktree_no_workspace_was_made_for() {
         let commit = child.head().unwrap().to_owned();
         (
             child.root().to_path_buf(),
-            task_start::Made {
+            crate::server::tasks::start::Made {
                 workspace,
                 tab: None,
                 worktree: Some((parent.clone(), child)),
@@ -400,12 +400,12 @@ fn a_stopping_server_undoes_only_a_worktree_no_workspace_was_made_for() {
     };
 
     let (folder, without_workspace) = made("worktree/refused", false);
-    task_start::undo_failed(&state, without_workspace, true);
+    crate::server::tasks::start::undo_failed(&state, without_workspace, true);
     assert!(!folder.exists());
     assert!(!branch_exists("worktree/refused"));
 
     let (folder, with_workspace) = made("worktree/kept", true);
-    task_start::undo_failed(&state, with_workspace, true);
+    crate::server::tasks::start::undo_failed(&state, with_workspace, true);
     assert!(
         folder.exists(),
         "it comes back as a Workspace without a Task"
@@ -619,13 +619,13 @@ fn a_cmd_shim_refuses_a_task_file_path_with_its_metacharacters() {
     };
     let odd = std::path::Path::new(r"C:\Users\R&D (100%)\condr\tasks\1.md");
     let plain = std::path::Path::new(r"C:\Users\me\condr\tasks\1.md");
-    let refused = task_start::check_shim(&shim, odd).unwrap_err();
+    let refused = crate::server::tasks::start::check_shim(&shim, odd).unwrap_err();
     assert_eq!(refused.code, task_error::UNSUPPORTED_PATH);
     assert!(refused.message.contains(".cmd shim"), "{}", refused.message);
-    assert!(task_start::check_shim(&shim, plain).is_ok());
-    assert!(task_start::check_shim(&exe, odd).is_ok());
+    assert!(crate::server::tasks::start::check_shim(&shim, plain).is_ok());
+    assert!(crate::server::tasks::start::check_shim(&exe, odd).is_ok());
     assert_eq!(
-        task_start::initial_prompt(plain),
+        crate::server::tasks::start::initial_prompt(plain),
         r"Read C:\Users\me\condr\tasks\1.md and do the task it describes."
     );
 }
