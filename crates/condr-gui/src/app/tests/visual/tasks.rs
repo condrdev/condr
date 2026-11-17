@@ -729,12 +729,6 @@ fn a_device_the_person_disconnected_shows_no_band() {
 
 use condr_core::{StartPlace, TaskCommand, TaskId, TaskResponse};
 
-const SAVE: &str = if cfg!(target_os = "macos") {
-    "cmd-s"
-} else {
-    "ctrl-s"
-};
-
 /// A GUI on a fresh Server that keeps its Tasks in memory, and another Client of it, as
 /// the CLI would be.
 fn tasks_gui(
@@ -968,7 +962,7 @@ fn a_new_task_saves_with_the_shortcut_and_unsaved_changes_ask_before_they_go() {
     assert!(window.debug_bounds("task-start").is_none());
     assert!(gui_tasks(window, &view).is_empty());
     window.simulate_input("Write the release notes");
-    window.simulate_keystrokes(SAVE);
+    click(window, "task-form-save");
     assert!(wait_until(window, |window| form_home(window, &view).is_some()));
     draw(window);
     let (_, saved) = form_home(window, &view).unwrap();

@@ -7,7 +7,6 @@ use condr_core::agent_discovery::AgentInstallation;
 use condr_core::{StartPlace, TaskCommand, TaskError, TaskId, TaskResponse, task_error};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::{Textarea, TextareaState};
-use gpui_kit::component::kbd::Kbd;
 use gpui_kit::component::radio::Radio;
 use rust_i18n::t;
 use std::borrow::Cow;
@@ -708,7 +707,7 @@ impl Condr {
         }
     }
 
-    /// Save, and `Cmd+S` in the form: creates a new Task, edits a saved one, or moves a
+    /// Save: creates a new Task, edits a saved one, or moves a
     /// To do Task to the chosen Device by creating it there and deleting it here. Says
     /// whether the save went out; what stopped it shows in the form.
     pub(super) fn save_task_form(&mut self, cx: &mut Context<Self>) -> bool {
@@ -2017,14 +2016,6 @@ impl Condr {
                         let _ = save_owner.update(cx, |this, cx| this.save_task_form(cx));
                     }),
             )
-            .child(Kbd::new(
-                Keystroke::parse(if cfg!(target_os = "macos") {
-                    "cmd-s"
-                } else {
-                    "ctrl-s"
-                })
-                .expect("a key"),
-            ))
             .child(div().flex_1())
             .map(|this| match form.home {
                 Some((key, task_id)) => {
@@ -2080,10 +2071,6 @@ impl Condr {
         v_flex()
             .id("task-form")
             .debug_selector(|| "task-form".into())
-            .key_context("CondrTaskForm")
-            .on_action(cx.listener(|this, _: &SaveFile, _, cx| {
-                this.save_task_form(cx);
-            }))
             .flex_1()
             .min_w_0()
             .gap_2()

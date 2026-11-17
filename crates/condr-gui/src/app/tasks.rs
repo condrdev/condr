@@ -527,8 +527,9 @@ impl Condr {
             .debug_selector(|| "tasks-back".into())
             .ghost()
             .small()
-            .icon(Icon::new(IconName::ChevronLeft))
-            .label(back_label.clone())
+            // One run of text, not an icon beside it: Segoe UI sets its lowercase low in
+            // the line, which left a centred icon riding high.
+            .label(format!("\u{2039} {back_label}"))
             .tooltip_with_action(back_label, &ToggleTasks, Some(SHORTCUT_CONTEXT))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(move |_, window, cx| {
@@ -1041,7 +1042,7 @@ impl Condr {
                     .into_any_element(),
             );
             if !folded {
-                rows.push(self.render_new_task_button(cx));
+                rows.push(self.render_new_task_row(fit, cx));
                 rows.extend(
                     todo.iter()
                         .map(|(key, task)| self.render_todo_row(*key, task, fit, cx)),
@@ -1399,6 +1400,38 @@ impl Condr {
                 let _ = owner.update(cx, |this, cx| this.new_task(window, cx));
             })
             .into_any_element()
+    }
+
+    /// The Table's "+ New task": a row of its own, its mark and label where a Task's are.
+    fn render_new_task_row(&self, fit: ListFit, cx: &mut Context<Self>) -> AnyElement {
+        let owner = cx.weak_entity();
+        let theme = cx.theme();
+        let hover = theme.list_hover;
+        list_row(
+            fit,
+            "tasks-new-task",
+            Icon::new(IconName::Plus)
+                .size_3p5()
+                .text_color(theme.muted_foreground),
+            t!("tasks.todo.new").into_owned(),
+            String::new(),
+            String::new(),
+            String::new(),
+            div(),
+            div(),
+        )
+        .text_sm()
+        .text_color(theme.muted_foreground)
+        .rounded(theme.radius)
+        // The Task rows' selection border, so the label lines up with their titles.
+        .border_1()
+        .border_color(gpui_kit::transparent_black())
+        .cursor_pointer()
+        .hover(move |this| this.bg(hover))
+        .on_click(move |_, window, cx| {
+            let _ = owner.update(cx, |this, cx| this.new_task(window, cx));
+        })
+        .into_any_element()
     }
 
     /// `Device · repository` and `↺ branch` for a Task worked before.

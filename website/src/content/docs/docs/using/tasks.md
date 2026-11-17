@@ -25,7 +25,7 @@ Click the cards' background to take the keyboard back: the arrow keys then previ
 
 A **Task** is work you write down before any Agent starts on it. Tasks are kept on each Device's Server, so every window and the `condr task` command see the same ones.
 
-- **Write one** with **+ New task** at the top of To do, or **New Task** in the Command Palette. Give it a title, a plain-text description, the Device it belongs to and, optionally, the repository. Nothing is kept until you **Save** (`Cmd+S`).
+- **Write one** with **+ New task** at the top of To do, or **New Task** in the Command Palette. Give it a title, a plain-text description, the Device it belongs to and, optionally, the repository. Nothing is kept until you **Save**.
 - **Start it** from the right half of its form. Choose where: the repository's own Workspace, a **New worktree** with its own branch, or, for a Task worked on before, where it left off. Choose the Agent and press **Start**. Condr opens the Workspace, starts the Agent there and asks it to read the Task, its title and description, from a file the Server writes.
 - **While it runs**, every Agent in its Workspace carries the Task's title on its card. If its Workspace has no Agent left, the Task shows in Idle as "No agent running", ready to start again.
 - **Archive it** when the work is done or dropped. For a started Task, Archive asks whether to close its Workspace, ending its Agents, and whether to remove its worktree; the branch always stays. Archived Tasks wait at the bottom of To do, where you can restore or delete them.
