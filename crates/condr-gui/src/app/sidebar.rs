@@ -819,71 +819,76 @@ impl Condr {
                     .child(Separator::horizontal().color(cx.theme().sidebar_border))
                     .child(agents)
                     .child(
-                    h_flex()
-                        .w_full()
-                        .justify_between()
-                        .gap_1()
-                        .child(power::keep_awake_button(
-                            self.keep_awake,
-                            keep_awake_owner,
-                            cx,
-                        ))
-                        .child(div().flex_1())
-                        .child(
-                            // Shift twice is no key binding for `tooltip_with_action` to find, so
-                            // the tooltip draws the pair as Settings' tooltip draws its key.
-                            div()
-                                .id("command-palette-tooltip")
-                                .tooltip(|window, cx| {
-                                    Tooltip::element(|_, cx| {
-                                        let shift = || {
-                                            Kbd::new(Keystroke::parse("shift").expect("a key"))
-                                                .appearance(false)
-                                        };
-                                        h_flex().gap_3().child(t!("sidebar.command_palette")).child(
+                        h_flex()
+                            .w_full()
+                            .justify_between()
+                            .gap_1()
+                            .child(power::keep_awake_button(
+                                self.keep_awake,
+                                keep_awake_owner,
+                                cx,
+                            ))
+                            .child(div().flex_1())
+                            .child(
+                                // Shift twice is no key binding for `tooltip_with_action` to find, so
+                                // the tooltip draws the pair as Settings' tooltip draws its key.
+                                div()
+                                    .id("command-palette-tooltip")
+                                    .tooltip(|window, cx| {
+                                        Tooltip::element(|_, cx| {
+                                            let shift = || {
+                                                Kbd::new(Keystroke::parse("shift").expect("a key"))
+                                                    .appearance(false)
+                                            };
                                             h_flex()
-                                                .gap_1()
-                                                .text_xs()
-                                                .text_color(cx.theme().muted_foreground)
-                                                .child(shift())
-                                                .child(shift()),
-                                        )
+                                                .gap_3()
+                                                .child(t!("sidebar.command_palette"))
+                                                .child(
+                                                    h_flex()
+                                                        .gap_1()
+                                                        .text_xs()
+                                                        .text_color(cx.theme().muted_foreground)
+                                                        .child(shift())
+                                                        .child(shift()),
+                                                )
+                                        })
+                                        .build(window, cx)
                                     })
-                                    .build(window, cx)
-                                })
-                                .child(
-                                    Button::new("command-palette")
-                                        .debug_selector(|| "command-palette-button".into())
-                                        .ghost()
-                                        .small()
-                                        .icon(Glyph::Command)
-                                        .accessibility_label(t!("sidebar.command_palette"))
-                                        .on_click(move |_, window, cx| {
-                                            let _ = palette_owner.update(cx, |this, cx| {
-                                                let all = command_palette::OpenCommandPalette {
-                                                    page: command_palette::Page::All,
-                                                };
-                                                this.action_open_command_palette(&all, window, cx)
-                                            });
-                                        }),
-                                ),
-                        )
-                        .child(self.render_ports_button(view, cx))
-                        .child(
-                            Button::new("add-server")
-                                .debug_selector(|| "add-server".into())
-                                .ghost()
-                                .small()
-                                .icon(Icon::new(CondrIconName::ServerPlus))
-                                .tooltip(t!("sidebar.connect_remote_device"))
-                                .accessibility_label(t!("sidebar.connect_remote_device"))
-                                .dropdown_menu(move |menu, _, _| {
-                                    Condr::add_server_menu(menu, add_owner.clone())
-                                })
-                                .anchor(Anchor::BottomLeft),
-                        )
-                        .child(self.settings_button(settings_owner, cx)),
-                ),
+                                    .child(
+                                        Button::new("command-palette")
+                                            .debug_selector(|| "command-palette-button".into())
+                                            .ghost()
+                                            .small()
+                                            .icon(Glyph::Command)
+                                            .accessibility_label(t!("sidebar.command_palette"))
+                                            .on_click(move |_, window, cx| {
+                                                let _ = palette_owner.update(cx, |this, cx| {
+                                                    let all = command_palette::OpenCommandPalette {
+                                                        page: command_palette::Page::All,
+                                                    };
+                                                    this.action_open_command_palette(
+                                                        &all, window, cx,
+                                                    )
+                                                });
+                                            }),
+                                    ),
+                            )
+                            .child(self.render_ports_button(view, cx))
+                            .child(
+                                Button::new("add-server")
+                                    .debug_selector(|| "add-server".into())
+                                    .ghost()
+                                    .small()
+                                    .icon(Icon::new(CondrIconName::ServerPlus))
+                                    .tooltip(t!("sidebar.connect_remote_device"))
+                                    .accessibility_label(t!("sidebar.connect_remote_device"))
+                                    .dropdown_menu(move |menu, _, _| {
+                                        Condr::add_server_menu(menu, add_owner.clone())
+                                    })
+                                    .anchor(Anchor::BottomLeft),
+                            )
+                            .child(self.settings_button(settings_owner, cx)),
+                    ),
             )
             .into_any_element()
     }
