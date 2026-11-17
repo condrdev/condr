@@ -53,10 +53,10 @@ pub(super) enum TasksScope {
     Workspace(ServerId, WorkspaceId),
 }
 
-/// The main window's Tasks mode as the GUI state file keeps it (ADR 0023).
+/// How the main window's Tasks mode shows, as the GUI state file keeps it (ADR 0023);
+/// whether it shows is the window's `ContentPage`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct TasksPrefs {
-    pub(super) on: bool,
     pub(super) layout: TasksLayout,
     pub(super) density: TasksDensity,
     pub(super) scope: TasksScope,
@@ -215,7 +215,6 @@ pub(super) fn inert_in_tasks_mode(action: TypeId) -> bool {
         TypeId::of::<SwapUp>(),
         TypeId::of::<SwapDown>(),
         TypeId::of::<ToggleZoom>(),
-        TypeId::of::<ToggleSidebar>(),
         TypeId::of::<ToggleChanges>(),
         TypeId::of::<NextWorkspace>(),
         TypeId::of::<PreviousWorkspace>(),
@@ -226,24 +225,22 @@ pub(super) fn inert_in_tasks_mode(action: TypeId) -> bool {
 impl Condr {
     /// Whether `view` shows Tasks mode, which only the main window does.
     pub(super) fn in_tasks_mode(&self, view: &WindowView) -> bool {
-        view.scope == WindowScope::Main && view.tasks.on
+        view.scope == WindowScope::Main && view.page == ContentPage::Tasks
     }
 
     /// Enters or leaves Tasks mode. Neither changes the View (ADR 0021): leaving shows
     /// the Workspace and Tab shown before, and entering marks nothing seen.
     pub(super) fn toggle_tasks(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let view = self.window_view_mut(window);
+        let view = self.window_view(window);
         if view.scope != WindowScope::Main {
             return;
         }
-        view.tasks.on = !view.tasks.on;
-        if view.tasks.on {
-            view.ports = None;
-        }
-        self.rebuild_window_dock(window, cx);
-        self.sync_terminal_focus(window, cx);
-        self.schedule_state_save(cx);
-        cx.notify();
+        let page = if view.page == ContentPage::Tasks {
+            ContentPage::Workspace
+        } else {
+            ContentPage::Tasks
+        };
+        self.show_page(page, window, cx);
     }
 
     /// Makes each window's cached views before a frame renders them: GPUI tracks a
@@ -266,7 +263,8 @@ impl Condr {
     }
 
     /// The Tasks row at the top of the main window's sidebar, with To do's count.
-    pub(super) fn render_tasks_entry(&self, cx: &mut Context<Self>) -> AnyElement {
+    /// The Tasks row, lit while Tasks mode shows, as a Workspace's row is while it shows.
+    pub(super) fn render_tasks_entry(&self, active: bool, cx: &mut Context<Self>) -> AnyElement {
         let owner = cx.weak_entity();
         let todo = self.todo_count();
         let muted = cx.theme().muted_foreground;
@@ -281,7 +279,7 @@ impl Condr {
             .rounded(cx.theme().radius)
             .text_sm()
             .font_semibold()
-            .map(|this| super::change_tree::row_highlight(this, false, cx))
+            .map(|this| super::change_tree::row_highlight(this, active, cx))
             .child(Icon::new(CondrIconName::SquareKanban).size_4())
             .child(div().flex_1().child(t!("tasks.title").into_owned()))
             .when(todo > 0, |this| {
@@ -305,13 +303,18 @@ impl Condr {
     }
 
     /// The Tasks icon heading the collapsed sidebar's avatars.
-    pub(super) fn render_collapsed_tasks_entry(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_collapsed_tasks_entry(
+        &self,
+        active: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let owner = cx.weak_entity();
         Button::new("collapsed-tasks")
             .debug_selector(|| "collapsed-tasks".into())
             .ghost()
             .small()
             .icon(Icon::new(CondrIconName::SquareKanban))
+            .selected(active)
             .tooltip_with_action(t!("tasks.title"), &ToggleTasks, Some(SHORTCUT_CONTEXT))
             .on_click(move |_, window, cx| {
                 let _ = owner.update(cx, |this, cx| this.toggle_tasks(window, cx));
@@ -523,48 +526,24 @@ impl Condr {
         })
     }
 
-    /// Tasks mode's title row: back to the Workspaces and the mode's name. The scope and
-    /// the layout sit in the toolbar over the cards, as a project board has them.
-    pub(super) fn tasks_title_bar(&self, cx: &mut Context<Self>) -> TitleBar {
-        let theme = cx.theme();
-        let back_owner = cx.weak_entity();
-        let back_label = t!("tasks.back");
-        let back = Button::new("tasks-back")
-            .debug_selector(|| "tasks-back".into())
-            .ghost()
-            .small()
-            .icon(Icon::new(IconName::ChevronLeft))
-            .label(back_label.clone())
-            .tooltip_with_action(back_label, &ToggleTasks, Some(SHORTCUT_CONTEXT))
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_click(move |_, window, cx| {
-                let _ = back_owner.update(cx, |this, cx| this.toggle_tasks(window, cx));
-            });
-        TitleBar::new()
-            .h(WORKSPACE_TITLE_BAR_HEIGHT)
-            .bg(theme.sidebar)
-            .border_color(theme.border)
-            .child(
-                h_flex()
-                    .debug_selector(|| "tasks-title".into())
-                    .h_full()
-                    .w_full()
-                    .min_w_0()
-                    .gap_2()
-                    .pr_2()
-                    .items_center()
-                    .child(back)
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_semibold()
-                            .child(t!("tasks.title").into_owned()),
-                    ),
-            )
+    /// Tasks mode's title in the title bar, where the Tab strip was, as the Ports page's.
+    pub(super) fn render_tasks_title(&self, cx: &mut Context<Self>) -> AnyElement {
+        h_flex()
+            .debug_selector(|| "tasks-title".into())
+            .gap_2()
+            .items_center()
+            .px_2()
+            .child(Icon::new(CondrIconName::SquareKanban).size_4())
+            .child(div().text_sm().child(t!("tasks.title").into_owned()))
+            .text_color(cx.theme().foreground)
+            .into_any_element()
     }
 
-    /// Over the cards and the interaction area: the scope on the left, Layout on the right.
+    /// Over the cards and the interaction area: the scope on the left, Layout and the way
+    /// back to the Workspace on the right, as the Ports page closes.
     fn tasks_toolbar(&self, prefs: TasksPrefs, cx: &mut Context<Self>) -> impl IntoElement {
+        let close_owner = cx.weak_entity();
+        let back = t!("tasks.back");
         h_flex()
             .debug_selector(|| "tasks-toolbar".into())
             .flex_none()
@@ -578,6 +557,17 @@ impl Condr {
             .child(self.render_scope_menu(prefs.scope, cx))
             .child(div().flex_1())
             .child(self.render_layout_popover(cx))
+            .child(
+                Button::new("tasks-close")
+                    .debug_selector(|| "tasks-close".into())
+                    .ghost()
+                    .small()
+                    .icon(IconName::Close)
+                    .tooltip_with_action(back, &ToggleTasks, Some(SHORTCUT_CONTEXT))
+                    .on_click(move |_, window, cx| {
+                        let _ = close_owner.update(cx, |this, cx| this.toggle_tasks(window, cx));
+                    }),
+            )
     }
 
     /// Layout: List or Board, and whether the Board's cards are compact; the List's rows
@@ -810,11 +800,9 @@ impl Condr {
                 self.render_tasks_list(&columns, todo, scope, view.tasks, fit, cx)
             }
         };
-        let bands = self.render_connection_bands(view.tasks.scope, cx);
         v_flex()
             .debug_selector(|| "tasks-cards".into())
             .size_full()
-            .children(bands)
             .track_focus(&view.tasks_focus)
             .on_key_down(cx.listener(Self::tasks_key_down))
             .on_mouse_down(
@@ -1085,83 +1073,6 @@ impl Condr {
             .overflow_y_scroll()
             .children(rows)
             .into_any_element()
-    }
-
-    /// With the sidebar hidden, ADR 0020's mark has nowhere to be: a band names each
-    /// Device in the scope that is not connected, whose Agents the cards then leave out,
-    /// unless the person disconnected it, which needs no telling.
-    fn render_connection_bands(
-        &self,
-        scope: TasksScope,
-        cx: &mut Context<Self>,
-    ) -> Vec<AnyElement> {
-        let scope = self.effective_tasks_scope(scope);
-        let mut bands = Vec::new();
-        for connection in &self.connections {
-            let in_scope = match scope {
-                TasksScope::All => true,
-                TasksScope::Device(server) | TasksScope::Workspace(server, _) => {
-                    connection.model.server_id == Some(server)
-                }
-            };
-            if !in_scope
-                || connection.status == ConnectionStatus::Connected
-                || !connection.auto_connect
-            {
-                continue;
-            }
-            let key = connection.key;
-            let reconnecting = connection.reconnect_deadline.is_some();
-            let owner = cx.weak_entity();
-            let status = super::sidebar::device_status(
-                key,
-                connection.endpoint.as_local_path().is_some(),
-                connection.status,
-                connection.build_notice().is_some(),
-                connection.error.is_some() && !reconnecting,
-                cx,
-            );
-            let theme = cx.theme();
-            bands.push(
-                h_flex()
-                    .debug_selector(move || format!("tasks-band-{key}"))
-                    .flex_none()
-                    .w_full()
-                    .gap_2()
-                    .px_3()
-                    .py_1()
-                    .items_center()
-                    .border_b_1()
-                    .border_color(theme.border)
-                    .bg(theme.sidebar)
-                    .text_sm()
-                    .child(status)
-                    .child(div().min_w_0().truncate().child(
-                        t!("tasks.band.not_connected", device = connection.label).into_owned(),
-                    ))
-                    .when(reconnecting, |this| {
-                        this.child(
-                            div()
-                                .text_color(theme.muted_foreground)
-                                .child(t!("tasks.band.reconnecting").into_owned()),
-                        )
-                    })
-                    .child(div().flex_1())
-                    .child(
-                        Button::new(SharedString::from(format!("tasks-band-reconnect-{key}")))
-                            .debug_selector(move || format!("tasks-band-reconnect-{key}"))
-                            .ghost()
-                            .xsmall()
-                            .label(t!("tasks.band.reconnect"))
-                            .on_click(move |_, window, cx| {
-                                let _ = owner
-                                    .update(cx, |this, cx| this.connect_server(key, window, cx));
-                            }),
-                    )
-                    .into_any_element(),
-            );
-        }
-        bands
     }
 
     /// What a card shows, gathered once for every density.
@@ -2116,9 +2027,10 @@ impl ListFit {
     const ALWAYS: f32 = 2. + 1.25 + 10. + 12. + 1.;
 
     fn of(view: &WindowView, form_open: bool, window: &Window) -> Self {
-        // Tasks mode hides both sidebars, so the card area spans the window; beside the
-        // interaction area the List takes its share of the split.
-        let mut width = window.viewport_size().width / window.rem_size();
+        // The card area spans the window beside the left sidebar (the Changes sidebar is
+        // under it); beside the interaction area the List takes its share of the split.
+        let mut width =
+            (window.viewport_size().width - view.sidebar_layout_width()) / window.rem_size();
         if form_open || view.tasks_selection.is_some() {
             width *= f32::from(view.tasks.split_list.unwrap_or(DEFAULT_SPLIT_LIST)) / 1000.;
         }
@@ -2445,10 +2357,11 @@ impl Condr {
         cx.notify();
     }
 
-    /// Leaves Tasks mode, for Go to's places and Open in Workspace.
+    /// Leaves the main window's Tasks mode, for Go to's places, which the palette may run
+    /// from another window, and Open in Workspace.
     pub(super) fn leave_tasks_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.main_view().tasks.on {
-            self.main_view_mut().tasks.on = false;
+        if self.main_view().page == ContentPage::Tasks {
+            self.main_view_mut().page = ContentPage::Workspace;
             self.main_view_mut().tasks_dock = None;
             if self.is_main(window) {
                 self.rebuild_window_dock(window, cx);
@@ -2471,7 +2384,7 @@ impl Condr {
     /// size, so stepping through cards resizes no Agent (ADR 0068).
     pub(super) fn tasks_previews(&self, key: ConnectionKey, pane_id: PaneId) -> bool {
         let view = self.main_view();
-        view.tasks.on
+        view.page == ContentPage::Tasks
             && view.tasks_selection.is_some_and(|selected| {
                 (selected.key, selected.pane_id) == (key, pane_id) && !selected.keyboard
             })
@@ -2897,7 +2810,7 @@ mod tests {
     fn layout_and_tab_actions_are_inert() {
         assert!(inert_in_tasks_mode(TypeId::of::<SplitRight>()));
         assert!(inert_in_tasks_mode(TypeId::of::<ClosePane>()));
-        assert!(inert_in_tasks_mode(TypeId::of::<ToggleSidebar>()));
+        assert!(!inert_in_tasks_mode(TypeId::of::<ToggleSidebar>()));
         assert!(!inert_in_tasks_mode(TypeId::of::<NextAgent>()));
         assert!(!inert_in_tasks_mode(TypeId::of::<OpenSettings>()));
         assert!(!inert_in_tasks_mode(TypeId::of::<ToggleTasks>()));

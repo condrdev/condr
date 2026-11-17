@@ -173,13 +173,11 @@ impl Condr {
                 pending: false,
             });
         }
-        self.window_view_mut(window).ports = Some(scope);
-        cx.notify();
+        self.show_page(ContentPage::Ports(scope), window, cx);
     }
 
     pub(super) fn close_ports(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.window_view_mut(window).ports = None;
-        cx.notify();
+        self.show_page(ContentPage::Workspace, window, cx);
     }
 
     /// Wakes the page when a forward or a link changes, at most ten times a second.
@@ -772,7 +770,7 @@ impl Condr {
             .icon(Icon::new(CondrIconName::ArrowLeftRight))
             .tooltip(t!("ports.title"))
             .accessibility_label(t!("ports.title"))
-            .when(view.ports == Some(PortsScope::All), |button| {
+            .when(view.page == ContentPage::Ports(PortsScope::All), |button| {
                 button.selected(true)
             })
             .on_click(move |_, window, cx| {

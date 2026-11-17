@@ -46,7 +46,8 @@ pub(super) struct GuiState {
     pub servers: HashMap<ServerId, ServerState>,
     /// The detached windows (ADR 0043), each opened again once its Server bootstraps.
     pub detached: Vec<DetachedWindowState>,
-    /// The main window's Tasks mode and how it shows (ADR 0068).
+    /// Whether the main window showed Tasks mode, and how it shows (ADR 0068).
+    pub tasks_open: bool,
     pub tasks: super::tasks::TasksPrefs,
 }
 
@@ -426,7 +427,7 @@ mod wire {
                         }
                     };
                     Tasks {
-                        on: state.tasks.on,
+                        on: state.tasks_open,
                         list: state.tasks.layout == TasksLayout::List,
                         compact: state.tasks.density == TasksDensity::Compact,
                         folded: state.tasks.folded.into(),
@@ -499,10 +500,10 @@ mod wire {
                 sidebar_collapsed: state.sidebar_collapsed,
                 agents_height: state.agents_height,
                 agents_collapsed: state.agents_collapsed,
+                tasks_open: state.tasks.as_ref().is_some_and(|tasks| tasks.on),
                 tasks: state
                     .tasks
                     .map_or_else(TasksPrefs::default, |tasks| TasksPrefs {
-                        on: tasks.on,
                         layout: if tasks.list {
                             TasksLayout::List
                         } else {
@@ -678,6 +679,7 @@ impl Condr {
             sidebar_collapsed: self.main_view().sidebar_collapsed,
             agents_height: self.main_view().agents_height.map(Into::into),
             agents_collapsed: self.main_view().agents_collapsed,
+            tasks_open: self.main_view().page == ContentPage::Tasks,
             tasks: self.main_view().tasks,
             changes_width: Some(self.main_view().changes_width.into()),
             diff_unified: self.files_view.diff_unified,
@@ -834,8 +836,8 @@ mod tests {
             sidebar_collapsed: true,
             agents_height: Some(180.),
             agents_collapsed: true,
+            tasks_open: true,
             tasks: super::super::tasks::TasksPrefs {
-                on: true,
                 layout: super::super::tasks::TasksLayout::List,
                 density: super::super::tasks::TasksDensity::Compact,
                 scope: super::super::tasks::TasksScope::Workspace(

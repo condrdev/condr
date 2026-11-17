@@ -21,10 +21,8 @@ Every key combination not declared on this page passes through to the child proc
 | Close Settings | `Esc` | `Esc` |
 | Toggle the left sidebar | `Cmd + B` | `Ctrl + Shift + B` |
 | Toggle the right sidebar (Changes & Files) | `Cmd + Option + B` | `Ctrl + Alt + B` |
-| Enter or leave [Tasks mode](/docs/using/tasks/) | `Cmd + 0` | `Alt + 0` |
 
-* **New Task** has no default key; find it in the Command Palette or [give it one](#change-a-shortcut) as `new-task`.
-* On Windows and Linux, a program in the terminal no longer receives `Alt + 0`; [rebind](#change-a-shortcut) `toggle-tasks` if it needs it.
+* **Tasks mode** and **New Task** have no default key; find them in the Command Palette or [give them one](#change-a-shortcut) as `toggle-tasks` and `new-task`.
 
 ---
 

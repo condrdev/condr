@@ -8,8 +8,8 @@ tasks:
       en: All
       zh-CN: 全部
   back:
-    en: Workspaces
-    zh-CN: Workspace
+    en: Back to the Workspace
+    zh-CN: 返回 Workspace
   layout:
     button:
       en: Layout
@@ -78,16 +78,9 @@ tasks:
     agent_exited:
       en: Agent exited
       zh-CN: Agent 已退出
-  band:
-    not_connected:
-      en: "%{device} is not connected"
-      zh-CN: "%{device} 未连接"
-    reconnecting:
-      en: Reconnecting…
-      zh-CN: 正在重新连接…
-    reconnect:
-      en: Reconnect
-      zh-CN: 重新连接
+  not_connected:
+    en: "%{device} is not connected"
+    zh-CN: "%{device} 未连接"
   request_failed:
     en: "The Task request failed: %{error}"
     zh-CN: "Task 请求失败：%{error}"

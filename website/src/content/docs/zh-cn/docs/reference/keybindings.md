@@ -21,10 +21,8 @@ Condr 的快捷键分为两层逻辑：
 | 关闭设置 | `Esc` | `Esc` |
 | 切换左侧栏显示状态 | `Cmd + B` | `Ctrl + Shift + B` |
 | 切换右侧栏“变更与文件”（Changes & Files） | `Cmd + Option + B` | `Ctrl + Alt + B` |
-| 进入或离开 [Tasks 模式](/zh-cn/docs/using/tasks/) | `Cmd + 0` | `Alt + 0` |
 
-* **New Task** 没有默认快捷键，可以在命令面板里找到，或者用 `new-task` [自己绑一个](#修改快捷键)。
-* 在 Windows 和 Linux 上，终端里的程序收不到 `Alt + 0`；需要的话可以[改绑](#修改快捷键) `toggle-tasks`。
+* **Tasks 模式**和 **New Task** 没有默认快捷键，可以在命令面板里找到，或者用 `toggle-tasks` 和 `new-task` [自己绑一个](#修改快捷键)。
 
 ---
 

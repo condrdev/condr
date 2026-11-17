@@ -305,7 +305,8 @@ impl Condr {
         }
         let owner = cx.weak_entity();
         // Above everything, in the main window only (ADR 0068).
-        let tasks_entry = (view.scope == WindowScope::Main).then(|| self.render_tasks_entry(cx));
+        let tasks_entry = (view.scope == WindowScope::Main)
+            .then(|| self.render_tasks_entry(self.in_tasks_mode(view), cx));
         let needs_you = self.needs_you_items(view, cx);
         let agents = self.render_agents_section(view, window, cx);
         // A detached window lists only what it shows (ADR 0043).
@@ -317,7 +318,10 @@ impl Condr {
             .map(|connection| {
                 let key = connection.key;
                 let server_target = DropTarget::Server { key, after: false };
-                let active_server = key == self.presented_key(view);
+                // Beside Tasks mode no Device or Workspace is lit, so a click on any of them
+                // goes there rather than folding it (ADR 0068).
+                let active_server =
+                    view.page != ContentPage::Tasks && key == self.presented_key(view);
                 let connected = connection.can_mutate();
                 let workspaces = connection
                     .presented_session()
@@ -987,7 +991,8 @@ impl Condr {
                 if !view.scope.lists_workspace(connection_key, workspace_id) {
                     continue;
                 }
-                let active = connection.key == self.presented_key(view)
+                let active = view.page != ContentPage::Tasks
+                    && connection.key == self.presented_key(view)
                     && active_workspace == Some(workspace_id);
                 let workspace_name = workspace.name().to_owned();
                 let icon = CondrSidebarIcon::avatar(
@@ -1038,7 +1043,7 @@ impl Condr {
             .border_r_1()
             .border_color(cx.theme().sidebar_border)
             .when(view.scope == WindowScope::Main, |this| {
-                this.child(self.render_collapsed_tasks_entry(cx))
+                this.child(self.render_collapsed_tasks_entry(self.in_tasks_mode(view), cx))
             })
             .children(avatars)
             .into_any_element()

@@ -511,7 +511,7 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.main_view().tasks.on {
+        if self.main_view().page != ContentPage::Tasks {
             self.toggle_tasks(window, cx);
         }
         self.clear_task_selection(window, cx);
@@ -646,8 +646,7 @@ impl Condr {
                 .find(|connection| connection.key == key)
                 .map(|connection| connection.label.clone())
                 .unwrap_or_default();
-            form.description_error =
-                Some(t!("tasks.band.not_connected", device = label).into_owned());
+            form.description_error = Some(t!("tasks.not_connected", device = label).into_owned());
         }
         self.ask_task_agents(key);
         cx.notify();
@@ -770,7 +769,7 @@ impl Condr {
                 None => {
                     form.error = Some((
                         FormField::Form,
-                        t!("tasks.band.not_connected", device = label).into_owned(),
+                        t!("tasks.not_connected", device = label).into_owned(),
                     ))
                 }
             }
@@ -931,7 +930,7 @@ impl Condr {
                             .connection(old_key)
                             .map(|old| old.label.clone())
                             .unwrap_or_default();
-                        let error = t!("tasks.band.not_connected", device = old);
+                        let error = t!("tasks.not_connected", device = old);
                         self.report_error(
                             t!(
                                 "tasks.form.move_failed",
@@ -1510,7 +1509,7 @@ impl Condr {
             && let Some(connection) = self.connection(key)
         {
             let label = connection.label.clone();
-            self.report_error(t!("tasks.band.not_connected", device = label), cx);
+            self.report_error(t!("tasks.not_connected", device = label), cx);
         }
         cx.notify();
     }

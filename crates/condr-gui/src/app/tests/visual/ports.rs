@@ -63,7 +63,7 @@ fn the_ports_page_forwards_a_devices_port_and_stops_it() {
         assert!(
             view.windows
                 .iter()
-                .any(|v| v.ports == Some(PortsScope::All))
+                .any(|v| v.page == ContentPage::Ports(PortsScope::All))
         );
     });
 
@@ -115,12 +115,17 @@ fn the_ports_page_forwards_a_devices_port_and_stops_it() {
     // Choosing a Device in the sidebar leaves the page.
     window.update(|window, cx| {
         view.update(cx, |this, cx| {
-            this.window_view_mut(window).ports = Some(PortsScope::Device(1));
+            this.window_view_mut(window).page = ContentPage::Ports(PortsScope::Device(1));
             this.select_server(1, window, cx);
         })
     });
     window.read(|app| {
-        assert!(view.read(app).windows.iter().all(|v| v.ports.is_none()));
+        assert!(
+            view.read(app)
+                .windows
+                .iter()
+                .all(|v| v.page == ContentPage::Workspace)
+        );
     });
 
     // So does choosing an Agent's Pane.
@@ -133,7 +138,12 @@ fn the_ports_page_forwards_a_devices_port_and_stops_it() {
         })
     });
     window.read(|app| {
-        assert!(view.read(app).windows.iter().all(|v| v.ports.is_none()));
+        assert!(
+            view.read(app)
+                .windows
+                .iter()
+                .all(|v| v.page == ContentPage::Workspace)
+        );
     });
 }
 

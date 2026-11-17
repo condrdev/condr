@@ -4,11 +4,6 @@
 use super::layout::agent_changed;
 use super::*;
 
-const TOGGLE_TASKS: &str = if cfg!(target_os = "macos") {
-    "cmd-0"
-} else {
-    "alt-0"
-};
 const SPLIT_RIGHT: &str = if cfg!(target_os = "macos") {
     "cmd-d"
 } else {
@@ -110,14 +105,16 @@ fn tasks_mode_takes_the_window_sorts_agents_into_columns_and_leaves_the_view() {
         "the row tops the sidebar"
     );
 
-    window.simulate_keystrokes(TOGGLE_TASKS);
-    draw(window);
+    click(window, "sidebar-tasks");
     assert!(window.debug_bounds("tasks-mode").is_some());
     assert!(window.debug_bounds("tasks-title").is_some());
+    // It covers the content area as the Ports page does: the sidebar stays beside it and
+    // the Changes sidebar is under it.
     assert!(
-        window.debug_bounds("condr-sidebar").is_none(),
-        "Tasks mode hides the sidebar"
+        window.debug_bounds("condr-sidebar").is_some(),
+        "the sidebar stays beside Tasks mode"
     );
+    assert!(window.debug_bounds("condr-changes-column").is_none());
     assert!(
         window.read(|app| view.read(app).terminal_input.target.is_none()),
         "nothing targets the keyboard without a selection"
@@ -162,7 +159,6 @@ fn tasks_mode_takes_the_window_sorts_agents_into_columns_and_leaves_the_view() {
     assert_eq!(
         window.read(|app| view.read(app).collect_state(app).tasks),
         super::super::super::tasks::TasksPrefs {
-            on: true,
             layout: super::super::super::tasks::TasksLayout::List,
             density: super::super::super::tasks::TasksDensity::Compact,
             scope: Default::default(),
@@ -173,9 +169,7 @@ fn tasks_mode_takes_the_window_sorts_agents_into_columns_and_leaves_the_view() {
         "the state file keeps the mode, the layout and the density"
     );
 
-    let back = window.debug_bounds("tasks-back").unwrap();
-    window.simulate_click(back.center(), Modifiers::default());
-    draw(window);
+    click(window, "tasks-close");
     assert!(window.debug_bounds("tasks-mode").is_none());
     assert!(window.debug_bounds("condr-sidebar").is_some());
     assert_eq!(
@@ -228,7 +222,7 @@ fn the_sidebar_enters_tasks_mode_where_layout_actions_do_nothing() {
     );
 
     // Back in normal mode, the collapsed sidebar's icon enters it too.
-    window.simulate_keystrokes(TOGGLE_TASKS);
+    click(window, "tasks-close");
     window.update(|window, cx| {
         view.update(cx, |this, cx| this.toggle_sidebar(window, cx));
     });
@@ -647,8 +641,10 @@ fn going_to_an_agent_outside_the_scope_widens_it_and_selects_its_card() {
     assert!(window.debug_bounds("tasks-area").is_some());
 }
 
+/// ADR 0020 in Tasks mode: the sidebar beside it marks the Device, and the open Pane of a
+/// Device that is retrying wears the veil.
 #[test]
-fn a_disconnected_device_shows_a_band_and_its_open_pane_a_veil() {
+fn a_disconnected_device_veils_its_open_pane_and_keeps_its_sidebar_mark() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
     let (view, window, _server, pane_id) = tasks_mode_with_an_agent(&mut cx);
@@ -657,10 +653,6 @@ fn a_disconnected_device_shows_a_band_and_its_open_pane_a_veil() {
     window.simulate_click(bounds.center(), Modifiers::default());
     window.run_until_parked();
     draw(window);
-    assert!(
-        window.debug_bounds("tasks-band-1").is_none(),
-        "no band while connected"
-    );
 
     window.update(|_, cx| {
         view.update(cx, |this, cx| {
@@ -678,9 +670,66 @@ fn a_disconnected_device_shows_a_band_and_its_open_pane_a_veil() {
         });
     });
     draw(window);
-    assert!(window.debug_bounds("tasks-band-1").is_some());
-    assert!(window.debug_bounds("tasks-band-reconnect-1").is_some());
+    assert!(inside(window, "device-status-1", "condr-sidebar"));
     assert!(inside(window, "reconnect-veil-1", "tasks-area"));
+}
+
+/// Tasks mode covers the content area as the Ports page does: toggle-sidebar works
+/// beside it, and a Workspace chosen in the sidebar, or the Ports page, leaves it.
+#[test]
+fn the_sidebar_beside_tasks_mode_leaves_it_for_a_workspace() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    let (view, window, _server, _pane_id) = tasks_mode_with_workspaces(&mut cx, 2);
+    assert!(window.debug_bounds("tasks-mode").is_some());
+    let collapsed = |window: &mut VisualTestContext| {
+        window.read(|app| view.read(app).main_view().sidebar_collapsed)
+    };
+    let before = collapsed(window);
+    window.update(|window, cx| {
+        window.dispatch_action(Box::new(super::super::super::ToggleSidebar), cx)
+    });
+    draw(window);
+    assert_ne!(
+        collapsed(window),
+        before,
+        "toggle-sidebar works beside Tasks mode"
+    );
+    window.update(|window, cx| {
+        window.dispatch_action(Box::new(super::super::super::ToggleSidebar), cx)
+    });
+    draw(window);
+
+    // The Workspace shown before is not lit beside Tasks mode, so its row leaves too
+    // rather than folding.
+    let shown = presented(window, &view).unwrap().0;
+    click(window, sidebar_workspace_selector(shown));
+    assert!(window.debug_bounds("tasks-mode").is_none());
+    assert_eq!(
+        presented(window, &view).map(|(workspace, _)| workspace),
+        Some(shown)
+    );
+    click(window, "sidebar-tasks");
+    let second = window.read(|app| view.read(app).active_session().unwrap().workspaces()[1].id());
+    click(window, sidebar_workspace_selector(second));
+    assert!(window.debug_bounds("tasks-mode").is_none());
+    assert_eq!(
+        presented(window, &view).map(|(workspace, _)| workspace),
+        Some(second)
+    );
+
+    click(window, "sidebar-tasks");
+    assert!(window.debug_bounds("tasks-mode").is_some());
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| {
+            this.open_ports(super::super::super::ports::PortsScope::All, window, cx)
+        })
+    });
+    draw(window);
+    assert!(window.debug_bounds("tasks-mode").is_none());
+    assert!(
+        window.read(|app| { matches!(view.read(app).main_view().page, ContentPage::Ports(_)) })
+    );
 }
 
 /// The area's Pane keeps its header but offers no zoom or Pane menu, whose actions do
@@ -739,24 +788,6 @@ fn the_area_split_takes_a_press_beside_its_line() {
         split.is_some_and(|split| split < super::super::super::tasks::DEFAULT_SPLIT_BOARD),
         "dragging up shrinks the cards: {split:?}"
     );
-}
-
-/// A Device the person disconnected from its menu needs no band saying so.
-#[test]
-fn a_device_the_person_disconnected_shows_no_band() {
-    let _serial_guard = acquire_visual_test_lock();
-    let mut cx = TestAppContext::single();
-    let (view, window, _server, _pane_id) = tasks_mode_with_an_agent(&mut cx);
-    window.update(|_, cx| {
-        view.update(cx, |this, cx| {
-            this.set_auto_connect(1, false, cx);
-            this.disconnect_server(1);
-            cx.notify();
-        });
-    });
-    draw(window);
-    assert!(window.debug_bounds("tasks-cards").is_some());
-    assert!(window.debug_bounds("tasks-band-1").is_none());
 }
 
 // Tasks (ADR 0068): To do, the form, Start and the archive dialog.

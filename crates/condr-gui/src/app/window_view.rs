@@ -47,6 +47,18 @@ impl WindowScope {
     }
 }
 
+/// What a window's content area shows beside its sidebar: its Workspace, or one page
+/// covering it, the Ports page (ADR 0061) or, in the main window, Tasks mode (ADR 0068).
+/// One at a time: showing a page replaces the one shown, and choosing a place in the
+/// sidebar shows the Workspace again. A page added later joins this list.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(super) enum ContentPage {
+    #[default]
+    Workspace,
+    Ports(super::ports::PortsScope),
+    Tasks,
+}
+
 /// What one of this Client's windows keeps for itself; the connections, the Panes, the
 /// Dock surfaces and every Workspace's view are the application's, so they follow
 /// whatever moves between windows. `Condr` is the root view of each window and finds
@@ -75,8 +87,8 @@ pub(super) struct WindowView {
     /// Where the window is, as last observed, so a save needs no `Window` (ADR 0023).
     pub(super) bounds: gui_state::WindowState,
     pub(super) display: Option<DisplayId>,
-    /// The Ports page, when it covers this window's content area (ADR 0061).
-    pub(super) ports: Option<super::ports::PortsScope>,
+    /// What the content area shows: the Workspace, or the one page covering it.
+    pub(super) page: ContentPage,
     /// The left sidebar's cached view, made at the window's first render.
     pub(super) sidebar: Option<Entity<super::sidebar::LeftSidebar>>,
     /// Tasks mode, which only the main window enters, and how it shows (ADR 0068).
@@ -143,7 +155,7 @@ impl WindowView {
             last_scrolled_tab: Cell::new(None),
             bounds: window.window_bounds().into(),
             display: window.display(cx).map(|display| display.id()),
-            ports: None,
+            page: ContentPage::Workspace,
             sidebar: None,
             tasks: Default::default(),
             tasks_board: None,
@@ -166,6 +178,31 @@ impl WindowView {
 }
 
 impl Condr {
+    /// Shows `page` in `window`'s content area in place of the one it showed. Tasks mode,
+    /// coming or going, swaps the window's Dock between the card's Pane and the Workspace's
+    /// Tab, and is remembered (ADR 0068).
+    pub(super) fn show_page(
+        &mut self,
+        page: ContentPage,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let view = self.window_view_mut(window);
+        let shown = std::mem::replace(&mut view.page, page);
+        if shown == page {
+            return;
+        }
+        if (shown == ContentPage::Tasks) != (page == ContentPage::Tasks) {
+            if page != ContentPage::Tasks {
+                view.tasks_dock = None;
+            }
+            self.rebuild_window_dock(window, cx);
+            self.sync_terminal_focus(window, cx);
+            self.schedule_state_save(cx);
+        }
+        cx.notify();
+    }
+
     /// Remembers what a Tab, Workspace or Device drag would detach: GPUI hands the dragged
     /// value only to moves, and the release may come outside the window (ADR 0043).
     pub(super) fn track_drag_out(&mut self, scope: WindowScope) {

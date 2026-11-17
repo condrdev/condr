@@ -111,13 +111,13 @@ pub(super) const GROUPS: &[(&str, &[Shortcut])] = &[
                 Needs::Changes,
                 on(&["cmd-alt-b"], &["ctrl-alt-b"]),
             ),
-            // The level above Tabs 1 to 9 (ADR 0068).
+            // No default key: the sidebar's Tasks row enters it (ADR 0068).
             shortcut(
                 "toggle-tasks",
                 "keymap.action.toggle_tasks",
                 &ToggleTasks,
                 Needs::MainWindow,
-                on(&["cmd-0"], &["alt-0"]),
+                &[],
             ),
             // No default key, as New Workspace has none (ADR 0068).
             shortcut(

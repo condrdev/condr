@@ -95,7 +95,7 @@ impl Condr {
         cx: &mut Context<Self>,
     ) -> WorkspaceChrome {
         // The Ports page covers the content area, the Tab strip included (ADR 0061).
-        if let Some(scope) = view.ports {
+        if let ContentPage::Ports(scope) = view.page {
             return WorkspaceChrome {
                 tab_strip: Some(self.render_ports_title(cx)),
                 open_in: None,
@@ -903,13 +903,27 @@ impl Render for Condr {
             tab_strip,
             open_in,
             body,
-        } = self.render_workspace(view, cx);
-        let has_workspace = view.ports.is_none()
+        } = match tasks_board {
+            // Tasks mode covers the content area as the Ports page does, the sidebar
+            // beside it and the Changes sidebar under it (ADR 0068).
+            Some(board) => WorkspaceChrome {
+                tab_strip: Some(self.render_tasks_title(cx)),
+                open_in: None,
+                body: div()
+                    .debug_selector(|| "tasks-mode".into())
+                    .size_full()
+                    .child(self.render_tasks_body(view, board, cx))
+                    .into_any_element(),
+            },
+            None => self.render_workspace(view, cx),
+        };
+        let has_workspace = view.page == ContentPage::Workspace
             && self.presented_workspace_in(view).is_some()
             && self.draws_workspace(view);
         let changes_toggle = has_workspace.then(|| self.render_changes_toggle(view, cx));
-        let changes_column = (view.ports.is_none() && self.changes_sidebar_open(view))
-            .then(|| self.render_right_sidebar(view, cx));
+        let changes_column = (view.page == ContentPage::Workspace
+            && self.changes_sidebar_open(view))
+        .then(|| self.render_right_sidebar(view, cx));
         let tab_window = matches!(view.scope, WindowScope::Tab(..));
         let title = self.window_title(view.scope);
         let bring_back =
@@ -1016,16 +1030,6 @@ impl Render for Condr {
                 if tab_window {
                     this.child(tab_window_title_bar(title, bring_back, cx))
                         .child(workspace)
-                } else if let Some(tasks_board) = tasks_board {
-                    // Tasks mode takes the whole window, both sidebars too (ADR 0068).
-                    this.child(self.tasks_title_bar(cx)).child(
-                        div()
-                            .debug_selector(|| "tasks-mode".into())
-                            .flex_1()
-                            .min_h_0()
-                            .w_full()
-                            .child(self.render_tasks_body(view, tasks_board, cx)),
-                    )
                 } else {
                     this.child(workspace_title_bar(
                         title,

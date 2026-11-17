@@ -463,7 +463,7 @@ impl Condr {
             self.refresh_target_pane(key);
         }
         if let Some(view) = self.windows.iter_mut().find(|view| view.handle == home) {
-            view.ports = None;
+            view.page = ContentPage::Workspace;
         }
         self.activate_window(home, cx);
         self.rebuild_dock(window, cx);

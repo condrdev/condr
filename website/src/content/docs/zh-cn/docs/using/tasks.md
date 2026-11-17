@@ -7,13 +7,13 @@ description: 在一个视图里看到每台设备上的所有 Agent，不离开�
 
 ## Tasks 模式
 
-点侧栏最上面的 **Tasks** 行、侧栏收起时最上面的图标，或按 `Cmd+0`（Windows 和 Linux 上是 `Alt+0`）进入。左上角的 **‹ Workspace** 或同样的快捷键会回到你之前看的 Tab。只有主窗口有 Tasks 模式。
+点侧栏最上面的 **Tasks** 行，或侧栏收起时最上面的图标进入；它和 Ports 页一样占据 Workspace 的位置，侧栏留在旁边。工具栏最右边的 ✕ 回到你之前看的 Tab，在侧栏里点一个 Workspace 就去那里。在侧栏里点一个 Agent 会选中它的卡片。只有主窗口有 Tasks 模式。
 
 Agent 按状态分列：**To do**（还没开始的任务）、**Needs you**（Bell、Blocked 或 Error）、**Done**（完成了还没看过）、**Working** 和 **Idle**。卡片不能拖，它们随 Agent 上报的状态移动。点列名可以把一列收成窄条；Needs you 来了新 Agent 时会自己展开。
 
 - **看板或表格**：用卡片上方工具栏右侧的 **布局** 切换。看板显示完整的卡片（Workspace、分支、设备、改动、Agent 在等什么），打开 **紧凑卡片** 后每个 Agent 一行；表格每个 Agent 一行。
 - **范围**：工具栏左侧的面包屑 `MacBook › api-server` 可以只看一台设备或一个 Workspace；仓库的范围包括从它建出来的 worktree。
-- **未连接的设备**：顶部的横幅列出范围内每台没连上的设备，带“重新连接”按钮。
+- **未连接的设备**：它们的 Agent 卡片会被隐藏，侧栏里设备上的标记会说明原因。
 
 ### 回复 Agent
 

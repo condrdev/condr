@@ -66,7 +66,8 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.window_view_mut(window).ports = None;
+        // Choosing a Device shows the Workspace, whatever page covered it.
+        self.show_page(ContentPage::Workspace, window, cx);
         // A Device window shows its own Device whatever its rows say.
         if self.connection(key).is_none() || !self.is_main(window) || self.active_connection == key
         {
@@ -87,9 +88,10 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Choosing a Workspace leaves the Ports page (ADR 0061).
-        let left_ports = self.window_view_mut(window).ports.take().is_some();
-        let mut changed = self.show_view(key, workspace_id, None) || left_ports;
+        // Choosing a Workspace shows it, whatever page covered it.
+        let left_page = self.window_view(window).page != ContentPage::Workspace;
+        self.show_page(ContentPage::Workspace, window, cx);
+        let mut changed = self.show_view(key, workspace_id, None) || left_page;
         // A Workspace another window draws is still selected here, and shows its page:
         // the sidebar and the keys agree on the order (ADR 0043).
         if let Some(connection) = self.connection_mut(key)
@@ -121,9 +123,12 @@ impl Condr {
             connection.viewed_tab_id(connection.session()?, workspace_id)
         });
         let home = self.home_window(key, Some(workspace_id), shown_tab);
-        // The window that shows it leaves its Ports page (ADR 0061).
-        if let Some(view) = self.windows.iter_mut().find(|view| view.handle == home) {
-            view.ports = None;
+        // The window that shows it leaves its Ports page (ADR 0061), and stays in Tasks
+        // mode, which shows the Workspace again only when left (ADR 0068).
+        if let Some(view) = self.windows.iter_mut().find(|view| view.handle == home)
+            && matches!(view.page, ContentPage::Ports(_))
+        {
+            view.page = ContentPage::Workspace;
         }
         self.activate_window(home, cx);
         changed
@@ -172,8 +177,8 @@ impl Condr {
         else {
             return false;
         };
-        // Showing a Pane shows its Workspace, which leaves the Ports page (ADR 0061).
-        self.window_view_mut(window).ports = None;
+        // Showing a Pane shows its Workspace, whatever page covered it.
+        self.show_page(ContentPage::Workspace, window, cx);
         self.show_view(key, workspace_id, Some(tab_id));
         // A Pane another window draws is shown there, and that window comes forward.
         let home = self.home_window(key, Some(workspace_id), Some(tab_id));

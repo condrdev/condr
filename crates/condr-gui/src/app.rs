@@ -157,7 +157,7 @@ use terminal_input::{
 };
 use terminal_panel::TerminalPanel;
 use updates::{UpdateChannel, UpdateCheck, UpdateState};
-use window_view::{WindowScope, WindowView, workspace_of_tab};
+use window_view::{ContentPage, WindowScope, WindowView, workspace_of_tab};
 use workspace::{default_worktree_branch, title_bar};
 use workspace_resources::WorkspaceResources;
 
@@ -479,6 +479,9 @@ impl Condr {
         }
         main_view.sidebar_collapsed = restored_state.sidebar_collapsed;
         main_view.tasks = restored_state.tasks;
+        if restored_state.tasks_open {
+            main_view.page = ContentPage::Tasks;
+        }
         main_view.agents_height = restored_state
             .agents_height
             .map(|height| px(height).max(MIN_AGENTS_HEIGHT));
