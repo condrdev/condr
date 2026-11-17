@@ -1235,7 +1235,7 @@ fn start_takes_its_defaults_and_a_successful_start_selects_the_agent() {
             (plan.place, plan.workspace, plan.blocked.is_some())
         })
     };
-    use super::super::super::task_form::Where;
+    use super::super::super::tasks::Where;
     assert_eq!(
         plan(window),
         (Where::Existing, Some(repository_workspace), false),
@@ -1430,7 +1430,7 @@ fn start_takes_its_defaults_and_a_successful_start_selects_the_agent() {
     assert!(window.read(|app| view.read(app).last_error.is_none()));
     window
         .executor()
-        .advance_clock(super::super::super::task_form::AGENT_WAIT);
+        .advance_clock(super::super::super::tasks::AGENT_WAIT);
     window.run_until_parked();
     draw(window);
     assert!(inside(window, task_card, "tasks-column-idle"));
@@ -1864,7 +1864,7 @@ fn set_title(window: &mut VisualTestContext, view: &Entity<Condr>, title: &str) 
 fn form_error(
     window: &mut VisualTestContext,
     view: &Entity<Condr>,
-) -> Option<super::super::super::task_form::FormField> {
+) -> Option<super::super::super::tasks::FormField> {
     window.read(|app| {
         view.read(app)
             .task_form
@@ -2023,7 +2023,7 @@ fn the_leave_dialogs_save_keeps_the_form_until_its_save_is_in() {
     draw(window);
     open_form(window, &view, task);
     let sent = capture(window, &view);
-    use super::super::super::task_form::FormField;
+    use super::super::super::tasks::FormField;
 
     // Saved on the way out and refused: the form stays, with the refusal, where it was.
     set_title(window, &view, "Fix the login redirect!");
@@ -2085,7 +2085,7 @@ fn the_leave_dialogs_save_keeps_the_form_until_its_save_is_in() {
             this.task_form = None;
             this.connection_mut(1).unwrap().device_tasks.pending.insert(
                 900,
-                super::super::super::task_form::TaskRequest::Edit {
+                super::super::super::tasks::TaskRequest::Edit {
                     title: "Fix the login redirect".into(),
                 },
             );
@@ -2298,14 +2298,14 @@ fn a_recovery_bootstrap_forgets_answers_it_dropped_and_asks_again() {
             let connection = this.connection_mut(1).unwrap();
             connection.device_tasks.pending.insert(
                 900,
-                super::super::super::task_form::TaskRequest::Edit {
+                super::super::super::tasks::TaskRequest::Edit {
                     title: "Fix the login redirect!".into(),
                 },
             );
             connection
                 .device_tasks
                 .agent_requests
-                .push_front(super::super::super::task_form::AgentRequest::Hooks);
+                .push_front(super::super::super::tasks::AgentRequest::Hooks);
             connection.recover_after_bootstrap = true;
             connection.request_snapshot();
             this.task_form.as_mut().unwrap().saving = Some((1, 900));
@@ -2328,7 +2328,7 @@ fn a_recovery_bootstrap_forgets_answers_it_dropped_and_asks_again() {
                 .unwrap()
                 .device_tasks
                 .agent_requests
-                .contains(&super::super::super::task_form::AgentRequest::Hooks)
+                .contains(&super::super::super::tasks::AgentRequest::Hooks)
     }));
     // Save works again, and the Agents are asked for again.
     click(window, "task-form-save");
@@ -2351,7 +2351,7 @@ fn agent_answers_land_where_they_were_asked() {
     let mut cx = TestAppContext::single();
     let (view, window, _server, _cli) = tasks_gui(&mut cx);
     let _sent = capture(window, &view);
-    use super::super::super::task_form::AgentRequest;
+    use super::super::super::tasks::AgentRequest;
     let answer = |window: &mut VisualTestContext, request: AgentRequest| {
         window.update(|_, cx| {
             view.update(cx, |this, cx| {

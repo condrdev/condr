@@ -886,12 +886,12 @@ impl Condr {
                     Ok(AgentResponse::Available(installations)) => {
                         connection.device_tasks.agents_available(installations);
                     }
-                    Err(error) if request == Some(super::task_form::AgentRequest::Available) => {
+                    Err(error) if request == Some(super::tasks::AgentRequest::Available) => {
                         connection.device_tasks.available = Some(Vec::new());
                         self.report_error(error.message, cx);
                     }
                     // Installed from a Task's Start, which has no place for it but a toast.
-                    Err(error) if request == Some(super::task_form::AgentRequest::InstallHooks) => {
+                    Err(error) if request == Some(super::tasks::AgentRequest::InstallHooks) => {
                         self.report_error(
                             rust_i18n::t!("tasks.start.install_failed", error = error.message),
                             cx,

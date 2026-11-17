@@ -1,7 +1,6 @@
 //! Tasks in Tasks mode (ADR 0068): the form that writes a Task and starts it, the
-//! archive dialog, and the requests behind them. The cards are `tasks.rs`'s.
+//! archive dialog, and the requests behind them.
 
-use super::sidebar::CondrIconName;
 use super::*;
 use condr_core::agent_discovery::AgentInstallation;
 use condr_core::{StartPlace, TaskCommand, TaskError, TaskId, TaskResponse, task_error};
@@ -13,17 +12,14 @@ use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::path::Path;
 
-/// `gpui_kit::Task` is the executor's.
-type TaskRecord = condr_core::Task;
-
 /// How long a started Task's card reads "Starting…" before, with still no Agent in its
 /// Workspace, it reads "No agent running" (ADR 0068).
-pub(super) const AGENT_WAIT: Duration = Duration::from_secs(30);
+pub(in crate::app) const AGENT_WAIT: Duration = Duration::from_secs(30);
 
 /// An Agent request still owed an `AgentResult`, which carries no request id; the Server
 /// answers these in the order asked.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum AgentRequest {
+pub(in crate::app) enum AgentRequest {
     Hooks,
     Available,
     /// Install from the Start half, whose failure is a toast there (ADR 0020).
@@ -31,7 +27,7 @@ pub(super) enum AgentRequest {
 }
 
 /// What a Task request was for, so its answer lands where it belongs.
-pub(super) enum TaskRequest {
+pub(in crate::app) enum TaskRequest {
     /// The description an open form fetches.
     Get(TaskId),
     ListArchived,
@@ -57,28 +53,28 @@ pub(super) enum TaskRequest {
 /// A Device's Task requests in flight and what their answers brought beyond the
 /// Session model.
 #[derive(Default)]
-pub(super) struct DeviceTasks {
-    pub(super) pending: HashMap<u64, TaskRequest>,
-    pub(super) agent_requests: VecDeque<AgentRequest>,
+pub(in crate::app) struct DeviceTasks {
+    pub(in crate::app) pending: HashMap<u64, TaskRequest>,
+    pub(in crate::app) agent_requests: VecDeque<AgentRequest>,
     /// The Agents on the Device's PATH that can start a Task, in `AgentKind::ALL`'s
     /// order; `None` until asked.
-    pub(super) available: Option<Vec<AgentKind>>,
+    pub(in crate::app) available: Option<Vec<AgentKind>>,
     /// The archived Tasks, fetched each time To do's Archived list unfolds.
-    pub(super) archived: Option<Vec<TaskRecord>>,
+    pub(in crate::app) archived: Option<Vec<TaskRecord>>,
     /// Started Tasks whose Agent may still be coming: when each was seen to start, and
     /// whether this Client started it.
-    pub(super) waiting: HashMap<TaskId, (Instant, bool)>,
+    pub(in crate::app) waiting: HashMap<TaskId, (Instant, bool)>,
 }
 
 impl DeviceTasks {
     /// The stream is gone, and every answer it owed with it.
-    pub(super) fn connection_closed(&mut self) {
+    pub(in crate::app) fn connection_closed(&mut self) {
         self.pending.clear();
         self.agent_requests.clear();
         self.available = None;
     }
 
-    pub(super) fn agents_available(&mut self, installations: Vec<AgentInstallation>) {
+    pub(in crate::app) fn agents_available(&mut self, installations: Vec<AgentInstallation>) {
         self.available = Some(
             AgentKind::ALL
                 .into_iter()
@@ -98,13 +94,13 @@ impl DeviceTasks {
 }
 
 /// A fully supported Agent (ADR 0035) whose CLI takes the prompt it starts on.
-pub(super) fn starts_tasks(kind: AgentKind) -> bool {
+pub(in crate::app) fn starts_tasks(kind: AgentKind) -> bool {
     kind.spec().hooks().is_some() && kind.spec().initial_prompt.args("").is_some()
 }
 
 /// Where a Start runs, as the form offers it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Where {
+pub(in crate::app) enum Where {
     Continue,
     Existing,
     NewWorktree,
@@ -112,7 +108,7 @@ pub(super) enum Where {
 
 /// Why Continue cannot be chosen.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) enum ContinueBlock {
+pub(in crate::app) enum ContinueBlock {
     /// Another Task holds the Workspace open on the folder; its title.
     Held(String),
     /// The Server said the folder is gone.
@@ -121,35 +117,35 @@ pub(super) enum ContinueBlock {
 
 /// Why New worktree cannot be chosen.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) enum WorktreeBlock {
+pub(in crate::app) enum WorktreeBlock {
     NoRepository,
     /// The repository's Workspace is not open; the repository's name.
     NotOpen(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct WorkspaceOption {
-    pub(super) id: WorkspaceId,
-    pub(super) name: String,
+pub(in crate::app) struct WorkspaceOption {
+    pub(in crate::app) id: WorkspaceId,
+    pub(in crate::app) name: String,
     /// The title of the other Task that holds it.
-    pub(super) holder: Option<String>,
+    pub(in crate::app) holder: Option<String>,
 }
 
 /// What Where offers a Task on its Device, and which it chooses by default (ADR 0068).
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct WhereOptions {
+pub(in crate::app) struct WhereOptions {
     /// The last place's branch, or its folder's name, and why it is blocked.
-    pub(super) continue_in: Option<(String, Option<ContinueBlock>)>,
-    pub(super) workspaces: Vec<WorkspaceOption>,
+    pub(in crate::app) continue_in: Option<(String, Option<ContinueBlock>)>,
+    pub(in crate::app) workspaces: Vec<WorkspaceOption>,
     /// The Workspace Existing takes unless the person picks another.
-    pub(super) existing: Option<WorkspaceId>,
+    pub(in crate::app) existing: Option<WorkspaceId>,
     /// The repository Workspace's name.
-    pub(super) new_worktree: Result<String, WorktreeBlock>,
-    pub(super) default: Option<Where>,
+    pub(in crate::app) new_worktree: Result<String, WorktreeBlock>,
+    pub(in crate::app) default: Option<Where>,
 }
 
 impl WhereOptions {
-    pub(super) fn allows(&self, place: Where) -> bool {
+    pub(in crate::app) fn allows(&self, place: Where) -> bool {
         match place {
             Where::Continue => matches!(self.continue_in, Some((_, None))),
             Where::Existing => self.workspaces.iter().any(|each| each.holder.is_none()),
@@ -161,7 +157,7 @@ impl WhereOptions {
 /// The defaults' order: Continue where it was worked; else the repository's Workspace
 /// when no Task holds it; else a new worktree of it; else the first free Workspace.
 /// A folder the Server reported gone makes a new worktree the default.
-pub(super) fn where_options(
+pub(in crate::app) fn where_options(
     session: &Session,
     tasks: &BTreeMap<TaskId, TaskRecord>,
     task: &TaskRecord,
@@ -235,28 +231,28 @@ fn folder_name(path: &Path) -> String {
 }
 
 /// What a saved Task held when the form last heard of it.
-pub(super) struct SavedTask {
-    pub(super) title: String,
+pub(in crate::app) struct SavedTask {
+    pub(in crate::app) title: String,
     /// `None` until the form's request for it is answered.
-    pub(super) description: Option<String>,
-    pub(super) repository: Option<PathBuf>,
+    pub(in crate::app) description: Option<String>,
+    pub(in crate::app) repository: Option<PathBuf>,
 }
 
 /// The Start half's choices; `None` follows the default.
-pub(super) struct StartChoice {
-    pub(super) place: Option<Where>,
-    pub(super) workspace: Option<WorkspaceId>,
-    pub(super) branch: Entity<InputState>,
-    pub(super) agent: Option<AgentKind>,
+pub(in crate::app) struct StartChoice {
+    pub(in crate::app) place: Option<Where>,
+    pub(in crate::app) workspace: Option<WorkspaceId>,
+    pub(in crate::app) branch: Entity<InputState>,
+    pub(in crate::app) agent: Option<AgentKind>,
     /// The Server's refusal of the branch, shown under its field.
-    pub(super) branch_error: Option<String>,
-    pub(super) folder_missing: bool,
-    pub(super) request: Option<u64>,
+    pub(in crate::app) branch_error: Option<String>,
+    pub(in crate::app) folder_missing: bool,
+    pub(in crate::app) request: Option<u64>,
 }
 
 /// Where a refusal of the form shows (ADR 0020).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum FormField {
+pub(in crate::app) enum FormField {
     Title,
     Description,
     /// Under the form's buttons, for what no one field caused.
@@ -265,27 +261,27 @@ pub(super) enum FormField {
 
 /// The form in the interaction area's left half, for a To do Task or a new one; nothing
 /// is kept until Save (ADR 0068).
-pub(super) struct TaskForm {
+pub(in crate::app) struct TaskForm {
     /// The saved Task's Device and number; `None` for a new Task, which has no card yet.
-    pub(super) home: Option<(ConnectionKey, TaskId)>,
+    pub(in crate::app) home: Option<(ConnectionKey, TaskId)>,
     /// The Device chosen in the form.
-    pub(super) device: ConnectionKey,
-    pub(super) repository: Option<PathBuf>,
+    pub(in crate::app) device: ConnectionKey,
+    pub(in crate::app) repository: Option<PathBuf>,
     /// The repository chosen on each Device the form left, given back on returning.
-    pub(super) repositories: HashMap<ConnectionKey, Option<PathBuf>>,
-    pub(super) title: Entity<InputState>,
-    pub(super) description: Entity<TextareaState>,
-    pub(super) saved: Option<SavedTask>,
-    pub(super) description_request: Option<u64>,
+    pub(in crate::app) repositories: HashMap<ConnectionKey, Option<PathBuf>>,
+    pub(in crate::app) title: Entity<InputState>,
+    pub(in crate::app) description: Entity<TextareaState>,
+    pub(in crate::app) saved: Option<SavedTask>,
+    pub(in crate::app) description_request: Option<u64>,
     /// Why the description could not be fetched; Retry asks again.
-    pub(super) description_error: Option<String>,
+    pub(in crate::app) description_error: Option<String>,
     /// The save in flight, by Device and request.
-    pub(super) saving: Option<(ConnectionKey, u64)>,
+    pub(in crate::app) saving: Option<(ConnectionKey, u64)>,
     /// Where the leave dialog's Save was going, once that save is in.
-    pub(super) after_save: Option<Continuation>,
+    pub(in crate::app) after_save: Option<Continuation>,
     /// The last save's refusal, under the field it is about.
-    pub(super) error: Option<(FormField, String)>,
-    pub(super) start: StartChoice,
+    pub(in crate::app) error: Option<(FormField, String)>,
+    pub(in crate::app) start: StartChoice,
 }
 
 impl TaskForm {
@@ -298,7 +294,7 @@ impl TaskForm {
     }
 
     /// Whether leaving loses something: a new Task's text, or a saved one's changes.
-    pub(super) fn changed(&self, cx: &App) -> bool {
+    pub(in crate::app) fn changed(&self, cx: &App) -> bool {
         match (&self.saved, self.home) {
             (Some(saved), Some((home, _))) => {
                 self.title_text(cx) != saved.title
@@ -319,7 +315,7 @@ impl TaskForm {
     }
 
     /// A new Task's description is there from the start; a saved one's once fetched.
-    pub(super) fn description_loaded(&self) -> bool {
+    pub(in crate::app) fn description_loaded(&self) -> bool {
         self.saved
             .as_ref()
             .is_none_or(|saved| saved.description.is_some())
@@ -362,14 +358,14 @@ fn form_refusal(title: &str, description: &str) -> Option<(FormField, String)> {
 impl Condr {
     /// The connected Devices that keep Tasks: a Server that sent no Tasks record, older
     /// or built without them, offers no To do and takes no new Task (ADR 0068).
-    pub(super) fn task_devices(&self) -> impl Iterator<Item = &ServerConnection> {
+    pub(in crate::app) fn task_devices(&self) -> impl Iterator<Item = &ServerConnection> {
         self.connections.iter().filter(|connection| {
             connection.status == ConnectionStatus::Connected && connection.model.tasks.is_some()
         })
     }
 
     /// How many Tasks wait in To do across the connected Devices, for the sidebar's row.
-    pub(super) fn todo_count(&self) -> usize {
+    pub(in crate::app) fn todo_count(&self) -> usize {
         self.task_devices()
             .flat_map(|connection| {
                 connection
@@ -384,7 +380,7 @@ impl Condr {
 
     /// Runs `then` once the open form may go: at once when nothing would be lost, else
     /// after asking Save, Discard or Cancel (ADR 0068).
-    pub(super) fn leave_task_form(
+    pub(in crate::app) fn leave_task_form(
         &mut self,
         then: Continuation,
         window: &mut Window,
@@ -448,7 +444,7 @@ impl Condr {
 
     /// The Command Palette's New Task and To do's "+ New task": Tasks mode with an empty
     /// form on the scope's Device, else this machine's.
-    pub(super) fn new_task(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(in crate::app) fn new_task(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.is_main(window) {
             return;
         }
@@ -604,7 +600,7 @@ impl Condr {
     }
 
     /// Opens a To do Task's form, fetching its description, which the cards never carry.
-    pub(super) fn open_task_form(
+    pub(in crate::app) fn open_task_form(
         &mut self,
         key: ConnectionKey,
         task_id: TaskId,
@@ -663,7 +659,7 @@ impl Condr {
     }
 
     /// A click on a To do card: its own form closes, another's opens.
-    pub(super) fn click_todo_card(
+    pub(in crate::app) fn click_todo_card(
         &mut self,
         key: ConnectionKey,
         task_id: TaskId,
@@ -709,7 +705,7 @@ impl Condr {
     /// Save: creates a new Task, edits a saved one, or moves a
     /// To do Task to the chosen Device by creating it there and deleting it here. Says
     /// whether the save went out; what stopped it shows in the form.
-    pub(super) fn save_task_form(&mut self, cx: &mut Context<Self>) -> bool {
+    pub(in crate::app) fn save_task_form(&mut self, cx: &mut Context<Self>) -> bool {
         if self.save_in_flight() {
             return false;
         }
@@ -794,7 +790,7 @@ impl Condr {
     }
 
     /// Fetches the description of the form's Task again, unless a fetch is on its way.
-    pub(super) fn fetch_form_description(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::app) fn fetch_form_description(&mut self, cx: &mut Context<Self>) {
         let Some(form) = &self.task_form else {
             return;
         };
@@ -877,7 +873,7 @@ impl Condr {
     }
 
     /// A Task request's answer.
-    pub(super) fn task_answered(
+    pub(in crate::app) fn task_answered(
         &mut self,
         key: ConnectionKey,
         request_id: u64,
@@ -1040,7 +1036,7 @@ impl Condr {
 
     /// A Task changed on `key`'s Device: the model follows, as do the Archived list, a
     /// Start's wait for its Agent and an open form (ADR 0068).
-    pub(super) fn task_changed(
+    pub(in crate::app) fn task_changed(
         &mut self,
         key: ConnectionKey,
         task: TaskRecord,
@@ -1082,7 +1078,7 @@ impl Condr {
         }
     }
 
-    pub(super) fn task_removed(
+    pub(in crate::app) fn task_removed(
         &mut self,
         key: ConnectionKey,
         task: TaskId,
@@ -1100,7 +1096,11 @@ impl Condr {
 
     /// A Bootstrap replaced the Device's Tasks: the form follows, a description lost
     /// with the old stream is fetched again, and an unfolded Archived list too.
-    pub(super) fn tasks_bootstrapped(&mut self, key: ConnectionKey, cx: &mut Context<Self>) {
+    pub(in crate::app) fn tasks_bootstrapped(
+        &mut self,
+        key: ConnectionKey,
+        cx: &mut Context<Self>,
+    ) {
         self.reconcile_task_form(cx);
         // Answers lost with the old stream, or to writer lag, never come.
         if let (Some(form), Some(connection)) = (
@@ -1200,7 +1200,7 @@ impl Condr {
 
     /// Selects a started Task's card: its Agent's, or while it has none, the Task's own
     /// on its Workspace's focused Pane.
-    pub(super) fn select_started_task(
+    pub(in crate::app) fn select_started_task(
         &mut self,
         key: ConnectionKey,
         task_id: TaskId,
@@ -1246,7 +1246,7 @@ impl Condr {
 
     /// An Agent left its Pane: when its Task has no Agent left, the selection on that
     /// Pane moves to the Task's card (ADR 0068).
-    pub(super) fn agent_left_task(&mut self, key: ConnectionKey, pane_id: PaneId) {
+    pub(in crate::app) fn agent_left_task(&mut self, key: ConnectionKey, pane_id: PaneId) {
         let Some(selected) = self
             .main_view()
             .tasks_selection
@@ -1319,7 +1319,7 @@ impl Condr {
 
     /// `AGENT_WAIT` after a Start: the card reads "No agent running" if no Agent came,
     /// and for this Client's own Start one toast says so.
-    pub(super) fn task_start_settled(
+    pub(in crate::app) fn task_start_settled(
         &mut self,
         key: ConnectionKey,
         task_id: TaskId,
@@ -1348,7 +1348,7 @@ impl Condr {
     }
 
     /// Whether a started Task's card still reads "Starting…".
-    pub(super) fn task_starting(&self, key: ConnectionKey, task: TaskId) -> bool {
+    pub(in crate::app) fn task_starting(&self, key: ConnectionKey, task: TaskId) -> bool {
         self.connection(key).is_some_and(|connection| {
             connection
                 .device_tasks
@@ -1515,7 +1515,7 @@ impl Condr {
     }
 
     /// Delete, from To do or Archived, after "Delete ‘…’? This can't be undone."
-    pub(super) fn confirm_delete_task(
+    pub(in crate::app) fn confirm_delete_task(
         &mut self,
         key: ConnectionKey,
         task: TaskId,
@@ -1545,7 +1545,7 @@ impl Condr {
         );
     }
 
-    pub(super) fn restore_task(
+    pub(in crate::app) fn restore_task(
         &mut self,
         key: ConnectionKey,
         task: TaskId,
@@ -1556,7 +1556,7 @@ impl Condr {
 
     /// Drops a To do Task where another of the same Device was: the Server counts the
     /// place among that Device's To do Tasks, the dragged one included.
-    pub(super) fn reorder_todo(
+    pub(in crate::app) fn reorder_todo(
         &mut self,
         key: ConnectionKey,
         task: TaskId,
@@ -1584,7 +1584,7 @@ impl Condr {
     }
 
     /// Folds or unfolds To do's Archived list, fetching it from each Device as it opens.
-    pub(super) fn toggle_archived_tasks(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::app) fn toggle_archived_tasks(&mut self, cx: &mut Context<Self>) {
         self.tasks_archived_open = !self.tasks_archived_open;
         if self.tasks_archived_open {
             for connection in &mut self.connections {
@@ -1603,7 +1603,7 @@ impl Condr {
 
     /// Asks before archiving a started Task: whether to close its Workspace, checked when
     /// a Start of it made the Workspace, and whether to remove its worktree (ADR 0068).
-    pub(super) fn confirm_archive_task(
+    pub(in crate::app) fn confirm_archive_task(
         &mut self,
         key: ConnectionKey,
         task_id: TaskId,
@@ -1646,7 +1646,7 @@ impl Condr {
     }
 
     /// What the archive dialog says about a started Task's Workspace.
-    pub(super) fn archive_facts(
+    pub(in crate::app) fn archive_facts(
         &self,
         key: ConnectionKey,
         task_id: TaskId,
@@ -1694,7 +1694,11 @@ impl Condr {
         }
     }
 
-    pub(super) fn choose_task_workspace(&mut self, workspace: WorkspaceId, cx: &mut Context<Self>) {
+    pub(in crate::app) fn choose_task_workspace(
+        &mut self,
+        workspace: WorkspaceId,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(form) = &mut self.task_form {
             form.start.place = Some(Where::Existing);
             form.start.workspace = Some(workspace);
@@ -1709,7 +1713,11 @@ impl Condr {
         }
     }
 
-    pub(super) fn choose_task_device(&mut self, device: ConnectionKey, cx: &mut Context<Self>) {
+    pub(in crate::app) fn choose_task_device(
+        &mut self,
+        device: ConnectionKey,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(form) = &mut self.task_form
             && form.device != device
         {
@@ -1723,7 +1731,7 @@ impl Condr {
         self.ask_task_agents(device);
     }
 
-    pub(super) fn choose_task_repository(
+    pub(in crate::app) fn choose_task_repository(
         &mut self,
         repository: Option<PathBuf>,
         cx: &mut Context<Self>,
@@ -1735,7 +1743,7 @@ impl Condr {
     }
 
     /// What Start would do now, and why it cannot when it cannot.
-    pub(super) fn start_plan(&self, form: &TaskForm, cx: &App) -> Option<StartPlan> {
+    pub(in crate::app) fn start_plan(&self, form: &TaskForm, cx: &App) -> Option<StartPlan> {
         let (key, task_id) = form.home?;
         let connection = self.connection(key)?;
         let tasks = connection.model.tasks.as_ref()?;
@@ -1789,7 +1797,7 @@ impl Condr {
 
     /// The interaction area for the form: a header, the form's fields on the left, and
     /// on the right Start for a saved Task (ADR 0068).
-    pub(super) fn render_task_form_area(
+    pub(in crate::app) fn render_task_form_area(
         &self,
         form: &TaskForm,
         cx: &mut Context<Self>,
@@ -2447,27 +2455,27 @@ impl Condr {
 }
 
 /// What Start would do now; `blocked` says why it cannot.
-pub(super) struct StartPlan {
-    pub(super) options: WhereOptions,
-    pub(super) place: Where,
-    pub(super) workspace: Option<WorkspaceId>,
-    pub(super) available: Option<Vec<AgentKind>>,
-    pub(super) agent: Option<AgentKind>,
-    pub(super) blocked: Option<String>,
+pub(in crate::app) struct StartPlan {
+    pub(in crate::app) options: WhereOptions,
+    pub(in crate::app) place: Where,
+    pub(in crate::app) workspace: Option<WorkspaceId>,
+    pub(in crate::app) available: Option<Vec<AgentKind>>,
+    pub(in crate::app) agent: Option<AgentKind>,
+    pub(in crate::app) blocked: Option<String>,
 }
 
 /// What the archive dialog says about a started Task's Workspace.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct ArchiveFacts {
-    pub(super) title: String,
+pub(in crate::app) struct ArchiveFacts {
+    pub(in crate::app) title: String,
     /// A Start of this Task made the Workspace, as the Server recorded at its commit.
-    pub(super) created: bool,
-    pub(super) agents: usize,
+    pub(in crate::app) created: bool,
+    pub(in crate::app) agents: usize,
     /// One Agent that waits for the person, else one that works.
-    pub(super) busy: Option<(AgentKind, AgentDisplayState)>,
-    pub(super) managed: bool,
-    pub(super) dirty: bool,
-    pub(super) branch: Option<String>,
+    pub(in crate::app) busy: Option<(AgentKind, AgentDisplayState)>,
+    pub(in crate::app) managed: bool,
+    pub(in crate::app) dirty: bool,
+    pub(in crate::app) branch: Option<String>,
 }
 
 fn render_archive_choice(
@@ -2552,7 +2560,7 @@ fn render_archive_choice(
 
 /// The Device's To do Tasks in the Server's order: not started, archived ones never
 /// being in the model.
-pub(super) fn todo_tasks(connection: &ServerConnection) -> Vec<&TaskRecord> {
+pub(in crate::app) fn todo_tasks(connection: &ServerConnection) -> Vec<&TaskRecord> {
     let mut todo: Vec<&TaskRecord> = connection
         .model
         .tasks
@@ -2566,7 +2574,7 @@ pub(super) fn todo_tasks(connection: &ServerConnection) -> Vec<&TaskRecord> {
 
 /// The Device's repository Workspaces, which a Task's repository is one of: the root of
 /// a Git repository, not a worktree made from one.
-pub(super) fn repository_workspaces(
+pub(in crate::app) fn repository_workspaces(
     connection: &ServerConnection,
 ) -> impl Iterator<Item = (WorkspaceId, String, PathBuf)> + '_ {
     connection
@@ -2587,7 +2595,10 @@ pub(super) fn repository_workspaces(
 }
 
 /// A repository by its Workspace's name, or its folder's when none is open.
-pub(super) fn repository_name(connection: Option<&ServerConnection>, root: &Path) -> String {
+pub(in crate::app) fn repository_name(
+    connection: Option<&ServerConnection>,
+    root: &Path,
+) -> String {
     connection
         .and_then(|connection| connection.session()?.workspace_by_root(root))
         .map(|workspace| workspace.name().to_owned())
@@ -2595,7 +2606,7 @@ pub(super) fn repository_name(connection: Option<&ServerConnection>, root: &Path
 }
 
 /// The Pane of `workspace_id` this Client shows focused, as the Workspace would open.
-pub(super) fn workspace_focused_pane(
+pub(in crate::app) fn workspace_focused_pane(
     connection: &ServerConnection,
     session: &Session,
     workspace_id: WorkspaceId,
@@ -2604,7 +2615,7 @@ pub(super) fn workspace_focused_pane(
     session.tab(tab)?.focused_pane().map(|pane| pane.id())
 }
 
-pub(super) fn workspace_has_agent(
+pub(in crate::app) fn workspace_has_agent(
     connection: &ServerConnection,
     workspace_id: WorkspaceId,
 ) -> bool {

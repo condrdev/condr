@@ -38,7 +38,6 @@ mod settings;
 mod sidebar;
 mod startup;
 mod syntax;
-mod task_form;
 mod tasks;
 mod terminal_images;
 mod terminal_input;
@@ -298,7 +297,7 @@ pub(crate) struct Condr {
     tasks_board_render_count: std::cell::Cell<usize>,
     /// The form of a To do Task, or of a new one, which the interaction area shows in
     /// place of a terminal (ADR 0068).
-    task_form: Option<task_form::TaskForm>,
+    task_form: Option<tasks::TaskForm>,
     /// Whether To do's Archived list is unfolded; it is fetched each time it unfolds.
     tasks_archived_open: bool,
     /// The Agent a Task was last started with, which Start offers first.

@@ -6,7 +6,6 @@ use super::sidebar::{
     CondrIconName, CondrSidebarIcon, SidebarIconTone, SidebarStatusVisual, pane_sidebar_status,
     urgency,
 };
-use super::task_form::{todo_tasks, workspace_focused_pane};
 use super::*;
 use condr_core::TaskId;
 use rust_i18n::t;
@@ -16,14 +15,19 @@ mod area;
 mod board;
 mod card;
 mod columns;
+mod form;
 mod sidebar_entry;
 mod table;
 mod todo;
 mod toolbar;
 
 pub(in crate::app) use board::TasksBoard;
+#[cfg(test)]
+pub(in crate::app) use form::{AGENT_WAIT, FormField, Where};
+pub(in crate::app) use form::{AgentRequest, DeviceTasks, TaskForm, TaskRequest};
 // What the submodules share with one another.
 use card::device_tag;
+use form::{todo_tasks, workspace_focused_pane};
 use table::{ListFit, list_row};
 
 /// `gpui_kit::Task` is the executor's.

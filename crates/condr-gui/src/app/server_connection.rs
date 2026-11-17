@@ -60,7 +60,7 @@ pub(super) struct ServerConnection {
     pub(super) hooks_error: Option<String>,
     /// What this Client asked about the Device's Tasks and Agents, and what came back
     /// beyond the Session model (ADR 0068).
-    pub(super) device_tasks: super::task_form::DeviceTasks,
+    pub(super) device_tasks: super::tasks::DeviceTasks,
     pub(super) listen: Option<String>,
     /// `[server.p2p] enabled` on the Server, as its last `Status` or `P2pSaved` said.
     pub(super) p2p: bool,
@@ -443,7 +443,7 @@ impl ServerConnection {
     /// Asks the Server to install, remove or report one agent's hooks on its machine.
     /// The reply comes back as an `AgentResult` and replaces that agent's row.
     pub(super) fn send_agent_hooks(&mut self, agent: AgentKind, action: HooksAction) {
-        self.send_hooks_request(agent, action, super::task_form::AgentRequest::Hooks);
+        self.send_hooks_request(agent, action, super::tasks::AgentRequest::Hooks);
     }
 
     /// A hooks request, remembered as `request` so its answer lands where it was asked.
@@ -451,7 +451,7 @@ impl ServerConnection {
         &mut self,
         agent: AgentKind,
         action: HooksAction,
-        request: super::task_form::AgentRequest,
+        request: super::tasks::AgentRequest,
     ) {
         let (Some(server_id), Some(session_id)) = (self.model.server_id, self.model.session_id)
         else {
@@ -480,7 +480,7 @@ impl ServerConnection {
         }) {
             self.device_tasks
                 .agent_requests
-                .push_back(super::task_form::AgentRequest::Available);
+                .push_back(super::tasks::AgentRequest::Available);
         }
     }
 
@@ -488,7 +488,7 @@ impl ServerConnection {
     pub(super) fn send_task(
         &mut self,
         command: condr_core::TaskCommand,
-        request: super::task_form::TaskRequest,
+        request: super::tasks::TaskRequest,
     ) -> Option<u64> {
         let request_id = self.send_request(|server_id, _, request_id| ClientMessage::Task {
             server_id,

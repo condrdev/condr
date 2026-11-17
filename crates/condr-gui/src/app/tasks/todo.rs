@@ -67,7 +67,7 @@ impl Condr {
         place.extend(
             task.repository
                 .as_deref()
-                .map(|root| super::task_form::repository_name(connection, root)),
+                .map(|root| super::form::repository_name(connection, root)),
         );
         let last = task.last.as_ref().map(|last| {
             let name = last.branch.clone().unwrap_or_else(|| {
@@ -226,7 +226,7 @@ impl Condr {
         let repository = task
             .repository
             .as_deref()
-            .map(|root| super::task_form::repository_name(connection, root))
+            .map(|root| super::form::repository_name(connection, root))
             .unwrap_or_default();
         let (_, last) = self.todo_place(key, task);
         let state = div().text_color(theme.muted_foreground).children(
