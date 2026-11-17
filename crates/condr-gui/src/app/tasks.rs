@@ -675,6 +675,7 @@ impl Condr {
     pub(super) fn render_task_cards(
         &self,
         view: &WindowView,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let scope = self.effective_tasks_scope(view.tasks.scope);
@@ -682,7 +683,10 @@ impl Condr {
         let todo = self.offers_todo(scope).then(|| self.todo_cards(scope));
         let cards = match view.tasks.layout {
             TasksLayout::Board => self.render_tasks_board(&columns, todo, scope, view.tasks, cx),
-            TasksLayout::List => self.render_tasks_list(&columns, todo, scope, view.tasks, cx),
+            TasksLayout::List => {
+                let fit = ListFit::of(view, self.task_form.is_some(), window);
+                self.render_tasks_list(&columns, todo, scope, view.tasks, fit, cx)
+            }
         };
         let bands = self.render_connection_bands(view.tasks.scope, cx);
         v_flex()
@@ -873,10 +877,12 @@ impl Condr {
         todo: Option<Vec<(ConnectionKey, TaskRecord)>>,
         scope: TasksScope,
         prefs: TasksPrefs,
+        fit: ListFit,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = cx.theme().clone();
         let header = list_row(
+            fit,
             "tasks-list-header",
             div(),
             t!("tasks.list.title").into_owned(),
@@ -905,7 +911,7 @@ impl Condr {
                 rows.push(self.render_new_task_button(cx));
                 rows.extend(
                     todo.iter()
-                        .map(|(key, task)| self.render_todo_row(*key, task, cx)),
+                        .map(|(key, task)| self.render_todo_row(*key, task, fit, cx)),
                 );
                 rows.push(self.render_archived(scope, cx));
             }
@@ -924,8 +930,8 @@ impl Condr {
             );
             if !folded {
                 rows.extend(cards.iter().map(|card| match card.task {
-                    Some(task) => self.render_task_row(card, task, cx),
-                    None => self.render_list_row(card, cx),
+                    Some(task) => self.render_task_row(card, task, fit, cx),
+                    None => self.render_list_row(card, fit, cx),
                 }));
             }
         }
@@ -1190,7 +1196,7 @@ impl Condr {
             .into_any_element()
     }
 
-    fn render_list_row(&self, card: &TaskCard, cx: &mut Context<Self>) -> AnyElement {
+    fn render_list_row(&self, card: &TaskCard, fit: ListFit, cx: &mut Context<Self>) -> AnyElement {
         let Some(facts) = self.card_facts(card) else {
             return div().into_any_element();
         };
@@ -1212,6 +1218,7 @@ impl Condr {
             None => div().children(state_name(card.status, cx)),
         };
         list_row(
+            fit,
             format!("tasks-row-{key}-{pane}"),
             icon,
             facts.title,
@@ -1414,6 +1421,7 @@ impl Condr {
         &self,
         key: ConnectionKey,
         task: &TaskRecord,
+        fit: ListFit,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let id = task.id;
@@ -1434,6 +1442,7 @@ impl Condr {
                 .then(|| t!("tasks.todo.starting").into_owned()),
         );
         let row = list_row(
+            fit,
             format!("tasks-todo-{key}-{}", id.as_u64()),
             Icon::new(CondrIconName::Circle)
                 .size_3p5()
@@ -1703,7 +1712,13 @@ impl Condr {
         }
     }
 
-    fn render_task_row(&self, card: &TaskCard, task: TaskId, cx: &mut Context<Self>) -> AnyElement {
+    fn render_task_row(
+        &self,
+        card: &TaskCard,
+        task: TaskId,
+        fit: ListFit,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let Some((title, _, device, state)) = self.task_card_facts(card, task) else {
             return div().into_any_element();
         };
@@ -1723,6 +1738,7 @@ impl Condr {
             .and_then(|git| git.branch.clone())
             .unwrap_or_default();
         list_row(
+            fit,
             format!("tasks-task-{key}-{}", task.as_u64()),
             Icon::new(CondrIconName::Circle)
                 .size_3p5()
@@ -1806,8 +1822,45 @@ fn change_counts(added: u32, deleted: u32, ahead: u32, theme: &Theme) -> Option<
     })
 }
 
+/// How many of the List's optional columns fit its width, taken in the order
+/// Workspace, Device, Changes, Branch; the mark, Title and State always show, so a List
+/// beside the interaction area keeps its titles.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct ListFit(usize);
+
+impl ListFit {
+    /// Rems of the optional columns, each with its gap, in the order they are kept.
+    const OPTIONAL: [f32; 4] = [9.5, 6.5, 6.5, 9.5];
+    /// Rems of what always shows: padding, the mark, a Title's least, State and gaps.
+    const ALWAYS: f32 = 2. + 1.25 + 10. + 12. + 1.;
+
+    fn of(view: &WindowView, form_open: bool, window: &Window) -> Self {
+        // Tasks mode hides both sidebars, so the card area spans the window; beside the
+        // interaction area the List takes its share of the split.
+        let mut width = window.viewport_size().width / window.rem_size();
+        if form_open || view.tasks_selection.is_some() {
+            width *= f32::from(view.tasks.split_list.unwrap_or(DEFAULT_SPLIT_LIST)) / 1000.;
+        }
+        Self::within(width)
+    }
+
+    fn within(rems: f32) -> Self {
+        let mut used = Self::ALWAYS;
+        Self(
+            Self::OPTIONAL
+                .iter()
+                .take_while(|column| {
+                    used += *column;
+                    used <= rems
+                })
+                .count(),
+        )
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn list_row(
+    fit: ListFit,
     id: impl Into<SharedString>,
     icon: impl IntoElement,
     title: String,
@@ -1829,11 +1882,19 @@ fn list_row(
         .items_center()
         .child(div().flex_none().w(rems(1.25)).child(icon))
         .child(div().flex_1().min_w_0().truncate().child(title))
-        .child(div().flex_none().w(rems(9.)).truncate().child(workspace))
-        .child(div().flex_none().w(rems(9.)).truncate().child(branch))
-        .child(div().flex_none().w(rems(6.)).truncate().child(device))
-        .child(div().flex_none().w(rems(6.)).child(changes))
-        .child(div().flex_none().w(rems(12.)).truncate().child(state))
+        .when(fit.0 > 0, |row| {
+            row.child(div().flex_none().w(rems(9.)).truncate().child(workspace))
+        })
+        .when(fit.0 > 3, |row| {
+            row.child(div().flex_none().w(rems(9.)).truncate().child(branch))
+        })
+        .when(fit.0 > 1, |row| {
+            row.child(div().flex_none().w(rems(6.)).truncate().child(device))
+        })
+        .when(fit.0 > 2, |row| {
+            row.child(div().flex_none().w(rems(6.)).child(changes))
+        })
+        .child(div().min_w_0().w(rems(12.)).truncate().child(state))
 }
 
 /// The card area as a view of its own, cached as the sidebar is: a terminal frame
@@ -1864,7 +1925,7 @@ impl Render for TasksBoard {
                     .tasks_board_render_count
                     .set(condr.tasks_board_render_count.get() + 1);
                 let condr = &*condr;
-                condr.render_task_cards(condr.window_view(window), cx)
+                condr.render_task_cards(condr.window_view(window), window, cx)
             })
             .unwrap_or_else(|_| div().into_any_element())
     }
@@ -2284,7 +2345,7 @@ impl Condr {
                     .child(cards),
             )
             .child(handle)
-            .child(div().flex_1().min_w_0().min_h_0().child(area))
+            .child(div().flex_1().size_full().min_w_0().min_h_0().child(area))
             .into_any_element()
     }
 
@@ -2467,7 +2528,9 @@ mod tests {
     use super::super::{
         ClosePane, NextAgent, OpenSettings, SplitRight, ToggleSidebar, ToggleTasks,
     };
-    use super::{SidebarStatusVisual, TaskCard, TasksColumn, inert_in_tasks_mode, rank_column};
+    use super::{
+        ListFit, SidebarStatusVisual, TaskCard, TasksColumn, inert_in_tasks_mode, rank_column,
+    };
     use condr_core::{PaneId, WorkspaceId};
     use std::any::TypeId;
 
@@ -2478,6 +2541,13 @@ mod tests {
             key,
             label: key,
         }
+    }
+
+    #[test]
+    fn the_list_drops_branch_first_and_workspace_last() {
+        assert_eq!(ListFit::within(80.), ListFit(4));
+        assert_eq!(ListFit::within(ListFit::ALWAYS + 9.5 + 6.5), ListFit(2));
+        assert_eq!(ListFit::within(20.), ListFit(0));
     }
 
     #[test]
