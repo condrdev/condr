@@ -88,6 +88,8 @@ gpui_kit::assets::icon_assets!(
         ListFilter,
         List,
         Kanban,
+        Layers,
+        Monitor,
     ]
 );
 

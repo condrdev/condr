@@ -151,6 +151,10 @@ fn tasks_mode_takes_the_window_sorts_agents_into_columns_and_leaves_the_view() {
     assert!(window.debug_bounds("tasks-list").is_some());
     assert!(window.debug_bounds("tasks-board").is_none());
     assert!(
+        window.debug_bounds("tasks-compact").is_none(),
+        "the List's rows are always compact, so it offers no switch"
+    );
+    assert!(
         window
             .debug_bounds(leaked_selector(format!("tasks-row-1-{}", blocked.as_u64())))
             .is_some()

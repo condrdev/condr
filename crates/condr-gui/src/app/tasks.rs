@@ -9,6 +9,7 @@ use super::*;
 use condr_core::TaskId;
 use gpui_kit::component::button::ButtonGroup;
 use gpui_kit::component::popover::Popover;
+use gpui_kit::component::separator::Separator;
 use gpui_kit::component::switch::Switch;
 use rust_i18n::t;
 use std::any::TypeId;
@@ -614,7 +615,6 @@ impl Condr {
                     });
                 let compact = Switch::new("tasks-compact")
                     .checked(prefs.density == TasksDensity::Compact)
-                    .disabled(!board)
                     .on_click(move |compact, _, cx| {
                         let density = if *compact {
                             TasksDensity::Compact
@@ -624,39 +624,46 @@ impl Condr {
                         let _ = density_owner
                             .update(cx, |this, cx| this.set_tasks_density(density, cx));
                     });
-                v_flex().w(rems(16.)).gap_3().child(layout).child(
-                    h_flex()
-                        .gap_2()
-                        .items_center()
-                        .text_sm()
-                        .when(!board, |row| row.text_color(cx.theme().muted_foreground))
-                        .child(t!("tasks.compact_cards.label").into_owned())
-                        .child(div().flex_1())
-                        // Kit's unchecked track all but vanishes on a popover; the word
-                        // says the state.
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(if prefs.density == TasksDensity::Compact {
-                                    t!("tasks.compact_cards.on").into_owned()
-                                } else {
-                                    t!("tasks.compact_cards.off").into_owned()
-                                }),
+                let muted = cx.theme().muted_foreground;
+                // The layout leads; its options sit under a rule in the secondary colour,
+                // and the List, whose rows are always compact, has none.
+                v_flex()
+                    .w(rems(16.))
+                    .gap_2()
+                    .child(layout)
+                    .when(board, |this| {
+                        this.child(Separator::horizontal()).child(
+                            h_flex()
+                                .gap_2()
+                                .items_center()
+                                .text_sm()
+                                .text_color(muted)
+                                .child(Icon::new(gpui_kit::assets::IconName::Rows2).small())
+                                .child(t!("tasks.compact_cards.label").into_owned())
+                                .child(div().flex_1())
+                                // Kit's unchecked track all but vanishes on a popover; the
+                                // word says the state.
+                                .child(div().text_xs().child(
+                                    if prefs.density == TasksDensity::Compact {
+                                        t!("tasks.compact_cards.on").into_owned()
+                                    } else {
+                                        t!("tasks.compact_cards.off").into_owned()
+                                    },
+                                ))
+                                .child(
+                                    div()
+                                        .debug_selector(|| "tasks-compact".into())
+                                        .child(compact),
+                                ),
                         )
-                        .child(
-                            div()
-                                .debug_selector(|| "tasks-compact".into())
-                                .child(compact),
-                        ),
-                )
+                    })
             })
             .into_any_element()
     }
 
-    /// `MacBook › api-server ▾`: the scope as a breadcrumb that opens a tree of
-    /// All, the Devices and their Workspaces, worktrees under their repository, each
-    /// with its Agent count.
+    /// `MacBook › api-server ▾`: the scope as a breadcrumb that opens a grouped tree:
+    /// All, then each Device over its Workspaces, worktrees under their repository, each
+    /// row with its Agent count on the right.
     fn render_scope_menu(&self, scope: TasksScope, cx: &mut Context<Self>) -> AnyElement {
         let scope = self.effective_tasks_scope(scope);
         let count = |scope| -> usize {
@@ -666,12 +673,20 @@ impl Condr {
                 .sum()
         };
         let mut crumbs = Vec::new();
-        let mut options = vec![(t!("tasks.scope.all").into_owned(), TasksScope::All)];
+        let mut options = vec![(
+            ScopeRow::All,
+            t!("tasks.scope.all").into_owned(),
+            TasksScope::All,
+        )];
         for connection in &self.connections {
             let Some(server) = connection.model.server_id else {
                 continue;
             };
-            options.push((connection.label.clone(), TasksScope::Device(server)));
+            options.push((
+                ScopeRow::Device,
+                connection.label.clone(),
+                TasksScope::Device(server),
+            ));
             if scope == TasksScope::Device(server) {
                 crumbs.push(connection.label.clone());
             }
@@ -690,7 +705,11 @@ impl Condr {
                 .filter(|each| parent_of(each).is_none())
             {
                 let repository_scope = TasksScope::Workspace(server, repository.id());
-                options.push((format!("\u{2003}{}", repository.name()), repository_scope));
+                options.push((
+                    ScopeRow::Workspace,
+                    repository.name().to_owned(),
+                    repository_scope,
+                ));
                 if scope == repository_scope {
                     crumbs.extend([connection.label.clone(), repository.name().to_owned()]);
                 }
@@ -701,7 +720,8 @@ impl Condr {
                 {
                     let worktree_scope = TasksScope::Workspace(server, worktree.id());
                     options.push((
-                        format!("\u{2003}\u{2003}└ {}", worktree.name()),
+                        ScopeRow::Worktree,
+                        worktree.name().to_owned(),
                         worktree_scope,
                     ));
                     if scope == worktree_scope {
@@ -717,9 +737,9 @@ impl Condr {
         if scope == TasksScope::All {
             crumbs.push(t!("tasks.scope.all").into_owned());
         }
-        let options: Vec<(String, TasksScope)> = options
+        let options: Vec<(ScopeRow, SharedString, usize, TasksScope)> = options
             .into_iter()
-            .map(|(name, each)| (format!("{name}  {}", count(each)), each))
+            .map(|(row, name, each)| (row, name.into(), count(each), each))
             .collect();
         let owner = cx.weak_entity();
         Button::new("tasks-scope")
@@ -730,14 +750,24 @@ impl Condr {
             .label(crumbs.join(" › "))
             .dropdown_caret(true)
             .dropdown_menu(move |menu, _, _| {
-                options.iter().fold(menu, |menu, (name, each)| {
-                    let (owner, each) = (owner.clone(), *each);
+                let menu = menu.min_w(px(260.)).max_h(px(480.)).scrollable(true);
+                options.iter().fold(menu, |menu, (row, name, count, each)| {
+                    let (owner, each, row, count) = (owner.clone(), *each, *row, *count);
+                    let name = name.clone();
+                    // Each Device starts a group under a rule.
+                    let menu = if row == ScopeRow::Device {
+                        menu.separator()
+                    } else {
+                        menu
+                    };
                     menu.item(
-                        PopupMenuItem::new(name.clone())
-                            .checked(each == scope)
-                            .on_click(move |_, _, cx| {
-                                let _ = owner.update(cx, |this, cx| this.set_tasks_scope(each, cx));
-                            }),
+                        PopupMenuItem::element(move |_, cx| {
+                            scope_row(row, name.clone(), count, each == scope, cx)
+                        })
+                        .checked(each == scope)
+                        .on_click(move |_, _, cx| {
+                            let _ = owner.update(cx, |this, cx| this.set_tasks_scope(each, cx));
+                        }),
                     )
                 })
             })
@@ -1897,6 +1927,51 @@ fn change_counts(added: u32, deleted: u32, ahead: u32, theme: &Theme) -> Option<
                 this.child(div().text_color(theme.success).child(format!("↑{ahead}")))
             })
     })
+}
+
+/// What a row of the scope's menu names, which sets its indent, icon and colour.
+#[derive(Clone, Copy, PartialEq)]
+enum ScopeRow {
+    All,
+    Device,
+    Workspace,
+    Worktree,
+}
+
+/// A scope's row: indented by its level, its icon, its name, and its Agent count on the
+/// right. All and the Devices lead in the primary colour; Workspaces and worktrees, and
+/// counts, are secondary, a zero count fainter still.
+fn scope_row(row: ScopeRow, name: SharedString, count: usize, selected: bool, cx: &App) -> Div {
+    let theme = cx.theme();
+    let (indent, icon, primary) = match row {
+        ScopeRow::All => (0., Icon::new(gpui_kit::assets::IconName::Layers), true),
+        ScopeRow::Device => (0., Icon::new(gpui_kit::assets::IconName::Monitor), true),
+        ScopeRow::Workspace => (1.25, Icon::new(IconName::Folder), false),
+        ScopeRow::Worktree => (2.5, Icon::new(CondrIconName::GitBranch), false),
+    };
+    let color = if primary || selected {
+        theme.foreground
+    } else {
+        theme.muted_foreground
+    };
+    h_flex()
+        .flex_1()
+        .min_w_0()
+        .gap_2()
+        .pl(rems(indent))
+        .items_center()
+        .text_color(color)
+        .child(icon.small())
+        .child(div().flex_1().min_w_0().truncate().child(name))
+        .child(
+            div()
+                .flex_none()
+                .pl_4()
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .when(count == 0, |this| this.opacity(0.6))
+                .child(count.to_string()),
+        )
 }
 
 /// How many of the List's optional columns fit its width, taken in the order
