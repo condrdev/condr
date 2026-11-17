@@ -181,13 +181,19 @@ fn wait_for<T>(mut done: impl FnMut() -> Option<T>) -> T {
     }
 }
 
-fn ids(list: &Value) -> Vec<u64> {
-    list["tasks"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|task| task["task"].as_u64().unwrap())
-        .collect()
+/// A Task's id as the CLI prints it: its UUIDv7, hyphenated.
+fn id(task: &Value) -> String {
+    let id = task["task"].as_str().unwrap_or_else(|| panic!("{task}"));
+    assert_eq!(
+        id.parse::<uuid::Uuid>().unwrap().get_version_num(),
+        7,
+        "{id}"
+    );
+    id.to_owned()
+}
+
+fn ids(list: &Value) -> Vec<String> {
+    list["tasks"].as_array().unwrap().iter().map(id).collect()
 }
 
 #[test]
@@ -201,7 +207,7 @@ fn tasks_are_written_listed_archived_restored_and_deleted() {
         "--description",
         "It fails on Safari.",
     ]);
-    assert_eq!(created["task"], 1);
+    let first = id(&created);
     assert_eq!(created["title"], "Fix the login bug");
     assert_eq!(created["description"], "It fails on Safari.");
     assert_eq!(created["status"], "todo");
@@ -211,7 +217,7 @@ fn tasks_are_written_listed_archived_restored_and_deleted() {
 
     // No Workspace on the Device, so nowhere to start by default.
     assert_eq!(
-        server.err(&["task", "start", "1", "--kind", "claude"]),
+        server.err(&["task", "start", &first, "--kind", "claude"]),
         "where_required"
     );
 
@@ -237,6 +243,7 @@ fn tasks_are_written_listed_archived_restored_and_deleted() {
         .unwrap();
     let piped = ok(piped.wait_with_output().unwrap(), &["create from stdin"]);
     assert_eq!(piped["description"], "From stdin.\n");
+    let second = id(&piped);
     let file = server.root.join("description.txt");
     std::fs::write(&file, "From a file.").unwrap();
     let from_file = server.ok(&[
@@ -248,42 +255,62 @@ fn tasks_are_written_listed_archived_restored_and_deleted() {
         file.to_str().unwrap(),
     ]);
     assert_eq!(from_file["description"], "From a file.");
+    let third = id(&from_file);
 
     // New Tasks head To do; a list carries no descriptions.
     let list = server.ok(&["task", "list"]);
-    assert_eq!(ids(&list), [3, 2, 1]);
+    assert_eq!(
+        ids(&list),
+        [third.as_str(), second.as_str(), first.as_str()]
+    );
     assert!(list["tasks"][0].get("description").is_none(), "{list}");
 
-    let edited = server.ok(&["task", "edit", "2", "--title", "Piped, renamed"]);
+    let edited = server.ok(&["task", "edit", &second, "--title", "Piped, renamed"]);
     assert_eq!(edited["title"], "Piped, renamed");
     assert_eq!(edited["description"], "From stdin.\n");
-    let got = server.ok(&["task", "get", "2"]);
+    let got = server.ok(&["task", "get", &second]);
     assert_eq!(got["title"], "Piped, renamed");
     assert_eq!(got["description"], "From stdin.\n");
 
-    assert_eq!(server.ok(&["task", "archive", "3"])["status"], "archived");
-    assert_eq!(ids(&server.ok(&["task", "list"])), [2, 1]);
-    assert_eq!(ids(&server.ok(&["task", "list", "--archived"])), [3]);
-    assert_eq!(server.ok(&["task", "restore", "3"])["status"], "todo");
-    assert_eq!(ids(&server.ok(&["task", "list"])), [3, 2, 1]);
+    assert_eq!(
+        server.ok(&["task", "archive", &third])["status"],
+        "archived"
+    );
+    assert_eq!(
+        ids(&server.ok(&["task", "list"])),
+        [second.as_str(), first.as_str()]
+    );
+    assert_eq!(
+        ids(&server.ok(&["task", "list", "--archived"])),
+        [third.as_str()]
+    );
+    assert_eq!(server.ok(&["task", "restore", &third])["status"], "todo");
+    assert_eq!(
+        ids(&server.ok(&["task", "list"])),
+        [third.as_str(), second.as_str(), first.as_str()]
+    );
 
     assert_eq!(
-        server.ok(&["task", "delete", "3"]),
+        server.ok(&["task", "delete", &third]),
         serde_json::json!({ "ok": true })
     );
-    assert_eq!(server.err(&["task", "get", "3"]), "task_not_found");
-    assert_eq!(server.err(&["task", "delete", "3"]), "task_not_found");
+    assert_eq!(server.err(&["task", "get", &third]), "task_not_found");
+    assert_eq!(server.err(&["task", "delete", &third]), "task_not_found");
     // Outside a Pane an omitted id names nothing.
     assert_eq!(server.err(&["task", "get"]), "no_current_pane");
     assert_eq!(
         server.err(&["task", "create", "--title", "x", "--repository", "99"]),
         "workspace_not_found"
     );
-    let usage = server
-        .command(&["task", "archive", "1", "--remove-worktree"])
-        .output()
-        .unwrap();
-    assert_eq!(usage.status.code(), Some(2), "{usage:?}");
+    for args in [
+        vec!["task", "archive", &first, "--remove-worktree"],
+        // An id is the whole UUID: neither a number nor a prefix.
+        vec!["task", "get", "1"],
+        vec!["task", "get", &first[..8]],
+    ] {
+        let usage = server.command(&args).output().unwrap();
+        assert_eq!(usage.status.code(), Some(2), "{args:?}: {usage:?}");
+    }
 }
 
 /// A Start types the Agent with a prompt naming the task file, links the Workspace and
@@ -293,17 +320,17 @@ fn tasks_are_written_listed_archived_restored_and_deleted() {
 fn a_started_task_holds_its_workspace_until_archived() {
     let server = Server::start();
     let (first, _) = server.workspace("plain");
-    server.ok(&[
+    let fix = id(&server.ok(&[
         "task",
         "create",
         "--title",
         "Fix it",
         "--description",
         "Make it work.",
-    ]);
+    ]));
 
     // The Device's first Workspace no Task holds, in a new Tab named after the Task.
-    let started = server.ok(&["task", "start", "1", "--kind", "claude"]);
+    let started = server.ok(&["task", "start", &fix, "--kind", "claude"]);
     assert_eq!(started["workspace"]["workspace_id"], first);
     assert_eq!(started["tab"]["workspace_id"], first);
     assert_eq!(started["tab"]["name"], "Fix it");
@@ -323,26 +350,26 @@ fn a_started_task_holds_its_workspace_until_archived() {
         "{file}"
     );
 
-    let task = server.ok(&["task", "get", "1"]);
+    let task = server.ok(&["task", "get", &fix]);
     assert_eq!(task["status"], "started");
     assert_eq!(task["workspace"], first);
     assert_eq!(task["last"]["managed"], false);
     // Inside a Pane of its Workspace, an omitted id is this Task.
     let mine = ok(server.in_pane(pane, &["task", "get"]), &["get in a Pane"]);
-    assert_eq!(mine["task"], 1);
+    assert_eq!(mine["task"], fix);
     assert_eq!(mine["description"], "Make it work.");
 
     assert_eq!(
-        server.err(&["task", "start", "1", "--kind", "claude"]),
+        server.err(&["task", "start", &fix, "--kind", "claude"]),
         "task_started"
     );
-    assert_eq!(server.err(&["task", "delete", "1"]), "task_started");
-    server.ok(&["task", "create", "--title", "Other"]);
+    assert_eq!(server.err(&["task", "delete", &fix]), "task_started");
+    let other = id(&server.ok(&["task", "create", "--title", "Other"]));
     assert_eq!(
         server.err(&[
             "task",
             "start",
-            "2",
+            &other,
             "--kind",
             "claude",
             "--workspace",
@@ -361,14 +388,14 @@ fn a_started_task_holds_its_workspace_until_archived() {
 
     // A Start holds its Task in "Starting" until it has written the task file, here a
     // FIFO that blocks the write until it is read; another Start of it is refused.
-    let fifo = std::path::Path::new(file).with_file_name("2.md");
+    let fifo = std::path::Path::new(file).with_file_name(format!("{other}.md"));
     let made = Command::new("mkfifo").arg(&fifo).status().unwrap();
     assert!(made.success());
     let held = server
         .command(&[
             "task",
             "start",
-            "2",
+            &other,
             "--kind",
             "claude",
             "--workspace",
@@ -378,9 +405,9 @@ fn a_started_task_holds_its_workspace_until_archived() {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    wait_for(|| (server.ok(&["task", "get", "2"])["status"] == "starting").then_some(()));
+    wait_for(|| (server.ok(&["task", "get", &other])["status"] == "starting").then_some(()));
     assert_eq!(
-        server.err(&["task", "start", "2", "--kind", "claude"]),
+        server.err(&["task", "start", &other, "--kind", "claude"]),
         "task_starting"
     );
     assert_eq!(std::fs::read_to_string(&fifo).unwrap(), "Other\n\n");
@@ -389,15 +416,15 @@ fn a_started_task_holds_its_workspace_until_archived() {
     server.agent_args();
 
     // Archived without being told to close, the Workspace stays and leaves the Task.
-    let archived = server.ok(&["task", "archive", "1"]);
+    let archived = server.ok(&["task", "archive", &fix]);
     assert_eq!(archived["status"], "archived");
     assert_eq!(archived["workspace"], Value::Null);
     server.ok(&["workspace", "get", &first.to_string()]);
-    assert_eq!(server.ok(&["task", "restore", "1"])["status"], "todo");
+    assert_eq!(server.ok(&["task", "restore", &fix])["status"], "todo");
     let continued = server.ok(&[
         "task",
         "start",
-        "1",
+        &fix,
         "--kind",
         "claude",
         "--continue",
@@ -406,7 +433,7 @@ fn a_started_task_holds_its_workspace_until_archived() {
     assert_eq!(continued["workspace"]["workspace_id"], first);
     server.agent_args();
 
-    let closed = server.ok(&["task", "archive", "1", "--close-workspace"]);
+    let closed = server.ok(&["task", "archive", &fix, "--close-workspace"]);
     assert_eq!(closed["status"], "archived");
     wait_for(|| {
         let output = server
@@ -416,7 +443,7 @@ fn a_started_task_holds_its_workspace_until_archived() {
         (!output.status.success()).then_some(())
     });
     assert_eq!(
-        server.ok(&["task", "delete", "1"]),
+        server.ok(&["task", "delete", &fix]),
         serde_json::json!({ "ok": true })
     );
 }
@@ -453,21 +480,22 @@ fn a_task_starts_in_a_new_worktree_that_archiving_removes() {
         &parent.to_string(),
     ]);
     assert_eq!(created["repository"], root);
-    let started = server.ok(&["task", "start", "1", "--kind", "claude", "--worktree"]);
+    let add = id(&created);
+    let started = server.ok(&["task", "start", &add, "--kind", "claude", "--worktree"]);
     let worktree = &started["workspace"]["worktree"];
     assert_eq!(worktree["parent_workspace_id"], parent);
     assert_eq!(worktree["managed"], true);
     let path = PathBuf::from(started["workspace"]["root_directory"].as_str().unwrap());
     assert!(path.is_dir());
     server.agent_args();
-    let task = server.ok(&["task", "get", "1"]);
+    let task = server.ok(&["task", "get", &add]);
     assert_eq!(task["last"]["managed"], true);
     assert_eq!(task["last"]["path"], started["workspace"]["root_directory"]);
 
     let archived = server.ok(&[
         "task",
         "archive",
-        "1",
+        &add,
         "--close-workspace",
         "--remove-worktree",
     ]);
@@ -600,9 +628,9 @@ fn tasks_are_written_on_a_device_over_tcp() {
 
     let args = ["--device", "Lab", "task", "create", "--title", "Remote"];
     let created = ok(run(&args), &args);
-    assert_eq!(created["task"], 1);
+    let remote = id(&created);
     let args = ["--device", "Lab", "task", "list"];
-    assert_eq!(ids(&ok(run(&args), &args)), [1]);
+    assert_eq!(ids(&ok(run(&args), &args)), [remote.as_str()]);
     let args = ["--device", "Lab", "task", "get"];
     assert_eq!(err(run(&args), &args), "no_current_pane");
     let args = ["task", "list"];

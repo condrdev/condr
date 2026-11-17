@@ -42,17 +42,41 @@ pub mod task_error {
     pub const INTERNAL_ERROR: &str = "internal_error";
 }
 
-/// A Task's number, per Device and never reused.
+/// A Task's id: a UUIDv7 its Server gives it, unique across Devices and ordered by when
+/// it was made (ADR 0068). It reads as the hyphenated lowercase form.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct TaskId(u64);
+pub struct TaskId(uuid::Uuid);
 
 impl TaskId {
-    pub const fn from_u64(value: u64) -> Self {
-        Self(value)
+    pub const fn from_bytes(bytes: [u8; 16]) -> Self {
+        Self(uuid::Uuid::from_bytes(bytes))
     }
 
-    pub const fn as_u64(self) -> u64 {
-        self.0
+    pub const fn as_bytes(&self) -> &[u8; 16] {
+        self.0.as_bytes()
+    }
+
+    pub const fn from_uuid(id: uuid::Uuid) -> Self {
+        Self(id)
+    }
+
+    /// The id whose 128 bits are `value`, for tests and fixtures.
+    pub const fn from_u128(value: u128) -> Self {
+        Self(uuid::Uuid::from_u128(value))
+    }
+}
+
+impl std::fmt::Display for TaskId {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.hyphenated().fmt(formatter)
+    }
+}
+
+impl std::str::FromStr for TaskId {
+    type Err = uuid::Error;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        text.parse().map(Self)
     }
 }
 
@@ -309,7 +333,7 @@ mod tests {
     #[test]
     fn a_status_follows_from_the_fields() {
         let mut task = Task {
-            id: TaskId::from_u64(1),
+            id: TaskId::from_u128(1),
             title: "t".into(),
             description: Some("d".into()),
             repository: None,

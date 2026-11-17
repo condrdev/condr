@@ -432,9 +432,9 @@ fn a_watched_set_and_a_terminal_record_without_a_view_round_trip() {
     );
 }
 
-fn task(id: u64, description: Option<&str>) -> crate::Task {
+fn task(id: u128, description: Option<&str>) -> crate::Task {
     crate::Task {
-        id: crate::TaskId::from_u64(id),
+        id: crate::TaskId::from_u128(id),
         title: "Fix the login bug".into(),
         description: description.map(str::to_owned),
         repository: Some("/src/api".into()),
@@ -470,13 +470,13 @@ fn tasks_round_trip_in_records_events_requests_and_replies() {
     for event in [
         SessionEvent::TaskChanged(task(3, None)),
         SessionEvent::TaskRemoved {
-            task: crate::TaskId::from_u64(3),
+            task: crate::TaskId::from_u128(3),
         },
     ] {
         let wire = super::SessionEvent::try_from(&event).unwrap();
         assert_eq!(SessionEvent::try_from(wire).unwrap(), event);
     }
-    let id = crate::TaskId::from_u64(4);
+    let id = crate::TaskId::from_u128(4);
     for command in [
         crate::TaskCommand::Create {
             title: "t".into(),
@@ -574,7 +574,7 @@ fn a_start_with_an_unknown_agent_is_an_unknown_request() {
             request_id: 1,
             command: Some(super::TaskCommand {
                 command: Some(task_command::Command::Start(TaskStart {
-                    task: 1,
+                    task: vec![1; 16],
                     place: None,
                     agent: 99,
                 })),

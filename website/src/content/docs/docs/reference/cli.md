@@ -293,7 +293,7 @@ condr agent hooks uninstall <kind>
 
 ### `task`
 
-Tasks are written-down work an Agent starts on (see [Tasks](/docs/using/tasks/)). Each Device's Server keeps its own; `<id>` is a Task's number on that Device. Run inside a Pane, an omitted `<id>` means the Task holding that Pane's Workspace.
+Tasks are written-down work an Agent starts on (see [Tasks](/docs/using/tasks/)). Each Device's Server keeps its own; `<id>` is a Task's id, the whole UUID `task create` and `task list` print. Run inside a Pane, an omitted `<id>` means the Task holding that Pane's Workspace.
 
 ```bash
 # List the Tasks to do and started; --archived lists the archived ones (no descriptions in a list)

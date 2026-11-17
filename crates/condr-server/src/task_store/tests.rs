@@ -35,9 +35,9 @@ impl Drop for TestDirectory {
     }
 }
 
-fn task(id: u64, title: &str, order: i64) -> Task {
+fn task(id: u128, title: &str, order: i64) -> Task {
     Task {
-        id: TaskId::from_u64(id),
+        id: TaskId::from_u128(id),
         title: title.into(),
         description: Some(format!("{title}, in detail\nover two lines")),
         repository: Some("/src/api".into()),
@@ -65,11 +65,10 @@ fn sorted(mut tasks: Vec<Task>) -> Vec<Task> {
 /// ADR 0068: what the Server writes is what it reads back after a restart: created,
 /// edited, reordered, archived, restored and deleted Tasks, links and last places.
 #[test]
-fn the_store_keeps_every_change_across_a_restart_and_never_reuses_a_number() {
+fn the_store_keeps_every_change_across_a_restart() {
     let directory = TestDirectory::new();
     let mut opened = TaskStore::open(&directory.store()).unwrap();
     assert!(opened.tasks.is_empty());
-    assert_eq!(opened.next_id, 1);
 
     let mut first = task(1, "Fix the login bug", 0);
     let mut second = task(2, "修复输入法", -1);
@@ -103,10 +102,6 @@ fn the_store_keeps_every_change_across_a_restart_and_never_reuses_a_number() {
         sorted(reopened.tasks.clone()),
         vec![first.clone(), second.clone()]
     );
-    assert_eq!(
-        reopened.next_id, 4,
-        "a deleted Task's number does not return"
-    );
     assert!(directory.set_aside().is_empty());
 
     second.archived = false;
@@ -117,28 +112,25 @@ fn the_store_keeps_every_change_across_a_restart_and_never_reuses_a_number() {
     assert_eq!(sorted(restored.tasks.clone()), vec![first, second]);
 }
 
-/// ADR 0068 and 0028: a store from a newer Server, or one that is not a database, is
-/// renamed aside, never overwritten, and the Server starts with no Tasks.
+/// ADR 0068 and 0028: a store from a newer Server, or from an early build that numbered
+/// its Tasks, or one that is not a database, is renamed aside, never overwritten, and the
+/// Server starts with no Tasks.
 #[test]
-fn a_newer_or_unreadable_store_is_set_aside_and_tasks_start_empty() {
-    let directory = TestDirectory::new();
-    {
-        let newer = Connection::open(directory.store()).unwrap();
-        newer
-            .pragma_update(None, "user_version", SCHEMA_VERSION + 1)
-            .unwrap();
+fn a_newer_older_or_unreadable_store_is_set_aside_and_tasks_start_empty() {
+    for version in [SCHEMA_VERSION + 1, SCHEMA_VERSION - 1] {
+        let directory = TestDirectory::new();
+        {
+            let other = Connection::open(directory.store()).unwrap();
+            other.pragma_update(None, "user_version", version).unwrap();
+        }
+        let opened = TaskStore::open(&directory.store()).unwrap();
+        assert!(opened.tasks.is_empty());
+        let aside = directory.set_aside();
+        assert_eq!(aside.len(), 1);
+        assert_eq!(user_version(&aside[0]), version, "left as it was");
+        drop(opened);
+        assert_eq!(user_version(&directory.store()), SCHEMA_VERSION);
     }
-    let opened = TaskStore::open(&directory.store()).unwrap();
-    assert!(opened.tasks.is_empty());
-    let aside = directory.set_aside();
-    assert_eq!(aside.len(), 1);
-    assert_eq!(
-        user_version(&aside[0]),
-        SCHEMA_VERSION + 1,
-        "left as it was"
-    );
-    drop(opened);
-    assert_eq!(user_version(&directory.store()), SCHEMA_VERSION);
 
     let directory = TestDirectory::new();
     fs::write(directory.store(), b"not a database, just text").unwrap();

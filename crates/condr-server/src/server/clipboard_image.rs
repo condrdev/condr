@@ -135,7 +135,7 @@ mod tests {
 
     #[test]
     fn staged_files_are_unique_private_and_swept_when_stale() {
-        let directory = std::env::temp_dir().join(format!("condr-images-{}", uuid::Uuid::new_v4()));
+        let directory = std::env::temp_dir().join(format!("condr-images-{}", uuid::Uuid::now_v7()));
         let first = stage_in(&directory, 7, ClipboardImageFormat::Png, b"one").unwrap();
         let second = stage_in(&directory, 7, ClipboardImageFormat::Jpeg, b"two").unwrap();
         assert_ne!(first, second);
@@ -181,7 +181,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn staging_rejects_a_symlink_directory() {
-        let root = std::env::temp_dir().join(format!("condr-images-{}", uuid::Uuid::new_v4()));
+        let root = std::env::temp_dir().join(format!("condr-images-{}", uuid::Uuid::now_v7()));
         fs::create_dir(&root).unwrap();
         let link = root.join("link");
         std::os::unix::fs::symlink(&root, &link).unwrap();

@@ -102,7 +102,7 @@ unicode-properties = { version = "0.1", default-features = false, features = ["e
 toml = "1.0"
 # Format-preserving writes, so a hand-edited config.toml keeps its comments.
 toml_edit = "0.25"
-uuid = { version = "1", features = ["v4"] }
+uuid = "1"
 notify = "8"
 portable-pty = "0.9.0"
 sysinfo = "0.31.4"

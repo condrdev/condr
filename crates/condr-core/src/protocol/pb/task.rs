@@ -7,9 +7,20 @@ use crate::{
     TaskId, TaskResponse, WorkspaceId,
 };
 
+/// A Task's id on the wire: its UUID's 16 bytes.
+pub(super) fn task_id_bytes(id: &TaskId) -> Vec<u8> {
+    id.as_bytes().to_vec()
+}
+
+pub(super) fn decode_task_id(bytes: Vec<u8>) -> WireResult<TaskId> {
+    <[u8; 16]>::try_from(bytes.as_slice())
+        .map(TaskId::from_bytes)
+        .map_err(|_| malformed("a Task id is not 16 bytes"))
+}
+
 pub(super) fn encode_task(task: &Task) -> Result<super::Task, String> {
     Ok(super::Task {
-        id: task.id.as_u64(),
+        id: task_id_bytes(&task.id),
         title: task.title.clone(),
         description: task.description.clone(),
         repository: optional_path_text(task.repository.as_ref())?,
@@ -43,7 +54,7 @@ pub(super) fn decode_task(task: super::Task) -> WireResult<Task> {
         return Err(malformed("a Task description exceeds 64 KiB"));
     }
     Ok(Task {
-        id: TaskId::from_u64(task.id),
+        id: decode_task_id(task.id)?,
         title: task.title,
         description: task.description,
         repository: task.repository.map(PathBuf::from),
@@ -94,7 +105,7 @@ impl TryFrom<&TaskCommand> for super::TaskCommand {
                     description,
                     repository,
                 } => Command::Edit(TaskEdit {
-                    task: task.as_u64(),
+                    task: task_id_bytes(task),
                     title: title.clone(),
                     description: description.clone(),
                     repository: repository
@@ -106,27 +117,27 @@ impl TryFrom<&TaskCommand> for super::TaskCommand {
                         })
                         .transpose()?,
                 }),
-                TaskCommand::Delete { task } => Command::Delete(task.as_u64()),
+                TaskCommand::Delete { task } => Command::Delete(task_id_bytes(task)),
                 TaskCommand::Archive {
                     task,
                     close_workspace,
                     remove_worktree,
                 } => Command::Archive(TaskArchive {
-                    task: task.as_u64(),
+                    task: task_id_bytes(task),
                     close_workspace: *close_workspace,
                     remove_worktree: *remove_worktree,
                 }),
-                TaskCommand::Restore { task } => Command::Restore(task.as_u64()),
+                TaskCommand::Restore { task } => Command::Restore(task_id_bytes(task)),
                 TaskCommand::Reorder { task, index } => Command::Reorder(TaskReorder {
-                    task: task.as_u64(),
+                    task: task_id_bytes(task),
                     index: *index,
                 }),
-                TaskCommand::Get { task } => Command::Get(task.as_u64()),
+                TaskCommand::Get { task } => Command::Get(task_id_bytes(task)),
                 TaskCommand::List { archived } => Command::List(TaskList {
                     archived: *archived,
                 }),
                 TaskCommand::Start { task, place, agent } => Command::Start(TaskStart {
-                    task: task.as_u64(),
+                    task: task_id_bytes(task),
                     place: place.as_ref().map(|place| {
                         use start_place::Place;
                         super::StartPlace {
@@ -155,7 +166,7 @@ impl TryFrom<super::TaskCommand> for TaskCommand {
 
     fn try_from(command: super::TaskCommand) -> WireResult<Self> {
         use task_command::Command;
-        let task = TaskId::from_u64;
+        let task = decode_task_id;
         Ok(match member(command.command)? {
             Command::Create(create) => Self::Create {
                 title: create.title,
@@ -163,30 +174,30 @@ impl TryFrom<super::TaskCommand> for TaskCommand {
                 repository: create.repository.map(PathBuf::from),
             },
             Command::Edit(edit) => Self::Edit {
-                task: task(edit.task),
+                task: task(edit.task)?,
                 title: edit.title,
                 description: edit.description,
                 repository: edit
                     .repository
                     .map(|repository| repository.path.map(PathBuf::from)),
             },
-            Command::Delete(id) => Self::Delete { task: task(id) },
+            Command::Delete(id) => Self::Delete { task: task(id)? },
             Command::Archive(archive) => Self::Archive {
-                task: task(archive.task),
+                task: task(archive.task)?,
                 close_workspace: archive.close_workspace,
                 remove_worktree: archive.remove_worktree,
             },
-            Command::Restore(id) => Self::Restore { task: task(id) },
+            Command::Restore(id) => Self::Restore { task: task(id)? },
             Command::Reorder(reorder) => Self::Reorder {
-                task: task(reorder.task),
+                task: task(reorder.task)?,
                 index: reorder.index,
             },
-            Command::Get(id) => Self::Get { task: task(id) },
+            Command::Get(id) => Self::Get { task: task(id)? },
             Command::List(list) => Self::List {
                 archived: list.archived,
             },
             Command::Start(start) => Self::Start {
-                task: task(start.task),
+                task: task(start.task)?,
                 place: start
                     .place
                     .map(|place| {

@@ -15,7 +15,7 @@ struct Home {
 
 impl Home {
     fn new() -> Self {
-        let root = std::env::temp_dir().join(format!("condr-install-{}", uuid::Uuid::new_v4()));
+        let root = std::env::temp_dir().join(format!("condr-install-{}", uuid::Uuid::now_v7()));
         fs::create_dir_all(root.join("home")).unwrap();
         Self { root }
     }

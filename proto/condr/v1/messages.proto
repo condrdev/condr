@@ -52,15 +52,16 @@ message TaskRequest {
   TaskCommand command = 3;
 }
 
+// A Task's id is its UUIDv7's 16 bytes.
 message TaskCommand {
   oneof command {
     TaskCreate create = 1;
     TaskEdit edit = 2;
-    uint64 delete = 3;
+    bytes delete = 3;
     TaskArchive archive = 4;
-    uint64 restore = 5;
+    bytes restore = 5;
     TaskReorder reorder = 6;
-    uint64 get = 7;
+    bytes get = 7;
     TaskList list = 8;
     TaskStart start = 9;
   }
@@ -74,7 +75,7 @@ message TaskCreate {
 
 // Absent fields stay as they are.
 message TaskEdit {
-  uint64 task = 1;
+  bytes task = 1;
   optional string title = 2;
   optional string description = 3;
   TaskRepository repository = 4;
@@ -86,13 +87,13 @@ message TaskRepository {
 }
 
 message TaskArchive {
-  uint64 task = 1;
+  bytes task = 1;
   bool close_workspace = 2;
   bool remove_worktree = 3;
 }
 
 message TaskReorder {
-  uint64 task = 1;
+  bytes task = 1;
   uint32 index = 2;
 }
 
@@ -101,7 +102,7 @@ message TaskList {
 }
 
 message TaskStart {
-  uint64 task = 1;
+  bytes task = 1;
   // Absent: the Server's default.
   StartPlace place = 2;
   AgentKind agent = 3;
@@ -122,7 +123,7 @@ message NewWorktree {
 
 // A Task (ADR 0068). The Bootstrap, events and lists carry it without its description.
 message Task {
-  uint64 id = 1;
+  bytes id = 1;
   string title = 2;
   optional string description = 3;
   optional string repository = 4;
@@ -806,8 +807,8 @@ message SessionEvent {
     // A Task was created or changed, without its description; only to a Client that said
     // `tasks` in Hello, every other one receives `omitted` in its place (ADR 0068).
     Task task_changed = 15;
-    // A Task was deleted. Sent like `task_changed`.
-    uint64 task_removed = 16;
+    // A Task was deleted, by its id. Sent like `task_changed`.
+    bytes task_removed = 16;
   }
 }
 

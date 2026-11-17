@@ -40,7 +40,7 @@ fn err(endpoint: &Path, args: &[&str]) -> Value {
 
 #[test]
 fn skill_prints_the_bundled_document_without_a_server() {
-    let root = std::env::temp_dir().join(format!("condr-skill-{}", uuid::Uuid::new_v4()));
+    let root = std::env::temp_dir().join(format!("condr-skill-{}", uuid::Uuid::now_v7()));
     let output = Command::new(env!("CARGO_BIN_EXE_condr"))
         .arg("--skill")
         .env("CONDR_SOCKET_PATH", root.join("absent.sock"))
@@ -67,7 +67,7 @@ fn skill_prints_the_bundled_document_without_a_server() {
 #[test]
 fn omp_hook_status_uses_the_native_config_root_and_agent_override() {
     let home = std::path::PathBuf::from(std::env::var_os("HOME").unwrap());
-    let name = format!(".condr-omp-path-test-{}", uuid::Uuid::new_v4());
+    let name = format!(".condr-omp-path-test-{}", uuid::Uuid::now_v7());
     let mut command = Command::new(env!("CARGO_BIN_EXE_condr"));
     command.args(["agent", "hooks", "status", "omp"]);
     let status_path = |command: &mut Command| {
@@ -466,7 +466,7 @@ fn a_missing_server_is_a_json_error() {
 /// store first converts the line file, whether it lists the devices or revokes one.
 #[test]
 fn the_offline_cli_converts_the_authorized_line_file() {
-    let root = std::env::temp_dir().join(format!("condr-authorized-{}", uuid::Uuid::new_v4()));
+    let root = std::env::temp_dir().join(format!("condr-authorized-{}", uuid::Uuid::now_v7()));
     let (config, data) = (root.join("config"), root.join("data"));
     let key = condr_server::noise::PublicKey::from_bytes([0x55; 32]);
     let line = format!("{} 1 2 old laptop\n", key.to_hex());

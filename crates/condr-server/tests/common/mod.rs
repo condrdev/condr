@@ -7,5 +7,6 @@
 /// rather than the whole UUID: `sun_path` holds 104 bytes on macOS, and the temporary
 /// directory there already takes half of them.
 pub fn unique_suffix() -> String {
-    format!("{:08x}", uuid::Uuid::new_v4().as_u128() as u32)
+    // The low bits: a UUIDv7 leads with the time, so only these are random.
+    format!("{:08x}", uuid::Uuid::now_v7().as_u128() as u32)
 }

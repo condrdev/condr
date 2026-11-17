@@ -2645,9 +2645,9 @@ mod tests {
     use std::collections::BTreeMap;
     use std::path::PathBuf;
 
-    fn task(id: u64, repository: Option<&str>, workspace: Option<WorkspaceId>) -> Task {
+    fn task(id: u128, repository: Option<&str>, workspace: Option<WorkspaceId>) -> Task {
         Task {
-            id: TaskId::from_u64(id),
+            id: TaskId::from_u128(id),
             title: format!("task {id}"),
             description: None,
             repository: repository.map(PathBuf::from),

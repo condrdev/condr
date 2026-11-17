@@ -1518,10 +1518,10 @@ impl Condr {
             this.click_todo_card(key, id, window, cx)
         });
         let theme = cx.theme().clone();
-        let selector = format!("tasks-todo-{key}-{}", id.as_u64());
+        let selector = format!("tasks-todo-{key}-{}", id);
         let starting = task.starting.then(|| {
             div()
-                .debug_selector(move || format!("tasks-todo-starting-{key}-{}", id.as_u64()))
+                .debug_selector(move || format!("tasks-todo-starting-{key}-{}", id))
                 .flex_none()
                 .text_xs()
                 .text_color(theme.muted_foreground)
@@ -1620,7 +1620,7 @@ impl Condr {
         );
         let row = list_row(
             fit,
-            format!("tasks-todo-{key}-{}", id.as_u64()),
+            format!("tasks-todo-{key}-{}", id),
             Icon::new(CondrIconName::Circle)
                 .size_3p5()
                 .text_color(theme.muted_foreground),
@@ -1712,7 +1712,7 @@ impl Condr {
         let (restore_owner, delete_owner) = (cx.weak_entity(), cx.weak_entity());
         let title = task.title.clone();
         h_flex()
-            .debug_selector(move || format!("tasks-archived-{key}-{}", id.as_u64()))
+            .debug_selector(move || format!("tasks-archived-{key}-{}", id))
             .w_full()
             .gap_1()
             .pl(rems(1.))
@@ -1727,24 +1727,21 @@ impl Condr {
                     .child(task.title.clone()),
             )
             .child(
-                Button::new(SharedString::from(format!(
-                    "tasks-restore-{key}-{}",
-                    id.as_u64()
-                )))
-                .debug_selector(move || format!("tasks-restore-{key}-{}", id.as_u64()))
-                .ghost()
-                .xsmall()
-                .label(t!("tasks.todo.restore"))
-                .on_click(move |_, _, cx| {
-                    let _ = restore_owner.update(cx, |this, cx| this.restore_task(key, id, cx));
-                }),
+                Button::new(SharedString::from(format!("tasks-restore-{key}-{}", id)))
+                    .debug_selector(move || format!("tasks-restore-{key}-{}", id))
+                    .ghost()
+                    .xsmall()
+                    .label(t!("tasks.todo.restore"))
+                    .on_click(move |_, _, cx| {
+                        let _ = restore_owner.update(cx, |this, cx| this.restore_task(key, id, cx));
+                    }),
             )
             .child(
                 Button::new(SharedString::from(format!(
                     "tasks-archived-delete-{key}-{}",
-                    id.as_u64()
+                    id
                 )))
-                .debug_selector(move || format!("tasks-archived-delete-{key}-{}", id.as_u64()))
+                .debug_selector(move || format!("tasks-archived-delete-{key}-{}", id))
                 .ghost()
                 .xsmall()
                 .label(t!("tasks.form.delete"))
@@ -1810,7 +1807,7 @@ impl Condr {
             this.click_task_card(key, pane_id, Some(task), window, cx)
         });
         let theme = cx.theme().clone();
-        let selector = format!("tasks-task-{key}-{}", task.as_u64());
+        let selector = format!("tasks-task-{key}-{}", task);
         let mark = Icon::new(CondrIconName::Circle)
             .size_3p5()
             .text_color(card.status.tone.color(cx));
@@ -1916,7 +1913,7 @@ impl Condr {
             .unwrap_or_default();
         list_row(
             fit,
-            format!("tasks-task-{key}-{}", task.as_u64()),
+            format!("tasks-task-{key}-{}", task),
             Icon::new(CondrIconName::Circle)
                 .size_3p5()
                 .text_color(card.status.tone.color(cx)),

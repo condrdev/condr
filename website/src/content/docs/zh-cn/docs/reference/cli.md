@@ -292,7 +292,7 @@ condr agent hooks uninstall <种类>
 
 ### `task`
 
-任务是写下来、由 Agent 去做的事（参见[任务](/zh-cn/docs/using/tasks/)）。每台设备的 Server 各自保存自己的任务；`<id>` 是任务在那台设备上的编号。在 Pane 里运行时，省略 `<id>` 表示这个 Pane 所在 Workspace 的任务。
+任务是写下来、由 Agent 去做的事（参见[任务](/zh-cn/docs/using/tasks/)）。每台设备的 Server 各自保存自己的任务；`<id>` 是任务的 id，即 `task create` 和 `task list` 打印的完整 UUID。在 Pane 里运行时，省略 `<id>` 表示这个 Pane 所在 Workspace 的任务。
 
 ```bash
 # 列出待办和已开始的任务；--archived 列出已归档的（列表里不含描述）

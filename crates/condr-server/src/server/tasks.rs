@@ -11,7 +11,6 @@ use std::collections::{BTreeMap, HashMap};
 pub(super) struct Tasks {
     /// Every Task, archived ones included, each with its description.
     items: BTreeMap<TaskId, Task>,
-    next_id: u64,
     #[cfg(feature = "tasks")]
     store: Option<crate::task_store::TaskStore>,
     /// Where each Task's file goes once it starts: `<data directory>/tasks`.
@@ -32,7 +31,6 @@ impl Tasks {
     pub(super) fn in_memory(files: PathBuf) -> Self {
         Self {
             items: BTreeMap::new(),
-            next_id: 1,
             #[cfg(feature = "tasks")]
             store: None,
             files,
@@ -66,7 +64,6 @@ impl Tasks {
                         .into_iter()
                         .map(|task| (task.id, task))
                         .collect();
-                    tasks.next_id = opened.next_id;
                     tasks.store = Some(opened.store);
                 }
                 Err(error) => tracing::error!(
@@ -98,7 +95,7 @@ impl Tasks {
     }
 
     pub(super) fn file(&self, id: TaskId) -> PathBuf {
-        self.files.join(format!("{}.md", id.as_u64()))
+        self.files.join(format!("{id}.md"))
     }
 
     /// The Task that holds `workspace_id`, or a Start under way that chose it.
@@ -142,7 +139,7 @@ impl Tasks {
 fn not_found(id: TaskId) -> TaskError {
     TaskError::new(
         task_error::TASK_NOT_FOUND,
-        format!("no Task {} on this Device", id.as_u64()),
+        format!("no Task {id} on this Device"),
     )
 }
 
@@ -246,7 +243,7 @@ impl RuntimeState {
                 task.last = last;
             }
             tracing::info!(
-                task = id.as_u64(),
+                task = %id,
                 workspace = workspace_id.as_u64(),
                 "a Task's Workspace closed; it is back in To do"
             );
@@ -288,8 +285,7 @@ impl RuntimeState {
                     self.valid_repository(repository)?;
                 }
                 let tasks = self.tasks_mut();
-                let id = TaskId::from_u64(tasks.next_id);
-                tasks.next_id += 1;
+                let id = TaskId::from_uuid(uuid::Uuid::now_v7());
                 let task = Task {
                     id,
                     title,
@@ -448,10 +444,7 @@ fn stopping_server() -> TaskError {
 }
 
 fn starting(id: TaskId) -> TaskError {
-    TaskError::new(
-        task_error::TASK_STARTING,
-        format!("Task {} is starting", id.as_u64()),
-    )
+    TaskError::new(task_error::TASK_STARTING, format!("Task {id} is starting"))
 }
 
 /// Refuses a Task that is starting or started, which only archiving ends.
@@ -462,7 +455,7 @@ fn refuse_busy(task: &Task) -> Result<(), TaskError> {
     if task.workspace.is_some() {
         return Err(TaskError::new(
             task_error::TASK_STARTED,
-            format!("Task {} is started; archive it first", task.id.as_u64()),
+            format!("Task {} is started; archive it first", task.id),
         ));
     }
     Ok(())
@@ -609,7 +602,7 @@ pub(super) fn archive_and_close(
         let closed = answer_or_fail(|| layouts.apply(command), Err);
         if let Err(error) = closed {
             tracing::warn!(
-                task = id.as_u64(),
+                task = %id,
                 "the archived Task's Workspace stays open: {error}"
             );
         }

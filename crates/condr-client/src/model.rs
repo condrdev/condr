@@ -551,7 +551,7 @@ mod tests {
     #[test]
     fn tasks_follow_the_bootstrap_and_their_events() {
         let task = |id, archived| Task {
-            id: TaskId::from_u64(id),
+            id: TaskId::from_u128(id),
             title: "t".into(),
             description: None,
             repository: None,
@@ -588,10 +588,10 @@ mod tests {
             model
                 .workspace_task(WorkspaceId::from_u64(9))
                 .map(|task| task.id),
-            Some(TaskId::from_u64(2))
+            Some(TaskId::from_u128(2))
         );
         model.apply_task(task(2, true));
-        model.remove_task(TaskId::from_u64(1));
+        model.remove_task(TaskId::from_u128(1));
         assert_eq!(model.tasks, Some(BTreeMap::new()));
     }
 }

@@ -16,7 +16,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 /// The schema this build writes, kept in `PRAGMA user_version`.
-pub(crate) const SCHEMA_VERSION: i64 = 1;
+pub(crate) const SCHEMA_VERSION: i64 = 2;
 const DEBOUNCE: Duration = Duration::from_millis(100);
 const RETRY_DELAY: Duration = Duration::from_secs(1);
 const SHUTDOWN_RETRY_DELAY: Duration = Duration::from_millis(50);
@@ -24,7 +24,7 @@ const SHUTDOWN_WRITE_ATTEMPTS: usize = 4;
 
 const SCHEMA: &str = "
 CREATE TABLE tasks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
     description TEXT NOT NULL,
     repository TEXT,
@@ -65,8 +65,6 @@ pub(crate) struct OpenedTasks {
     pub(crate) store: TaskStore,
     /// Every Task, archived ones included, with its description.
     pub(crate) tasks: Vec<Task>,
-    /// Above every number the store ever gave, deleted ones included.
-    pub(crate) next_id: u64,
 }
 
 impl TaskStore {
@@ -82,7 +80,7 @@ impl TaskStore {
         }
         // SQLite gives its log files the database's permissions.
         crate::persistence::private_file_options().open(path)?;
-        let (connection, tasks, next_id) = match load(path) {
+        let (connection, tasks) = match load(path) {
             Ok(loaded) => loaded,
             Err(LoadError::Unreadable(reason)) => {
                 let aside = set_aside(path)?;
@@ -118,7 +116,6 @@ impl TaskStore {
                 worker: Some(worker),
             },
             tasks,
-            next_id,
         })
     }
 
@@ -192,7 +189,7 @@ fn sqlite(error: rusqlite::Error) -> LoadError {
 }
 
 /// Opens and reads the database, creating its schema in a new one, and takes its lock.
-fn load(path: &Path) -> Result<(Connection, Vec<Task>, u64), LoadError> {
+fn load(path: &Path) -> Result<(Connection, Vec<Task>), LoadError> {
     let connection = Connection::open(path).map_err(sqlite)?;
     // Another Server holds its lock for as long as it runs: waiting would not help.
     connection.busy_timeout(Duration::ZERO).map_err(sqlite)?;
@@ -207,9 +204,11 @@ fn load(path: &Path) -> Result<(Connection, Vec<Task>, u64), LoadError> {
     let version: i64 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(sqlite)?;
-    if version > SCHEMA_VERSION {
+    // A newer build's, or an early one's that numbered its Tasks: there is no migration
+    // before the first release.
+    if version != 0 && version != SCHEMA_VERSION {
         return Err(LoadError::Unreadable(format!(
-            "its schema version {version} is newer than this Server's {SCHEMA_VERSION}"
+            "its schema version {version} is not this Server's {SCHEMA_VERSION}"
         )));
     }
     connection
@@ -237,7 +236,13 @@ fn load(path: &Path) -> Result<(Connection, Vec<Task>, u64), LoadError> {
             .query_map([], |row| {
                 let last_path: Option<String> = row.get(7)?;
                 Ok(Task {
-                    id: TaskId::from_u64(row.get::<_, i64>(0)? as u64),
+                    id: row.get::<_, String>(0)?.parse().map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            0,
+                            rusqlite::types::Type::Text,
+                            Box::new(error),
+                        )
+                    })?,
                     title: row.get(1)?,
                     description: Some(row.get(2)?),
                     repository: row.get::<_, Option<String>>(3)?.map(PathBuf::from),
@@ -263,17 +268,7 @@ fn load(path: &Path) -> Result<(Connection, Vec<Task>, u64), LoadError> {
             .map_err(sqlite)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(sqlite)?
     };
-    // Ids are stored as SQLite's signed integers, bit for bit.
-    // AUTOINCREMENT keeps the highest number ever given, so a deleted Task's never returns.
-    let sequence: i64 = connection
-        .query_row(
-            "SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'tasks'), 0)",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(sqlite)?;
-    let highest = tasks.iter().map(|task| task.id.as_u64()).max().unwrap_or(0);
-    Ok((connection, tasks, (sequence as u64).max(highest) + 1))
+    Ok((connection, tasks))
 }
 
 /// Renames the database and its WAL files to `<file>.unreadable-<unix seconds>`, so a new
@@ -354,7 +349,7 @@ fn write(connection: &mut Connection, writes: &Writes) -> rusqlite::Result<()> {
     let transaction = connection.transaction()?;
     for (id, task) in writes {
         let Some(task) = task else {
-            transaction.execute("DELETE FROM tasks WHERE id = ?1", [id.as_u64() as i64])?;
+            transaction.execute("DELETE FROM tasks WHERE id = ?1", [id.to_string()])?;
             continue;
         };
         let last = task.last.as_ref();
@@ -364,7 +359,7 @@ fn write(connection: &mut Connection, writes: &Writes) -> rusqlite::Result<()> {
              last_repository, made_workspace) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
-                id.as_u64() as i64,
+                id.to_string(),
                 task.title,
                 task.description.as_deref().unwrap_or_default(),
                 text(&task.repository),
@@ -378,19 +373,6 @@ fn write(connection: &mut Connection, writes: &Writes) -> rusqlite::Result<()> {
                 last.and_then(|last| text(&last.repository)),
                 task.made_workspace,
             ],
-        )?;
-    }
-    // A Task created and deleted between two writes never reaches the table; its number
-    // was still given out, so the sequence keeps it.
-    if let Some(highest) = writes.keys().next_back() {
-        transaction.execute(
-            "INSERT INTO sqlite_sequence (name, seq) SELECT 'tasks', 0 \
-             WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = 'tasks')",
-            [],
-        )?;
-        transaction.execute(
-            "UPDATE sqlite_sequence SET seq = MAX(seq, ?1) WHERE name = 'tasks'",
-            [highest.as_u64() as i64],
         )?;
     }
     transaction.commit()

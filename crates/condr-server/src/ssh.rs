@@ -327,7 +327,7 @@ mod tests {
     #[test]
     fn binary_is_one_literal_shell_word() {
         use std::os::unix::fs::PermissionsExt;
-        let directory = std::env::temp_dir().join(format!("condr-ssh-{}", uuid::Uuid::new_v4()));
+        let directory = std::env::temp_dir().join(format!("condr-ssh-{}", uuid::Uuid::now_v7()));
         std::fs::create_dir(&directory).unwrap();
         let binary = directory.join("a 'quoted' \"$(echo injected)\"; binary");
         std::fs::write(&binary, "#!/bin/sh\nprintf '%s\\n' \"$0\" \"$@\"\n").unwrap();
@@ -352,7 +352,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn multiplexing_defers_to_a_configured_control_path_and_otherwise_adds_its_own() {
-        let path = std::env::temp_dir().join(format!("condr-ssh-mux-{}", uuid::Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!("condr-ssh-mux-{}", uuid::Uuid::now_v7()));
         let endpoint = SshEndpoint::parse("ssh://mux-target").unwrap();
 
         std::fs::write(
@@ -395,7 +395,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn ssh_config_preserves_routes_but_cannot_replace_the_bridge_session() {
-        let path = std::env::temp_dir().join(format!("condr-ssh-config-{}", uuid::Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!("condr-ssh-config-{}", uuid::Uuid::now_v7()));
         std::fs::write(&path, "Host review-target\n HostName example.invalid\n User configured-user\n Port 2222\n IdentityFile /configured/key\n ProxyJump jump-host\n StrictHostKeyChecking yes\n RemoteCommand tmux\n SessionType none\n StdinNull yes\n ForkAfterAuthentication yes\n LocalForward 8080 localhost:80\n RemoteForward 9090 localhost:90\n DynamicForward 1080\n ControlMaster auto\n ControlPersist 60\n").unwrap();
         let mut command = Command::new("ssh");
         command.arg("-G").arg("-F").arg(&path);

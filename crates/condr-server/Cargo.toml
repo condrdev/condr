@@ -43,10 +43,11 @@ notify.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 tracing-appender.workspace = true
+# A Task's id (ADR 0068), and unique names for temporary files.
+uuid = { workspace = true, features = ["v7"] }
 
 [dev-dependencies]
 prost.workspace = true
-uuid.workspace = true
 
 [build-dependencies]
 dirs.workspace = true

@@ -50,6 +50,7 @@ toml = { workspace = true, optional = true }
 toml_edit = { workspace = true, optional = true }
 tracing.workspace = true
 url.workspace = true
+uuid.workspace = true
 
 [build-dependencies]
 prost-build.workspace = true

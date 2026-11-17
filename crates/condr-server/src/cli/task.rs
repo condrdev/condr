@@ -14,7 +14,7 @@ pub(crate) enum TaskCommand {
     /// Show one Task with its description
     Get {
         /// Task id; inside a Pane, the Task holding its Workspace
-        task: Option<u64>,
+        task: Option<TaskId>,
     },
     /// Write a Task; it heads To do
     Create {
@@ -30,7 +30,7 @@ pub(crate) enum TaskCommand {
     /// Change a Task's title, description or repository
     Edit {
         /// Task id; inside a Pane, the Task holding its Workspace
-        task: Option<u64>,
+        task: Option<TaskId>,
         #[arg(long, value_name = "TEXT")]
         title: Option<String>,
         #[command(flatten)]
@@ -42,7 +42,7 @@ pub(crate) enum TaskCommand {
     /// Start an Agent on a To do Task; without a place, where the GUI would start it
     Start {
         /// Task id; inside a Pane, the Task holding its Workspace
-        task: Option<u64>,
+        task: Option<TaskId>,
         /// Agent kind (see `condr agent available`)
         #[arg(long)]
         kind: String,
@@ -63,7 +63,7 @@ pub(crate) enum TaskCommand {
     /// Archive a Task; its Workspace stays open unless told
     Archive {
         /// Task id; inside a Pane, the Task holding its Workspace
-        task: Option<u64>,
+        task: Option<TaskId>,
         /// Close the started Task's Workspace and stop its terminals
         #[arg(long)]
         close_workspace: bool,
@@ -74,12 +74,12 @@ pub(crate) enum TaskCommand {
     /// Put an archived Task back in To do
     Restore {
         /// Task id; inside a Pane, the Task holding its Workspace
-        task: Option<u64>,
+        task: Option<TaskId>,
     },
     /// Delete a To do or archived Task for good
     Delete {
         /// Task id; inside a Pane, the Task holding its Workspace
-        task: Option<u64>,
+        task: Option<TaskId>,
     },
 }
 
@@ -146,7 +146,7 @@ fn one(response: TaskResponse) -> Result<Value, CliError> {
 /// does and `list` does not.
 fn task_info(task: &Task) -> Value {
     let mut info = json!({
-        "task": task.id.as_u64(),
+        "task": task.id.to_string(),
         "title": task.title,
         "status": task.status().as_str(),
         "repository": task.repository,
@@ -168,10 +168,10 @@ fn task_info(task: &Task) -> Value {
 fn task_id(
     client: &mut ClientConnection,
     device: Option<&str>,
-    id: Option<u64>,
+    id: Option<TaskId>,
 ) -> Result<TaskId, CliError> {
     if let Some(id) = id {
-        return Ok(TaskId::from_u64(id));
+        return Ok(id);
     }
     let pane = PaneId::from_u64(super::pane::caller_pane(device)?);
     let workspace = client

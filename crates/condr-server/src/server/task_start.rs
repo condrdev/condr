@@ -169,7 +169,7 @@ fn run(
     if let Err(failure) = &result {
         undo_failed(state, made, lifecycle.is_stopping());
         tracing::info!(
-            task = id.as_u64(),
+            task = %id,
             step = failure.step.as_deref().unwrap_or(""),
             code = %failure.code,
             "a Task did not start: {}",
@@ -190,13 +190,13 @@ fn startable(task: &condr_core::Task) -> Result<(), TaskError> {
     if task.starting {
         return Err(error(
             task_error::TASK_STARTING,
-            format!("Task {} is already starting", task.id.as_u64()),
+            format!("Task {} is already starting", task.id),
         ));
     }
     if task.workspace.is_some() {
         return Err(error(
             task_error::TASK_STARTED,
-            format!("Task {} is already started", task.id.as_u64()),
+            format!("Task {} is already started", task.id),
         ));
     }
     Ok(())
@@ -700,7 +700,7 @@ fn type_agent(
         task.last = last;
         state.task_changed(id);
         tracing::info!(
-            task = id.as_u64(),
+            task = %id,
             workspace = workspace_id.as_u64(),
             agent = agent.id(),
             "a Task started"

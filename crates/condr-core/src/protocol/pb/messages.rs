@@ -1481,7 +1481,7 @@ impl TryFrom<&SessionEvent> for super::SessionEvent {
                 tab_id: tab_id.map(TabId::as_u64),
             }),
             SessionEvent::TaskChanged(task) => Event::TaskChanged(encode_task(task)?),
-            SessionEvent::TaskRemoved { task } => Event::TaskRemoved(task.as_u64()),
+            SessionEvent::TaskRemoved { task } => Event::TaskRemoved(task::task_id_bytes(task)),
             SessionEvent::Omitted => Event::Omitted(Empty {}),
         };
         Ok(Self { event: Some(event) })
@@ -1547,7 +1547,7 @@ impl TryFrom<super::SessionEvent> for SessionEvent {
             },
             Event::TaskChanged(task) => Self::TaskChanged(decode_task(task)?),
             Event::TaskRemoved(id) => Self::TaskRemoved {
-                task: crate::TaskId::from_u64(id),
+                task: task::decode_task_id(id)?,
             },
             Event::Omitted(_) => Self::Omitted,
         })

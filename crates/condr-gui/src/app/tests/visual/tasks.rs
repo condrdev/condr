@@ -786,7 +786,7 @@ fn click(window: &mut VisualTestContext, selector: &'static str) {
 }
 
 fn todo_card(task: TaskId) -> &'static str {
-    leaked_selector(format!("tasks-todo-1-{}", task.as_u64()))
+    leaked_selector(format!("tasks-todo-1-{}", task))
 }
 
 fn form_home(window: &mut VisualTestContext, view: &Entity<Condr>) -> Option<(u64, TaskId)> {
@@ -1038,7 +1038,7 @@ fn a_new_task_saves_with_the_shortcut_and_unsaved_changes_ask_before_they_go() {
 
     // The Archived list unfolds with it, to restore.
     click(window, "tasks-archived");
-    let restore = leaked_selector(format!("tasks-restore-1-{}", other.as_u64()));
+    let restore = leaked_selector(format!("tasks-restore-1-{}", other));
     assert!(wait_until(window, |window| {
         draw(window);
         window.debug_bounds(restore).is_some()
@@ -1082,7 +1082,7 @@ fn a_form_closes_when_another_client_deletes_its_task_and_follows_one_that_start
     let mut task = gui_tasks(window, &view)[&started].clone();
     task.workspace = Some(workspace_id);
     event(window, &view, SessionEvent::TaskChanged(task));
-    let card = leaked_selector(format!("tasks-task-1-{}", started.as_u64()));
+    let card = leaked_selector(format!("tasks-task-1-{}", started));
     assert!(window.read(|app| view.read(app).task_form.is_none()));
     assert_eq!(
         window.read(|app| view.read(app).main_view().tasks_selection.unwrap().task),
@@ -1180,7 +1180,7 @@ fn start_takes_its_defaults_and_a_successful_start_selects_the_agent() {
     // Another Task holds it: greyed with that Task's title, and a new worktree on the
     // Server's branch is the default.
     let mut holder = gui_tasks(window, &view)[&task_id].clone();
-    holder.id = TaskId::from_u64(99);
+    holder.id = TaskId::from_u128(99);
     holder.title = "Another task".into();
     holder.workspace = Some(repository_workspace);
     put_task(window, &view, holder.clone());
@@ -1256,7 +1256,7 @@ fn start_takes_its_defaults_and_a_successful_start_selects_the_agent() {
         (Where::Existing, Some(other_workspace), false)
     );
     let mut second = holder.clone();
-    second.id = TaskId::from_u64(98);
+    second.id = TaskId::from_u128(98);
     second.workspace = Some(other_workspace);
     put_task(window, &view, second.clone());
     window.update(|_, cx| {
@@ -1323,7 +1323,7 @@ fn start_takes_its_defaults_and_a_successful_start_selects_the_agent() {
         window
             .debug_bounds(leaked_selector(format!(
                 "tasks-todo-starting-1-{}",
-                task_id.as_u64()
+                task_id
             )))
             .is_some()
     );
@@ -1358,7 +1358,7 @@ fn start_takes_its_defaults_and_a_successful_start_selects_the_agent() {
         },
     );
     assert!(window.read(|app| view.read(app).task_form.is_none()));
-    let task_card = leaked_selector(format!("tasks-task-1-{}", task_id.as_u64()));
+    let task_card = leaked_selector(format!("tasks-task-1-{}", task_id));
     assert!(inside(window, task_card, "tasks-column-working"));
     assert_eq!(target(window, &view), Some((1, pane_id)));
     // No Agent within the wait: "No agent running", and one toast for this Start.
@@ -1451,8 +1451,8 @@ fn archiving_a_started_task_closes_a_workspace_its_start_made_and_keeps_a_borrow
     // What the Server recorded at each Start's commit: a new worktree and a plain folder
     // opened again are the Start's own; an open Workspace, Managed Worktree or not, is
     // borrowed.
-    let task = |id: u64, workspace_id, made_workspace| condr_core::Task {
-        id: TaskId::from_u64(id),
+    let task = |id: u128, workspace_id, made_workspace| condr_core::Task {
+        id: TaskId::from_u128(id),
         title: format!("task {id}"),
         description: None,
         repository: Some(directory.0.clone()),
@@ -1491,7 +1491,7 @@ fn archiving_a_started_task_closes_a_workspace_its_start_made_and_keeps_a_borrow
     // own.
     let facts = window.read(|app| {
         view.read(app)
-            .archive_facts(1, TaskId::from_u64(1))
+            .archive_facts(1, TaskId::from_u128(1))
             .unwrap()
     });
     assert!(facts.created && facts.managed);
@@ -1510,7 +1510,7 @@ fn archiving_a_started_task_closes_a_workspace_its_start_made_and_keeps_a_borrow
                         remove_worktree,
                     },
                 ..
-            } => Some((task.as_u64(), close_workspace, remove_worktree)),
+            } => Some((task, close_workspace, remove_worktree)),
             _ => None,
         })
     };
@@ -1533,25 +1533,25 @@ fn archiving_a_started_task_closes_a_workspace_its_start_made_and_keeps_a_borrow
         (
             leaked_selector(format!("tasks-card-1-{}", in_made.as_u64())),
             true,
-            (1, true, false),
+            (TaskId::from_u128(1), true, false),
             "a new worktree its Start made closes by default; the worktree stays",
         ),
         (
-            "tasks-task-1-2",
+            leaked_selector(format!("tasks-task-1-{}", TaskId::from_u128(2))),
             true,
-            (2, false, false),
+            (TaskId::from_u128(2), false, false),
             "a borrowed Managed Worktree stays open by default",
         ),
         (
-            "tasks-task-1-3",
+            leaked_selector(format!("tasks-task-1-{}", TaskId::from_u128(3))),
             false,
-            (3, true, false),
+            (TaskId::from_u128(3), true, false),
             "a plain folder its Start opened again closes by default",
         ),
         (
-            "tasks-task-1-4",
+            leaked_selector(format!("tasks-task-1-{}", TaskId::from_u128(4))),
             false,
-            (4, false, false),
+            (TaskId::from_u128(4), false, false),
             "the repository's own Workspace, borrowed, stays open",
         ),
     ] {
@@ -1634,7 +1634,7 @@ fn a_new_device_for_a_to_do_task_creates_it_there_and_deletes_it_here() {
         .expect("the new Device is asked to create it");
     assert_eq!(description, "Fix the login redirect, described");
     let moved = condr_core::Task {
-        id: TaskId::from_u64(5),
+        id: TaskId::from_u128(5),
         title,
         description: Some(description),
         repository: None,
@@ -1668,14 +1668,14 @@ fn a_new_device_for_a_to_do_task_creates_it_there_and_deletes_it_here() {
         })
     });
     answer(window, request_id, Ok(TaskResponse::Task(moved)));
-    assert_eq!(form_home(window, &view), Some((2, TaskId::from_u64(5))));
+    assert_eq!(form_home(window, &view), Some((2, TaskId::from_u128(5))));
     assert!(
         wait_until(window, |window| gui_tasks(window, &view).is_empty()),
         "then the old Device deletes its copy"
     );
 
     // From a Device whose delete fails: both copies stay, and a toast says so.
-    let stay = |window: &mut VisualTestContext, id: u64| {
+    let stay = |window: &mut VisualTestContext, id: u128| {
         let mut task = moved_task(id);
         task.description = None;
         window.update(|_, cx| {
@@ -1685,7 +1685,7 @@ fn a_new_device_for_a_to_do_task_creates_it_there_and_deletes_it_here() {
         });
         window.update(|window, cx| {
             view.update(cx, |this, cx| {
-                this.open_task_form(2, TaskId::from_u64(id), window, cx)
+                this.open_task_form(2, TaskId::from_u128(id), window, cx)
             })
         });
         let get = box_sent
@@ -1712,7 +1712,7 @@ fn a_new_device_for_a_to_do_task_creates_it_there_and_deletes_it_here() {
                 request_id,
                 command: TaskCommand::Delete { task },
                 ..
-            } if task == TaskId::from_u64(7) => Some(request_id),
+            } if task == TaskId::from_u128(7) => Some(request_id),
             _ => None,
         })
         .expect("the old Device is asked to delete its copy");
@@ -1733,7 +1733,7 @@ fn a_new_device_for_a_to_do_task_creates_it_there_and_deletes_it_here() {
             .tasks
             .as_ref()
             .unwrap()
-            .contains_key(&TaskId::from_u64(7))
+            .contains_key(&TaskId::from_u128(7))
     });
     assert!(both, "the old copy stays beside the new one");
 
@@ -1752,9 +1752,9 @@ fn a_new_device_for_a_to_do_task_creates_it_there_and_deletes_it_here() {
 }
 
 /// A Task on the test's own second Device.
-fn moved_task(id: u64) -> condr_core::Task {
+fn moved_task(id: u128) -> condr_core::Task {
     condr_core::Task {
-        id: TaskId::from_u64(id),
+        id: TaskId::from_u128(id),
         title: format!("Moved {id}"),
         description: Some("Fix the login redirect, described".into()),
         repository: None,
