@@ -8,7 +8,8 @@
 //! ```
 //!
 //! It starts a TCP Server with one Workspace, opens Condr against it, and saves one PNG
-//! per state: the Workspace, the Command Palette's pages, the Ports page empty, with forwards, for one Device, the right
+//! per state: the Workspace, the Command Palette's pages, Tasks mode with Tasks and with an
+//! Agent in every column, the Ports page empty, with forwards, for one Device, the right
 //! sidebar's transfer strip, the left sidebar with its Device folded, and a finished
 //! download's toast. The website's screenshots come from the same window, in `website`.
 
@@ -289,6 +290,11 @@ pub(crate) fn run(directory: PathBuf) {
     });
     shot(&mut cx, window, &directory, "07-transfer-strip-folded");
 
+    // Before the Device drops, which leaves nothing to add Workspaces to.
+    agents(
+        &mut cx, window, &view, &mut admin, pane_id, &root, &directory,
+    );
+
     // The Device drops: its forwards wait, dimmed, on the Ports page.
     update(&mut cx, window, &view, |this, window, cx| {
         let _ = this.mark_disconnected(1, 0, "the network dropped".into());
@@ -377,6 +383,92 @@ fn tasks(
         this.toggle_tasks(window, cx);
     });
     shot(cx, window, directory, "10d-task-no-agent");
+    update(cx, window, view, |this, window, cx| {
+        this.toggle_tasks(window, cx)
+    });
+}
+
+/// Tasks mode with an Agent in every column (ADR 0068): the Board as Cards and Compact,
+/// the List, and a card's terminal in the interaction area. The Agents are put straight
+/// into the Client's model; nothing runs them.
+fn agents(
+    cx: &mut VisualTestAppContext,
+    window: AnyWindowHandle,
+    view: &Entity<Condr>,
+    admin: &mut ClientConnection,
+    first_pane: PaneId,
+    root: &std::path::Path,
+    directory: &std::path::Path,
+) {
+    use super::tasks::{TasksDensity, TasksLayout};
+    use condr_core::AgentState;
+    let mut panes = vec![first_pane];
+    for name in ["api-gateway", "condr", "docs-site"] {
+        let root_directory = root.join(name);
+        std::fs::create_dir_all(&root_directory).unwrap();
+        let Ok(Ok(LayoutResult::WorkspaceCreated { pane_id, .. })) =
+            admin.layout(LayoutCommand::CreateWorkspace {
+                root_directory,
+                name: None,
+            })
+        else {
+            panic!("expected a Workspace");
+        };
+        panes.push(pane_id);
+    }
+    let blocked = panes[1];
+    wait(cx, "the Workspaces arrived", |app| {
+        view.read(app).terminal(1, blocked).is_some()
+    });
+    let agents = [
+        (AgentKind::Codex, AgentState::Working, None, false),
+        (
+            AgentKind::Claude,
+            AgentState::Blocked,
+            Some("Allow Bash: rm -rf dist?"),
+            false,
+        ),
+        (AgentKind::Claude, AgentState::Done, None, true),
+        (AgentKind::OpenCode, AgentState::Idle, None, false),
+    ];
+    update(cx, window, view, move |this, window, cx| {
+        let model = &mut this.connection_mut(1).unwrap().model;
+        for (pane_id, (kind, state, detail, unseen)) in panes.into_iter().zip(agents) {
+            model.apply_agent(
+                pane_id,
+                Some(AgentSnapshot {
+                    session_id: None,
+                    kind,
+                    state,
+                    detail: detail.map(Into::into),
+                }),
+            );
+            model.apply_agent_unseen(pane_id, unseen, false);
+        }
+        this.toggle_tasks(window, cx);
+    });
+    shot(cx, window, directory, "11-tasks-agents");
+    update(cx, window, view, |this, _, cx| {
+        this.main_view_mut().tasks.density = TasksDensity::Compact;
+        cx.notify();
+    });
+    shot(cx, window, directory, "11b-tasks-compact");
+    update(cx, window, view, |this, _, cx| {
+        this.main_view_mut().tasks.layout = TasksLayout::List;
+        cx.notify();
+    });
+    shot(cx, window, directory, "11c-tasks-list");
+    update(cx, window, view, move |this, window, cx| {
+        this.select_task_card(1, blocked, false, window, cx)
+    });
+    shot(cx, window, directory, "11d-tasks-list-open");
+    update(cx, window, view, |this, _, cx| {
+        let prefs = &mut this.main_view_mut().tasks;
+        prefs.layout = TasksLayout::Board;
+        prefs.density = TasksDensity::Cards;
+        cx.notify();
+    });
+    shot(cx, window, directory, "11e-tasks-board-open");
     update(cx, window, view, |this, window, cx| {
         this.toggle_tasks(window, cx)
     });
