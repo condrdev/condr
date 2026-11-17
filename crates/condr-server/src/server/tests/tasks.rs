@@ -4,8 +4,7 @@
 use super::*;
 use condr_core::protocol::Hello;
 use condr_core::{
-    AgentKind, LastPlace, StartPlace, Task, TaskCommand, TaskError, TaskId, TaskResponse,
-    task_error,
+    AgentKind, LastPlace, Task, TaskCommand, TaskError, TaskId, TaskResponse, task_error,
 };
 
 fn temp(name: &str) -> PathBuf {

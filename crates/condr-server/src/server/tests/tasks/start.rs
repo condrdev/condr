@@ -2,6 +2,7 @@
 //! that writes the arguments it was started with.
 
 use super::*;
+use condr_core::StartPlace;
 use condr_core::agent_discovery::AgentInstallation;
 
 struct Fixture {
