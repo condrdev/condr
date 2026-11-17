@@ -82,23 +82,26 @@ pub(super) fn pane_sidebar_status(
     })
 }
 
-/// A Device's connection, before its name: plugged in green, amber with a spark while its
-/// Server runs another build (ADR 0027), amber and fading while it connects, unplugged
-/// grey, or red when the last try failed.
+/// A Device's connection, before its name: a monitor for this machine and a server for
+/// any other, green when connected, amber while its Server runs another build (ADR 0027)
+/// or while it connects, fading then, grey when disconnected, and a crashed server in red
+/// when the last try failed.
 pub(super) fn device_status(
     key: ConnectionKey,
+    local: bool,
     status: ConnectionStatus,
     other_build: bool,
     failed: bool,
     cx: &App,
 ) -> AnyElement {
     let theme = cx.theme();
+    let device = if local { Glyph::Monitor } else { Glyph::Server };
     let (glyph, color) = match status {
-        ConnectionStatus::Connected if other_build => (Glyph::PlugZap, theme.warning),
-        ConnectionStatus::Connected => (Glyph::Plug, theme.success),
-        ConnectionStatus::Connecting => (Glyph::Plug, theme.warning),
-        ConnectionStatus::Disconnected if failed => (Glyph::Unplug, theme.danger),
-        ConnectionStatus::Disconnected => (Glyph::Unplug, theme.muted_foreground),
+        ConnectionStatus::Connected if other_build => (device, theme.warning),
+        ConnectionStatus::Connected => (device, theme.success),
+        ConnectionStatus::Connecting => (device, theme.warning),
+        ConnectionStatus::Disconnected if failed => (Glyph::ServerCrash, theme.danger),
+        ConnectionStatus::Disconnected => (device, theme.muted_foreground),
     };
     let icon = div()
         .debug_selector(move || format!("device-status-{key}"))
@@ -656,7 +659,9 @@ impl Condr {
                 .foldable(folded, format!("device-fold-{key}"), move |_, _, cx| {
                     let _ = fold_owner.update(cx, |this, cx| this.toggle_device_fold(key, cx));
                 })
-                .status(move |_, cx| device_status(key, status, build_notice_shown, failed, cx))
+                .status(move |_, cx| {
+                    device_status(key, is_local, status, build_notice_shown, failed, cx)
+                })
                 .summary(device_summary)
                 // Selected as a Workspace row is: lit while it holds the shown Workspace.
                 .active(active_server)

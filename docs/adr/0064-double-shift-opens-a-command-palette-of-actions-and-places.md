@@ -33,7 +33,7 @@ Four kinds of row, from every connected Device, whichever window the palette ope
 | Agent | its mark with the state on it, Pane title, Workspace, the state's name | Pane title | Agent kind, Workspace and Tab names |
 | Tab | its number and name, or its focused Pane's title as the tab bar has it; Workspace | Tab name | Workspace name |
 | Workspace | name, Root Directory | name | Root Directory |
-| Device | plug, name, connection state | name | |
+| Device | connection icon, name, connection state | name | |
 
 With more than one Device connected, each row ends with "· Device", as Needs you does. A Pane with no Agent has no row; its Tab does. A disconnected Device lists itself and nothing it held, as the sidebar does (ADR 0020). `detail` stays in the sidebar and the notification.
 

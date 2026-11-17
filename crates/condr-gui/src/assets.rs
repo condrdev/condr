@@ -90,6 +90,8 @@ gpui_kit::assets::icon_assets!(
         Kanban,
         Layers,
         Monitor,
+        Server,
+        ServerCrash,
         FoldHorizontal,
     ]
 );

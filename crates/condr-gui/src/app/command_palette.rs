@@ -95,6 +95,7 @@ enum Look {
         root: String,
     },
     Device {
+        local: bool,
         status: ConnectionStatus,
         other_build: bool,
         failed: bool,
@@ -306,6 +307,7 @@ impl Condr {
                 .into_owned(),
                 enabled: true,
                 look: Look::Device {
+                    local: connection.endpoint.as_local_path().is_some(),
                     status: connection.status,
                     other_build: connection.build_notice().is_some(),
                     failed: connection.error.is_some(),
@@ -734,6 +736,7 @@ fn render_row(entry: &Entry, ranges: &[Range<usize>], grouped: bool, cx: &mut Ap
             CondrSidebarIcon::avatar(&entry.label, root, format!("{selector}-mark")).render(cx),
         ),
         Look::Device {
+            local,
             status,
             other_build,
             failed,
@@ -741,7 +744,14 @@ fn render_row(entry: &Entry, ranges: &[Range<usize>], grouped: bool, cx: &mut Ap
             let Target::Device(key) = entry.target else {
                 unreachable!("a Device row leads to its Device")
             };
-            Some(device_status(key, *status, *other_build, *failed, cx))
+            Some(device_status(
+                key,
+                *local,
+                *status,
+                *other_build,
+                *failed,
+                cx,
+            ))
         }
     };
     let theme = cx.theme();

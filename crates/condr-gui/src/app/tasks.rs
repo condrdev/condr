@@ -695,7 +695,9 @@ impl Condr {
                 continue;
             };
             options.push((
-                ScopeRow::Device,
+                ScopeRow::Device {
+                    local: connection.endpoint.as_local_path().is_some(),
+                },
                 connection.label.clone(),
                 TasksScope::Device(server),
             ));
@@ -767,7 +769,7 @@ impl Condr {
                     let (owner, each, row, count) = (owner.clone(), *each, *row, *count);
                     let name = name.clone();
                     // Each Device starts a group under a rule.
-                    let menu = if row == ScopeRow::Device {
+                    let menu = if matches!(row, ScopeRow::Device { .. }) {
                         menu.separator()
                     } else {
                         menu
@@ -1108,6 +1110,7 @@ impl Condr {
             let owner = cx.weak_entity();
             let status = super::sidebar::device_status(
                 key,
+                connection.endpoint.as_local_path().is_some(),
                 connection.status,
                 connection.build_notice().is_some(),
                 connection.error.is_some() && !reconnecting,
@@ -2052,7 +2055,7 @@ fn strip_label(label: &str, family: &str) -> Svg {
 #[derive(Clone, Copy, PartialEq)]
 enum ScopeRow {
     All,
-    Device,
+    Device { local: bool },
     Workspace,
     Worktree,
 }
@@ -2064,7 +2067,12 @@ fn scope_row(row: ScopeRow, name: SharedString, count: usize, selected: bool, cx
     let theme = cx.theme();
     let (indent, icon, primary) = match row {
         ScopeRow::All => (0., Icon::new(gpui_kit::assets::IconName::Layers), true),
-        ScopeRow::Device => (0., Icon::new(gpui_kit::assets::IconName::Monitor), true),
+        ScopeRow::Device { local: true } => {
+            (0., Icon::new(gpui_kit::assets::IconName::Monitor), true)
+        }
+        ScopeRow::Device { local: false } => {
+            (0., Icon::new(gpui_kit::assets::IconName::Server), true)
+        }
         ScopeRow::Workspace => (1.25, Icon::new(IconName::Folder), false),
         ScopeRow::Worktree => (2.5, Icon::new(CondrIconName::GitBranch), false),
     };
