@@ -814,7 +814,11 @@ impl Condr {
             // sits at the bottom left, the actions at the bottom right, Connect Remote Device
             // left of Settings. Reconnect is the `ReconnectServer` action; it has no button.
             .footer(
-                v_flex().w_full().child(agents).child(
+                v_flex()
+                    .w_full()
+                    .child(Separator::horizontal().color(cx.theme().sidebar_border))
+                    .child(agents)
+                    .child(
                     h_flex()
                         .w_full()
                         .justify_between()

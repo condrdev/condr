@@ -206,8 +206,8 @@ fn the_agents_section_lists_every_workspaces_agents_most_urgent_first() {
     assert!(window.debug_bounds(row_selector(blocked)).is_none());
     assert_eq!(
         window.debug_bounds("agents-section").unwrap().size.height,
-        heading.size.height + px(1.),
-        "folded, the section is its heading and border"
+        heading.size.height,
+        "folded, the section is its heading"
     );
     assert!(
         window.debug_bounds("agents-heading").is_some(),

@@ -203,13 +203,7 @@ impl Condr {
         let section = v_flex()
             .id("agents-section")
             .debug_selector(|| "agents-section".into())
-            .relative()
-            // Out through the footer's padding so the border spans the sidebar; the
-            // padding comes back inside, keeping the rows in line with the tree's.
-            .mx_neg_3()
-            .px_3()
-            .border_t_1()
-            .border_color(cx.theme().sidebar_border);
+            .relative();
 
         let several_devices = self.connections.len() > 1;
         let mut items = Vec::new();
@@ -306,8 +300,8 @@ impl Condr {
         } else {
             v_flex().gap_1().children(items).into_any_element()
         };
-        // Folded, the section is its heading over its top border.
-        let folded_height = HEADING_HEIGHT.to_pixels(window.rem_size()) + px(1.);
+        // Folded, the section is its heading.
+        let folded_height = HEADING_HEIGHT.to_pixels(window.rem_size());
         let open_height = agents_height(view);
         section
             .on_drag_move(

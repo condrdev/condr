@@ -295,16 +295,11 @@ impl Condr {
             .on_click(move |_, window, cx| {
                 let _ = owner.update(cx, |this, cx| this.toggle_tasks(window, cx));
             });
-        // Out through the header's padding so the rule spans the sidebar, as the Agents
-        // section's does; the padding comes back inside.
         v_flex()
             .flex_1()
-            .mx_neg_3()
-            .px_3()
-            .pb_2()
-            .border_b_1()
-            .border_color(cx.theme().sidebar_border)
+            .gap_2()
             .child(row)
+            .child(Separator::horizontal().color(cx.theme().sidebar_border))
             .into_any_element()
     }
 
