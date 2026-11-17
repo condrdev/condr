@@ -10,6 +10,7 @@ use super::*;
 use condr_core::TaskId;
 use gpui_kit::component::button::ButtonGroup;
 use gpui_kit::component::popover::Popover;
+use gpui_kit::component::resizable::resize_handle;
 use gpui_kit::component::separator::Separator;
 use gpui_kit::component::switch::Switch;
 use rust_i18n::t;
@@ -92,7 +93,7 @@ pub(super) struct TasksDock {
 #[derive(Clone)]
 pub(super) struct DraggedTasksSplit;
 
-const DEFAULT_SPLIT_BOARD: u16 = 450;
+pub(super) const DEFAULT_SPLIT_BOARD: u16 = 450;
 const DEFAULT_SPLIT_LIST: u16 = 440;
 
 impl TasksPrefs {
@@ -2596,19 +2597,18 @@ impl Condr {
             view.tasks.split_list.unwrap_or(DEFAULT_SPLIT_LIST)
         };
         let fraction = relative(f32::from(split) / 1000.);
-        let handle = div()
-            .id("tasks-split")
-            .debug_selector(|| "tasks-split".into())
-            .flex_none()
-            .bg(cx.theme().border)
-            .map(|this| {
-                if board_layout {
-                    this.h(px(1.)).w_full().cursor_row_resize()
-                } else {
-                    this.w(px(1.)).h_full().cursor_col_resize()
-                }
-            })
-            .on_drag(DraggedTasksSplit, |_, _, _, cx| cx.new(|_| EmptyView));
+        // Kit's handle straddles the area's leading edge and draws the rule, with a band
+        // wider than the line to grab.
+        let handle = resize_handle(
+            "tasks-split",
+            if board_layout {
+                Axis::Vertical
+            } else {
+                Axis::Horizontal
+            },
+        )
+        .debug_selector(|| "tasks-split".into())
+        .on_drag(DraggedTasksSplit, |_, _, _, cx| cx.new(|_| EmptyView));
         let container = if board_layout { v_flex() } else { h_flex() };
         container
             .size_full()
@@ -2644,8 +2644,16 @@ impl Condr {
                     })
                     .child(cards),
             )
-            .child(handle)
-            .child(div().flex_1().size_full().min_w_0().min_h_0().child(area))
+            .child(
+                div()
+                    .relative()
+                    .flex_1()
+                    .size_full()
+                    .min_w_0()
+                    .min_h_0()
+                    .child(area)
+                    .child(handle),
+            )
             .into_any_element()
     }
 

@@ -215,3 +215,36 @@ fn the_agents_section_lists_every_workspaces_agents_most_urgent_first() {
     );
     assert!(window.read(|app| view.read(app).main_view().agents_collapsed));
 }
+
+/// The section's top edge is Kit's resize handle: a press a few pixels off its line still
+/// takes it, and dragging up makes the section taller.
+#[test]
+fn the_agents_handle_takes_a_press_beside_its_line() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|window, cx| _ = window.draw(cx));
+    let before = window.debug_bounds("agents-section").unwrap().size.height;
+    let band = window
+        .debug_bounds("agents-resize")
+        .expect("the handle is drawn");
+    assert!(
+        band.size.height > px(4.),
+        "a band, not a hairline: {band:?}"
+    );
+    let press = point(band.center().x, band.top() + px(1.));
+    let to = point(press.x, press.y - px(80.));
+    window.simulate_mouse_down(press, MouseButton::Left, Modifiers::default());
+    for _ in 0..2 {
+        window.simulate_mouse_move(to, MouseButton::Left, Modifiers::default());
+        window.run_until_parked();
+        window.update(|window, cx| _ = window.draw(cx));
+    }
+    window.simulate_mouse_up(to, MouseButton::Left, Modifiers::default());
+    assert!(window.read(|app| view.read(app).main_view().agents_height.is_some()));
+    assert!(
+        window.debug_bounds("agents-section").unwrap().size.height > before,
+        "dragging up makes the section taller"
+    );
+}

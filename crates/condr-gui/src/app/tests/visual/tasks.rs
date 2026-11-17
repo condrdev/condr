@@ -707,6 +707,40 @@ fn the_area_pane_offers_no_zoom_or_pane_menu() {
     }
 }
 
+/// The split between the cards and the area is Kit's resize handle: a press a few
+/// pixels off its line still takes it, and the drag moves the split.
+#[test]
+fn the_area_split_takes_a_press_beside_its_line() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    let (view, window, _server, pane_id) = tasks_mode_with_an_agent(&mut cx);
+    click(
+        window,
+        leaked_selector(format!("tasks-card-1-{}", pane_id.as_u64())),
+    );
+    let band = window
+        .debug_bounds("tasks-split")
+        .expect("the handle is drawn");
+    assert!(
+        band.size.height > px(4.),
+        "a band, not a hairline: {band:?}"
+    );
+    let press = point(band.center().x, band.top() + px(1.));
+    let to = point(press.x, press.y - px(120.));
+    window.simulate_mouse_down(press, MouseButton::Left, Modifiers::default());
+    for _ in 0..2 {
+        window.simulate_mouse_move(to, MouseButton::Left, Modifiers::default());
+        window.run_until_parked();
+        draw(window);
+    }
+    window.simulate_mouse_up(to, MouseButton::Left, Modifiers::default());
+    let split = window.read(|app| view.read(app).main_view().tasks.split_board);
+    assert!(
+        split.is_some_and(|split| split < super::super::super::tasks::DEFAULT_SPLIT_BOARD),
+        "dragging up shrinks the cards: {split:?}"
+    );
+}
+
 /// A Device the person disconnected from its menu needs no band saying so.
 #[test]
 fn a_device_the_person_disconnected_shows_no_band() {

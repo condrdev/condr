@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::app::change_tree::row_highlight;
+use gpui_kit::component::resizable::resize_handle;
 use rust_i18n::t;
 
 /// The drag payload of the Agents section's handle; the section tracks its moves.
@@ -302,6 +303,8 @@ impl Condr {
         };
         // Folded, the section is its heading.
         let folded_height = HEADING_HEIGHT.to_pixels(window.rem_size());
+        // The colour Kit's resize handle draws its line in.
+        let border = cx.theme().border;
         let open_height = agents_height(view);
         section
             .on_drag_move(
@@ -322,6 +325,19 @@ impl Condr {
                     .h(phase.interpolate(folded_height, open_height))
                     // Only while it slides, so the open handle reaches over the border.
                     .when(phase.0 < 1., |section| section.overflow_hidden())
+                    // Folded, the rule over the heading is a plain line, the one the open
+                    // handle draws; over the heading's first pixel, so it adds no height.
+                    .when(phase.0 == 0., |section| {
+                        section.child(
+                            div()
+                                .absolute()
+                                .top_0()
+                                .left_0()
+                                .w_full()
+                                .h(px(1.))
+                                .bg(border),
+                        )
+                    })
                     // The list stays until the section has closed over it.
                     .when(phase.0 > 0., |section| {
                         section
@@ -334,19 +350,12 @@ impl Condr {
                                     .pb_2()
                                     .child(list),
                             )
-                            // Over the border, as the sidebar's own handle sits over its
-                            // edge; it swallows the press so the row under it is not clicked.
+                            // Kit's handle straddles the section's top edge and draws its
+                            // rule, with a band wider than the line to grab; it swallows the
+                            // press so the row under it is not clicked.
                             .child(
-                                div()
-                                    .id("agents-resize")
+                                resize_handle("agents-resize", Axis::Vertical)
                                     .debug_selector(|| "agents-resize".into())
-                                    .absolute()
-                                    .left_0()
-                                    .right_0()
-                                    .top(-SIDEBAR_RESIZE_HANDLE_WIDTH / 2.)
-                                    .h(SIDEBAR_RESIZE_HANDLE_WIDTH)
-                                    .occlude()
-                                    .cursor_row_resize()
                                     .on_mouse_down(MouseButton::Left, |_, _, cx| {
                                         cx.stop_propagation()
                                     })
