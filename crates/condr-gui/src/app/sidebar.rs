@@ -318,10 +318,10 @@ impl Condr {
             .map(|connection| {
                 let key = connection.key;
                 let server_target = DropTarget::Server { key, after: false };
-                // Beside Tasks mode no Device or Workspace is lit, so a click on any of them
-                // goes there rather than folding it (ADR 0068).
+                // Beside a page, Tasks mode or Ports, no Device or Workspace is lit, so a
+                // click on any of them goes there rather than folding it.
                 let active_server =
-                    view.page != ContentPage::Tasks && key == self.presented_key(view);
+                    view.page == ContentPage::Workspace && key == self.presented_key(view);
                 let connected = connection.can_mutate();
                 let workspaces = connection
                     .presented_session()
@@ -991,7 +991,7 @@ impl Condr {
                 if !view.scope.lists_workspace(connection_key, workspace_id) {
                     continue;
                 }
-                let active = view.page != ContentPage::Tasks
+                let active = view.page == ContentPage::Workspace
                     && connection.key == self.presented_key(view)
                     && active_workspace == Some(workspace_id);
                 let workspace_name = workspace.name().to_owned();

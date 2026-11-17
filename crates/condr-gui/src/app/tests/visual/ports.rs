@@ -147,6 +147,36 @@ fn the_ports_page_forwards_a_devices_port_and_stops_it() {
     });
 }
 
+/// While the Ports page shows, the sidebar lights no Device or Workspace: a click on the
+/// Device shown goes back to its Workspace rather than folding the Device.
+#[test]
+fn beside_the_ports_page_the_shown_device_leads_back_rather_than_folding() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    let root = TestDirectory::new("ports-device-heading");
+    let (workspace_id, _, _) = super::dock::create_workspace(window, &view, &root);
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| this.open_ports(PortsScope::All, window, cx))
+    });
+    window.update(|window, cx| _ = window.draw(cx));
+    let heading = window.debug_bounds("server-heading-1-row").unwrap();
+    window.simulate_click(heading.center(), Modifiers::default());
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
+    assert_eq!(
+        window.read(|app| view.read(app).main_view().page),
+        ContentPage::Workspace
+    );
+    assert!(
+        window
+            .debug_bounds(sidebar_workspace_selector(workspace_id))
+            .is_some(),
+        "the Device stays unfolded"
+    );
+}
+
 /// A forward outlives the terminal connection's reconnect and carries connections again
 /// once it is back; Disconnect ends it and frees the port (ADR 0061).
 #[test]
