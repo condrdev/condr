@@ -15,8 +15,8 @@ tasks:
       en: Layout
       zh-CN: 布局
     list:
-      en: List
-      zh-CN: 列表
+      en: Table
+      zh-CN: 表格
     board:
       en: Board
       zh-CN: 看板

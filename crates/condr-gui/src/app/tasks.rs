@@ -2,7 +2,8 @@
 //! columns by state, as a board or a list.
 
 use super::sidebar::{
-    CondrIconName, CondrSidebarIcon, SidebarStatusVisual, pane_sidebar_status, urgency,
+    CondrIconName, CondrSidebarIcon, SidebarIconTone, SidebarStatusVisual, pane_sidebar_status,
+    urgency,
 };
 use super::task_form::{todo_tasks, workspace_focused_pane};
 use super::*;
@@ -134,6 +135,16 @@ impl TasksColumn {
             Self::Working => 4,
             Self::Idle => 8,
             Self::ToDo => 16,
+        }
+    }
+
+    /// The colour of the column's ring, the one its cards' state shows in.
+    fn tone(self) -> SidebarIconTone {
+        match self {
+            Self::NeedsYou => SidebarIconTone::Danger,
+            Self::Done => SidebarIconTone::Success,
+            Self::Working => SidebarIconTone::Warning,
+            Self::ToDo | Self::Idle => SidebarIconTone::Muted,
         }
     }
 
@@ -592,7 +603,7 @@ impl Condr {
                         Button::new("tasks-layout-list")
                             .debug_selector(|| "tasks-layout-list".into())
                             .flex_1()
-                            .icon(Icon::new(gpui_kit::assets::IconName::List))
+                            .icon(Icon::new(gpui_kit::assets::IconName::Table))
                             .label(t!("tasks.layout.list"))
                             .selected(!board),
                     )
@@ -827,7 +838,7 @@ impl Condr {
                 .min_w(rems(14.))
                 .h_full()
                 .gap_2()
-                .child(self.column_heading(TasksColumn::ToDo, todo.len(), &theme, cx))
+                .child(self.board_heading(TasksColumn::ToDo, todo.len(), &theme, cx))
                 .child(
                     v_flex()
                         .id("tasks-column-cards-to-do")
@@ -864,7 +875,7 @@ impl Condr {
                     .min_w(rems(14.))
                     .h_full()
                     .gap_2()
-                    .child(self.column_heading(column, cards.len(), &theme, cx))
+                    .child(self.board_heading(column, cards.len(), &theme, cx))
                     .child(
                         v_flex()
                             .id(SharedString::from(format!(
@@ -903,8 +914,8 @@ impl Condr {
             .into_any_element()
     }
 
-    /// A folded column: its count over its name, one letter a line, since GPUI does not
-    /// rotate text; a click unfolds it.
+    /// A folded column: its count over its name, turned to read down the strip; a click
+    /// unfolds it.
     fn render_strip(
         &self,
         column: TasksColumn,
@@ -932,13 +943,10 @@ impl Condr {
             .text_xs()
             .text_color(theme.muted_foreground)
             .cursor_pointer()
+            .child(column_ring(column, cx))
             .child(div().font_semibold().child(count.to_string()))
-            .children(
-                column
-                    .label()
-                    .chars()
-                    .filter(|letter| !letter.is_whitespace())
-                    .map(|letter| div().child(letter.to_string())),
+            .child(
+                strip_label(&column.label(), &theme.font_family).text_color(theme.muted_foreground),
             )
             .on_click(move |_, _, cx| {
                 let _ = owner.update(cx, |this, cx| this.toggle_tasks_column(column, cx));
@@ -946,7 +954,7 @@ impl Condr {
             .into_any_element()
     }
 
-    /// A column's or group's name and count; a click folds it.
+    /// A column's or group's ring, name and count; a click folds it.
     fn column_heading(
         &self,
         column: TasksColumn,
@@ -961,17 +969,39 @@ impl Condr {
                 column.selector()
             )))
             .debug_selector(move || format!("tasks-heading-{}", column.selector()))
-            .gap_1()
+            .gap_2()
             .px_1()
-            .text_xs()
+            .py_0p5()
+            .rounded(theme.radius)
+            .text_sm()
             .font_semibold()
-            .text_color(theme.muted_foreground)
+            .text_color(theme.foreground)
             .cursor_pointer()
+            .hover(|this| this.bg(theme.list_hover))
+            .child(column_ring(column, cx))
             .child(column.label())
-            .child(div().font_normal().child(count.to_string()))
+            .child(count_pill(count, theme))
             .on_click(move |_, _, cx| {
                 let _ = owner.update(cx, |this, cx| this.toggle_tasks_column(column, cx));
             })
+    }
+
+    /// A Board column's heading, across the column with the fold mark at its end.
+    fn board_heading(
+        &self,
+        column: TasksColumn,
+        count: usize,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        self.column_heading(column, count, theme, cx)
+            .w_full()
+            .child(div().flex_1())
+            .child(
+                Icon::new(gpui_kit::assets::IconName::FoldHorizontal)
+                    .xsmall()
+                    .text_color(theme.muted_foreground),
+            )
     }
 
     fn render_tasks_list(
@@ -1927,6 +1957,62 @@ fn change_counts(added: u32, deleted: u32, ahead: u32, theme: &Theme) -> Option<
                 this.child(div().text_color(theme.success).child(format!("↑{ahead}")))
             })
     })
+}
+
+/// A column's ring, in the colour its cards' state shows in.
+fn column_ring(column: TasksColumn, cx: &App) -> Icon {
+    Icon::new(CondrIconName::Circle)
+        .size_3p5()
+        .text_color(column.tone().color(cx))
+}
+
+/// A count in a pill, beside a column's name.
+fn count_pill(count: usize, theme: &Theme) -> Div {
+    div()
+        .px_1p5()
+        .rounded_full()
+        .bg(theme.secondary)
+        .text_xs()
+        .font_normal()
+        .text_color(theme.muted_foreground)
+        .child(count.to_string())
+}
+
+/// A folded column's name turned a quarter clockwise, to read down its strip. GPUI does
+/// not rotate text, so the name is SVG text, laid out in rems (16 units each) so it
+/// follows the interface font. Its length is estimated, wide characters a full em.
+fn strip_label(label: &str, family: &str) -> Svg {
+    const REM: f32 = 16.;
+    // text_xs, and a baseline that centres its glyphs across the strip.
+    let (size, baseline) = (0.75 * REM, 5.);
+    let length = label
+        .chars()
+        .map(|letter| if letter.is_ascii() { 0.62 } else { 1. })
+        .sum::<f32>()
+        * size
+        + 4.;
+    let escape = |text: &str| {
+        text.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('\'', "&apos;")
+    };
+    let data = format!(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='{REM}' height='{length}' \
+         viewBox='0 0 {REM} {length}'><text transform='translate({baseline} 2) rotate(90)' \
+         font-family='\"{}\", \"Segoe UI\", \"Helvetica Neue\", Helvetica, Arial, \
+         \"Noto Sans\", \"DejaVu Sans\", sans-serif' font-size='{size}' font-weight='600'>{}\
+         </text></svg>",
+        // Quoted: a family such as `.SystemUIFont` is no CSS identifier, and an
+        // unparsable list falls back to a serif.
+        escape(&family.replace('"', "")),
+        escape(label),
+    );
+    svg()
+        .data(data.as_bytes())
+        .flex_none()
+        .w(rems(1.))
+        .h(rems(length / REM))
 }
 
 /// What a row of the scope's menu names, which sets its indent, icon and colour.

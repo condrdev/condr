@@ -9,7 +9,7 @@
 //!
 //! It starts a TCP Server with one Workspace, opens Condr against it, and saves one PNG
 //! per state: the Workspace, the Command Palette's pages, Tasks mode with Tasks and with an
-//! Agent in every column, the Ports page empty, with forwards, for one Device, the right
+//! Agent in every column and with columns folded, the Ports page empty, with forwards, for one Device, the right
 //! sidebar's transfer strip, the left sidebar with its Device folded, and a finished
 //! download's toast. The website's screenshots come from the same window, in `website`.
 
@@ -400,7 +400,7 @@ fn agents(
     root: &std::path::Path,
     directory: &std::path::Path,
 ) {
-    use super::tasks::{TasksDensity, TasksLayout};
+    use super::tasks::{TasksColumn, TasksDensity, TasksLayout};
     use condr_core::AgentState;
     let mut panes = vec![first_pane];
     for name in ["api-gateway", "condr", "docs-site"] {
@@ -469,6 +469,11 @@ fn agents(
         cx.notify();
     });
     shot(cx, window, directory, "11e-tasks-board-open");
+    update(cx, window, view, |this, _, cx| {
+        this.main_view_mut().tasks.folded = TasksColumn::Done.bit() | TasksColumn::Idle.bit();
+        cx.notify();
+    });
+    shot(cx, window, directory, "11f-tasks-folded");
     update(cx, window, view, |this, window, cx| {
         this.toggle_tasks(window, cx)
     });

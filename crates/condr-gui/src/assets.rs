@@ -86,10 +86,11 @@ gpui_kit::assets::icon_assets!(
         Command,
         // Tasks mode's scope and Layout (ADR 0068).
         ListFilter,
-        List,
+        Table,
         Kanban,
         Layers,
         Monitor,
+        FoldHorizontal,
     ]
 );
 
