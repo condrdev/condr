@@ -10,24 +10,30 @@ use super::*;
 use condr_core::TaskId;
 use rust_i18n::t;
 use std::any::TypeId;
+use std::path::Path;
 
+mod archive;
 mod area;
 mod board;
 mod card;
 mod columns;
 mod form;
+mod form_area;
+mod requests;
 mod sidebar_entry;
+mod start;
 mod table;
 mod todo;
 mod toolbar;
 
 pub(in crate::app) use board::TasksBoard;
-#[cfg(test)]
-pub(in crate::app) use form::{AGENT_WAIT, FormField, Where};
-pub(in crate::app) use form::{AgentRequest, DeviceTasks, TaskForm, TaskRequest};
+pub(in crate::app) use form::{FormField, TaskForm};
+pub(in crate::app) use requests::{AGENT_WAIT, AgentRequest, DeviceTasks, TaskRequest};
+pub(in crate::app) use start::Where;
 // What the submodules share with one another.
 use card::device_tag;
-use form::{todo_tasks, workspace_focused_pane};
+use form::saved_task;
+use start::{ContinueBlock, WorktreeBlock, default_branch, folder_name, starts_tasks};
 use table::{ListFit, list_row};
 
 /// `gpui_kit::Task` is the executor's.
@@ -303,6 +309,79 @@ impl Condr {
                 (selected.key, selected.pane_id) == (key, pane_id) && !selected.keyboard
             })
     }
+}
+
+/// The Device's To do Tasks in the Server's order: not started, archived ones never
+/// being in the model.
+pub(in crate::app) fn todo_tasks(connection: &ServerConnection) -> Vec<&TaskRecord> {
+    let mut todo: Vec<&TaskRecord> = connection
+        .model
+        .tasks
+        .iter()
+        .flat_map(|tasks| tasks.values())
+        .filter(|task| task.workspace.is_none())
+        .collect();
+    todo.sort_by_key(|task| (task.order, task.id));
+    todo
+}
+
+/// The Device's repository Workspaces, which a Task's repository is one of: the root of
+/// a Git repository, not a worktree made from one.
+pub(in crate::app) fn repository_workspaces(
+    connection: &ServerConnection,
+) -> impl Iterator<Item = (WorkspaceId, String, PathBuf)> + '_ {
+    connection
+        .session()
+        .into_iter()
+        .flat_map(|session| session.workspaces())
+        .filter(|workspace| {
+            workspace.worktree().is_none()
+                && connection.model.workspace_git.contains_key(&workspace.id())
+        })
+        .map(|workspace| {
+            (
+                workspace.id(),
+                workspace.name().to_owned(),
+                workspace.root_directory().to_path_buf(),
+            )
+        })
+}
+
+/// A repository by its Workspace's name, or its folder's when none is open.
+pub(in crate::app) fn repository_name(
+    connection: Option<&ServerConnection>,
+    root: &Path,
+) -> String {
+    connection
+        .and_then(|connection| connection.session()?.workspace_by_root(root))
+        .map(|workspace| workspace.name().to_owned())
+        .unwrap_or_else(|| folder_name(root))
+}
+
+/// The Pane of `workspace_id` this Client shows focused, as the Workspace would open.
+pub(in crate::app) fn workspace_focused_pane(
+    connection: &ServerConnection,
+    session: &Session,
+    workspace_id: WorkspaceId,
+) -> Option<PaneId> {
+    let tab = connection.viewed_tab_id(session, workspace_id)?;
+    session.tab(tab)?.focused_pane().map(|pane| pane.id())
+}
+
+pub(in crate::app) fn workspace_has_agent(
+    connection: &ServerConnection,
+    workspace_id: WorkspaceId,
+) -> bool {
+    connection
+        .session()
+        .and_then(|session| session.workspace(workspace_id))
+        .is_some_and(|workspace| {
+            workspace
+                .tabs()
+                .iter()
+                .flat_map(|tab| tab.panes())
+                .any(|pane| connection.model.agents.contains_key(&pane.id()))
+        })
 }
 
 #[cfg(test)]
