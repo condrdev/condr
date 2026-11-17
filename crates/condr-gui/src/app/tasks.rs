@@ -575,10 +575,11 @@ impl Condr {
                     .pr_2()
                     .items_center()
                     .child(back)
-                    .child(self.render_scope_menu(prefs.scope, cx))
+                    .child(claim_press(self.render_scope_menu(prefs.scope, cx)))
                     .child(div().flex_1())
-                    .children(density)
-                    .child(layout),
+                    .child(claim_press(
+                        h_flex().gap_2().children(density).child(layout),
+                    )),
             )
     }
 
@@ -947,7 +948,8 @@ impl Condr {
     }
 
     /// With the sidebar hidden, ADR 0020's mark has nowhere to be: a band names each
-    /// Device in the scope that is not connected, whose Agents the cards then leave out.
+    /// Device in the scope that is not connected, whose Agents the cards then leave out,
+    /// unless the person disconnected it, which needs no telling.
     fn render_connection_bands(
         &self,
         scope: TasksScope,
@@ -962,7 +964,10 @@ impl Condr {
                     connection.model.server_id == Some(server)
                 }
             };
-            if !in_scope || connection.status == ConnectionStatus::Connected {
+            if !in_scope
+                || connection.status == ConnectionStatus::Connected
+                || !connection.auto_connect
+            {
                 continue;
             }
             let key = connection.key;
@@ -1117,7 +1122,7 @@ impl Condr {
                             .min_w_0()
                             .text_sm()
                             .font_semibold()
-                            .line_clamp(2)
+                            .truncate()
                             .child(facts.title),
                     )
                     .children(state_name(card.status, cx)),
@@ -1399,7 +1404,7 @@ impl Condr {
                                 .min_w_0()
                                 .text_sm()
                                 .font_semibold()
-                                .line_clamp(2)
+                                .truncate()
                                 .child(task.title.clone()),
                         )
                         .children(starting),
@@ -1694,7 +1699,7 @@ impl Condr {
                                 .min_w_0()
                                 .text_sm()
                                 .font_semibold()
-                                .line_clamp(2)
+                                .truncate()
                                 .child(title),
                         )
                         .child(state),
@@ -1820,6 +1825,15 @@ fn change_counts(added: u32, deleted: u32, ahead: u32, theme: &Theme) -> Option<
                 this.child(div().text_color(theme.success).child(format!("↑{ahead}")))
             })
     })
+}
+
+/// Inside the title bar a press that no control claims starts a window move, which
+/// swallows the click; Kit's `Button` and `ButtonGroup` leave it unclaimed.
+fn claim_press(control: impl IntoElement) -> Div {
+    div()
+        .flex_none()
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .child(control)
 }
 
 /// How many of the List's optional columns fit its width, taken in the order

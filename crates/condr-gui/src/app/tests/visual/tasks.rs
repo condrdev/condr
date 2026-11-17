@@ -678,6 +678,24 @@ fn a_disconnected_device_shows_a_band_and_its_open_pane_a_veil() {
     assert!(inside(window, "reconnect-veil-1", "tasks-area"));
 }
 
+/// A Device the person disconnected from its menu needs no band saying so.
+#[test]
+fn a_device_the_person_disconnected_shows_no_band() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    let (view, window, _server, _pane_id) = tasks_mode_with_an_agent(&mut cx);
+    window.update(|_, cx| {
+        view.update(cx, |this, cx| {
+            this.set_auto_connect(1, false, cx);
+            this.disconnect_server(1);
+            cx.notify();
+        });
+    });
+    draw(window);
+    assert!(window.debug_bounds("tasks-cards").is_some());
+    assert!(window.debug_bounds("tasks-band-1").is_none());
+}
+
 // Tasks (ADR 0068): To do, the form, Start and the archive dialog.
 
 use condr_core::{StartPlace, TaskCommand, TaskId, TaskResponse};
