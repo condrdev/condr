@@ -242,7 +242,6 @@ const INITIAL_SIDEBAR_WIDTH: Pixels = px(240.);
 const MIN_SIDEBAR_WIDTH: Pixels = px(150.);
 const MAX_SIDEBAR_WIDTH: Pixels = px(360.);
 const COLLAPSED_SIDEBAR_WIDTH: Pixels = px(48.);
-const SIDEBAR_RESIZE_HANDLE_WIDTH: Pixels = px(6.);
 /// The Agents section's heading and one row, the least its handle leaves it (ADR 0067).
 const MIN_AGENTS_HEIGHT: Pixels = px(80.);
 /// The main window's title bar hosts the Tab strip, so it takes the strip's old height

@@ -629,11 +629,16 @@ fn the_sidebar_keeps_its_dragged_width_across_window_resizes() {
         "expanding restores the previous sidebar width"
     );
 
-    // Drag the handle 80px to the right.
+    // Drag the handle 80px to the right. It sits inside the sidebar's edge and the edge
+    // follows the pointer, so the press is on the edge itself.
     let handle = window
         .debug_bounds("condr-sidebar-resize")
         .expect("the sidebar renders its resize handle");
-    let start = handle.center();
+    assert!(
+        handle.size.width > px(4.),
+        "a band, not a hairline: {handle:?}"
+    );
+    let start = point(handle.right() - px(0.5), handle.center().y);
     window.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
     window.simulate_mouse_move(
         point(start.x + px(40.), start.y),

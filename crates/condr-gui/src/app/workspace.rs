@@ -2,6 +2,7 @@ use super::sidebar::{CondrIconName, DragPreview, DropTarget, attach_drop_target,
 use super::*;
 use gpui_fps::fps_monitor;
 use gpui_kit::component::InteractiveElementExt as _;
+use gpui_kit::component::resizable::{HandleEdge, resize_handle};
 use rust_i18n::t;
 
 #[derive(Clone)]
@@ -1076,29 +1077,21 @@ impl Render for Condr {
                                         AnyView::from(sidebar)
                                             .cached(StyleRefinement::default().size_full()),
                                     )
-                                    // Deferred so it paints above the workspace it overlaps by
-                                    // half its width, occluding so the terminal underneath never
-                                    // sees the press, and swallowing the press so the pane does
-                                    // not start a selection.
+                                    // Kit's handle inside its trailing edge, as Kit's Dock puts
+                                    // a left panel's: its line is the sidebar's border. It
+                                    // swallows the press so the row under it is not clicked.
                                     .when(!view.sidebar_collapsed, |this| {
-                                        this.child(deferred(
-                                            div()
-                                                .id("condr-sidebar-resize")
+                                        this.child(
+                                            resize_handle("condr-sidebar-resize", Axis::Horizontal)
+                                                .inside(HandleEdge::Trailing)
                                                 .debug_selector(|| "condr-sidebar-resize".into())
-                                                .absolute()
-                                                .top_0()
-                                                .bottom_0()
-                                                .right(-SIDEBAR_RESIZE_HANDLE_WIDTH / 2.)
-                                                .w(SIDEBAR_RESIZE_HANDLE_WIDTH)
-                                                .occlude()
-                                                .cursor_col_resize()
                                                 .on_mouse_down(MouseButton::Left, |_, _, cx| {
                                                     cx.stop_propagation()
                                                 })
                                                 .on_drag(DraggedSidebar, |_, _, _, cx| {
                                                     cx.new(|_| EmptyView)
                                                 }),
-                                        ))
+                                        )
                                     }),
                             )
                             .child(workspace)
@@ -1111,24 +1104,19 @@ impl Render for Condr {
                                         .flex_none()
                                         .h_full()
                                         .child(changes)
-                                        .child(deferred(
-                                            div()
-                                                .id("condr-changes-resize")
+                                        // Inside its leading edge, as Kit's Dock puts a right
+                                        // panel's.
+                                        .child(
+                                            resize_handle("condr-changes-resize", Axis::Horizontal)
+                                                .inside(HandleEdge::Leading)
                                                 .debug_selector(|| "condr-changes-resize".into())
-                                                .absolute()
-                                                .top_0()
-                                                .bottom_0()
-                                                .left(-SIDEBAR_RESIZE_HANDLE_WIDTH / 2.)
-                                                .w(SIDEBAR_RESIZE_HANDLE_WIDTH)
-                                                .occlude()
-                                                .cursor_col_resize()
                                                 .on_mouse_down(MouseButton::Left, |_, _, cx| {
                                                     cx.stop_propagation()
                                                 })
                                                 .on_drag(DraggedChanges, |_, _, _, cx| {
                                                     cx.new(|_| EmptyView)
                                                 }),
-                                        )),
+                                        ),
                                 )
                             }),
                     )
