@@ -1,6 +1,6 @@
 # Tasks Opens in a Window of Its Own
 
-Status: proposed 2026-11-18. It is accepted once the acceptance on Windows with two screens that Delivery names has passed. When accepted, it amends ADR 0068, which kept Tasks mode to the main window and left detached windows for later, and ADR 0043, whose units it joins with one that is a page rather than a part of the Session tree.
+Status: accepted 2026-11-18, once the acceptance on Windows with two screens that Delivery names had passed. Amends ADR 0068, which kept Tasks mode to the main window and left detached windows for later, and ADR 0043, whose units it joins with one that is a page rather than a part of the Session tree.
 
 Tasks mode (ADR 0068) covers the main window's content area: while it shows, the Workspace does not, so watching the board and working in a terminal take turns. A person with two screens wants the board on one and the Workspace on the other, as ADR 0043 lets them do with a Device, a Workspace or a Tab.
 
