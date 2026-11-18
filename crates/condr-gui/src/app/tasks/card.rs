@@ -2,6 +2,9 @@
 //! facts they share (ADR 0068).
 
 use super::*;
+use crate::app::change_tree::diff_stat;
+use crate::app::sidebar::{UpstreamCount, upstream_counts, upstream_label};
+use condr_core::GitDiffStat;
 
 /// What a card shows of its Agent.
 pub(super) struct CardFacts {
@@ -10,9 +13,8 @@ pub(super) struct CardFacts {
     pub(super) workspace: String,
     pub(super) branch: Option<String>,
     pub(super) device: String,
-    pub(super) added: u32,
-    pub(super) deleted: u32,
-    pub(super) ahead: u32,
+    pub(super) changes: GitDiffStat,
+    pub(super) upstream: Option<Vec<UpstreamCount>>,
     pub(super) detail: Option<String>,
 }
 
@@ -37,20 +39,19 @@ pub(super) fn device_tag(device: String, theme: &Theme) -> Div {
         .child(device)
 }
 
-/// `+12 −3 ↑1`, or nothing for a clean Workspace in step with its upstream.
-pub(super) fn change_counts(added: u32, deleted: u32, ahead: u32, theme: &Theme) -> Option<Div> {
-    (added > 0 || deleted > 0 || ahead > 0).then(|| {
-        h_flex()
-            .gap_1()
-            .text_xs()
-            .when(added > 0 || deleted > 0, |this| {
-                this.child(div().text_color(theme.success).child(format!("+{added}")))
-                    .child(div().text_color(theme.danger).child(format!("−{deleted}")))
-            })
-            .when(ahead > 0, |this| {
-                this.child(div().text_color(theme.success).child(format!("↑{ahead}")))
-            })
-    })
+/// `+1.2k −3 ↑1 ↓2` as the sidebar shows them, empty for a clean Workspace in step with
+/// its upstream.
+pub(super) fn change_counts(facts: &CardFacts, cx: &App) -> Div {
+    h_flex()
+        .gap_1()
+        .text_xs()
+        .child(diff_stat(facts.changes, cx))
+        .children(
+            facts
+                .upstream
+                .as_deref()
+                .map(|counts| upstream_label(counts, cx)),
+        )
 }
 
 impl Condr {
@@ -71,27 +72,24 @@ impl Condr {
             .unwrap_or_else(|| kind.label().to_owned());
         let git = connection.model.workspace_git.get(&card.workspace_id);
         let branch = git.and_then(|git| git.branch.clone());
-        let (added, deleted) = git.map_or((0, 0), |git| {
+        let changes = git.map_or(GitDiffStat::default(), |git| {
             git.changes
                 .entries
                 .iter()
                 .filter_map(|entry| entry.stat)
-                .fold((0, 0), |(added, deleted), stat| {
-                    (added + stat.added, deleted + stat.deleted)
+                .fold(GitDiffStat::default(), |total, stat| GitDiffStat {
+                    added: total.added + stat.added,
+                    deleted: total.deleted + stat.deleted,
                 })
         });
-        let ahead = git
-            .and_then(|git| git.upstream)
-            .map_or(0, |upstream| upstream.ahead);
         Some(CardFacts {
             kind,
             title,
             workspace: workspace.name().to_owned(),
             branch,
             device: connection.label.clone(),
-            added,
-            deleted,
-            ahead,
+            changes,
+            upstream: git.and_then(|git| git.upstream).and_then(upstream_counts),
             detail: agent.detail.clone(),
         })
     }
@@ -127,10 +125,32 @@ impl Condr {
         });
         let theme = cx.theme();
         let (key, pane) = (card.key, card.pane_id.as_u64());
-        let place = match &facts.branch {
-            Some(branch) => format!("{} · {branch}", facts.workspace),
-            None => facts.workspace.clone(),
-        };
+        let changed = facts.changes.added > 0 || facts.changes.deleted > 0;
+        let git = (facts.branch.is_some() || facts.upstream.is_some() || changed).then(|| {
+            h_flex()
+                .gap_2()
+                .text_xs()
+                .child(
+                    h_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .gap_1()
+                        .children(facts.branch.clone().map(|branch| {
+                            div()
+                                .min_w_0()
+                                .truncate()
+                                .text_color(theme.muted_foreground)
+                                .child(branch)
+                        }))
+                        .children(
+                            facts
+                                .upstream
+                                .as_deref()
+                                .map(|counts| upstream_label(counts, cx)),
+                        ),
+                )
+                .child(diff_stat(facts.changes, cx))
+        });
         v_flex()
             .id(SharedString::from(format!("tasks-card-{key}-{pane}")))
             .debug_selector(move || format!("tasks-card-{key}-{pane}"))
@@ -169,15 +189,10 @@ impl Condr {
                     .min_w_0()
                     .text_xs()
                     .text_color(theme.muted_foreground)
-                    .child(div().min_w_0().truncate().child(place))
+                    .child(div().min_w_0().truncate().child(facts.workspace))
                     .child(device_tag(facts.device, theme)),
             )
-            .children(change_counts(
-                facts.added,
-                facts.deleted,
-                facts.ahead,
-                theme,
-            ))
+            .children(git)
             .children(facts.detail.map(|detail| {
                 div()
                     .text_xs()
@@ -267,6 +282,7 @@ impl Condr {
                 .child(detail.clone()),
             None => div().children(state_name(card.status, cx)),
         };
+        let changes = change_counts(&facts, cx);
         list_row(
             fit,
             format!("tasks-row-{key}-{pane}"),
@@ -275,12 +291,7 @@ impl Condr {
             facts.workspace,
             facts.branch.unwrap_or_default(),
             facts.device,
-            h_flex().children(change_counts(
-                facts.added,
-                facts.deleted,
-                facts.ahead,
-                theme,
-            )),
+            changes,
             state,
         )
         .text_sm()
