@@ -144,7 +144,7 @@ pub fn install(target: &HookTarget, agent: AgentKind) -> io::Result<PathBuf> {
                 root["version"] = json!(1);
             }
             let map = hooks_map(&mut root)?;
-            strip_ours(map, agent);
+            strip_ours(map, agent, target);
             for entry in *events {
                 let items = map
                     .entry(entry.native)
@@ -201,7 +201,7 @@ pub fn uninstall(target: &HookTarget, agent: AgentKind) -> io::Result<PathBuf> {
                 return Ok(path);
             };
             if let Some(map) = root.get_mut("hooks").and_then(Value::as_object_mut) {
-                strip_ours(map, agent);
+                strip_ours(map, agent, target);
                 map.retain(|_, items| items.as_array().is_none_or(|items| !items.is_empty()));
             }
             if root
@@ -253,14 +253,16 @@ fn marker(agent: AgentKind) -> String {
     format!(" agent-hook {} ", agent.id())
 }
 
-/// Whether `program` is a `condr` executable, wherever it lives, so another tool's
-/// `<tool> agent-hook <agent>` command is never taken for ours.
-fn is_condr(program: &str) -> bool {
+/// Whether `program` is a `condr` executable, wherever it lives, or the one installing,
+/// so another tool's `<tool> agent-hook <agent>` command is never taken for ours.
+fn is_condr(program: &str, target: &HookTarget) -> bool {
     let name = program.rsplit(['/', '\\']).next().unwrap_or(program);
-    name.eq_ignore_ascii_case("condr") || name.eq_ignore_ascii_case("condr.exe")
+    name.eq_ignore_ascii_case("condr")
+        || name.eq_ignore_ascii_case("condr.exe")
+        || program == target.executable()
 }
 
-fn is_ours(hook: &Value, agent: AgentKind) -> bool {
+fn is_ours(hook: &Value, agent: AgentKind, target: &HookTarget) -> bool {
     let command = hook
         .get("command")
         .and_then(Value::as_str)
@@ -271,12 +273,12 @@ fn is_ours(hook: &Value, agent: AgentKind) -> bool {
                 Some(quoted) => quoted.split_once('"').unwrap_or((quoted, "")),
                 None => command.split_at(command.find(' ').unwrap_or(command.len())),
             };
-            is_condr(program) && rest.starts_with(&marker(agent))
+            is_condr(program, target) && rest.starts_with(&marker(agent))
         });
     let exec = hook
         .get("exec")
         .and_then(Value::as_str)
-        .is_some_and(is_condr)
+        .is_some_and(|exec| is_condr(exec, target))
         && hook.get("args").and_then(Value::as_array).is_some_and(|args| {
             matches!(args.as_slice(), [first, second, ..] if first == "agent-hook" && second == agent.id())
         });
@@ -331,8 +333,10 @@ fn map_state(
         for (native, items) in map {
             for item in items.as_array().into_iter().flatten() {
                 let nested = item.get("hooks").and_then(Value::as_array);
-                if is_ours(item, agent)
-                    || nested.is_some_and(|nested| nested.iter().any(|hook| is_ours(hook, agent)))
+                if is_ours(item, agent, target)
+                    || nested.is_some_and(|nested| {
+                        nested.iter().any(|hook| is_ours(hook, agent, target))
+                    })
                 {
                     found.push((native.clone(), item.clone()));
                 }
@@ -373,18 +377,18 @@ fn hooks_map(root: &mut Value) -> io::Result<&mut serde_json::Map<String, Value>
 }
 
 /// Drops Condr's hooks from every group of every event, and the groups that emptied.
-fn strip_ours(map: &mut serde_json::Map<String, Value>, agent: AgentKind) {
+fn strip_ours(map: &mut serde_json::Map<String, Value>, agent: AgentKind, target: &HookTarget) {
     for items in map.values_mut() {
         let Some(items) = items.as_array_mut() else {
             continue;
         };
         for item in items.iter_mut() {
             if let Some(nested) = item.get_mut("hooks").and_then(Value::as_array_mut) {
-                nested.retain(|hook| !is_ours(hook, agent));
+                nested.retain(|hook| !is_ours(hook, agent, target));
             }
         }
         items.retain(|item| {
-            !is_ours(item, agent)
+            !is_ours(item, agent, target)
                 && item
                     .get("hooks")
                     .and_then(Value::as_array)
@@ -691,7 +695,9 @@ mod tests {
 
     #[test]
     fn only_a_condr_executable_makes_an_agent_hook_ours() {
-        let ours = |command: &str| is_ours(&json!({ "command": command }), AgentKind::Claude);
+        let (target, _) = target();
+        let ours =
+            |command: &str| is_ours(&json!({ "command": command }), AgentKind::Claude, &target);
         assert!(ours("condr agent-hook claude stop"));
         assert!(ours("\"/old/condr\" agent-hook claude stop"));
         assert!(ours(
@@ -705,10 +711,26 @@ mod tests {
             is_ours(
                 &json!({ "exec": exec, "args": ["agent-hook", "claude", "stop"] }),
                 AgentKind::Claude,
+                &target,
             )
         };
         assert!(exec("/opt/condr bin/condr"));
         assert!(!exec("/usr/local/bin/cmux"));
+        // Whatever the installing executable is called, its own hooks are ours.
+        let renamed = HookTarget {
+            command: "\"/opt/tools/renamed\"".to_owned(),
+            ..target.clone()
+        };
+        assert!(is_ours(
+            &json!({ "command": "\"/opt/tools/renamed\" agent-hook claude stop" }),
+            AgentKind::Claude,
+            &renamed,
+        ));
+        assert!(is_ours(
+            &json!({ "exec": "/opt/tools/renamed", "args": ["agent-hook", "claude", "stop"] }),
+            AgentKind::Claude,
+            &renamed,
+        ));
     }
 
     #[test]
