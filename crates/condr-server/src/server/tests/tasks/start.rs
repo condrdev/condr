@@ -707,7 +707,7 @@ fn a_server_stopped_mid_start_keeps_the_workspace_without_a_task() {
     assert_eq!(answer.unwrap_err().code, task_error::SERVER_STOPPING);
     assert!(folder.is_dir(), "the Workspace it made stays");
     assert!(branch_exists(&repository, "worktree/never-typed"));
-    let stored = crate::task_store::TaskStore::open(&fixture.root.join("data/tasks.sqlite"))
+    let stored = crate::task_store::TaskStore::open(&fixture.root.join("data/server.sqlite"))
         .unwrap()
         .tasks;
     assert_eq!(stored.len(), 1);

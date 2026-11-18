@@ -19,15 +19,17 @@ path = "src/bin/condrw.rs"
 
 [features]
 default = ["tasks"]
-# The task store (ADR 0068): SQLite, which the `condr` binary carries and `condr-gui`'s
-# own build leaves out. Without it the Server keeps no Tasks and refuses their requests.
-tasks = ["dep:rusqlite"]
+# The Server's database and its Tasks (ADR 0068): SQLite and its migrations, which the
+# `condr` binary carries and `condr-gui`'s own build leaves out. Without it the Server
+# keeps no Tasks and refuses their requests.
+tasks = ["dep:rusqlite", "dep:refinery"]
 
 [dependencies]
 atomicwrites.workspace = true
 clap.workspace = true
 interprocess.workspace = true
 relative-path.workspace = true
+refinery = { workspace = true, optional = true }
 rusqlite = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true

@@ -420,7 +420,7 @@ fn a_stopping_server_undoes_only_a_worktree_no_workspace_was_made_for() {
 #[test]
 fn a_server_with_an_unreadable_task_store_starts_with_no_tasks() {
     let data = temp("unreadable");
-    std::fs::write(data.join("tasks.sqlite"), "not a database").unwrap();
+    std::fs::write(data.join("server.sqlite"), "not a database").unwrap();
     let mut state = RuntimeState::recover(
         test_endpoint().as_local_path().unwrap(),
         None,
@@ -435,7 +435,7 @@ fn a_server_with_an_unreadable_task_store_starts_with_no_tasks() {
             .unwrap()
             .file_name()
             .to_string_lossy()
-            .starts_with("tasks.sqlite.unreadable-")),
+            .starts_with("server.sqlite.unreadable-")),
         "the old file is left for the person"
     );
     let task = create(&mut state, "New").id;

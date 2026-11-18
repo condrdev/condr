@@ -23,6 +23,8 @@ const CONPTY_VERSION: &str = "1.25.260930003";
 const CONPTY_SHA256: &str = "02b07b349af66d801159bdf9e440d4a1ce78bb951f37fc8609731665afdae7ee";
 
 fn main() {
+    // refinery's `embed_migrations!` sees a new migration only when the crate rebuilds.
+    println!("cargo:rerun-if-changed=migrations");
     windows::embed_icon("condr");
     if !cfg!(windows) || env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return;

@@ -45,7 +45,7 @@ impl Tasks {
         }
     }
 
-    /// The Device's Tasks from `tasks.sqlite` in `data_directory`, or in memory for a
+    /// The Device's Tasks from the Server's database in `data_directory`, or in memory for a
     /// Server without one; `None` for a build without the task store, which keeps none.
     pub(super) fn open(data_directory: Option<&std::path::Path>, files: PathBuf) -> Option<Self> {
         #[cfg(not(feature = "tasks"))]
@@ -59,7 +59,7 @@ impl Tasks {
             let Some(directory) = data_directory else {
                 return Some(tasks);
             };
-            let path = directory.join("tasks.sqlite");
+            let path = directory.join(crate::store::FILE_NAME);
             match crate::task_store::TaskStore::open(&path) {
                 Ok(opened) => {
                     tasks.items = opened
@@ -70,7 +70,7 @@ impl Tasks {
                     tasks.store = Some(opened.store);
                 }
                 Err(error) => tracing::error!(
-                    "cannot open the task store {}: {error}; Tasks are kept in memory until \
+                    "cannot open the Server database {}: {error}; Tasks are kept in memory until \
                      the Server restarts",
                     path.display()
                 ),

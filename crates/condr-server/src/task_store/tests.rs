@@ -1,5 +1,6 @@
 use super::*;
 use crate::test_support::unique_suffix;
+use std::fs;
 
 struct TestDirectory(PathBuf);
 
@@ -11,7 +12,7 @@ impl TestDirectory {
     }
 
     fn store(&self) -> PathBuf {
-        self.0.join("tasks.sqlite")
+        self.0.join(crate::store::FILE_NAME)
     }
 
     /// The files set aside next to the store.
@@ -23,7 +24,7 @@ impl TestDirectory {
                 path.file_name()
                     .unwrap()
                     .to_string_lossy()
-                    .starts_with("tasks.sqlite.unreadable-")
+                    .starts_with("server.sqlite.unreadable-")
             })
             .collect()
     }
@@ -50,11 +51,26 @@ fn task(id: u128, title: &str, order: i64) -> Task {
     }
 }
 
-fn user_version(path: &Path) -> i64 {
-    Connection::open(path)
+/// The migrations the database at `path` has run, by version.
+fn applied(path: &Path) -> Vec<i32> {
+    let connection = Connection::open(path).unwrap();
+    let mut statement = connection
+        .prepare("SELECT version FROM refinery_schema_history ORDER BY version")
+        .unwrap();
+    statement
+        .query_map([], |row| row.get(0))
         .unwrap()
-        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .collect::<Result<_, _>>()
         .unwrap()
+}
+
+/// Every migration this build has, by version.
+fn latest() -> Vec<i32> {
+    crate::store::migrations::runner()
+        .get_migrations()
+        .iter()
+        .map(|migration| migration.version())
+        .collect()
 }
 
 fn sorted(mut tasks: Vec<Task>) -> Vec<Task> {
@@ -95,7 +111,7 @@ fn the_store_keeps_every_change_across_a_restart() {
     opened.store.schedule(third.id, None);
     opened.store.shutdown().unwrap();
     drop(opened);
-    assert_eq!(user_version(&directory.store()), SCHEMA_VERSION);
+    assert_eq!(applied(&directory.store()), latest());
 
     let mut reopened = TaskStore::open(&directory.store()).unwrap();
     assert_eq!(
@@ -112,24 +128,41 @@ fn the_store_keeps_every_change_across_a_restart() {
     assert_eq!(sorted(restored.tasks.clone()), vec![first, second]);
 }
 
-/// ADR 0068 and 0028: a store from a newer Server, or from an early build that numbered
-/// its Tasks, or one that is not a database, is renamed aside, never overwritten, and the
-/// Server starts with no Tasks.
+/// ADR 0068 and 0028: a database a newer Server has migrated further, one whose migration
+/// has been edited since it ran, and one that is not a database are renamed aside, never
+/// overwritten, and the Server starts with no Tasks.
 #[test]
-fn a_newer_older_or_unreadable_store_is_set_aside_and_tasks_start_empty() {
-    for version in [SCHEMA_VERSION + 1, SCHEMA_VERSION - 1] {
+fn a_newer_edited_or_unreadable_store_is_set_aside_and_tasks_start_empty() {
+    for change in [
+        "INSERT INTO refinery_schema_history (version, name, applied_on, checksum) \
+         VALUES (9999, 'from_a_newer_server', '2026-11-18T00:00:00Z', '0')",
+        "UPDATE refinery_schema_history SET checksum = '0' WHERE version = 1",
+    ] {
         let directory = TestDirectory::new();
-        {
-            let other = Connection::open(directory.store()).unwrap();
-            other.pragma_update(None, "user_version", version).unwrap();
-        }
+        let mut opened = TaskStore::open(&directory.store()).unwrap();
+        let kept = task(1, "Kept", 0);
+        opened.store.schedule(kept.id, Some(kept));
+        opened.store.shutdown().unwrap();
+        drop(opened);
+        Connection::open(directory.store())
+            .unwrap()
+            .execute_batch(change)
+            .unwrap();
+
         let opened = TaskStore::open(&directory.store()).unwrap();
         assert!(opened.tasks.is_empty());
         let aside = directory.set_aside();
         assert_eq!(aside.len(), 1);
-        assert_eq!(user_version(&aside[0]), version, "left as it was");
+        let left = Connection::open(&aside[0]).unwrap();
+        let count = |sql: &str| left.query_row(sql, [], |row| row.get::<_, i64>(0)).unwrap();
+        assert_eq!(
+            count("SELECT count(*) FROM refinery_schema_history WHERE checksum = '0'"),
+            1,
+            "left as it was"
+        );
+        assert_eq!(count("SELECT count(*) FROM tasks"), 1, "its Task kept");
         drop(opened);
-        assert_eq!(user_version(&directory.store()), SCHEMA_VERSION);
+        assert_eq!(applied(&directory.store()), latest());
     }
 
     let directory = TestDirectory::new();
@@ -174,7 +207,7 @@ fn a_store_in_use_or_unavailable_is_left_alone() {
 fn the_store_is_the_persons_alone() {
     use std::os::unix::fs::PermissionsExt as _;
     let directory = TestDirectory::new();
-    let store = directory.0.join("data").join("tasks.sqlite");
+    let store = directory.0.join("data").join(crate::store::FILE_NAME);
     let opened = TaskStore::open(&store).unwrap();
     let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode(&store), 0o600);
