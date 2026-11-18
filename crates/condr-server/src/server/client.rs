@@ -1054,46 +1054,6 @@ pub(super) fn handle_client(
                     true
                 }
             }
-            ClientMessage::RevokeDevice { key } => {
-                let response = if !stream.get_ref().may_administer() {
-                    ServerMessage::Error {
-                        message: "only the Server host may revoke devices".into(),
-                    }
-                } else if let Ok(key) = crate::noise::PublicKey::parse(&key) {
-                    let state = state.lock().or_abort();
-                    let mut disconnected = 0;
-                    for (id, (peer_key, peer)) in &state.tcp_peers {
-                        if *id != client_id && *peer_key == key {
-                            let _ = peer.shutdown();
-                            disconnected += 1;
-                        }
-                    }
-                    ServerMessage::DevicesRevoked { disconnected }
-                } else {
-                    ServerMessage::Error {
-                        message: "expected a full device fingerprint".into(),
-                    }
-                };
-                queue_message(&outbound, response)
-            }
-            ClientMessage::ConnectedDevices => {
-                let response = if !stream.get_ref().may_administer() {
-                    ServerMessage::Error {
-                        message: "only the Server host may list connected devices".into(),
-                    }
-                } else {
-                    let state = state.lock().or_abort();
-                    let mut keys = state
-                        .tcp_peers
-                        .values()
-                        .map(|(key, _)| key.to_string())
-                        .collect::<Vec<_>>();
-                    keys.sort();
-                    keys.dedup();
-                    ServerMessage::ConnectedDevices { keys }
-                };
-                queue_message(&outbound, response)
-            }
             ClientMessage::ServerAdmin { server_id, command } => {
                 let restart = matches!(command, ServerAdminCommand::Restart);
                 // A paired Device could otherwise cut its own connection (ADR 0038).
@@ -1428,6 +1388,11 @@ fn server_admin(
         .config_path
         .clone()
         .or_else(|| condr_core::config_directory().map(|root| root.join("config.toml")));
+    // The identity this Server's handshakes use, loaded off the state lock.
+    let identity = || {
+        let identity = Arc::clone(&state.lock().or_abort().identity);
+        identity.get()
+    };
     let connected = || {
         let state = state.lock().or_abort();
         let mut keys = state
@@ -1493,8 +1458,8 @@ fn server_admin(
             Err(io::Error::other("restart is handled by the Server runtime"))
         }
         ServerAdminCommand::Clients => {
-            let directory = crate::noise::identity_directory()?;
-            let clients = crate::noise::read_authorized(&directory)?
+            let clients = identity()?
+                .paired()?
                 .into_iter()
                 .map(|client| ServerClientInfo {
                     name: client.name,
@@ -1508,15 +1473,14 @@ fn server_admin(
             })
         }
         ServerAdminCommand::Invite => {
-            let directory = crate::noise::identity_directory()?;
-            let identity = crate::noise::ServerIdentity::load_or_create(&directory)?;
+            let identity = identity()?;
             let config = ServerConfig::default();
             if config.listen.is_none() && !config.p2p {
                 return Err(io::Error::other(
                     "neither a TCP listener nor Peer-to-peer is enabled",
                 ));
             }
-            let invite = crate::noise::create_invite(&directory)?;
+            let invite = identity.create_invite()?;
             let (id, secret) = (identity.public_key(), invite.secret.encode());
             Ok(ServerAdminResponse::Invite {
                 tcp: config
@@ -1531,8 +1495,7 @@ fn server_admin(
             })
         }
         ServerAdminCommand::Revoke { key } => {
-            let directory = crate::noise::identity_directory()?;
-            let Some(key) = crate::noise::revoke(&directory, &key)? else {
+            let Some(key) = identity()?.revoke(&key)? else {
                 return Err(io::Error::new(
                     io::ErrorKind::NotFound,
                     "no paired device matches that fingerprint",

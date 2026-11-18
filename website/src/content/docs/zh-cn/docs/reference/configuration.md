@@ -309,7 +309,6 @@ url = "http://user:password@proxy:8080"
 | `config.toml` | 配置 | 全局窗口与 Server 核心配置 | 所有参数回退为默认值，已保存的远程连接列表清空 |
 | `device-key` | 数据 | 设备非对称加密密钥 | 下次启动重新生成公私钥对并清空配对表；既有对端连接需重新授权 |
 | `authorized-clients.json` | 数据 | 配对白名单列表（JSON 数组，每台设备一项） | 已配对设备下次连接时被拒绝，需重新配对 |
-| `pending-invite` | 数据 | 当前生效的一次性配对票据 | 对应邀请链接立即失效 |
 | `condr-server-<id>.snapshot` | 状态 | Session 结构快照（Workspace、Tab 与 Pane 布局） | *需停机操作*。下次冷启动时丢弃所有会话上下文（磁盘已检出 Worktree 不受损） |
 | `condr-gui.state` | 状态 | 前端窗口几何尺寸、分栏折叠与各 Workspace 打开的 Tab 状态 | 窗口重置为初始居中尺寸与默认布局 |
 | `condr-server-<id>.<date>.log` | 日志 | Server 运行流水（按日轮转，仅滚动保留近 7 份） | 无直接影响 |

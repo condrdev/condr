@@ -21,3 +21,5 @@ Deferred from the roadmap's M3 list: storing the device key in an OS keychain, c
 > ADR 0040 pairs a Companion by QR code and keeps its key in the iOS Keychain or under an Android Keystore key. The OS keychain deferred here is the desktop's.
 
 > ADR 0047 replaces the lines of `authorized-clients` with `authorized-clients.json`, a JSON array that also records whether each Client accepts pushes; the store rules are unchanged.
+
+> Amended 2026-11-18: the running Server alone manages the paired devices and the invite. `condr server invite`, `clients` and `revoke` send `ServerAdmin`, as Settings has since ADR 0038, and fail like every other command that needs a Server when none runs; `RevokeDevice` and `ConnectedDevices` are gone. Revoking no longer works without a Server: without one nothing can connect, and a device that connects in the moment between starting a Server and revoking it is dropped by the revoke. The invite lives only in the Server's memory, never in `pending-invite`, so a restart drops it. `identity.lock` stays, for creating `device-key` and for the Server's own threads writing `authorized-clients.json`.

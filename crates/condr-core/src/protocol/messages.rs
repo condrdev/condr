@@ -154,14 +154,6 @@ pub enum ClientMessage {
     StopServer {
         server_id: ServerId,
     },
-    /// Drops the live TCP connections of the device identified by its full public key.
-    /// Only the Server host may send it; the authorized list itself is
-    /// a file the host edits directly.
-    RevokeDevice {
-        key: String,
-    },
-    /// Asks which paired devices hold a live TCP connection right now. Server host only.
-    ConnectedDevices,
     /// Server management commands. Only local/SSH connections may change how other devices
     /// reach the Server or restart it, and no device may revoke itself (ADR 0038).
     ServerAdmin {
@@ -1002,14 +994,6 @@ pub enum ServerMessage {
         text: String,
     },
     ServerStopping,
-    /// How many live connections a `RevokeDevice` request closed.
-    DevicesRevoked {
-        disconnected: u32,
-    },
-    /// The hex public keys of devices connected over TCP right now.
-    ConnectedDevices {
-        keys: Vec<String>,
-    },
     ServerAdmin(ServerAdminResponse),
     Error {
         message: String,

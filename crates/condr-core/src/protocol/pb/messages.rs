@@ -528,10 +528,6 @@ impl TryFrom<&ClientMessage> for super::ClientMessage {
             ClientMessage::StopServer { server_id } => Message::StopServer(ServerRequest {
                 server_id: server_id.0,
             }),
-            ClientMessage::RevokeDevice { key } => {
-                Message::RevokeDevice(super::RevokeDevice { key: key.clone() })
-            }
-            ClientMessage::ConnectedDevices => Message::ConnectedDevices(Empty {}),
             ClientMessage::ServerAdmin { server_id, command } => {
                 Message::ServerAdmin(ServerAdminRequest {
                     server_id: server_id.0,
@@ -733,8 +729,6 @@ fn decode_client_message(message: super::ClientMessage) -> WireResult<ClientMess
             Message::StopServer(request) => ClientMessage::StopServer {
                 server_id: ServerId(request.server_id),
             },
-            Message::RevokeDevice(revoke) => ClientMessage::RevokeDevice { key: revoke.key },
-            Message::ConnectedDevices(_) => ClientMessage::ConnectedDevices,
             Message::ServerAdmin(admin) => ClientMessage::ServerAdmin {
                 server_id: ServerId(admin.server_id),
                 command: required(admin.command, "admin command")?.try_into()?,
@@ -2032,12 +2026,6 @@ impl TryFrom<&ServerMessage> for super::ServerMessage {
                 })
             }
             ServerMessage::ServerStopping => Message::ServerStopping(Empty {}),
-            ServerMessage::DevicesRevoked { disconnected } => {
-                Message::DevicesRevoked(*disconnected)
-            }
-            ServerMessage::ConnectedDevices { keys } => {
-                Message::ConnectedDevices(super::ConnectedDevices { keys: keys.clone() })
-            }
             ServerMessage::ServerAdmin(response) => Message::ServerAdmin(response.into()),
             ServerMessage::Error { message } => Message::Error(message.clone()),
             ServerMessage::Unknown(_) => return Err("an unknown message cannot be sent".into()),
@@ -2250,10 +2238,6 @@ fn decode_server_message(message: server_message::Message) -> WireResult<ServerM
             text: text.text,
         },
         Message::ServerStopping(_) => ServerMessage::ServerStopping,
-        Message::DevicesRevoked(disconnected) => ServerMessage::DevicesRevoked { disconnected },
-        Message::ConnectedDevices(devices) => {
-            ServerMessage::ConnectedDevices { keys: devices.keys }
-        }
         Message::ServerAdmin(response) => ServerMessage::ServerAdmin(response.try_into()?),
         Message::Error(message) => ServerMessage::Error { message },
     })

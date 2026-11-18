@@ -451,6 +451,18 @@ fn lifecycle_commands_manage_a_detached_server() {
         client.overview().runtime_epoch
     );
     drop(remote);
+    // Revoking goes through the running Server, which refuses the device from then on.
+    let revoke = condr(&["server", "revoke"])
+        .arg(&device_key.public().to_string()[..8])
+        .output()
+        .unwrap();
+    assert!(
+        revoke.status.success() && String::from_utf8_lossy(&revoke.stdout).contains("laptop"),
+        "revoke failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&revoke.stdout),
+        String::from_utf8_lossy(&revoke.stderr)
+    );
+    assert!(ClientConnection::connect(&paired, "laptop").is_err());
     drop(client);
 
     let stop = condr(&["server", "stop"]).status().unwrap();

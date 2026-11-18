@@ -57,7 +57,7 @@ pub fn splice(local: EndpointStream, remote: P2pStream) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::noise::{Secret, ServerIdentity, create_invite, revoke};
+    use crate::noise::{Secret, ServerIdentity, revoke};
     use condr_core::ProxySetting;
     use condr_core::protocol::{
         ClientHandshake, Hello, ServerMessage, read_message, write_message,
@@ -118,7 +118,7 @@ mod tests {
 
         let server_dir = temp_dir("server");
         let server_identity = Arc::new(ServerIdentity::load_or_create(&server_dir).unwrap());
-        let invite = create_invite(&server_dir).unwrap().secret;
+        let invite = server_identity.create_invite().unwrap().secret;
         let client_dir = temp_dir("client");
         let client_identity = Arc::new(ServerIdentity::load_or_create(&client_dir).unwrap());
         let client_public = client_identity.public_key();
@@ -221,7 +221,7 @@ mod tests {
         let lookup = MemoryLookup::new();
         let server_dir = temp_dir("streams-server");
         let server_identity = Arc::new(ServerIdentity::load_or_create(&server_dir).unwrap());
-        let invite = create_invite(&server_dir).unwrap().secret;
+        let invite = server_identity.create_invite().unwrap().secret;
         let client_dir = temp_dir("streams-client");
         let client_identity = Arc::new(ServerIdentity::load_or_create(&client_dir).unwrap());
         let server_id = server_identity.public_key();

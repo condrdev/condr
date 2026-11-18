@@ -126,13 +126,13 @@ condr server install [--start] [--restart] [--yes] [--json]
 # Stop the Server and clean up the binary and PATH entry (user data and logs are kept)
 condr server uninstall [--yes] [--json]
 
-# Generate a one-time pairing link (valid for 10 minutes); listening or P2P must be enabled first
+# Generate a one-time pairing link (valid for 10 minutes); needs a running Server with listening or P2P enabled
 condr server invite
 
-# List the fingerprints and connection states of all authorized remote devices
+# List the fingerprints and connection states of all authorized remote devices; needs a running Server
 condr server clients
 
-# Revoke a client's access and disconnect it immediately; a unique prefix is enough
+# Revoke a client's access and disconnect it immediately; a unique prefix is enough; needs a running Server
 condr server revoke <fingerprint or prefix>
 
 # Bridge stdio to the local socket; called automatically by SSH, no need to run by hand

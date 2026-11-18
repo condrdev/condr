@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-use condr_core::protocol::{ServerAdminResponse, relative_age, uptime_text};
+use condr_core::protocol::{ServerAdminCommand, ServerAdminResponse, relative_age, uptime_text};
 use condr_server::ServerConfig;
 use condr_server::noise::{self, ServerIdentity};
 use serde_json::json;
@@ -702,9 +702,6 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                 .map_err(|error| failure("the Server stopped with an error", [error.to_string()]))
         }
         ServerCommand::Invite => {
-            let directory = identity_directory()?;
-            let identity = load_identity(&directory)?;
-            let invite = noise::create_invite(&directory)?;
             let config = ServerConfig::default();
             if config.listen.is_none() && !config.p2p {
                 return Err(failure(
@@ -713,47 +710,42 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                         .to_owned()],
                 ));
             }
+            let response = admin(ServerAdminCommand::Invite)?;
+            let ServerAdminResponse::Invite {
+                tcp,
+                p2p,
+                expires_in_secs,
+                hosts,
+            } = response
+            else {
+                return Err(unexpected(&response));
+            };
             field(
                 "Expires",
-                format_args!("in {} minutes", noise::INVITE_TTL.as_secs() / 60),
+                format_args!("in {} minutes", expires_in_secs / 60),
             );
-            if let Some(address) = config.listen {
-                field(
-                    "TCP",
-                    format_args!(
-                        "tcp://{}.{}@<host>:{}",
-                        identity.public_key(),
-                        invite.secret.encode(),
-                        address.port()
-                    ),
-                );
+            if let Some(tcp) = tcp {
+                field("TCP", tcp);
                 // What `<host>` may be, most likely first (ADR 0040).
-                let hosts = noise::invite_hosts(address);
                 if !hosts.is_empty() {
                     field("Hosts", hosts.join(", "));
                 }
             }
-            if config.p2p {
-                field(
-                    "Peer-to-peer",
-                    format_args!("p2p://{}.{}", identity.public_key(), invite.secret.encode()),
-                );
+            if let Some(p2p) = p2p {
+                field("Peer-to-peer", p2p);
             }
             field("Next", "in Condr, Connect Remote Device and paste a link");
             Ok(0)
         }
         ServerCommand::Clients => {
-            let directory = identity_directory()?;
-            let clients = noise::read_authorized(&directory)?;
+            let response = admin(ServerAdminCommand::Clients)?;
+            let ServerAdminResponse::Clients { clients, connected } = response else {
+                return Err(unexpected(&response));
+            };
             if clients.is_empty() {
                 println!("no paired devices");
                 return Ok(0);
             }
-            // A Server that is not running has no live connections; every device then
-            // shows when it was last seen.
-            let connected =
-                condr_server::connected_devices(&ServerConfig::default().local_endpoint())
-                    .unwrap_or_default();
             let name_width = clients
                 .iter()
                 .map(|client| client.name.chars().count())
@@ -762,42 +754,77 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                 .max("NAME".len());
             println!("{:<name_width$}  {:<14}  FINGERPRINT", "NAME", "LAST SEEN");
             for client in clients {
-                let seen = if connected.contains(&client.key.to_string()) {
+                let seen = if connected.contains(&client.fingerprint) {
                     "connected".to_owned()
                 } else {
                     relative_age(client.last_seen)
                 };
-                println!("{:<name_width$}  {seen:<14}  {}", client.name, client.key);
+                println!(
+                    "{:<name_width$}  {seen:<14}  {}",
+                    client.name, client.fingerprint
+                );
             }
             println!("revoke a device with `condr server revoke <fingerprint or prefix>`");
             Ok(0)
         }
         ServerCommand::Revoke { key } => {
-            let directory = identity_directory()?;
-            let Some(key) = noise::revoke(&directory, &key)? else {
-                return Err(failure(
+            let no_match = || {
+                failure(
                     format!("no paired device matches {key}"),
                     ["list paired devices with `condr server clients`".to_owned()],
-                ));
+                )
             };
-            field("Revoked", key);
-            // The file already refuses their next handshake; a running Server also drops
-            // the connections they hold now.
-            let endpoint = ServerConfig::default().local_endpoint();
-            match condr_server::revoke_devices(&endpoint, &key) {
-                Ok(disconnected) => {
+            let response = admin(ServerAdminCommand::Clients)?;
+            let ServerAdminResponse::Clients { clients, .. } = response else {
+                return Err(unexpected(&response));
+            };
+            // The whole fingerprint, so the Server revokes the device named here.
+            let mut matches = clients.into_iter().filter(|client| {
+                noise::PublicKey::parse(&client.fingerprint)
+                    .is_ok_and(|own| own.matches_prefix(&key))
+            });
+            let device = matches.next().ok_or_else(no_match)?;
+            if matches.next().is_some() {
+                return Err(failure(
+                    format!("more than one paired device matches {key}"),
+                    ["use a longer fingerprint".to_owned()],
+                ));
+            }
+            match admin(ServerAdminCommand::Revoke {
+                key: device.fingerprint.clone(),
+            })? {
+                ServerAdminResponse::Revoked { disconnected } => {
+                    field(
+                        "Revoked",
+                        format_args!("{} {}", device.fingerprint, device.name),
+                    );
                     field("Closed", format_args!("{disconnected} live connection(s)"));
                     Ok(0)
                 }
-                // The file edit stands, but nobody closed the device's live connections;
-                // a script must not read that as a complete revocation.
-                Err(error) => Err(failure(
-                    "revoked in authorized-clients.json, but its live connections were not dropped",
-                    [endpoint.describe_connect_error(&error)],
-                )),
+                other => Err(unexpected(&other)),
             }
         }
     }
+}
+
+/// Sends `command` to this machine's Server as Settings does: the Server alone manages
+/// the paired devices and the invite (ADR 0011, ADR 0038). Its refusal is the error.
+fn admin(command: ServerAdminCommand) -> io::Result<ServerAdminResponse> {
+    let endpoint = ServerConfig::default().local_endpoint();
+    condr_server::server_admin(&endpoint, command).map_err(|error| {
+        if condr_server::not_running(&error) {
+            failure(
+                "no Server is running on this machine",
+                ["start it with `condr server start`".to_owned()],
+            )
+        } else {
+            failure(error.to_string(), [])
+        }
+    })
+}
+
+fn unexpected(response: &ServerAdminResponse) -> io::Error {
+    failure(format!("the Server answered {response:?}"), [])
 }
 
 fn config_path() -> io::Result<PathBuf> {

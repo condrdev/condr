@@ -68,7 +68,7 @@ If you delete only `device-key`, the window may generate a new key before the Se
 
 ## Invites and pairing
 
-* **The invite**: 32 random bytes, valid for 10 minutes, usable once. Only one invite is valid at any time, and generating a new one invalidates the previous one. It is stored in the `pending-invite` file in the data directory, with the same access permissions as the Device key.
+* **The invite**: 32 random bytes, valid for 10 minutes, usable once. Only one invite is valid at any time, and generating a new one invalidates the previous one. Only the running Server holds it, in memory: it is never written to disk, and restarting the Server drops it.
 * **Who can use it**: the first Device to complete the handshake uses up the invite. Anyone holding the invite can pair, so share it only through trusted channels.
 * **What pairing records**: after pairing, the Server adds an entry to the `authorized-clients.json` file with the other side's Device key, the pairing time, the last-seen time, its host name, and whether it takes push notifications (`push`), which the mobile app turns on when you allow notifications.
 * **What the client keeps**: the client stores only the Server's Device key and network address in `config.toml`, never the invite.
@@ -141,7 +141,7 @@ So pair only your own Devices with the Server. Read-only and control permissions
 
 | File | Linux and macOS | Windows |
 | :--- | :--- | :--- |
-| `device-key`, `pending-invite` | `0600`; refused when permissions are too broad | Only the owner and SYSTEM |
+| `device-key` | `0600`; refused when permissions are too broad | Only the owner and SYSTEM |
 | `config.toml`, the Session snapshot, the Server's `.stderr` file | `0600` | Inherits the parent folder's ACL |
 | `authorized-clients.json`, log files | Created with the system default umask | Inherits the parent folder's ACL |
 

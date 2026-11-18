@@ -51,11 +51,10 @@ fn lightweight_queries_and_admin_never_capture_terminal_views() {
     assert!(client.bootstrap().is_none());
     client.read_pane(pane_id, 5).unwrap();
     probe_server(&endpoint).unwrap();
-    assert!(connected_devices(&endpoint).unwrap().is_empty());
-    assert_eq!(
-        revoke_devices(&endpoint, &DeviceKey::generate().unwrap().public()).unwrap(),
-        0
-    );
+    assert!(matches!(
+        server_admin(&endpoint, ServerAdminCommand::Status).unwrap(),
+        ServerAdminResponse::Status { connected, .. } if connected.is_empty()
+    ));
     let inspector = ClientConnection::connect_overview(&endpoint, "second inspect").unwrap();
     assert_eq!(inspector.overview().terminals.len(), 1);
     assert_eq!(
@@ -703,7 +702,9 @@ fn a_paired_devices_push_is_recorded_on_every_handshake() {
         tcp.invite = invite;
         Endpoint::tcp(tcp)
     };
-    let invite = noise::create_invite(&directory).unwrap();
+    // The invite lives in the Server's identity, as `ServerAdmin::Invite` makes it.
+    let identity = Arc::clone(&handle.state.lock().unwrap().identity);
+    let invite = identity.get().unwrap().create_invite().unwrap();
     let phone = Hello {
         push: true,
         ..Hello::new("phone")
@@ -753,7 +754,9 @@ fn revoking_a_device_drops_its_live_connections_and_refuses_its_return() {
         tcp.invite = invite;
         Endpoint::tcp(tcp)
     };
-    let invite = noise::create_invite(&directory).unwrap();
+    // The invite lives in the Server's identity, as `ServerAdmin::Invite` makes it.
+    let identity = Arc::clone(&handle.state.lock().unwrap().identity);
+    let invite = identity.get().unwrap().create_invite().unwrap();
     let mut first = connect_and_bootstrap(&device(Some(invite.secret.clone())));
     assert_eq!(noise::read_authorized(&directory).unwrap().len(), 1);
     // A Client that kept its invite past a successful pairing (it never saw the
@@ -768,20 +771,8 @@ fn revoking_a_device_drops_its_live_connections_and_refuses_its_return() {
         stream.handshake().unwrap();
     }
 
-    // A paired device is not the host and may not revoke anyone.
     let prefix = device_key.public().to_string()[..12].to_owned();
-    condr_core::protocol::write_message(
-        &mut second,
-        &ClientMessage::RevokeDevice {
-            key: device_key.public().to_string(),
-        },
-    )
-    .unwrap();
-    assert!(matches!(
-        read_server(&mut second),
-        ServerMessage::Error { message } if message.contains("only the Server host")
-    ));
-    // Through Settings it may revoke others, but nothing that cuts its own connection
+    // A paired device may revoke others, but nothing that cuts its own connection
     // (ADR 0038).
     let server_id = handle.state.lock().unwrap().server_id;
     for (command, refusal) in [
@@ -816,11 +807,23 @@ fn revoking_a_device_drops_its_live_connections_and_refuses_its_return() {
 
     // The host sees the device connected, and its last-seen time was written at pairing.
     let mut admin = connect_and_bootstrap(&host);
-    condr_core::protocol::write_message(&mut admin, &ClientMessage::ConnectedDevices).unwrap();
-    assert!(matches!(
-        read_server(&mut admin),
-        ServerMessage::ConnectedDevices { keys } if keys == vec![device_key.public().to_string()]
-    ));
+    let mut administer = |command| {
+        condr_core::protocol::write_message(
+            &mut admin,
+            &ClientMessage::ServerAdmin { server_id, command },
+        )
+        .unwrap();
+        read_server(&mut admin)
+    };
+    let listed = administer(ServerAdminCommand::Clients);
+    assert!(
+        matches!(
+            &listed,
+            ServerMessage::ServerAdmin(ServerAdminResponse::Clients { clients, connected })
+                if clients.len() == 1 && *connected == [device_key.public().to_string()]
+        ),
+        "{listed:?}"
+    );
     let paired = noise::read_authorized(&directory).unwrap();
     assert!(paired[0].last_seen >= paired[0].paired_at);
 
@@ -834,24 +837,17 @@ fn revoking_a_device_drops_its_live_connections_and_refuses_its_return() {
         );
         thread::sleep(Duration::from_millis(10));
     }
-    // The host revokes: the file refuses the next handshake, the message drops both
-    // live connections.
-    assert_eq!(
-        noise::revoke(&directory, &prefix).unwrap(),
-        Some(device_key.public())
-    );
-    condr_core::protocol::write_message(
-        &mut admin,
-        &ClientMessage::RevokeDevice {
-            key: device_key.public().to_string(),
-        },
-    )
-    .unwrap();
-    let revoked = read_server(&mut admin);
+    // The host revokes through its Server, whose own store refuses the next handshake
+    // and which drops both live connections.
+    let revoked = administer(ServerAdminCommand::Revoke { key: prefix });
     assert!(
-        matches!(revoked, ServerMessage::DevicesRevoked { disconnected: 2 }),
+        matches!(
+            revoked,
+            ServerMessage::ServerAdmin(ServerAdminResponse::Revoked { disconnected: 2 })
+        ),
         "{revoked:?}"
     );
+    assert!(noise::read_authorized(&directory).unwrap().is_empty());
     for stream in [&mut first, &mut second] {
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))

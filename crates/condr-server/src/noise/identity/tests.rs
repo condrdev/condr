@@ -109,6 +109,35 @@ fn serve<T: Send + 'static>(
     thread::spawn(move || f(&mut server.join().unwrap()?))
 }
 
+/// The invite lives only in the Server's memory: one past its ten minutes is neither
+/// offered nor redeemed, and an identity without a store makes none.
+#[test]
+fn an_expired_invite_does_not_pair() {
+    let directory = std::env::temp_dir().join(format!(
+        "condr-noise-expired-{}-{}",
+        std::process::id(),
+        crate::test_support::unique_suffix()
+    ));
+    let identity = ServerIdentity::load_or_create(&directory).unwrap();
+    let invite = identity.create_invite().unwrap();
+    identity.pending().as_mut().unwrap().expires_at = now() - 1;
+    assert!(Authority::pending_invite(&identity).unwrap().is_none());
+    let device = DeviceKey::generate().unwrap().public();
+    assert!(
+        identity
+            .complete_pairing(device, "late", &invite.secret)
+            .is_err()
+    );
+    assert!(identity.paired().unwrap().is_empty());
+    assert!(
+        ServerIdentity::ephemeral()
+            .unwrap()
+            .create_invite()
+            .is_err()
+    );
+    fs::remove_dir_all(directory).unwrap();
+}
+
 #[test]
 fn an_invite_pairs_a_new_device_once_and_a_bad_invite_does_not() {
     let directory = std::env::temp_dir().join(format!(
@@ -119,7 +148,7 @@ fn an_invite_pairs_a_new_device_once_and_a_bad_invite_does_not() {
     let identity = Arc::new(ServerIdentity::load_or_create(&directory).unwrap());
     let device = DeviceKey::generate().unwrap();
 
-    let invite = create_invite(&directory).unwrap();
+    let invite = identity.create_invite().unwrap();
     let wrong = Secret::generate().unwrap();
     let (mut client, server) = pair(&identity, &device, Some(&wrong));
     let server = serve(server, |server| {
@@ -153,13 +182,13 @@ fn an_invite_pairs_a_new_device_once_and_a_bad_invite_does_not() {
     assert_eq!(clients[0].key, device.public());
     assert_eq!(clients[0].name, "laptop");
     assert!(
-        read_invite(&directory).unwrap().is_none(),
+        Authority::pending_invite(&*identity).unwrap().is_none(),
         "invite is one-time"
     );
 
     // A second device that finished its handshake with the same invite loses the
     // race: the invite is gone by the time it proves itself.
-    let invite = create_invite(&directory).unwrap();
+    let invite = identity.create_invite().unwrap();
     let first = DeviceKey::generate().unwrap();
     let second = DeviceKey::generate().unwrap();
     let (mut first_client, first_server) = pair(&identity, &first, Some(&invite.secret));
@@ -191,7 +220,7 @@ fn an_invite_pairs_a_new_device_once_and_a_bad_invite_does_not() {
 
     // A handshake made with an older invite cannot pair after a newer invite replaced
     // it, and does not consume the newer one.
-    let stale = create_invite(&directory).unwrap();
+    let stale = identity.create_invite().unwrap();
     let late = DeviceKey::generate().unwrap();
     let (mut late_client, late_server) = pair(&identity, &late, Some(&stale.secret));
     let late_server = serve(late_server, |server| {
@@ -199,15 +228,19 @@ fn an_invite_pairs_a_new_device_once_and_a_bad_invite_does_not() {
         server.complete_pairing("late")
     });
     late_client.handshake().unwrap();
-    let fresh = create_invite(&directory).unwrap();
+    let fresh = identity.create_invite().unwrap();
     late_client.write_all(b"hi").unwrap();
     late_client.flush().unwrap();
     assert_eq!(
         late_server.join().unwrap().unwrap_err().kind(),
         io::ErrorKind::PermissionDenied
     );
-    assert_eq!(read_invite(&directory).unwrap(), Some(fresh));
-    let _ = fs::remove_file(directory.join(INVITE_FILE));
+    assert_eq!(
+        Authority::pending_invite(&*identity).unwrap(),
+        Some(fresh.secret)
+    );
+    // No invite waits from here on, so an unknown device is refused outright.
+    *identity.pending() = None;
 
     // Paired: connects with the zero PSK, no invite needed.
     let (mut client, server) = pair(&identity, &device, None);

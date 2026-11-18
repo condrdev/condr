@@ -68,7 +68,7 @@ Condr 不设用户账号体系，亦不收集遥测数据。运行期间仅访�
 
 ## Invite 与配对
 
-* **Invite 规范**：由 32 字节随机数构成，有效期为 10 分钟，且仅限单次消费。系统在同一时刻仅允许存在一个有效 invite，生成新 invite 将立即使历史凭证失效。该凭证保存在数据目录下的 `pending-invite` 文件中，访问权限配置与设备密钥一致。
+* **Invite 规范**：由 32 字节随机数构成，有效期为 10 分钟，且仅限单次消费。系统在同一时刻仅允许存在一个有效 invite，生成新 invite 将立即使历史凭证失效。该凭证只保存在运行中的 Server 内存里，从不写入磁盘，Server 重启后即失效。
 * **使用限制**：首台成功完成握手接入的设备将直接消耗该 invite。任何持有该 invite 的主体均可完成配对，必须仅通过受信渠道分发。
 * **配对记录格式**：配对成功后，Server 在 `authorized-clients.json` 文件中新增一条记录，记录对端的设备公钥、配对时间戳、最后活跃时间、对端主机名，以及该设备是否接收推送通知（`push`）；你在手机端允许通知后，手机端会将其打开。
 * **客户端本地持久化**：客户端仅在 `config.toml` 中存储已连接 Server 的设备密钥与网络地址，不留存 invite 凭据。
@@ -141,7 +141,7 @@ Server 通过 Condr Cloud（`push.condr.dev`，一个 Cloudflare Worker）向每
 
 | 文件名 | Linux 与 macOS 权限模型 | Windows 权限模型 |
 | :--- | :--- | :--- |
-| `device-key`、`pending-invite` | `0600`，权限过宽时拒绝加载运行 | 仅允许所有者及 SYSTEM 访问 |
+| `device-key` | `0600`，权限过宽时拒绝加载运行 | 仅允许所有者及 SYSTEM 访问 |
 | `config.toml`、Session 快照、Server 进程的 `.stderr` 文件 | `0600` | 继承父目录 ACL 权限 |
 | `authorized-clients.json`、系统日志文件 | 遵循操作系统默认 umask 创建 | 继承父目录 ACL 权限 |
 

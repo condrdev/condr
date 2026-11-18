@@ -927,12 +927,10 @@ impl Condr {
                     ..IncomingEffect::default()
                 }
             }
-            // Only the CLI asks for Pane text or administers devices.
+            // Only the CLI asks for Pane text.
             ServerMessage::Overview(_)
             | ServerMessage::OverviewTerminals { .. }
-            | ServerMessage::PaneText { .. }
-            | ServerMessage::DevicesRevoked { .. }
-            | ServerMessage::ConnectedDevices { .. } => IncomingEffect::default(),
+            | ServerMessage::PaneText { .. } => IncomingEffect::default(),
             ServerMessage::ServerStopping => {
                 let connection = &mut self.connections[index];
                 connection.stopping_runtime = connection.model.runtime_epoch;

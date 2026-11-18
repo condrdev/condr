@@ -126,13 +126,13 @@ condr server install [--start] [--restart] [--yes] [--json]
 # 停止 Server 并清理二进制与 PATH 项（保留用户数据与日志）
 condr server uninstall [--yes] [--json]
 
-# 生成一次性配对链接（有效期 10 分钟），需先开启监听或 P2P
+# 生成一次性配对链接（有效期 10 分钟），需要 Server 正在运行并已开启监听或 P2P
 condr server invite
 
-# 列出所有已授权的远程设备指纹与连接状态
+# 列出所有已授权的远程设备指纹与连接状态，需要 Server 正在运行
 condr server clients
 
-# 吊销指定客户端权限并立即断开连接；支持唯一前缀匹配
+# 吊销指定客户端权限并立即断开连接；支持唯一前缀匹配，需要 Server 正在运行
 condr server revoke <指纹或前缀>
 
 # 将 Stdio 桥接至本地 Socket；通常由 SSH 自动化调用，无需手动执行

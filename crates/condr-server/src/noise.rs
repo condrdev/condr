@@ -16,8 +16,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 pub use condr_client::{Authority, DeviceKey, NoiseStream, PublicKey, Secret};
 pub(crate) use identity::LazyIdentity;
 pub use identity::{
-    AuthorizedClient, INVITE_TTL, Invite, ServerIdentity, create_invite, device_name,
-    identity_directory, invite_hosts, load_device_key, read_authorized, revoke,
+    AuthorizedClient, INVITE_TTL, Invite, ServerIdentity, device_name, identity_directory,
+    invite_hosts, load_device_key, read_authorized, revoke,
 };
 
 /// Reads the hex seed at `path`, or generates one and stores it owner-only.

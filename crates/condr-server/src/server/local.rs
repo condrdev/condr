@@ -378,67 +378,37 @@ pub fn probe_server(endpoint: &Endpoint) -> io::Result<()> {
     probe_protocol(endpoint.connect()?)
 }
 
-/// Asks the running Server to drop the live connections of a device by its full key;
-/// returns how many it closed. The caller has already edited the
-/// authorized list, so those devices cannot come back.
-pub fn revoke_devices(endpoint: &Endpoint, key: &crate::noise::PublicKey) -> io::Result<u32> {
-    let (mut stream, _) = ClientConnection::welcome(endpoint.connect()?, "condr-revoke")?;
+/// Sends one `ServerAdmin` command to the running Server, as Settings does (ADR 0038), and
+/// returns its answer; the Server's refusal is the error.
+pub fn server_admin(
+    endpoint: &Endpoint,
+    command: ServerAdminCommand,
+) -> io::Result<ServerAdminResponse> {
+    let (mut stream, welcome) = ClientConnection::welcome(endpoint.connect()?, "condr-admin")?;
     condr_core::protocol::write_message(
         &mut stream,
-        &ClientMessage::RevokeDevice {
-            key: key.to_string(),
+        &ClientMessage::ServerAdmin {
+            server_id: welcome.server_id,
+            command,
         },
     )
     .map_err(|error| io::Error::other(error.to_string()))?;
     match condr_core::protocol::read_message(&mut stream)
         .map_err(|error| io::Error::other(error.to_string()))?
     {
-        ServerMessage::DevicesRevoked { disconnected } => Ok(disconnected),
-        ServerMessage::Error { message } => {
-            Err(io::Error::new(io::ErrorKind::PermissionDenied, message))
-        }
+        ServerMessage::ServerAdmin(response) => Ok(response),
+        ServerMessage::Error { message } => Err(io::Error::other(message)),
         other => Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("unexpected revoke response: {other:?}"),
-        )),
-    }
-}
-
-/// The fingerprints of paired devices holding a live TCP connection to the running Server.
-pub fn connected_devices(endpoint: &Endpoint) -> io::Result<Vec<String>> {
-    let (mut stream, _) = ClientConnection::welcome(endpoint.connect()?, "condr-clients")?;
-    condr_core::protocol::write_message(&mut stream, &ClientMessage::ConnectedDevices)
-        .map_err(|error| io::Error::other(error.to_string()))?;
-    match condr_core::protocol::read_message(&mut stream)
-        .map_err(|error| io::Error::other(error.to_string()))?
-    {
-        ServerMessage::ConnectedDevices { keys } => Ok(keys),
-        ServerMessage::Error { message } => {
-            Err(io::Error::new(io::ErrorKind::PermissionDenied, message))
-        }
-        other => Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("unexpected connected-devices response: {other:?}"),
+            format!("unexpected admin response: {other:?}"),
         )),
     }
 }
 
 /// Asks the running Server for its `Status` admin report.
 pub fn server_status(endpoint: &Endpoint) -> io::Result<ServerAdminResponse> {
-    let (mut stream, welcome) = ClientConnection::welcome(endpoint.connect()?, "condr-status")?;
-    condr_core::protocol::write_message(
-        &mut stream,
-        &ClientMessage::ServerAdmin {
-            server_id: welcome.server_id,
-            command: ServerAdminCommand::Status,
-        },
-    )
-    .map_err(|error| io::Error::other(error.to_string()))?;
-    match condr_core::protocol::read_message(&mut stream)
-        .map_err(|error| io::Error::other(error.to_string()))?
-    {
-        ServerMessage::ServerAdmin(response @ ServerAdminResponse::Status { .. }) => Ok(response),
-        ServerMessage::Error { message } => Err(io::Error::other(message)),
+    match server_admin(endpoint, ServerAdminCommand::Status)? {
+        response @ ServerAdminResponse::Status { .. } => Ok(response),
         other => Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!("unexpected status response: {other:?}"),

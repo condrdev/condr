@@ -78,9 +78,9 @@ use workspace_git::*;
 
 pub use config::{ServerConfig, load_listen, load_p2p, save_listen, save_p2p};
 pub use local::{
-    connected_devices, ensure_local_server, ensure_server, ensure_server_from, not_running,
-    probe_server, resolve_server_executable, restart_server, restart_server_from, revoke_devices,
-    server_status, set_server_executable, stop_server, wait_for_shutdown,
+    ensure_local_server, ensure_server, ensure_server_from, not_running, probe_server,
+    resolve_server_executable, restart_server, restart_server_from, server_admin, server_status,
+    set_server_executable, stop_server, wait_for_shutdown,
 };
 
 const ACCEPT_POLL: Duration = Duration::from_millis(10);
@@ -161,8 +161,9 @@ pub struct BoundServer {
     startup_terminals: Vec<StartedTerminal>,
     /// `[server.p2p] enabled`: bind the Peer-to-peer endpoint at startup and accept (ADR 0026).
     p2p_enabled: bool,
-    /// The identity the Peer-to-peer endpoint uses; `None` loads it from disk on demand.
-    identity: Option<Arc<ServerIdentity>>,
+    /// The identity the Peer-to-peer endpoint, pushes and `ServerAdmin` share, so an
+    /// invite created for one is the one the others redeem.
+    identity: Arc<crate::noise::LazyIdentity>,
     /// Where pushes go (ADR 0047); `None` sends none.
     cloud_url: Option<String>,
 }
@@ -201,6 +202,10 @@ impl BoundServer {
             }
             tcp = Some(listener);
         }
+        let identity = Arc::new(match resolved_identity {
+            Some(identity) => crate::noise::LazyIdentity::loaded(identity),
+            None => crate::noise::LazyIdentity::default(),
+        });
         let (state, startup_terminals) = match RuntimeState::recover(
             &config.socket_path,
             config.snapshot_path,
@@ -217,6 +222,7 @@ impl BoundServer {
         {
             let mut runtime = state.lock().or_abort();
             runtime.running_listen = config.listen.map(|address| address.to_string());
+            runtime.identity = Arc::clone(&identity);
             runtime.start_git_watcher(Arc::downgrade(&state));
         }
         Ok(Self {
@@ -228,7 +234,7 @@ impl BoundServer {
             state,
             startup_terminals,
             p2p_enabled: config.p2p,
-            identity: resolved_identity,
+            identity,
             cloud_url: config.cloud_url,
         })
     }
@@ -293,10 +299,7 @@ impl BoundServer {
         // when enabled and dials for local `Tunnel` frames either way. Built here because
         // it needs the runtime this `spawn_blocking` task runs on.
         let (p2p_sender, p2p_accepted) = std::sync::mpsc::channel();
-        let identity = Arc::new(match &self.identity {
-            Some(identity) => crate::noise::LazyIdentity::loaded(Arc::clone(identity)),
-            None => crate::noise::LazyIdentity::default(),
-        });
+        let identity = Arc::clone(&self.identity);
         let accept: crate::p2p::Accept = Box::new(move |stream| {
             p2p_sender
                 .send(EndpointStream::P2p(stream))
@@ -609,6 +612,9 @@ struct RuntimeState {
     /// The TCP address this process bound at startup, reported by `Status` beside the
     /// saved one: a change to `[server] listen` waits for a restart.
     running_listen: Option<String>,
+    /// The identity its handshakes use, whose paired devices and invite `ServerAdmin`
+    /// manages: the host's, loaded on first use, unless it was started with one.
+    identity: Arc<crate::noise::LazyIdentity>,
     started_at: Instant,
 }
 
@@ -779,6 +785,7 @@ impl RuntimeState {
             config_path,
             socket_path: socket_path.to_string_lossy().into_owned(),
             running_listen: None,
+            identity: Arc::default(),
             started_at: Instant::now(),
         }
     }

@@ -14,19 +14,18 @@ const AUTHORIZED_FILE: &str = "authorized-clients.json";
 /// `convert_legacy_list` (ADR 0047).
 const LEGACY_AUTHORIZED_FILE: &str = "authorized-clients";
 
-const INVITE_FILE: &str = "pending-invite";
-
 const LOCK_FILE: &str = "identity.lock";
 
 /// The Server host's Device key plus the devices it accepts.
 ///
-/// With a store directory the authorized list and the pending invite live in files that
-/// `condr server invite|clients|revoke` edit on the same host; without one only
-/// `always_authorized` peers can connect.
+/// With a store directory the authorized list lives in a file only the running Server
+/// edits, for Settings and the CLI alike, and the pending invite only in its memory, so a
+/// restart drops it (ADR 0011); without one only `always_authorized` peers can connect.
 pub struct ServerIdentity {
     pub(super) key: DeviceKey,
     store: Option<PathBuf>,
     always_authorized: Vec<PublicKey>,
+    invite: Mutex<Option<Invite>>,
 }
 
 /// One entry of `authorized-clients.json`.
@@ -72,7 +71,7 @@ pub struct Invite {
 
 impl ServerIdentity {
     /// The identity stored in `directory`: `device-key`, the one key this machine also
-    /// connects out with, plus the paired devices and the pending invite kept beside it.
+    /// connects out with, plus the paired devices kept beside it.
     /// Processes on the host itself use the local socket, so no device is authorized by
     /// default. A machine whose key is created now has no paired devices either: an
     /// `authorized-clients.json` left from before the key existed can never match, so it goes.
@@ -96,6 +95,7 @@ impl ServerIdentity {
             key,
             store: Some(directory.to_path_buf()),
             always_authorized: Vec::new(),
+            invite: Mutex::new(None),
         })
     }
 
@@ -105,6 +105,7 @@ impl ServerIdentity {
             key: DeviceKey::generate()?,
             store: None,
             always_authorized: Vec::new(),
+            invite: Mutex::new(None),
         })
     }
 
@@ -115,6 +116,44 @@ impl ServerIdentity {
 
     pub fn public_key(&self) -> PublicKey {
         self.key.public()
+    }
+
+    /// The directory holding its paired devices, or why it has none.
+    fn store(&self) -> io::Result<&Path> {
+        self.store.as_deref().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::Unsupported,
+                "this Server cannot pair devices",
+            )
+        })
+    }
+
+    /// The devices paired with it.
+    pub fn paired(&self) -> io::Result<Vec<AuthorizedClient>> {
+        read_authorized(self.store()?)
+    }
+
+    /// Unpairs the one device `prefix` names, as [`revoke`] does.
+    pub fn revoke(&self, prefix: &str) -> io::Result<Option<PublicKey>> {
+        revoke(self.store()?, prefix)
+    }
+
+    /// Replaces the pending invite with a fresh one valid for [`INVITE_TTL`].
+    pub fn create_invite(&self) -> io::Result<Invite> {
+        self.store()?;
+        let invite = Invite {
+            secret: Secret::generate()?,
+            expires_at: now() + INVITE_TTL.as_secs(),
+        };
+        *self.pending() = Some(invite.clone());
+        Ok(invite)
+    }
+
+    /// The invite slot; one that expired still sits in it, and is no longer redeemable.
+    fn pending(&self) -> std::sync::MutexGuard<'_, Option<Invite>> {
+        self.invite
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// Whether `remote` may connect without an invite, as of the store on disk right now.
@@ -173,16 +212,16 @@ impl ServerIdentity {
         name: &str,
         invite: &Secret,
     ) -> io::Result<()> {
-        let store = self.store.as_deref().ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::Unsupported,
-                "this Server cannot pair devices",
-            )
-        })?;
+        let store = self.store()?;
+        // Held to the end, so the first device to finish wins.
+        let mut pending = self.pending();
+        if pending
+            .as_ref()
+            .is_none_or(|current| current.secret != *invite || current.expires_at <= now())
+        {
+            return Err(rejected("invite already used or expired"));
+        }
         with_store_lock(store, || {
-            if read_invite(store)?.is_none_or(|current| current.secret != *invite) {
-                return Err(rejected("invite already used or expired"));
-            }
             let mut clients = read_authorized(store)?;
             if !clients.iter().any(|client| client.key == remote) {
                 let paired_at = now();
@@ -195,12 +234,10 @@ impl ServerIdentity {
                 });
                 write_authorized(store, &clients)?;
             }
-            match fs::remove_file(store.join(INVITE_FILE)) {
-                Ok(()) => Ok(()),
-                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-                Err(error) => Err(error),
-            }
-        })
+            Ok(())
+        })?;
+        *pending = None;
+        Ok(())
     }
 }
 
@@ -215,10 +252,11 @@ impl Authority for ServerIdentity {
     }
 
     fn pending_invite(&self) -> io::Result<Option<Secret>> {
-        match &self.store {
-            Some(store) => Ok(read_invite(store)?.map(|invite| invite.secret)),
-            None => Ok(None),
-        }
+        Ok(self
+            .pending()
+            .as_ref()
+            .filter(|invite| invite.expires_at > now())
+            .map(|invite| invite.secret.clone()))
     }
 
     fn complete_pairing(&self, device: PublicKey, name: &str, invite: &Secret) -> io::Result<()> {
@@ -450,43 +488,6 @@ fn default_route_address() -> Option<std::net::IpAddr> {
     (!ip.is_unspecified() && !ip.is_loopback()).then_some(ip)
 }
 
-/// Replaces the pending invite with a fresh one valid for [`INVITE_TTL`].
-pub fn create_invite(directory: &Path) -> io::Result<Invite> {
-    let invite = Invite {
-        secret: Secret::generate()?,
-        expires_at: now() + INVITE_TTL.as_secs(),
-    };
-    with_store_lock(directory, || {
-        let _ = fs::remove_file(directory.join(INVITE_FILE));
-        write_secret_file(
-            &directory.join(INVITE_FILE),
-            &format!("{} {}", invite.secret.to_hex(), invite.expires_at),
-        )
-    })?;
-    Ok(invite)
-}
-
-/// The pending invite, if one exists and has not expired.
-fn read_invite(directory: &Path) -> io::Result<Option<Invite>> {
-    let Some(text) = read_secret_file(&directory.join(INVITE_FILE))? else {
-        return Ok(None);
-    };
-    let mut fields = text.split_whitespace();
-    let (Some(secret), Some(expires_at)) = (fields.next(), fields.next()) else {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "malformed pending-invite file",
-        ));
-    };
-    let invite = Invite {
-        secret: Secret::parse_hex(secret)?,
-        expires_at: expires_at
-            .parse()
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "malformed invite expiry"))?,
-    };
-    Ok((invite.expires_at > now()).then_some(invite))
-}
-
 /// The paired devices in `authorized-clients.json`, none when the file is missing.
 pub fn read_authorized(directory: &Path) -> io::Result<Vec<AuthorizedClient>> {
     let text = match fs::read_to_string(directory.join(AUTHORIZED_FILE)) {
@@ -504,8 +505,8 @@ pub fn read_authorized(directory: &Path) -> io::Result<Vec<AuthorizedClient>> {
 
 /// Removes the unique client matching `prefix` and returns its full key.
 /// Ambiguity leaves the store untouched; an unmatched prefix returns `None`.
-/// This refuses their next handshake; `ClientMessage::RevokeDevice` closes the
-/// connections they hold now.
+/// This refuses their next handshake; the running Server's `ServerAdminCommand::Revoke`
+/// also closes the connections they hold now.
 pub fn revoke(directory: &Path, prefix: &str) -> io::Result<Option<PublicKey>> {
     with_store_lock(directory, || {
         let mut clients = read_authorized(directory)?;

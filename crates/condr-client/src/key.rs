@@ -147,15 +147,6 @@ impl Secret {
         encode(&self.0)
     }
 
-    /// Parses the hex form `pending-invite` stores.
-    pub fn parse_hex(hex: &str) -> io::Result<Self> {
-        hex_decode(hex).map(Self)
-    }
-
-    pub fn to_hex(&self) -> String {
-        hex_encode(&self.0)
-    }
-
     pub fn from_bytes(bytes: [u8; 32]) -> Self {
         Self(bytes)
     }
@@ -230,7 +221,6 @@ mod tests {
         assert!(!key.public().matches_prefix(""));
         let secret = Secret::generate().unwrap();
         assert_eq!(Secret::parse(&secret.encode()).unwrap(), secret);
-        assert_eq!(Secret::parse_hex(&secret.to_hex()).unwrap(), secret);
 
         assert_eq!(DeviceKey::from_seed_hex(&key.seed_hex()).unwrap(), key);
         assert!(!format!("{key:?}").contains(&key.seed_hex()));

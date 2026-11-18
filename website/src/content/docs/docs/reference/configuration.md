@@ -309,7 +309,6 @@ For the variables set in every Pane, see [Agent automation](/docs/using/automati
 | `config.toml` | Config | Every window and Server setting | All settings return to their defaults, and the saved remote Device list is emptied |
 | `device-key` | Data | This Device's asymmetric key | The next start generates a new key pair and clears the paired list; existing peers must pair again |
 | `authorized-clients.json` | Data | The pairing allowlist (a JSON array, one entry per Device) | Paired Devices are refused on their next connection and must pair again |
-| `pending-invite` | Data | The one-time pairing invite currently in effect | That invite link stops working at once |
 | `condr-server-<id>.snapshot` | State | The Session structure snapshot (Workspace, Tab and Pane layout) | *Stop the Server first*. The next cold start discards every session context (worktrees checked out on disk are untouched) |
 | `condr-gui.state` | State | Window geometry, sidebar collapse state and the Tab each Workspace has open | The window resets to its default centered size and layout |
 | `condr-server-<id>.<date>.log` | Logs | The Server's running log (rotated daily, the latest 7 kept) | No direct effect |
