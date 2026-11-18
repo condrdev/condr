@@ -326,6 +326,15 @@ impl Condr {
         }
     }
 
+    /// The Pane the keyboard goes to while Tasks shows: the selected card's, while its
+    /// terminal holds the keyboard rather than the card area (ADR 0068).
+    pub(super) fn tasks_keyboard_pane(&self) -> Option<(ConnectionKey, PaneId)> {
+        self.tasks_view()
+            .tasks_selection
+            .filter(|selected| selected.keyboard)
+            .map(|selected| (selected.key, selected.pane_id))
+    }
+
     /// Whether the interaction area only previews `pane_id`: then the Client sends it no
     /// size, so stepping through cards resizes no Agent (ADR 0068).
     pub(super) fn tasks_previews(&self, key: ConnectionKey, pane_id: PaneId) -> bool {

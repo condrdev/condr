@@ -291,9 +291,7 @@ impl Condr {
         }
         let selection = self.tasks_view().tasks_selection;
         if input_window {
-            self.terminal_input.target = selection
-                .filter(|selected| selected.keyboard)
-                .map(|selected| (selected.key, selected.pane_id));
+            self.terminal_input.target = self.tasks_keyboard_pane();
         }
         let Some(selected) = selection else {
             self.tasks_view_mut().tasks_dock = None;

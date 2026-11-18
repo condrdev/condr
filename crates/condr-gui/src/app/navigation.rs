@@ -5,8 +5,16 @@ use std::borrow::Cow;
 
 impl Condr {
     /// Points the keyboard at the Session's focus in the active window's Tab, when that
-    /// window presents connection `key`.
+    /// window presents connection `key`, and marks that Pane seen, since the person looks
+    /// at it. It runs whenever the structure may have moved that Pane: a `LayoutChanged`
+    /// or `LayoutApplied`, a Bootstrap, another Device or Workspace shown. Tasks shows no
+    /// Tab: there the keyboard's Pane is the selected card's while its terminal holds the
+    /// keyboard, and nothing hidden is marked seen (ADR 0068, ADR 0069).
     pub(super) fn refresh_target_pane(&mut self, key: ConnectionKey) {
+        if self.in_tasks_mode(self.active_view()) {
+            self.terminal_input.target = self.tasks_keyboard_pane();
+            return;
+        }
         if key == self.input_connection() {
             let target = self.view_focused_pane(self.active_view());
             self.terminal_input.target = target.map(|pane_id| (key, pane_id));

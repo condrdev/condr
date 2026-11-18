@@ -259,3 +259,58 @@ fn the_tasks_window_comes_back_after_a_restart() {
     );
     drop(server);
 }
+
+/// A structure change on the Device, a `LayoutChanged` or a Bootstrap, points the keyboard
+/// again. Tasks shows no Tab, so the keyboard stays on the card's terminal, in Tasks mode
+/// and in the Tasks window, and the hidden Tab's Pane is neither targeted nor marked seen
+/// (ADR 0068, ADR 0069).
+#[test]
+fn a_structure_change_keeps_the_keyboard_on_the_card_and_marks_nothing_hidden_seen() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    let (view, window, _server, pane_id) = tasks_mode_with_an_agent(&mut cx);
+    let refresh = |window: &mut VisualTestContext| {
+        window.update(|_, cx| view.update(cx, |this, _| this.refresh_target_pane(1)));
+    };
+    let unseen = |window: &mut VisualTestContext| {
+        window.read(|app| {
+            view.read(app)
+                .connection(1)
+                .unwrap()
+                .model
+                .agent_unseen
+                .contains(&pane_id)
+        })
+    };
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.connection_mut(1)
+                .unwrap()
+                .model
+                .agent_unseen
+                .insert(pane_id);
+        })
+    });
+
+    // No card selected: nothing targeted, and the Agent in the hidden Tab stays unseen.
+    refresh(window);
+    assert_eq!(target(window, &view), None);
+    assert!(unseen(window), "a hidden Tab's Pane is not marked seen");
+
+    // The card's terminal holds the keyboard, and keeps it.
+    click(
+        window,
+        leaked_selector(format!("tasks-card-1-{}", pane_id.as_u64())),
+    );
+    refresh(window);
+    assert_eq!(target(window, &view), Some((1, pane_id)));
+
+    // So in the Tasks window, beside a main window that draws no Tab.
+    let mut tasks = open_tasks_window(window, &view);
+    window.update(|window, cx| view.update(cx, |this, cx| this.toggle_tasks(window, cx)));
+    window.run_until_parked();
+    tasks.update(|window, _| window.activate_window());
+    tasks.run_until_parked();
+    refresh(window);
+    assert_eq!(target(window, &view), Some((1, pane_id)));
+}
