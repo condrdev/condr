@@ -253,13 +253,34 @@ fn marker(agent: AgentKind) -> String {
     format!(" agent-hook {} ", agent.id())
 }
 
+/// Whether `program` is a `condr` executable, wherever it lives, so another tool's
+/// `<tool> agent-hook <agent>` command is never taken for ours.
+fn is_condr(program: &str) -> bool {
+    let name = program.rsplit(['/', '\\']).next().unwrap_or(program);
+    name.eq_ignore_ascii_case("condr") || name.eq_ignore_ascii_case("condr.exe")
+}
+
 fn is_ours(hook: &Value, agent: AgentKind) -> bool {
-    hook.get("command")
+    let command = hook
+        .get("command")
         .and_then(Value::as_str)
-        .is_some_and(|command| command.contains(&marker(agent)))
-        || hook.get("args").and_then(Value::as_array).is_some_and(|args| {
+        .is_some_and(|command| {
+            // `hook_command_for_shell`'s shape: `[& ]condr …` or `[& ]"<path>" …`.
+            let command = command.strip_prefix("& ").unwrap_or(command);
+            let (program, rest) = match command.strip_prefix('"') {
+                Some(quoted) => quoted.split_once('"').unwrap_or((quoted, "")),
+                None => command.split_at(command.find(' ').unwrap_or(command.len())),
+            };
+            is_condr(program) && rest.starts_with(&marker(agent))
+        });
+    let exec = hook
+        .get("exec")
+        .and_then(Value::as_str)
+        .is_some_and(is_condr)
+        && hook.get("args").and_then(Value::as_array).is_some_and(|args| {
             matches!(args.as_slice(), [first, second, ..] if first == "agent-hook" && second == agent.id())
-        })
+        });
+    command || exec
 }
 
 /// What Condr installs for one entry of a nested map or flat list.
@@ -669,6 +690,28 @@ mod tests {
     }
 
     #[test]
+    fn only_a_condr_executable_makes_an_agent_hook_ours() {
+        let ours = |command: &str| is_ours(&json!({ "command": command }), AgentKind::Claude);
+        assert!(ours("condr agent-hook claude stop"));
+        assert!(ours("\"/old/condr\" agent-hook claude stop"));
+        assert!(ours(
+            "& \"C:\\Program Files\\Condr\\condr.exe\" agent-hook claude stop"
+        ));
+        assert!(!ours("cmux agent-hook claude stop"));
+        assert!(!ours("\"/opt/condr bin/condr-dev\" agent-hook claude stop"));
+        assert!(!ours("notify condr agent-hook claude stop"));
+        assert!(!ours("condr agent-hook codex stop"));
+        let exec = |exec: &str| {
+            is_ours(
+                &json!({ "exec": exec, "args": ["agent-hook", "claude", "stop"] }),
+                AgentKind::Claude,
+            )
+        };
+        assert!(exec("/opt/condr bin/condr"));
+        assert!(!exec("/usr/local/bin/cmux"));
+    }
+
+    #[test]
     fn install_is_idempotent_preserves_user_hooks_and_uninstall_leaves_only_theirs() {
         let (target, root) = target();
         let path = target.path(AgentKind::Claude);
@@ -681,7 +724,10 @@ mod tests {
         let user = json!({
             "model": "opus",
             "hooks": {
-                "Stop": [{"hooks": [{"type": "command", "command": "notify-send done"}]}],
+                "Stop": [{"hooks": [
+                    {"type": "command", "command": "notify-send done"},
+                    {"type": "command", "command": "condr-dev agent-hook claude stop"}
+                ]}],
                 "PreToolUse": [{"matcher": "Bash", "hooks": [
                     {"type": "command", "command": "lint"},
                     {"type": "command", "command": "\"/old/condr\" agent-hook claude tool-start"}
@@ -749,6 +795,10 @@ mod tests {
         let after = read(&path);
         assert_eq!(after["model"], "opus");
         assert_eq!(after["hooks"]["Stop"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            after["hooks"]["Stop"][0]["hooks"][1]["command"], "condr-dev agent-hook claude stop",
+            "another tool's agent-hook survives"
+        );
         assert_eq!(
             after["hooks"]["PreToolUse"][0]["hooks"][0]["command"],
             "lint"
