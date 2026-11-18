@@ -200,7 +200,14 @@ impl Condr {
     /// The Command Palette's New Task and To do's "+ New task": Tasks mode with an empty
     /// form on the scope's Device, else this machine's.
     pub(in crate::app) fn new_task(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.is_main(window) {
+        let tasks = self.tasks_view().handle;
+        if window.window_handle() != tasks {
+            // The main window's New Task goes to the Tasks window while one is open (ADR
+            // 0069); any other window has none.
+            if self.is_main(window) {
+                self.activate_window(tasks, cx);
+                self.in_tasks_window(cx, |this, window, cx| this.new_task(window, cx));
+            }
             return;
         }
         let Some(device) = self.default_task_device() else {
@@ -215,7 +222,7 @@ impl Condr {
     }
 
     fn default_task_device(&self) -> Option<ConnectionKey> {
-        let scope = self.effective_tasks_scope(self.main_view().tasks.scope);
+        let scope = self.effective_tasks_scope(self.tasks_view().tasks.scope);
         let scoped = match scope {
             super::tasks::TasksScope::All => None,
             super::tasks::TasksScope::Device(server)
@@ -237,7 +244,7 @@ impl Condr {
     /// The repository a new Task in the scope's Workspace belongs to.
     fn scope_repository(&self, device: ConnectionKey) -> Option<PathBuf> {
         let super::tasks::TasksScope::Workspace(server, workspace_id) =
-            self.effective_tasks_scope(self.main_view().tasks.scope)
+            self.effective_tasks_scope(self.tasks_view().tasks.scope)
         else {
             return None;
         };
@@ -262,7 +269,7 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.main_view().page != ContentPage::Tasks {
+        if !self.in_tasks_mode(self.window_view(window)) {
             self.toggle_tasks(window, cx);
         }
         self.clear_task_selection(window, cx);
@@ -296,28 +303,17 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> TaskForm {
-        let title = title.to_owned();
         let loading = saved
             .as_ref()
             .is_some_and(|saved| saved.description.is_none());
+        let (title, description, branch) =
+            form_inputs(title.to_owned(), loading, branch, window, cx);
         TaskForm {
             home,
             device,
             repository,
-            title: cx.new(|cx| {
-                InputState::new(window, cx)
-                    .default_value(title)
-                    .placeholder(t!("tasks.form.title_placeholder"))
-            }),
-            description: cx.new(|cx| {
-                TextareaState::new(window, cx)
-                    .auto_grow(4, 12)
-                    .placeholder(if loading {
-                        t!("tasks.form.loading")
-                    } else {
-                        t!("tasks.form.description_placeholder")
-                    })
-            }),
+            title,
+            description,
             saved,
             repositories: HashMap::new(),
             description_request: None,
@@ -328,7 +324,7 @@ impl Condr {
             start: StartChoice {
                 place: None,
                 workspace: None,
-                branch: cx.new(|cx| InputState::new(window, cx).default_value(branch)),
+                branch,
                 agent: None,
                 branch_error: None,
                 folder_missing: false,
@@ -386,13 +382,34 @@ impl Condr {
         cx.notify();
     }
 
+    /// Makes the open form's inputs again in `window`, with their text: an input belongs
+    /// to the window it was made in, and Tasks has just moved to `window` (ADR 0069).
+    pub(in crate::app) fn rehome_task_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(form) = &self.task_form else {
+            return;
+        };
+        let title = form.title.read(cx).value().to_string();
+        let description = form.description_text(cx);
+        let branch = form.start.branch.read(cx).value().to_string();
+        let loading = form
+            .saved
+            .as_ref()
+            .is_some_and(|saved| saved.description.is_none());
+        let inputs = form_inputs(title, loading, branch, window, cx);
+        inputs
+            .1
+            .update(cx, |input, cx| input.set_value(description, window, cx));
+        let form = self.task_form.as_mut().expect("checked above");
+        (form.title, form.description, form.start.branch) = inputs;
+    }
+
     /// Ends the Agent selection, so the area can show a form.
     fn clear_task_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let view = self.main_view_mut();
+        let view = self.tasks_view_mut();
         view.tasks_selection = None;
         view.tasks_dock = None;
         self.terminal_input.target = None;
-        self.main_view().tasks_focus.clone().focus(window, cx);
+        self.tasks_view().tasks_focus.clone().focus(window, cx);
         self.sync_terminal_focus(window, cx);
     }
 
@@ -522,7 +539,7 @@ impl Condr {
         else {
             return;
         };
-        self.in_main_window(cx, move |this, window, cx| {
+        self.in_tasks_window(cx, move |this, window, cx| {
             this.leave_task_form(then, window, cx)
         });
     }
@@ -600,7 +617,7 @@ impl Condr {
         if title.is_none() && description.is_none() && !loading {
             return;
         }
-        self.in_main_window(cx, move |_, window, cx| {
+        self.in_tasks_window(cx, move |_, window, cx| {
             if let Some(title) = title {
                 title_input.update(cx, |input, cx| input.set_value(title, window, cx));
             }
@@ -651,4 +668,36 @@ pub(super) fn saved_task(task: &TaskRecord) -> SavedTask {
         description: task.description.clone(),
         repository: task.repository.clone(),
     }
+}
+
+/// A form's title, description and branch inputs, made in `window`; the description is
+/// "Loading…" until a saved Task's arrives.
+fn form_inputs(
+    title: String,
+    loading: bool,
+    branch: String,
+    window: &mut Window,
+    cx: &mut Context<Condr>,
+) -> (
+    Entity<InputState>,
+    Entity<TextareaState>,
+    Entity<InputState>,
+) {
+    (
+        cx.new(|cx| {
+            InputState::new(window, cx)
+                .default_value(title)
+                .placeholder(t!("tasks.form.title_placeholder"))
+        }),
+        cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .auto_grow(4, 12)
+                .placeholder(if loading {
+                    t!("tasks.form.loading")
+                } else {
+                    t!("tasks.form.description_placeholder")
+                })
+        }),
+        cx.new(|cx| InputState::new(window, cx).default_value(branch)),
+    )
 }

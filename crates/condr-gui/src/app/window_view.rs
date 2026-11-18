@@ -10,12 +10,14 @@ pub(super) enum WindowScope {
     Device(ConnectionKey),
     Workspace(ConnectionKey, WorkspaceId),
     Tab(ConnectionKey, TabId),
+    /// Tasks and nothing else, every Device's (ADR 0069); no part of the Session tree.
+    Tasks,
 }
 
 impl WindowScope {
     fn depth(self) -> u8 {
         match self {
-            Self::Main => 0,
+            Self::Main | Self::Tasks => 0,
             Self::Device(_) => 1,
             Self::Workspace(..) => 2,
             Self::Tab(..) => 3,
@@ -30,7 +32,7 @@ impl WindowScope {
     /// Whether it lists a Workspace's rows, "Needs you" included.
     pub(super) fn lists_workspace(self, key: ConnectionKey, workspace_id: WorkspaceId) -> bool {
         match self {
-            Self::Main => true,
+            Self::Main | Self::Tasks => true,
             Self::Device(scope_key) => scope_key == key,
             Self::Workspace(scope_key, scope_workspace) => {
                 scope_key == key && scope_workspace == workspace_id
@@ -41,14 +43,15 @@ impl WindowScope {
 
     pub(super) fn connection(self) -> Option<ConnectionKey> {
         match self {
-            Self::Main => None,
+            Self::Main | Self::Tasks => None,
             Self::Device(key) | Self::Workspace(key, _) | Self::Tab(key, _) => Some(key),
         }
     }
 }
 
 /// What a window's content area shows beside its sidebar: its Workspace, or one page
-/// covering it, the Ports page (ADR 0061) or, in the main window, Tasks mode (ADR 0068).
+/// covering it, the Ports page (ADR 0061) or, in the main window, Tasks mode (ADR 0068),
+/// which the Tasks window always shows (ADR 0069).
 /// One at a time: showing a page replaces the one shown, and choosing a place in the
 /// sidebar shows the Workspace again. A page added later joins this list.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -91,7 +94,8 @@ pub(super) struct WindowView {
     pub(super) page: ContentPage,
     /// The left sidebar's cached view, made at the window's first render.
     pub(super) sidebar: Option<Entity<super::sidebar::LeftSidebar>>,
-    /// Tasks mode, which only the main window enters, and how it shows (ADR 0068).
+    /// How Tasks shows, kept by the window that shows it, the main window or the Tasks
+    /// window, and moved with it (ADR 0068, ADR 0069).
     pub(super) tasks: super::tasks::TasksPrefs,
     /// Tasks mode's cached card area, made when the mode first shows.
     pub(super) tasks_board: Option<Entity<super::tasks::TasksBoard>>,
@@ -188,6 +192,10 @@ impl Condr {
         cx: &mut Context<Self>,
     ) {
         let view = self.window_view_mut(window);
+        // The Tasks window shows Tasks and nothing else (ADR 0069).
+        if view.scope == WindowScope::Tasks {
+            return;
+        }
         let shown = std::mem::replace(&mut view.page, page);
         if shown == page {
             return;
@@ -266,6 +274,39 @@ impl Condr {
         window.window_handle() == self.main_window()
     }
 
+    /// The window that shows Tasks: the Tasks window while one is open, else the main
+    /// window (ADR 0069).
+    pub(super) fn tasks_view(&self) -> &WindowView {
+        self.windows
+            .iter()
+            .find(|view| view.scope == WindowScope::Tasks)
+            .unwrap_or_else(|| self.main_view())
+    }
+
+    pub(super) fn tasks_view_mut(&mut self) -> &mut WindowView {
+        let index = self
+            .windows
+            .iter()
+            .position(|view| view.scope == WindowScope::Tasks)
+            .unwrap_or(0);
+        &mut self.windows[index]
+    }
+
+    /// Runs `update` in window `handle` once the current update is done.
+    pub(super) fn in_window(
+        &self,
+        handle: AnyWindowHandle,
+        cx: &mut Context<Self>,
+        update: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) + 'static,
+    ) {
+        let owner = cx.weak_entity();
+        cx.defer(move |cx| {
+            let _ = handle.update(cx, |_, window, cx| {
+                let _ = owner.update(cx, |this, cx| update(this, window, cx));
+            });
+        });
+    }
+
     /// The window last activated: the one the keyboard, the actions and the reported
     /// focus belong to.
     pub(super) fn active_view(&self) -> &WindowView {
@@ -296,8 +337,43 @@ impl Condr {
                 connection.viewed_tab_id(session, workspace_id)?,
             ),
             WindowScope::Tab(_, tab_id) => (workspace_of_tab(session, tab_id)?, tab_id),
+            WindowScope::Tasks => return None,
         };
         Some((key, session, workspace_id, tab_id))
+    }
+
+    /// The Tab a window draws right now: the one it shows, unless a page covers it or
+    /// another window draws it.
+    pub(super) fn drawn_tab(&self, view: &WindowView) -> Option<(ConnectionKey, TabId)> {
+        if view.page != ContentPage::Workspace || self.shown_elsewhere(view).is_some() {
+            return None;
+        }
+        self.presented_in(view)
+            .map(|(key, _, _, tab_id)| (key, tab_id))
+    }
+
+    /// The window other than the one showing Tasks that draws `pane_id`'s Tab right now:
+    /// the interaction area yields to it, and a notification's click goes there (ADR
+    /// 0069).
+    pub(super) fn window_drawing_pane(
+        &self,
+        key: ConnectionKey,
+        pane_id: PaneId,
+    ) -> Option<(WindowScope, AnyWindowHandle)> {
+        let tab_id = self
+            .connection(key)?
+            .session()?
+            .workspace_for_pane(pane_id)?
+            .tabs()
+            .iter()
+            .find(|tab| tab.panes().iter().any(|pane| pane.id() == pane_id))?
+            .id();
+        let tasks = self.tasks_view().handle;
+        self.windows
+            .iter()
+            .filter(|view| view.handle != tasks)
+            .find(|view| self.drawn_tab(view) == Some((key, tab_id)))
+            .map(|view| (view.scope, view.handle))
     }
 
     /// The window that draws a unit: the one whose scope is the most specific holding it.
@@ -461,6 +537,16 @@ impl Condr {
         let from_main = self.is_main(window);
         match scope {
             WindowScope::Main => return,
+            // Tasks leaves the main window for the Workspace and Tab it showed before,
+            // and takes its state along once its window opens (ADR 0069).
+            WindowScope::Tasks => {
+                if !from_main {
+                    return;
+                }
+                let main = self.main_view_mut();
+                main.page = ContentPage::Workspace;
+                main.tasks_dock = None;
+            }
             WindowScope::Device(key) => {
                 if from_main {
                     self.active_connection = key;
@@ -533,6 +619,15 @@ impl Condr {
                     view.agents_height = agents_height;
                     view.agents_collapsed = agents_collapsed;
                     view.changes_width = changes_width;
+                    if scope == WindowScope::Tasks {
+                        // Tasks keeps one set of preferences, and its selection, wherever
+                        // it shows (ADR 0069).
+                        let main = this.main_view_mut();
+                        view.tasks = main.tasks;
+                        view.tasks_selection = main.tasks_selection.take();
+                        main.tasks_dock = None;
+                        view.page = ContentPage::Tasks;
+                    }
                     this.windows.push(view);
                     this.prepare_cached_views(cx);
                     window.set_window_title(&this.window_title(scope));
@@ -546,6 +641,9 @@ impl Condr {
                     window.defer(cx, move |window, cx| {
                         let _ = rebuild_owner.update(cx, |this, cx| {
                             this.rebuild_dock(window, cx);
+                            if scope == WindowScope::Tasks {
+                                this.settle_tasks(window, cx);
+                            }
                             cx.notify();
                         });
                     });
@@ -576,6 +674,17 @@ impl Condr {
         }
         match view.scope {
             WindowScope::Main => {}
+            // Closing puts Tasks away: its state goes back to the main window, which keeps
+            // showing what it shows (ADR 0069).
+            WindowScope::Tasks => {
+                let main = self.main_view_mut();
+                main.tasks = view.tasks;
+                main.tasks_selection = view.tasks_selection;
+                main.tasks_dock = None;
+                self.in_window(self.main_window(), cx, |this, window, cx| {
+                    this.settle_tasks(window, cx);
+                });
+            }
             WindowScope::Device(key) => {
                 if self.home_window(key, None, None) == self.main_window() {
                     self.active_connection = key;
@@ -599,10 +708,19 @@ impl Condr {
         cx.notify();
     }
 
-    /// "Bring Back" in a detached window's title bar: the same as closing it.
+    /// "Bring Back" in a detached window's title bar: the same as closing it, except that
+    /// Tasks brought back shows in the main window, which comes forward (ADR 0069).
     pub(super) fn bring_back_and_close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let tasks = self.window_view(window).scope == WindowScope::Tasks;
         self.bring_back(window, cx);
         window.remove_window();
+        if tasks {
+            self.in_window(self.main_window(), cx, |this, window, cx| {
+                this.show_page(ContentPage::Tasks, window, cx);
+                this.focus_tasks(window, cx);
+                window.activate_window();
+            });
+        }
     }
 
     /// A detached window whose unit is gone closes itself: its Tab or Workspace closed,
@@ -622,7 +740,7 @@ impl Condr {
                 WindowScope::Tab(scope_key, tab_id) => {
                     scope_key == key && session.tab(tab_id).is_none()
                 }
-                WindowScope::Main | WindowScope::Device(_) => false,
+                WindowScope::Main | WindowScope::Device(_) | WindowScope::Tasks => false,
             })
             .map(|view| view.handle)
             .collect();
@@ -651,6 +769,7 @@ impl Condr {
     pub(super) fn window_title(&self, scope: WindowScope) -> String {
         let name = match scope {
             WindowScope::Main => None,
+            WindowScope::Tasks => Some(rust_i18n::t!("tasks.title").into_owned()),
             WindowScope::Device(key) => self
                 .connection(key)
                 .map(|connection| connection.label.to_string()),

@@ -191,7 +191,7 @@ impl Condr {
                     form.start.place = None;
                     form.start.workspace = None;
                     let (branch, input) = (default_branch(&task), form.start.branch.clone());
-                    self.in_main_window(cx, move |_, window, cx| {
+                    self.in_tasks_window(cx, move |_, window, cx| {
                         input.update(cx, |input, cx| input.set_value(branch, window, cx));
                     });
                     self.ask_task_agents(key);
@@ -257,20 +257,15 @@ impl Condr {
         cx.notify();
     }
 
-    /// Runs `update` in the main window once the current update is done: an answer that
-    /// sets an input's text needs its `Window`, which an incoming message has not.
-    pub(super) fn in_main_window(
+    /// Runs `update` in the window that shows Tasks once the current update is done: an
+    /// answer that sets an input's text needs its `Window`, which an incoming message has
+    /// not.
+    pub(in crate::app) fn in_tasks_window(
         &self,
         cx: &mut Context<Self>,
         update: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) + 'static,
     ) {
-        let handle = self.main_window();
-        let owner = cx.weak_entity();
-        cx.defer(move |cx| {
-            let _ = handle.update(cx, |_, window, cx| {
-                let _ = owner.update(cx, |this, cx| update(this, window, cx));
-            });
-        });
+        self.in_window(self.tasks_view().handle, cx, update);
     }
 
     /// A Task changed on `key`'s Device: the model follows, as do the Archived list, a
@@ -426,7 +421,7 @@ impl Condr {
                     && !self.task_form.as_ref().is_some_and(|form| form.changed(cx)) =>
             {
                 self.task_form = None;
-                self.in_main_window(cx, move |this, window, cx| {
+                self.in_tasks_window(cx, move |this, window, cx| {
                     if this.task_form.is_none() {
                         this.select_started_task(key, task_id, false, window, cx);
                     }

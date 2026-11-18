@@ -45,6 +45,9 @@ workspace:
     main:
       en: This is shown in another window.
       zh-CN: 它正显示在另一个窗口中。
+    tasks:
+      en: Tasks is shown in another window.
+      zh-CN: Tasks 正显示在另一个窗口中。
     device:
       en: This Device is shown in another window.
       zh-CN: 这台设备正显示在另一个窗口中。

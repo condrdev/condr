@@ -142,7 +142,7 @@ The collapsible section at the bottom of the GUI's left sidebar that lists every
 _Avoid_: Agents panel, Agents view, dashboard
 
 **Tasks mode**:
-The main window's view of every Agent on every connected Device, entered from the Tasks row at the top of the left sidebar or with `toggle-tasks` (ADR 0068). Its columns, To do, Needs you, Done, Working and Idle, are derived from state and never dragged between; it shows as a Board, in cards or compact rows, or as a Table, narrowed to one Device or one Workspace with its worktrees. A selected card opens its Agent's Pane alone in the interaction area beside the cards, without changing the window's View. It covers the content area as the Ports page does, beside the left sidebar.
+The main window's view of every Agent on every connected Device, entered from the Tasks row at the top of the left sidebar or with `toggle-tasks` (ADR 0068). Its columns, To do, Needs you, Done, Working and Idle, are derived from state and never dragged between; it shows as a Board, in cards or compact rows, or as a Table, narrowed to one Device or one Workspace with its worktrees. A selected card opens its Agent's Pane alone in the interaction area beside the cards, without changing the window's View. It covers the content area as the Ports page does, beside the left sidebar, or opens in the Tasks window, a window of its own without a sidebar, beside the main window (ADR 0069).
 _Avoid_: Overview, Board (one of its layouts), dashboard, Agents view
 
 **Task**:

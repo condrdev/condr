@@ -306,7 +306,7 @@ impl Condr {
         let owner = cx.weak_entity();
         // Above everything, in the main window only (ADR 0068).
         let tasks_entry = (view.scope == WindowScope::Main)
-            .then(|| self.render_tasks_entry(self.in_tasks_mode(view), cx));
+            .then(|| self.render_tasks_entry(view.page == ContentPage::Tasks, cx));
         let needs_you = self.needs_you_items(view, cx);
         let agents = self.render_agents_section(view, window, cx);
         // A detached window lists only what it shows (ADR 0043).
@@ -1043,7 +1043,7 @@ impl Condr {
             .border_r_1()
             .border_color(cx.theme().sidebar_border)
             .when(view.scope == WindowScope::Main, |this| {
-                this.child(self.render_collapsed_tasks_entry(self.in_tasks_mode(view), cx))
+                this.child(self.render_collapsed_tasks_entry(view.page == ContentPage::Tasks, cx))
             })
             .children(avatars)
             .into_any_element()

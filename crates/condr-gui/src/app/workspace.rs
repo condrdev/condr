@@ -94,6 +94,19 @@ impl Condr {
         view: &WindowView,
         cx: &mut Context<Self>,
     ) -> WorkspaceChrome {
+        // The main window's Tasks mode while Tasks is in its own window: the page saying
+        // so, with the way there and back (ADR 0069).
+        if view.page == ContentPage::Tasks
+            && let Some(handle) = self
+                .window_for(WindowScope::Tasks)
+                .filter(|handle| *handle != view.handle)
+        {
+            return WorkspaceChrome {
+                tab_strip: Some(self.render_tasks_title(false, cx)),
+                open_in: None,
+                body: self.render_shown_elsewhere(WindowScope::Tasks, handle, cx),
+            };
+        }
         // The Ports page covers the content area, the Tab strip included (ADR 0061).
         if let ContentPage::Ports(scope) = view.page {
             return WorkspaceChrome {
@@ -907,7 +920,7 @@ impl Render for Condr {
             // Tasks mode covers the content area as the Ports page does, the sidebar
             // beside it and the Changes sidebar under it (ADR 0068).
             Some(board) => WorkspaceChrome {
-                tab_strip: Some(self.render_tasks_title(cx)),
+                tab_strip: Some(self.render_tasks_title(view.scope == WindowScope::Main, cx)),
                 open_in: None,
                 body: div()
                     .debug_selector(|| "tasks-mode".into())
@@ -924,7 +937,8 @@ impl Render for Condr {
         let changes_column = (view.page == ContentPage::Workspace
             && self.changes_sidebar_open(view))
         .then(|| self.render_right_sidebar(view, cx));
-        let tab_window = matches!(view.scope, WindowScope::Tab(..));
+        // The Tasks window draws Tasks alone, as a Tab window draws its Tab (ADR 0069).
+        let tab_window = matches!(view.scope, WindowScope::Tab(..) | WindowScope::Tasks);
         let title = self.window_title(view.scope);
         let bring_back =
             (view.scope != WindowScope::Main).then(|| bring_back_button(cx.weak_entity()));
@@ -1187,6 +1201,7 @@ impl Condr {
             WindowScope::Device(_) => t!("workspace.shown_elsewhere.device"),
             WindowScope::Workspace(..) => t!("workspace.shown_elsewhere.workspace"),
             WindowScope::Tab(..) => t!("workspace.shown_elsewhere.tab"),
+            WindowScope::Tasks => t!("workspace.shown_elsewhere.tasks"),
         };
         let owner = cx.weak_entity();
         v_flex()

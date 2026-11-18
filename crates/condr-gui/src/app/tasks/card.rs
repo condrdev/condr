@@ -119,7 +119,7 @@ impl Condr {
         let icon = self.card_icon(card, facts.kind, cx);
         let (card_key, card_pane) = (card.key, card.pane_id);
         let selected = self
-            .main_view()
+            .tasks_view()
             .tasks_selection
             .is_some_and(|selected| (selected.key, selected.pane_id) == (card_key, card_pane));
         let on_click = cx.listener(move |this, _: &ClickEvent, window, cx| {
@@ -198,7 +198,7 @@ impl Condr {
         let icon = self.card_icon(card, facts.kind, cx);
         let (card_key, card_pane) = (card.key, card.pane_id);
         let selected = self
-            .main_view()
+            .tasks_view()
             .tasks_selection
             .is_some_and(|selected| (selected.key, selected.pane_id) == (card_key, card_pane));
         let on_click = cx.listener(move |this, _: &ClickEvent, window, cx| {
@@ -253,7 +253,7 @@ impl Condr {
         let icon = self.card_icon(card, facts.kind, cx);
         let (card_key, card_pane) = (card.key, card.pane_id);
         let selected = self
-            .main_view()
+            .tasks_view()
             .tasks_selection
             .is_some_and(|selected| (selected.key, selected.pane_id) == (card_key, card_pane));
         let on_click = cx.listener(move |this, _: &ClickEvent, window, cx| {

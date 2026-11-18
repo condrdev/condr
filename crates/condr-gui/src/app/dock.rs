@@ -257,8 +257,22 @@ impl Condr {
             self.rebuild_tasks_dock(window, cx);
             return;
         }
+        // What this window draws may be the Pane the Tasks window's area shows, which
+        // yields to it, or may have stopped being it (ADR 0069).
+        if let Some(tasks) = self.window_for(WindowScope::Tasks) {
+            self.in_window(tasks, cx, |this, window, cx| {
+                let shown =
+                    |this: &Self| this.tasks_view().tasks_dock.as_ref().map(|dock| dock.pane);
+                let before = shown(this);
+                this.rebuild_tasks_dock(window, cx);
+                if shown(this) != before {
+                    cx.notify();
+                }
+            });
+        }
         let view = self.window_view(window);
-        let shown = if self.shown_elsewhere(view).is_some() {
+        // The main window's page saying Tasks is in its own window draws no Tab either.
+        let shown = if self.shown_elsewhere(view).is_some() || view.page == ContentPage::Tasks {
             None
         } else {
             let key = self.presented_key(view);
@@ -272,6 +286,7 @@ impl Condr {
                         connection.viewed_tab_id(session, workspace_id)?,
                     ),
                     WindowScope::Tab(_, tab_id) => (workspace_of_tab(session, tab_id)?, tab_id),
+                    WindowScope::Tasks => return None,
                 };
                 Some((key, workspace_id, tab_id))
             })

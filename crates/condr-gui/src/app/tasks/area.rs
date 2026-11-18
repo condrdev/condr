@@ -49,12 +49,12 @@ impl Condr {
             .and_then(|session| session.workspace_for_pane(pane_id))
             .is_some_and(|workspace| {
                 Self::tasks_scope_shows(
-                    self.effective_tasks_scope(self.main_view().tasks.scope),
+                    self.effective_tasks_scope(self.tasks_view().tasks.scope),
                     connection,
                     workspace,
                 )
             });
-        let view = self.main_view_mut();
+        let view = self.tasks_view_mut();
         // A notification's Agent outside the scope widens it to All first.
         if !shown {
             view.tasks.scope = TasksScope::All;
@@ -76,7 +76,7 @@ impl Condr {
         if keyboard {
             self.focus_tasks_terminal(key, pane_id, window, cx);
         } else {
-            self.main_view().tasks_focus.clone().focus(window, cx);
+            self.tasks_view().tasks_focus.clone().focus(window, cx);
         }
         self.sync_terminal_focus(window, cx);
         self.schedule_state_save(cx);
@@ -117,11 +117,11 @@ impl Condr {
 
     pub(super) fn close_task_area_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.task_form = None;
-        let view = self.main_view_mut();
+        let view = self.tasks_view_mut();
         view.tasks_selection = None;
         view.tasks_dock = None;
         self.terminal_input.target = None;
-        self.main_view().tasks_focus.clone().focus(window, cx);
+        self.tasks_view().tasks_focus.clone().focus(window, cx);
         self.sync_terminal_focus(window, cx);
         cx.notify();
     }
@@ -137,7 +137,7 @@ impl Condr {
         cx: &mut Context<Self>,
     ) {
         let selected = self
-            .main_view()
+            .tasks_view()
             .tasks_selection
             .is_some_and(|selected| match task {
                 Some(task) => selected.key == key && selected.task == Some(task),
@@ -159,7 +159,7 @@ impl Condr {
     /// The Agent cards in the order `next-agent` and the arrows step through: column
     /// by column, each by urgency.
     pub(super) fn task_card_order(&self) -> Vec<(ConnectionKey, PaneId)> {
-        let view = self.main_view();
+        let view = self.tasks_view();
         self.task_cards(
             self.effective_tasks_scope(view.tasks.scope),
             view.tasks_selection,
@@ -184,7 +184,7 @@ impl Condr {
         if order.is_empty() {
             return;
         }
-        let current = self.main_view().tasks_selection.and_then(|selected| {
+        let current = self.tasks_view().tasks_selection.and_then(|selected| {
             order
                 .iter()
                 .position(|card| *card == (selected.key, selected.pane_id))
@@ -215,7 +215,7 @@ impl Condr {
             "up" | "left" => self.step_task_card(-1, false, window, cx),
             "down" | "right" => self.step_task_card(1, false, window, cx),
             "enter" => {
-                if let Some(selected) = self.main_view().tasks_selection {
+                if let Some(selected) = self.tasks_view().tasks_selection {
                     let (key, pane_id, task) = (selected.key, selected.pane_id, selected.task);
                     self.select_card(key, pane_id, task, true, window, cx);
                 }
@@ -227,8 +227,8 @@ impl Condr {
 
     /// A press on the card area's background takes the keyboard back from the terminal.
     pub(super) fn focus_task_cards(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let focus = self.main_view().tasks_focus.clone();
-        if let Some(selected) = self.main_view_mut().tasks_selection.as_mut() {
+        let focus = self.tasks_view().tasks_focus.clone();
+        if let Some(selected) = self.tasks_view_mut().tasks_selection.as_mut() {
             selected.keyboard = false;
         }
         self.terminal_input.target = None;
@@ -242,31 +242,30 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(selected) = self.main_view().tasks_selection else {
+        let Some(selected) = self.tasks_view().tasks_selection else {
             return;
         };
-        self.main_view_mut().tasks_selection = None;
+        if self.window_view(window).scope == WindowScope::Tasks {
+            // The main window shows it, and the area, keeping its card, yields to it
+            // (ADR 0069).
+            self.in_window(self.main_window(), cx, move |this, window, cx| {
+                this.leave_tasks_mode(window, cx);
+                this.select_pane(selected.key, selected.pane_id, window, cx);
+                window.activate_window();
+            });
+            return;
+        }
+        self.tasks_view_mut().tasks_selection = None;
         self.leave_tasks_mode(window, cx);
         self.select_pane(selected.key, selected.pane_id, window, cx);
     }
 
-    /// The other window that draws the selected Pane's Tab, if one does.
+    /// The other window that draws the selected Pane's Tab right now, if one does.
     pub(super) fn tasks_pane_shown_elsewhere(
         &self,
         selected: TasksSelection,
     ) -> Option<(WindowScope, AnyWindowHandle)> {
-        let tab_id = self
-            .connection(selected.key)?
-            .session()?
-            .workspace_for_pane(selected.pane_id)?
-            .tabs()
-            .iter()
-            .find(|tab| tab.panes().iter().any(|pane| pane.id() == selected.pane_id))?
-            .id();
-        self.windows.iter().skip(1).find_map(|view| {
-            let (key, _, _, shown) = self.presented_in(view)?;
-            ((key, shown) == (selected.key, tab_id)).then_some((view.scope, view.handle))
-        })
+        self.window_drawing_pane(selected.key, selected.pane_id)
     }
 
     /// The Dock part of `rebuild_window_dock` in Tasks mode: no Tab's surface, and a
@@ -279,34 +278,34 @@ impl Condr {
         let input_window = self.last_active == window.window_handle();
         self.window_view_mut(window).dock_surface = None;
         // A Pane that closed takes the area with it.
-        if let Some(selected) = self.main_view().tasks_selection
+        if let Some(selected) = self.tasks_view().tasks_selection
             && self
                 .connection(selected.key)
                 .and_then(ServerConnection::session)
                 .and_then(|session| session.workspace_for_pane(selected.pane_id))
                 .is_none()
         {
-            let view = self.main_view_mut();
+            let view = self.tasks_view_mut();
             view.tasks_selection = None;
             view.tasks_dock = None;
         }
-        let selection = self.main_view().tasks_selection;
+        let selection = self.tasks_view().tasks_selection;
         if input_window {
             self.terminal_input.target = selection
                 .filter(|selected| selected.keyboard)
                 .map(|selected| (selected.key, selected.pane_id));
         }
         let Some(selected) = selection else {
-            self.main_view_mut().tasks_dock = None;
+            self.tasks_view_mut().tasks_dock = None;
             return;
         };
         if self.tasks_pane_shown_elsewhere(selected).is_some() {
-            self.main_view_mut().tasks_dock = None;
+            self.tasks_view_mut().tasks_dock = None;
             return;
         }
         let pane = (selected.key, selected.pane_id);
         if self
-            .main_view()
+            .tasks_view()
             .tasks_dock
             .as_ref()
             .is_some_and(|dock| dock.pane == pane)
@@ -314,7 +313,7 @@ impl Condr {
             return;
         }
         let size = {
-            let workspace = self.main_view().workspace_size;
+            let workspace = self.tasks_view().workspace_size;
             size(
                 workspace.width.max(px(1.)),
                 (workspace.height / 2.).max(px(1.)),
@@ -330,7 +329,7 @@ impl Condr {
             dock.set_locked(true, window, cx);
             dock.set_center(layout, window, cx);
         });
-        self.main_view_mut().tasks_dock = Some(TasksDock { area, pane });
+        self.tasks_view_mut().tasks_dock = Some(TasksDock { area, pane });
     }
 
     /// The cards, and below the Board or beside the List the interaction area, with a
@@ -343,7 +342,7 @@ impl Condr {
     ) -> AnyElement {
         v_flex()
             .size_full()
-            .child(self.tasks_toolbar(view.tasks, cx))
+            .child(self.tasks_toolbar(view.tasks, view.scope != WindowScope::Tasks, cx))
             .child(
                 div()
                     .flex_1()
@@ -399,7 +398,7 @@ impl Condr {
                         (position.x - bounds.left()) / bounds.size.width
                     };
                     let split = Some((fraction.clamp(0.2, 0.8) * 1000.).round() as u16);
-                    let prefs = &mut this.main_view_mut().tasks;
+                    let prefs = &mut this.tasks_view_mut().tasks;
                     if board_layout {
                         prefs.split_board = split;
                     } else {

@@ -401,7 +401,7 @@ impl Condr {
     }
 
     pub(super) fn task_card_selected(&self, card: &TaskCard, task: TaskId) -> bool {
-        self.main_view()
+        self.tasks_view()
             .tasks_selection
             .is_some_and(|selected| selected.key == card.key && selected.task == Some(task))
     }

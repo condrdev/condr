@@ -154,8 +154,9 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        // In Tasks mode, going to an Agent selects its card, keyboard and all (ADR 0068).
-        if self.is_main(window) && self.in_tasks_mode(self.window_view(window)) {
+        // In Tasks mode, or in the Tasks window, going to an Agent selects its card,
+        // keyboard and all (ADR 0068, ADR 0069).
+        if self.in_tasks_mode(self.window_view(window)) {
             self.select_task_card(key, pane_id, true, window, cx);
             return true;
         }
@@ -477,6 +478,10 @@ impl Condr {
 
     pub(super) fn toggle_sidebar(&mut self, window: &Window, cx: &mut Context<Self>) {
         let view = self.window_view_mut(window);
+        // The Tasks window has no sidebar (ADR 0069).
+        if view.scope == WindowScope::Tasks {
+            return;
+        }
         view.sidebar_collapsed = !view.sidebar_collapsed;
         self.schedule_state_save(cx);
         cx.notify();

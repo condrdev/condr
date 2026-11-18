@@ -46,9 +46,19 @@ pub(super) struct GuiState {
     pub servers: HashMap<ServerId, ServerState>,
     /// The detached windows (ADR 0043), each opened again once its Server bootstraps.
     pub detached: Vec<DetachedWindowState>,
-    /// Whether the main window showed Tasks mode, and how it shows (ADR 0068).
+    /// Whether the main window showed Tasks mode, and how Tasks shows, wherever it does
+    /// (ADR 0068, ADR 0069).
     pub tasks_open: bool,
     pub tasks: super::tasks::TasksPrefs,
+    /// The Tasks window, opened again after the main window (ADR 0069).
+    pub tasks_window: Option<TasksWindowState>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct TasksWindowState {
+    pub window: WindowState,
+    /// macOS places a window relative to its display, so the display comes back too.
+    pub display: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -252,7 +262,9 @@ impl GuiState {
 /// costs a window position or a sidebar choice at most.
 mod wire {
     use super::super::tasks::{TasksDensity, TasksLayout, TasksPrefs, TasksScope};
-    use super::{DetachedWindowState, SavedScope, SidebarView, WindowRect, WindowState};
+    use super::{
+        DetachedWindowState, SavedScope, SidebarView, TasksWindowState, WindowRect, WindowState,
+    };
     use condr_core::protocol::ServerId;
     use condr_core::{TabId, WorkspaceId};
     use std::collections::HashMap;
@@ -281,6 +293,17 @@ mod wire {
         agents_collapsed: bool,
         #[prost(message, optional, tag = "11")]
         tasks: Option<Tasks>,
+        #[prost(message, optional, tag = "12")]
+        tasks_window: Option<TasksWindow>,
+    }
+
+    /// The Tasks window (ADR 0069).
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct TasksWindow {
+        #[prost(message, optional, tag = "1")]
+        window: Option<Window>,
+        #[prost(uint64, optional, tag = "2")]
+        display: Option<u64>,
     }
 
     /// Tasks mode (ADR 0068); every field's zero is its default.
@@ -437,6 +460,10 @@ mod wire {
                         split_list: state.tasks.split_list.map(u32::from),
                     }
                 }),
+                tasks_window: state.tasks_window.map(|tasks| TasksWindow {
+                    window: Some(window_to_wire(tasks.window)),
+                    display: tasks.display,
+                }),
                 changes_width: state.changes_width,
                 diff_unified: state.diff_unified,
                 active_server: state.active_server.map(|server| server.0),
@@ -528,6 +555,12 @@ mod wire {
                             .and_then(|split| u16::try_from(split).ok()),
                         split_list: tasks.split_list.and_then(|split| u16::try_from(split).ok()),
                     }),
+                tasks_window: state.tasks_window.and_then(|tasks| {
+                    Some(TasksWindowState {
+                        window: window_from_wire(tasks.window?)?,
+                        display: tasks.display,
+                    })
+                }),
                 changes_width: state.changes_width,
                 diff_unified: state.diff_unified,
                 active_server: state.active_server.map(ServerId),
@@ -610,7 +643,7 @@ impl Condr {
             .iter()
             .filter_map(|view| {
                 let (key, scope) = match view.scope {
-                    WindowScope::Main => return None,
+                    WindowScope::Main | WindowScope::Tasks => return None,
                     WindowScope::Device(key) => (key, SavedScope::Device),
                     WindowScope::Workspace(key, workspace_id) => {
                         (key, SavedScope::Workspace(workspace_id))
@@ -680,7 +713,15 @@ impl Condr {
             agents_height: self.main_view().agents_height.map(Into::into),
             agents_collapsed: self.main_view().agents_collapsed,
             tasks_open: self.main_view().page == ContentPage::Tasks,
-            tasks: self.main_view().tasks,
+            tasks: self.tasks_view().tasks,
+            tasks_window: self
+                .windows
+                .iter()
+                .find(|view| view.scope == WindowScope::Tasks)
+                .map(|view| TasksWindowState {
+                    window: view.bounds,
+                    display: view.display.map(u64::from),
+                }),
             changes_width: Some(self.main_view().changes_width.into()),
             diff_unified: self.files_view.diff_unified,
             // Until the active connection has bootstrapped (a slow first start), the
@@ -813,8 +854,8 @@ impl Condr {
 mod tests {
     // Not `super::*`: the app module's glob brings in GPUI's `#[test]` macro.
     use super::{
-        DetachedWindowState, GuiState, STATE_FILE_NAME, SavedScope, ServerState, WindowRect,
-        WindowState, WorkspaceState, on_a_display,
+        DetachedWindowState, GuiState, STATE_FILE_NAME, SavedScope, ServerState, TasksWindowState,
+        WindowRect, WindowState, WorkspaceState, on_a_display,
     };
     use crate::app::changes::SidebarView;
     use condr_core::protocol::ServerId;
@@ -848,6 +889,15 @@ mod tests {
                 split_board: Some(600),
                 split_list: None,
             },
+            tasks_window: Some(TasksWindowState {
+                window: WindowState::Windowed(WindowRect {
+                    x: 1920.,
+                    y: 0.,
+                    width: 1200.,
+                    height: 800.,
+                }),
+                display: Some(2),
+            }),
             changes_width: Some(300.),
             diff_unified: true,
             active_server: Some(ServerId(7)),

@@ -214,6 +214,21 @@ impl Condr {
         let Some((key, pane_id)) = parse_pane_notification_tag(&response.tag) else {
             return;
         };
+        // While the Tasks window is open its card is selected there, and the window that
+        // comes forward is the one drawing the Agent's Tab, if one does, since the area
+        // would only point to it (ADR 0069).
+        if let Some(tasks) = self.window_for(WindowScope::Tasks) {
+            self.in_window(tasks, cx, move |this, window, cx| {
+                match this.window_drawing_pane(key, pane_id) {
+                    Some((_, drawing)) => {
+                        let _ = drawing.update(cx, |_, window, _| window.activate_window());
+                    }
+                    None => window.activate_window(),
+                }
+                this.select_task_card(key, pane_id, true, window, cx);
+            });
+            return;
+        }
         window.activate_window();
         self.select_pane(key, pane_id, window, cx);
     }

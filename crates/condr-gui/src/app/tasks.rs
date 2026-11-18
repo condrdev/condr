@@ -1,5 +1,5 @@
-//! Tasks mode (ADR 0068): the main window's page of every Agent and every Task, in
-//! columns by state, as a Board or a Table. This root holds what its parts share and
+//! Tasks mode (ADR 0068): the page of every Agent and every Task, in columns by state,
+//! as a Board or a Table, in the main window or the Tasks window (ADR 0069). This root holds what its parts share and
 //! entering and leaving it; each part is a submodule.
 
 use super::sidebar::{
@@ -244,9 +244,33 @@ pub(super) fn inert_in_tasks_mode(action: TypeId) -> bool {
 }
 
 impl Condr {
-    /// Whether `view` shows Tasks mode, which only the main window does.
+    /// Whether `view` shows Tasks: the Tasks window, or the main window in Tasks mode
+    /// while no Tasks window is open (ADR 0069).
     pub(super) fn in_tasks_mode(&self, view: &WindowView) -> bool {
-        view.scope == WindowScope::Main && view.page == ContentPage::Tasks
+        view.page == ContentPage::Tasks && view.handle == self.tasks_view().handle
+    }
+
+    /// Tasks has just come to `window`, or left a window for the main window: the form's
+    /// inputs are made again where Tasks now is, and while `window` shows Tasks the
+    /// keyboard goes back where the selection had it (ADR 0069).
+    pub(super) fn settle_tasks(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.rehome_task_form(window, cx);
+        self.focus_tasks(window, cx);
+    }
+
+    /// The keyboard to the selected terminal when the selection had it, else to the
+    /// card area, in `window` while it shows Tasks.
+    pub(super) fn focus_tasks(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.in_tasks_mode(self.window_view(window)) {
+            return;
+        }
+        match self.tasks_view().tasks_selection {
+            Some(selected) if selected.keyboard => {
+                self.focus_tasks_terminal(selected.key, selected.pane_id, window, cx);
+            }
+            _ => self.tasks_view().tasks_focus.clone().focus(window, cx),
+        }
+        self.sync_terminal_focus(window, cx);
     }
 
     /// Enters or leaves Tasks mode. Neither changes the View (ADR 0021): leaving shows
@@ -274,8 +298,10 @@ impl Condr {
                 let sidebar = cx.new(|cx| super::sidebar::LeftSidebar::new(&owner, cx));
                 self.windows[index].sidebar = Some(sidebar);
             }
-            if self.windows[index].scope == WindowScope::Main
-                && self.windows[index].tasks_board.is_none()
+            if matches!(
+                self.windows[index].scope,
+                WindowScope::Main | WindowScope::Tasks
+            ) && self.windows[index].tasks_board.is_none()
             {
                 let board = cx.new(|cx| TasksBoard::new(&owner, cx));
                 self.windows[index].tasks_board = Some(board);
@@ -286,8 +312,8 @@ impl Condr {
 
 /// The interaction area: selecting, the single-Pane Dock, the keyboard and the split.
 impl Condr {
-    /// Leaves the main window's Tasks mode, for Go to's places, which the palette may run
-    /// from another window, and Open in Workspace.
+    /// Leaves the main window's Tasks mode, or the page saying Tasks is in its own window,
+    /// for Go to's places and Open in Workspace.
     pub(super) fn leave_tasks_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.main_view().page == ContentPage::Tasks {
             self.main_view_mut().page = ContentPage::Workspace;
@@ -303,7 +329,7 @@ impl Condr {
     /// Whether the interaction area only previews `pane_id`: then the Client sends it no
     /// size, so stepping through cards resizes no Agent (ADR 0068).
     pub(super) fn tasks_previews(&self, key: ConnectionKey, pane_id: PaneId) -> bool {
-        let view = self.main_view();
+        let view = self.tasks_view();
         view.page == ContentPage::Tasks
             && view.tasks_selection.is_some_and(|selected| {
                 (selected.key, selected.pane_id) == (key, pane_id) && !selected.keyboard

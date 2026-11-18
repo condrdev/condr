@@ -12,7 +12,12 @@ use rust_i18n::t;
 #[derive(Clone, Copy, PartialEq)]
 pub(super) enum ScopeRow {
     All,
-    Device { local: bool },
+    /// A Device, and whether it is disconnected, which its row marks as ADR 0020's
+    /// sidebar does; the Tasks window has no sidebar to say so (ADR 0069).
+    Device {
+        local: bool,
+        disconnected: bool,
+    },
     Workspace,
     Worktree,
 }
@@ -30,10 +35,10 @@ pub(super) fn scope_row(
     let theme = cx.theme();
     let (indent, icon, primary) = match row {
         ScopeRow::All => (0., Icon::new(gpui_kit::assets::IconName::Layers), true),
-        ScopeRow::Device { local: true } => {
+        ScopeRow::Device { local: true, .. } => {
             (0., Icon::new(gpui_kit::assets::IconName::Monitor), true)
         }
-        ScopeRow::Device { local: false } => {
+        ScopeRow::Device { local: false, .. } => {
             (0., Icon::new(gpui_kit::assets::IconName::Server), true)
         }
         ScopeRow::Workspace => (1.25, Icon::new(IconName::Folder), false),
@@ -53,6 +58,27 @@ pub(super) fn scope_row(
         .text_color(color)
         .child(icon.small())
         .child(div().flex_1().min_w_0().truncate().child(name))
+        .when(
+            matches!(
+                row,
+                ScopeRow::Device {
+                    disconnected: true,
+                    ..
+                }
+            ),
+            |this| {
+                this.child(
+                    div()
+                        .debug_selector(|| "tasks-scope-disconnected".into())
+                        .flex_none()
+                        .child(
+                            Icon::new(Glyph::CircleAlert)
+                                .small()
+                                .text_color(theme.danger),
+                        ),
+                )
+            },
+        )
         .child(
             div()
                 .flex_none()
@@ -66,35 +92,66 @@ pub(super) fn scope_row(
 
 impl Condr {
     pub(super) fn set_tasks_layout(&mut self, layout: TasksLayout, cx: &mut Context<Self>) {
-        self.main_view_mut().tasks.layout = layout;
+        self.tasks_view_mut().tasks.layout = layout;
         self.schedule_state_save(cx);
         cx.notify();
     }
 
     pub(super) fn set_tasks_density(&mut self, density: TasksDensity, cx: &mut Context<Self>) {
-        self.main_view_mut().tasks.density = density;
+        self.tasks_view_mut().tasks.density = density;
         self.schedule_state_save(cx);
         cx.notify();
     }
 
-    /// Tasks mode's title in the title bar, where the Tab strip was, as the Ports page's.
-    pub(in crate::app) fn render_tasks_title(&self, cx: &mut Context<Self>) -> AnyElement {
+    /// Tasks mode's title in the title bar, where the Tab strip was, as the Ports page's;
+    /// in Tasks mode it ends with Open in New Window, where a detached window has Bring
+    /// Back (ADR 0069).
+    pub(in crate::app) fn render_tasks_title(
+        &self,
+        open_in_new_window: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let owner = cx.weak_entity();
         h_flex()
             .debug_selector(|| "tasks-title".into())
+            .flex_1()
+            .min_w_0()
+            .h_full()
             .gap_2()
             .items_center()
             .px_2()
             .child(Icon::new(CondrIconName::SquareKanban).size_4())
             .child(div().text_sm().child(t!("tasks.title").into_owned()))
             .text_color(cx.theme().foreground)
+            .child(div().flex_1())
+            .when(open_in_new_window, |this| {
+                this.child(
+                    Button::new("tasks-open-in-new-window")
+                        .debug_selector(|| "tasks-open-in-new-window".into())
+                        .ghost()
+                        .small()
+                        .icon(Icon::new(gpui_kit::assets::IconName::SquareArrowUpRight))
+                        .label(t!("tasks.open_in_new_window"))
+                        // Inside the title bar an unclaimed press starts a window move on
+                        // Windows.
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_click(move |_, window, cx| {
+                            let _ = owner.update(cx, |this, cx| {
+                                this.open_in_new_window(WindowScope::Tasks, window, cx)
+                            });
+                        }),
+                )
+            })
             .into_any_element()
     }
 
-    /// Over the cards and the interaction area: the scope on the left, Layout and the way
-    /// back to the Workspace on the right, as the Ports page closes.
+    /// Over the cards and the interaction area: the scope on the left, Layout and, in the
+    /// main window, the way back to the Workspace on the right, as the Ports page closes.
+    /// The Tasks window has no way back: it shows Tasks alone (ADR 0069).
     pub(super) fn tasks_toolbar(
         &self,
         prefs: TasksPrefs,
+        closable: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let close_owner = cx.weak_entity();
@@ -112,17 +169,20 @@ impl Condr {
             .child(self.render_scope_menu(prefs.scope, cx))
             .child(div().flex_1())
             .child(self.render_layout_popover(cx))
-            .child(
-                Button::new("tasks-close")
-                    .debug_selector(|| "tasks-close".into())
-                    .ghost()
-                    .small()
-                    .icon(IconName::Close)
-                    .tooltip_with_action(back, &ToggleTasks, Some(SHORTCUT_CONTEXT))
-                    .on_click(move |_, window, cx| {
-                        let _ = close_owner.update(cx, |this, cx| this.toggle_tasks(window, cx));
-                    }),
-            )
+            .when(closable, |this| {
+                this.child(
+                    Button::new("tasks-close")
+                        .debug_selector(|| "tasks-close".into())
+                        .ghost()
+                        .small()
+                        .icon(IconName::Close)
+                        .tooltip_with_action(back, &ToggleTasks, Some(SHORTCUT_CONTEXT))
+                        .on_click(move |_, window, cx| {
+                            let _ =
+                                close_owner.update(cx, |this, cx| this.toggle_tasks(window, cx));
+                        }),
+                )
+            })
     }
 
     /// Layout: List or Board, and whether the Board's cards are compact; the List's rows
@@ -142,7 +202,7 @@ impl Condr {
             .content(move |_, _, cx| {
                 let prefs = owner
                     .upgrade()
-                    .map(|owner| owner.read(cx).main_view().tasks)
+                    .map(|owner| owner.read(cx).tasks_view().tasks)
                     .unwrap_or_default();
                 let board = prefs.layout == TasksLayout::Board;
                 let (layout_owner, density_owner) = (owner.clone(), owner.clone());
@@ -251,6 +311,7 @@ impl Condr {
             options.push((
                 ScopeRow::Device {
                     local: connection.endpoint.as_local_path().is_some(),
+                    disconnected: connection.status == ConnectionStatus::Disconnected,
                 },
                 connection.label.clone(),
                 TasksScope::Device(server),

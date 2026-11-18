@@ -7,7 +7,7 @@ When several projects run at once, switching between them one Workspace at a tim
 
 ## Tasks mode
 
-Open it with the **Tasks** row at the top of the sidebar, or its icon at the top of the collapsed sidebar; it takes the place of the Workspace, beside the sidebar, as the Ports page does. The ✕ at the right of its toolbar takes you back to the Tab you were looking at, and choosing a Workspace in the sidebar goes there. In the sidebar, choosing an Agent selects its card. Only the main window has Tasks mode.
+Open it with the **Tasks** row at the top of the sidebar, or its icon at the top of the collapsed sidebar; it takes the place of the Workspace, beside the sidebar, as the Ports page does. The ✕ at the right of its toolbar takes you back to the Tab you were looking at, and choosing a Workspace in the sidebar goes there. In the sidebar, choosing an Agent selects its card. Only the main window has Tasks mode; to keep it beside your Workspace, open it in a window of its own (below).
 
 Agents sit in columns by state: **To do** (Tasks not started yet), **Needs you** (a bell, Blocked or Error), **Done** (finished and not looked at yet), **Working** and **Idle**. You never drag cards between them; they move as the Agents report. A column's heading folds it to a narrow strip, and Needs you unfolds by itself when an Agent arrives in it.
 
@@ -20,6 +20,14 @@ Agents sit in columns by state: **To do** (Tasks not started yet), **Needs you**
 Click a card to open its terminal beside the cards, below the Board or to the right of the Table, and type: the keyboard goes straight to the Agent. `Cmd+]` and `Cmd+[` (`Alt+]` and `Alt+[`) step to the next and previous Agent, so you can answer one after another without the mouse. Click the card again, or ✕, to close the terminal.
 
 Click the cards' background to take the keyboard back: the arrow keys then preview each Agent without typing into it or resizing it, and `Enter` hands the keyboard over. **Open in Workspace** leaves Tasks mode for the Agent's own Tab, where you can split or rearrange Panes. Layout and Tab shortcuts do nothing in Tasks mode.
+
+### Tasks in its own window
+
+With two screens, put Tasks on one and your Workspace on the other: **Open in New Window**, at the right of the title bar in Tasks mode, moves Tasks into a window of its own, and the main window goes back to the Tab you were looking at. The Tasks window has the same cards and terminal, without a sidebar; the scope's menu marks a disconnected Device. Everything else stays in the main window: choosing a Workspace or a Tab with **Go to**, and **Open in Workspace**, show it there.
+
+A terminal is shown in one window at a time. While the main window shows the selected Agent's Tab, the Tasks window says so and offers **Go to Window**; when the main window moves on, the terminal is back in the Tasks window. Clicking a notification selects the Agent's card in the Tasks window, and brings forward whichever window shows its terminal.
+
+**Bring Back**, at the right of the Tasks window's title bar, returns Tasks to the main window. Closing the window only puts it away: the next time you open Tasks, the same card, and any unsaved Task, are still there. Condr reopens the Tasks window where you left it when it starts again.
 
 ## Tasks
 

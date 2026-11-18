@@ -3,6 +3,9 @@ tasks:
   title:
     en: Tasks
     zh-CN: Tasks
+  open_in_new_window:
+    en: Open in New Window
+    zh-CN: 在新窗口中打开
   scope:
     all:
       en: All

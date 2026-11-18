@@ -627,6 +627,20 @@ impl Condr {
             this.restore_server_state(1, cx);
         }
         this.refresh_target_pane(1);
+        // The Tasks window after the main window, which then comes forward (ADR 0069).
+        if let Some(saved) = this.restored_state.tasks_window {
+            let bounds = saved.window.window_bounds(DEFAULT_WINDOW_SIZE, cx);
+            this.open_window(
+                WindowScope::Tasks,
+                bounds,
+                saved.display.map(DisplayId::from),
+                cx,
+            );
+            let main = this.main_window();
+            cx.defer(move |cx| {
+                let _ = main.update(cx, |_, window, _| window.activate_window());
+            });
+        }
         this.connections[0].subscribe();
         if let Some(error) = config_error {
             this.report_error(error, cx);

@@ -5,13 +5,13 @@ use super::*;
 
 impl Condr {
     pub(super) fn toggle_tasks_column(&mut self, column: TasksColumn, cx: &mut Context<Self>) {
-        self.main_view_mut().tasks.folded ^= column.bit();
+        self.tasks_view_mut().tasks.folded ^= column.bit();
         self.schedule_state_save(cx);
         cx.notify();
     }
 
     pub(in crate::app) fn set_tasks_scope(&mut self, scope: TasksScope, cx: &mut Context<Self>) {
-        self.main_view_mut().tasks.scope = scope;
+        self.tasks_view_mut().tasks.scope = scope;
         self.schedule_state_save(cx);
         cx.notify();
     }
@@ -33,7 +33,7 @@ impl Condr {
             .iter()
             .any(|agent| !self.tasks_needs_you.contains(agent));
         self.tasks_needs_you = now;
-        let tasks = &mut self.main_view_mut().tasks;
+        let tasks = &mut self.tasks_view_mut().tasks;
         if arrived && tasks.is_folded(TasksColumn::NeedsYou) {
             tasks.folded &= !TasksColumn::NeedsYou.bit();
             self.schedule_state_save(cx);

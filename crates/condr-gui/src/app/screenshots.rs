@@ -449,12 +449,12 @@ fn agents(
     });
     shot(cx, window, directory, "11-tasks-agents");
     update(cx, window, view, |this, _, cx| {
-        this.main_view_mut().tasks.density = TasksDensity::Compact;
+        this.tasks_view_mut().tasks.density = TasksDensity::Compact;
         cx.notify();
     });
     shot(cx, window, directory, "11b-tasks-compact");
     update(cx, window, view, |this, _, cx| {
-        this.main_view_mut().tasks.layout = TasksLayout::List;
+        this.tasks_view_mut().tasks.layout = TasksLayout::List;
         cx.notify();
     });
     shot(cx, window, directory, "11c-tasks-list");
@@ -463,14 +463,14 @@ fn agents(
     });
     shot(cx, window, directory, "11d-tasks-list-open");
     update(cx, window, view, |this, _, cx| {
-        let prefs = &mut this.main_view_mut().tasks;
+        let prefs = &mut this.tasks_view_mut().tasks;
         prefs.layout = TasksLayout::Board;
         prefs.density = TasksDensity::Cards;
         cx.notify();
     });
     shot(cx, window, directory, "11e-tasks-board-open");
     update(cx, window, view, |this, _, cx| {
-        this.main_view_mut().tasks.folded = TasksColumn::Done.bit() | TasksColumn::Idle.bit();
+        this.tasks_view_mut().tasks.folded = TasksColumn::Done.bit() | TasksColumn::Idle.bit();
         cx.notify();
     });
     shot(cx, window, directory, "11f-tasks-folded");

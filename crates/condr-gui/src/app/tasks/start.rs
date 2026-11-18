@@ -230,7 +230,7 @@ impl Condr {
     /// Pane moves to the Task's card (ADR 0068).
     pub(in crate::app) fn agent_left_task(&mut self, key: ConnectionKey, pane_id: PaneId) {
         let Some(selected) = self
-            .main_view()
+            .tasks_view()
             .tasks_selection
             .filter(|selected| (selected.key, selected.pane_id) == (key, pane_id))
         else {
@@ -255,7 +255,7 @@ impl Condr {
             .any(|pane| connection.model.agents.contains_key(&pane.id()));
         if !agents_left {
             let task = task.id;
-            if let Some(selection) = self.main_view_mut().tasks_selection.as_mut() {
+            if let Some(selection) = self.tasks_view_mut().tasks_selection.as_mut() {
                 *selection = super::tasks::TasksSelection {
                     task: Some(task),
                     column: None,
@@ -407,7 +407,7 @@ impl Condr {
                 .is_none_or(|form| form.home == Some((key, task_id)) && !form.changed(cx));
             if follow {
                 self.task_form = None;
-                self.in_main_window(cx, move |this, window, cx| {
+                self.in_tasks_window(cx, move |this, window, cx| {
                     if this.task_form.is_none() {
                         this.select_card(key, pane_id, Some(task_id), true, window, cx);
                     }
@@ -440,7 +440,7 @@ impl Condr {
                         .task_form
                         .as_ref()
                         .map(|form| form.start.branch.clone());
-                    self.in_main_window(cx, move |_, window, cx| {
+                    self.in_tasks_window(cx, move |_, window, cx| {
                         if let Some(input) = input {
                             input.update(cx, |input, cx| input.set_value(branch, window, cx));
                         }

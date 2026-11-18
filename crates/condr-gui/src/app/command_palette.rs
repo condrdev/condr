@@ -439,6 +439,15 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // The Tasks window shows Tasks alone: a place shows in the main window, which comes
+        // forward (ADR 0069).
+        if self.window_view(window).scope == WindowScope::Tasks {
+            self.in_window(self.main_window(), cx, move |this, window, cx| {
+                window.activate_window();
+                this.go_to_place(key, workspace_id, tab_id, window, cx);
+            });
+            return;
+        }
         // A place is not an Agent: Go to leaves Tasks mode for it (ADR 0068).
         self.leave_tasks_mode(window, cx);
         let pane_id = self.connection(key).and_then(|connection| {
@@ -456,6 +465,13 @@ impl Condr {
 
     /// Presents a Device in the window that draws it: its own, or the main window.
     fn go_to_device(&mut self, key: ConnectionKey, window: &mut Window, cx: &mut Context<Self>) {
+        if self.window_view(window).scope == WindowScope::Tasks {
+            self.in_window(self.main_window(), cx, move |this, window, cx| {
+                window.activate_window();
+                this.go_to_device(key, window, cx);
+            });
+            return;
+        }
         self.leave_tasks_mode(window, cx);
         let home = self.home_window(key, None, None);
         if home == self.main_window() && self.active_connection != key {

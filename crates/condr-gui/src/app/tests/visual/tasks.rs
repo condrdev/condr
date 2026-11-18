@@ -11,6 +11,7 @@ mod form;
 mod mode;
 mod start;
 mod todo;
+mod window;
 
 const SPLIT_RIGHT: &str = if cfg!(target_os = "macos") {
     "cmd-d"

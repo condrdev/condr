@@ -47,3 +47,5 @@ In order, each its own change: this ADR; splitting `Condr` with the main window 
 Left for later, each with its trigger: a Pane detached into a window, which would move it into a new Tab on the Server first, when people ask for one Pane on the other screen; a Tab window that holds several Tabs, when dropping into another window exists; dropping into another window's Dock; a ghost window while dragging outside; a Window menu on macOS, which GPUI does not provide (`SystemMenuType` has only Services).
 
 > ADR 0068: only the main window enters Tasks mode, and its interaction area shows this decision's page for a Pane whose Tab another window shows.
+
+> ADR 0069 adds the Tasks window, a unit that is a page rather than part of the Session tree, opened from Tasks mode's title bar; closing it, unlike these windows, does not bring Tasks back.
