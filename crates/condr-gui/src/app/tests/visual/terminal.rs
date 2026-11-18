@@ -6,10 +6,12 @@ use crate::app::terminal_input::ReportedTerminalMouseMotion;
 use condr_core::DETECTED_LINK_FLAG;
 #[cfg(unix)]
 use condr_core::{TerminalMouseButton, TerminalMouseEvent};
+#[cfg(unix)]
+use gpui_kit::{KeyDownEvent, Keystroke, PlatformInput};
 
 #[cfg(unix)]
 #[test]
-fn terminal_tab_backtab_and_ctrl_c_reach_the_pty() {
+fn terminal_shift_enter_tab_backtab_and_ctrl_c_reach_the_pty() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
     cx.update(|cx| {
@@ -64,7 +66,7 @@ fn terminal_tab_backtab_and_ctrl_c_reach_the_pty() {
                 1,
                 pane_id,
                 TerminalCommand::Text(
-                    "stty -echo -icanon -isig min 1 time 0; printf 'CONDR_TAB_%s\\n' READY; bytes=$(dd bs=1 count=5 2>/dev/null | od -An -tx1 | tr -d '[:space:]'); stty sane; printf 'CONDR_TAB_BYTES_%s\\n' \"$bytes\"\r"
+                    "stty -echo -icanon -isig min 1 time 0; printf 'CONDR_TAB_%s\\n' READY; bytes=$(dd bs=1 count=6 2>/dev/null | od -An -tx1 | tr -d '[:space:]'); stty sane; printf 'CONDR_TAB_BYTES_%s\\n' \"$bytes\"\r"
                         .into(),
                 ),
             );
@@ -81,14 +83,31 @@ fn terminal_tab_backtab_and_ctrl_c_reach_the_pty() {
     });
     assert!(focus.is_some_and(|focus| window.update(|window, _| focus.is_focused(window))));
 
+    // Dispatched by hand: the test window would type an unhandled key's text, where macOS's
+    // input method turns Shift+Enter into a command GPUI drops.
+    let shift_enter = window.update(|window, cx| {
+        window.dispatch_event(
+            PlatformInput::KeyDown(KeyDownEvent {
+                keystroke: Keystroke::parse("shift-enter").unwrap(),
+                is_held: false,
+                prefer_character_input: false,
+            }),
+            cx,
+        )
+    });
+    assert_eq!(
+        shift_enter.propagate,
+        cfg!(target_os = "macos"),
+        "on macOS Shift+Enter goes on to the input method, so a Shift tap is not seen alone"
+    );
     // Kit binds each of these in its Root: Tab to focus navigation, Ctrl+C (off macOS) to Copy.
     window.simulate_keystrokes("tab shift-tab ctrl-c");
 
     assert!(
         wait_until_event_driven(window, |window| {
-            terminal_contains(window, &view, 1, pane_id, "CONDR_TAB_BYTES_091b5b5a03")
+            terminal_contains(window, &view, 1, pane_id, "CONDR_TAB_BYTES_0a091b5b5a03")
         }),
-        "Tab, BackTab or Ctrl+C was handled as a GUI action instead of terminal input"
+        "Shift+Enter, Tab, BackTab or Ctrl+C was handled as a GUI action instead of terminal input"
     );
 }
 

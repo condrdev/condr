@@ -500,7 +500,9 @@ impl Condr {
                     TerminalKeyEventKind::Press
                 },
             );
-            cx.stop_propagation();
+            if !leaves_key_to_macos_input_method(stroke) {
+                cx.stop_propagation();
+            }
         }
     }
 
@@ -678,6 +680,15 @@ pub(super) fn terminal_key_for(stroke: &Keystroke, option_as_meta: bool) -> Opti
         },
     };
     Some(TerminalKey::Character(text))
+}
+
+/// Whether a key already sent to the terminal still goes on, unhandled, to the macOS
+/// input method. GPUI hands Enter to Condr before the input method, so an input method
+/// that switches Chinese/English on a lone Shift tap saw a quick Shift+Enter as one
+/// (zed#21042). Unhandled, it reaches the input method, which turns it into
+/// `insertNewline:`, a command GPUI drops, so the terminal still gets one LF.
+fn leaves_key_to_macos_input_method(stroke: &Keystroke) -> bool {
+    cfg!(target_os = "macos") && stroke.key == "enter" && stroke.modifiers == Modifiers::shift()
 }
 
 pub(super) fn should_defer_to_character_input(event: &KeyDownEvent) -> bool {
