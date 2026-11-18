@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Moves condr-ghostty-vt to another Ghostty commit (ADR 0051): downloads the lib-vt
-# source tarball upstream publishes for it, regenerates the bindings from its headers
-# and rewrites the manifest `build.rs` checks against.
+# source tarball upstream publishes for it, regenerates the bindings from its headers,
+# vendors the Zig packages Ghostty's own mirror does not carry, and rewrites the manifest
+# `build.rs` checks against. It needs the Zig that commit names on PATH.
 #
 #   script/update-libghostty-vt.sh <full ghostty commit>
 #
@@ -150,6 +151,27 @@ mise exec cargo:bindgen-cli@0.73.2 -- bindgen "$source_dir/include/ghostty/vt.h"
   --allowlist-function "$allowlist" \
   --allowlist-type "$type_allowlist" \
   -- -I"$source_dir/include" -DGHOSTTY_STATIC
+
+# The packages libghostty-vt's build fetches from anywhere but deps.files.ghostty.org go
+# into vendor/, which build.rs puts into zig-pkg/ before Zig would fetch them: a host
+# such as Codeberg is one more a build machine may fail to reach.
+(cd "$source_dir" && zig build --fetch -Demit-lib-vt=true -Demit-xcframework=false)
+rm -f "$crate"/vendor/*.tar.gz
+mkdir -p "$crate/vendor"
+for package in $(cat "$source_dir"/build.zig.zon "$source_dir"/pkg/*/build.zig.zon \
+  "$source_dir"/zig-pkg/*/build.zig.zon 2>/dev/null | awk '
+    /\.url = "/ { url = $0; next }
+    /\.hash = "/ {
+      if (url != "" && url !~ /deps\.files\.ghostty\.org/) {
+        line = $0; sub(/.*\.hash = "/, "", line); sub(/".*/, "", line); print line
+      }
+      url = ""
+    }' | sort -u); do
+  # A lazy package this build does not use was never fetched.
+  [ -d "$source_dir/zig-pkg/$package" ] || continue
+  COPYFILE_DISABLE=1 tar --no-xattrs -C "$source_dir/zig-pkg" -cf - "$package" \
+    | gzip -9n >"$crate/vendor/$package.tar.gz"
+done
 
 zig="$(sed -n 's/^ *\.minimum_zig_version = "\(.*\)",$/\1/p' "$source_dir/build.zig.zon")"
 version="$(cat "$source_dir/VERSION")"

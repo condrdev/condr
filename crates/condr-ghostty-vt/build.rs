@@ -3,16 +3,18 @@
 //!
 //! The tarball and its extracted source are kept in the user's cache directory, outside
 //! `target`, so neither `cargo clean` nor another profile downloads it again, and Zig's
-//! own cache inside it outlives them too. `CONDR_GHOSTTY_VT_SOURCE_DIR` builds a local
-//! Ghostty checkout instead; `CONDR_GHOSTTY_VT_SKIP_NATIVE` builds and links nothing,
-//! for checking another target without its toolchain.
+//! own cache inside it outlives them too. The Zig packages Ghostty's own mirror does not
+//! carry are in `vendor/`, put into the source before Zig would fetch them.
+//! `CONDR_GHOSTTY_VT_SOURCE_DIR` builds a local Ghostty checkout instead;
+//! `CONDR_GHOSTTY_VT_SKIP_NATIVE` builds and links nothing, for checking another target
+//! without its toolchain.
 
 #[path = "build/checks.rs"]
 mod checks;
 
 use std::{
     env, fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{self, Command},
 };
 
@@ -51,6 +53,7 @@ fn build() -> Result<(), String> {
 
     let source = source_dir()?;
     checks::check_headers(&source.join("include"), field("headers_sha256")?)?;
+    vendor_packages(&source)?;
 
     let prefix = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo sets OUT_DIR"));
     // Baseline CPU, so the binary runs on any machine of the target's architecture.
@@ -145,6 +148,54 @@ fn source_dir() -> Result<PathBuf, String> {
     let _ = fs::remove_file(&tarball);
     let _ = fs::remove_dir_all(&staging);
     extracted.map(|()| source)
+}
+
+/// The Zig packages in `vendor/`, each `<package hash>.tar.gz`, extracted into the
+/// source's `zig-pkg/`, where Zig finds a package by its hash and fetches nothing. They
+/// are the ones Ghostty's own mirror does not carry: `aro` comes from Codeberg over git,
+/// which build machines have failed to reach.
+fn vendor_packages(source: &Path) -> Result<(), String> {
+    let vendor =
+        PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("Cargo sets it")).join("vendor");
+    println!("cargo:rerun-if-changed={}", vendor.display());
+    let packages = source.join("zig-pkg");
+    let entries =
+        fs::read_dir(&vendor).map_err(|error| format!("reading {}: {error}", vendor.display()))?;
+    for entry in entries {
+        let tarball = entry
+            .map_err(|error| format!("reading {}: {error}", vendor.display()))?
+            .path();
+        let Some(name) = tarball
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(|name| name.strip_suffix(".tar.gz"))
+        else {
+            continue;
+        };
+        let package = packages.join(name);
+        if package.is_dir() {
+            continue;
+        }
+        // Extracted under its own name and renamed into place, as the source is.
+        let staging = source.join(format!("vendor-staging-{}", process::id()));
+        let placed = (|| {
+            fs::create_dir_all(&staging)
+                .and_then(|()| fs::create_dir_all(&packages))
+                .map_err(|error| format!("creating {}: {error}", staging.display()))?;
+            run(Command::new("tar")
+                .arg("-xzf")
+                .arg(&tarball)
+                .arg("-C")
+                .arg(&staging))?;
+            if fs::rename(staging.join(name), &package).is_err() && !package.is_dir() {
+                return Err(format!("moving {name} into {}", packages.display()));
+            }
+            Ok(())
+        })();
+        let _ = fs::remove_dir_all(&staging);
+        placed?;
+    }
+    Ok(())
 }
 
 /// A `key = "value"` line of `ghostty.toml`, which the update script writes.
