@@ -105,6 +105,8 @@ pub(super) struct WindowView {
     pub(super) tasks_focus: FocusHandle,
     /// The Dock holding only the selected Agent's Pane (ADR 0068).
     pub(super) tasks_dock: Option<super::tasks::TasksDock>,
+    /// Where the Board's columns are scrolled across, which its scrollbar shows.
+    pub(super) tasks_board_scroll: ScrollHandle,
     _activation_subscription: Subscription,
     _bounds_subscription: Subscription,
     _focus_lost_subscription: Subscription,
@@ -166,6 +168,7 @@ impl WindowView {
             tasks_selection: None,
             tasks_focus: cx.focus_handle(),
             tasks_dock: None,
+            tasks_board_scroll: ScrollHandle::new(),
             _activation_subscription: activation_subscription,
             _bounds_subscription: bounds_subscription,
             _focus_lost_subscription: focus_lost_subscription,

@@ -553,7 +553,7 @@ impl Condr {
                                     };
                                     menu.item(
                                         PopupMenuItem::new(t!("sidebar.open_in_new_window"))
-                                            .icon(menu_icon(Glyph::AppWindow))
+                                            .icon(menu_icon(Glyph::SquareArrowUpRight))
                                             .on_click(move |_, window, cx| {
                                                 let _ = detach_owner.update(cx, |this, cx| {
                                                     this.open_in_new_window(
@@ -756,7 +756,7 @@ impl Condr {
                         )
                         .item(
                             PopupMenuItem::new(t!("sidebar.open_in_new_window"))
-                                .icon(menu_icon(Glyph::AppWindow))
+                                .icon(menu_icon(Glyph::SquareArrowUpRight))
                                 .on_click(move |_, window, cx| {
                                     let _ = detach_owner.update(cx, |this, cx| {
                                         this.open_in_new_window(

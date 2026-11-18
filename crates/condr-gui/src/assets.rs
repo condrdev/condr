@@ -63,13 +63,14 @@ gpui_kit::assets::icon_assets!(
         Rows2,
         Columns2,
         Link,
+        // Bring Back, and Open in New Window in the sidebars' menus and Tasks mode's title.
         SquareArrowDownLeft,
+        SquareArrowUpRight,
         // The sidebars' right-click menus.
         Pencil,
         GitBranchPlus,
         GitBranchMinus,
         FolderGit2,
-        AppWindow,
         Plug,
         PlugZap,
         Unplug,

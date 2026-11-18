@@ -2,6 +2,7 @@
 //! columns dropped as it narrows (ADR 0068).
 
 use super::*;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use rust_i18n::t;
 
 /// How many of the List's optional columns fit its width, taken in the order
@@ -151,7 +152,7 @@ impl Condr {
             .size_full()
             .p_3()
             .gap_1()
-            .overflow_y_scroll()
+            .overflow_y_scrollbar()
             .children(rows)
             .into_any_element()
     }

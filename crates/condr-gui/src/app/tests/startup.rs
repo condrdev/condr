@@ -55,7 +55,9 @@ fn condr_assets_include_custom_and_kit_icons() {
         "icons/git-branch-plus.svg",
         "icons/git-branch-minus.svg",
         "icons/folder-git-2.svg",
-        "icons/app-window.svg",
+        // Open in New Window and Bring Back.
+        "icons/square-arrow-up-right.svg",
+        "icons/square-arrow-down-left.svg",
         "icons/plug.svg",
         "icons/unplug.svg",
         "icons/trash.svg",

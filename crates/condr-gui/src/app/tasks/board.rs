@@ -2,6 +2,7 @@
 //! Board: its columns, their headings and the strip a folded one becomes (ADR 0068).
 
 use super::*;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use rust_i18n::t;
 
 pub(super) fn nothing_here(theme: &Theme) -> Div {
@@ -114,7 +115,14 @@ impl Condr {
         let columns = self.task_cards(scope, view.tasks_selection);
         let todo = self.offers_todo(scope).then(|| self.todo_cards(scope));
         let cards = match view.tasks.layout {
-            TasksLayout::Board => self.render_tasks_board(&columns, todo, scope, view.tasks, cx),
+            TasksLayout::Board => self.render_tasks_board(
+                &columns,
+                todo,
+                scope,
+                view.tasks,
+                &view.tasks_board_scroll,
+                cx,
+            ),
             TasksLayout::List => {
                 let fit = ListFit::of(view, self.task_form.is_some(), window);
                 self.render_tasks_list(&columns, todo, scope, view.tasks, fit, cx)
@@ -139,6 +147,7 @@ impl Condr {
         todo: Option<Vec<(ConnectionKey, TaskRecord)>>,
         scope: TasksScope,
         prefs: TasksPrefs,
+        scroll: &ScrollHandle,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let density = prefs.density;
@@ -161,7 +170,7 @@ impl Condr {
                         .flex_1()
                         .min_h_0()
                         .gap_2()
-                        .overflow_y_scroll()
+                        .overflow_y_scrollbar()
                         .child(self.render_new_task_button(cx))
                         .children(todo.iter().map(|(key, task)| {
                             self.render_todo_card(*key, task, density == TasksDensity::Compact, cx)
@@ -170,7 +179,9 @@ impl Condr {
                 )
                 .into_any_element()
         });
-        h_flex()
+        // GPUI's own scrolling, which turns a mouse's vertical wheel into the Board's
+        // horizontal scroll, under Kit's scrollbar; Kit's scroll area would lock the axis.
+        let board = h_flex()
             .id("tasks-board")
             .debug_selector(|| "tasks-board".into())
             .size_full()
@@ -178,6 +189,7 @@ impl Condr {
             .gap_3()
             .p_3()
             .overflow_x_scroll()
+            .track_scroll(scroll)
             .children(todo)
             .children(columns.iter().map(|(column, cards)| {
                 let column = *column;
@@ -201,7 +213,13 @@ impl Condr {
                             .flex_1()
                             .min_h_0()
                             .gap_2()
-                            .overflow_y_scroll()
+                            .overflow_y_scrollbar()
+                            // Every column from this one call site: the scroll state is
+                            // its own only under an id of its own.
+                            .id(SharedString::from(format!(
+                                "tasks-column-scroll-{}",
+                                column.selector()
+                            )))
                             .map(|this| {
                                 if cards.is_empty() {
                                     this.child(nothing_here(&theme))
@@ -226,7 +244,12 @@ impl Condr {
                             }),
                     )
                     .into_any_element()
-            }))
+            }));
+        div()
+            .relative()
+            .size_full()
+            .child(board)
+            .horizontal_scrollbar(scroll)
             .into_any_element()
     }
 
