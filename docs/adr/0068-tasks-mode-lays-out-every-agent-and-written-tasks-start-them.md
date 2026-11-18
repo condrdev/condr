@@ -39,9 +39,9 @@ Only the main window enters Tasks mode; a Device, Workspace or Tab window (ADR 0
 
 **Cards.** A card is an Agent, and any recognized Agent on a connected Device has one; a Pane running only a shell has none. Its title is its Task's title, or the Pane's terminal title for an Agent without a Task. Two exceptions are Tasks: a To do card, and a started Task whose Workspace has no Agent (see Tasks). The views:
 
-- **Board, Cards**: the Agent's mark with its state badge, the title, the state's name in its colour unless Idle or Unknown, `Workspace · branch` with a Device tag, the diff stat and `↑` against the upstream, and the `detail` while there is one. The Workspace shows even when it repeats the Task's title.
+- **Board, Cards**: the Agent's mark with its state badge, the title, the state's name in its colour unless Idle or Unknown, the Workspace with a Device tag, a line of the branch with `↑ ↓` against the upstream and the diff stat at its right, and the `detail` while there is one. The Workspace shows even when it repeats the Task's title.
 - **Board, Compact**: one line per Agent, with a second for its `detail`.
-- **Table**: always compact: mark, Title, Workspace, Branch, Device, Changes, and the State or the `detail`.
+- **Table**: always compact: mark, Title, Workspace, Device, Branch with `↑ ↓`, Changes, and the State or the `detail`.
 
 **Scope.** One choice: All, one Device, or one Workspace. A repository Workspace's scope includes the Managed Worktrees made from it, so choosing `api-server` keeps the Agents working on its Tasks; a worktree's own scope is just itself. The scope's breadcrumb opens a tree of All, Devices and their Workspaces, worktrees indented under their repository, each with its Agent count. Agent cards filter by their Workspace and Device and To do cards by their Task's location; a Task with no repository shows only under All or its Device. `next-agent` and `previous-agent` step within the scope.
 

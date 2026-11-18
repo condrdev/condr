@@ -11,7 +11,7 @@ Open it with the **Tasks** row at the top of the sidebar, or its icon at the top
 
 Agents sit in columns by state: **To do** (Tasks not started yet), **Needs you** (a bell, Blocked or Error), **Done** (finished and not looked at yet), **Working** and **Idle**. You never drag cards between them; they move as the Agents report. A column's heading folds it to a narrow strip, and Needs you unfolds by itself when an Agent arrives in it.
 
-- **Board or Table.** **Layout**, at the right of the toolbar above the cards, switches between them. The Board shows full cards, with the Workspace, branch, Device, changes and what the Agent waits for, or, with **Compact cards** on, one row per Agent; the Table has one row per Agent.
+- **Board or Table.** **Layout**, at the right of the toolbar above the cards, switches between them. The Board shows full cards, with the Workspace, Device, branch, changes and what the Agent waits for, or, with **Compact cards** on, one row per Agent; the Table has one row per Agent.
 - **Scope.** The breadcrumb at the left of the toolbar, `MacBook › api-server`, narrows the view to one Device or one Workspace. A repository's scope includes the worktrees made from it.
 - **Disconnected Devices.** Their Agents' cards are hidden; the Device's mark in the sidebar says why.
 

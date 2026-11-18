@@ -49,7 +49,7 @@ pub(super) fn list_row(
     icon: impl IntoElement,
     title: String,
     workspace: String,
-    branch: String,
+    branch: impl IntoElement,
     device: String,
     changes: impl IntoElement,
     state: impl IntoElement,
@@ -69,11 +69,11 @@ pub(super) fn list_row(
         .when(fit.0 > 0, |row| {
             row.child(div().flex_none().w(rems(9.)).truncate().child(workspace))
         })
-        .when(fit.0 > 3, |row| {
-            row.child(div().flex_none().w(rems(9.)).truncate().child(branch))
-        })
         .when(fit.0 > 1, |row| {
             row.child(div().flex_none().w(rems(6.)).truncate().child(device))
+        })
+        .when(fit.0 > 3, |row| {
+            row.child(div().flex_none().w(rems(9.)).truncate().child(branch))
         })
         .when(fit.0 > 2, |row| {
             row.child(div().flex_none().w(rems(6.)).child(changes))

@@ -39,13 +39,18 @@ pub(super) fn device_tag(device: String, theme: &Theme) -> Div {
         .child(device)
 }
 
-/// `+1.2k −3 ↑1 ↓2` as the sidebar shows them, empty for a clean Workspace in step with
-/// its upstream.
-pub(super) fn change_counts(facts: &CardFacts, cx: &App) -> Div {
+/// The branch with `↑1 ↓2` beside it as the sidebar shows them; a long branch truncates,
+/// the counts stay.
+pub(super) fn branch_label(facts: &CardFacts, cx: &App) -> Div {
     h_flex()
+        .min_w_0()
         .gap_1()
-        .text_xs()
-        .child(diff_stat(facts.changes, cx))
+        .children(
+            facts
+                .branch
+                .clone()
+                .map(|branch| div().min_w_0().truncate().child(branch)),
+        )
         .children(
             facts
                 .upstream
@@ -131,23 +136,9 @@ impl Condr {
                 .gap_2()
                 .text_xs()
                 .child(
-                    h_flex()
+                    branch_label(&facts, cx)
                         .flex_1()
-                        .min_w_0()
-                        .gap_1()
-                        .children(facts.branch.clone().map(|branch| {
-                            div()
-                                .min_w_0()
-                                .truncate()
-                                .text_color(theme.muted_foreground)
-                                .child(branch)
-                        }))
-                        .children(
-                            facts
-                                .upstream
-                                .as_deref()
-                                .map(|counts| upstream_label(counts, cx)),
-                        ),
+                        .text_color(theme.muted_foreground),
                 )
                 .child(diff_stat(facts.changes, cx))
         });
@@ -282,14 +273,14 @@ impl Condr {
                 .child(detail.clone()),
             None => div().children(state_name(card.status, cx)),
         };
-        let changes = change_counts(&facts, cx);
+        let (branch, changes) = (branch_label(&facts, cx), diff_stat(facts.changes, cx));
         list_row(
             fit,
             format!("tasks-row-{key}-{pane}"),
             icon,
             facts.title,
             facts.workspace,
-            facts.branch.unwrap_or_default(),
+            branch,
             facts.device,
             changes,
             state,
