@@ -36,7 +36,7 @@ enum AgentMarks {
     private static let marks: [String: ImageResource] = [
         "antigravity": .agentAntigravity, "claude": .agentClaude, "codex": .agentCodex,
         "copilot": .agentCopilot, "cursor": .agentCursor, "grok": .agentGrok,
-        "kimi": .agentKimi, "omp": .agentOmp, "opencode": .agentOpencode, "pi": .agentPi,
+        "kilo": .agentKilo, "kimi": .agentKimi, "omp": .agentOmp, "opencode": .agentOpencode, "pi": .agentPi,
         "goose": .agentGoose, "qwen": .agentQwen,
     ]
 

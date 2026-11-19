@@ -180,7 +180,20 @@ OPENAI_BASE_PATH: {(url.path.strip("/") + "/chat/completions").lstrip("/")}
     return {"OPENAI_API_KEY": os.environ[KEY_ENV]}
 
 
-PROFILES = {f.__name__: f for f in (pi, omp, grok, copilot, opencode, kimi, qwen, goose)}
+def kilo(base, model):
+    write(".config/kilo/kilo.json", json.dumps({
+        "model": f"condr-e2e/{model}",
+        "provider": {"condr-e2e": {
+            "npm": "@ai-sdk/openai",
+            "options": {"baseURL": base, "apiKey": f"{{env:{KEY_ENV}}}"},
+            "models": {model: {}}}},
+        "experimental": {"openTelemetry": False},
+        # Ask before shell commands, so the blocked step has a prompt to see.
+        "permission": {"bash": "ask"}}))
+    return {}
+
+
+PROFILES = {f.__name__: f for f in (pi, omp, grok, copilot, opencode, kimi, qwen, goose, kilo)}
 
 
 class Failed(Exception):

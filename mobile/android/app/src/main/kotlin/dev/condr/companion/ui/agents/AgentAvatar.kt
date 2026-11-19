@@ -31,6 +31,7 @@ object AgentMarks {
       "cursor" to R.drawable.agent_cursor,
       "goose" to R.drawable.agent_goose,
       "grok" to R.drawable.agent_grok,
+      "kilo" to R.drawable.agent_kilo,
       "kimi" to R.drawable.agent_kimi,
       "omp" to R.drawable.agent_omp,
       "opencode" to R.drawable.agent_opencode,

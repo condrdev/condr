@@ -105,6 +105,7 @@ enum AgentKind {
   AGENT_KIND_OTHER = 11;
   AGENT_KIND_QWEN = 12;
   AGENT_KIND_GOOSE = 13;
+  AGENT_KIND_KILO = 14;
 }
 
 // Unknown decodes to UNKNOWN.
