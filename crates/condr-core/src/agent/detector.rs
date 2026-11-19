@@ -316,9 +316,11 @@ impl AgentDetector {
 
     /// A new shell prompt (OSC 133 `A`): a `working` or `blocked` record is stale, the
     /// protocol says, while `idle`, `done` and `error` outlive it. Only state the protocol
-    /// reported follows its rules; hook state ends with the process (ADR 0014).
+    /// reported follows its rules; hook state ends with the process (ADR 0014). An agent
+    /// the process table names is still in front, so the mark is its own (ADR 0070).
     pub fn observe_prompt_start(&mut self) -> AgentPublish {
         if !self.program_status
+            || !self.seeded
             || !matches!(self.state, Some(AgentState::Working | AgentState::Blocked))
         {
             return AgentPublish::Nothing;

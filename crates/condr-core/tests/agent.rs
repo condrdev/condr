@@ -695,16 +695,13 @@ fn program_status_reports_take_over_from_hooks_and_follow_their_lifetime() {
         detector.observe_status(&error),
         snapshot(AgentState::Error, Some("s2"), Some("Rate limited"))
     );
-    // A shell prompt drops only a working or blocked record.
-    assert_eq!(detector.observe_prompt_start(), AgentPublish::Nothing);
+    // The process table still names the agent, so a prompt mark is its own output
+    // (Kimi Code marks its turns), not the shell coming back (ADR 0070).
     assert_eq!(
         detector.observe_status(&report(ProgramState::Working)),
         snapshot(AgentState::Working, Some("s2"), None)
     );
-    assert_eq!(
-        detector.observe_prompt_start(),
-        snapshot(AgentState::Unknown, Some("s2"), None)
-    );
+    assert_eq!(detector.observe_prompt_start(), AgentPublish::Nothing);
     // Clear deletes the record; a reset removes them all, and hooks count again.
     assert_eq!(
         detector.observe_status(&report(ProgramState::Idle)),
@@ -752,6 +749,15 @@ fn program_status_reports_take_over_from_hooks_and_follow_their_lifetime() {
         detector.observe_status(&named),
         snapshot(AgentState::Working, None, None)
     );
+    // For an agent only its reports name, a shell prompt is the sign it went: it drops a
+    // working or blocked record, and leaves the rest.
+    assert_eq!(
+        detector.observe_prompt_start(),
+        snapshot(AgentState::Unknown, None, None)
+    );
+    named.state = ProgramState::Done;
+    detector.observe_status(&named);
+    assert_eq!(detector.observe_prompt_start(), AgentPublish::Nothing);
     let mut detector = AgentDetector::new();
     detector.observe_process(ProcessProbeResult::Agent(AgentKind::Kimi), now);
     assert_eq!(
