@@ -77,6 +77,12 @@ while IFS= read -r line; do
   [ "$line" = quit ] && exit 0
   # Names a new conversation before the turn, as Pi, OMP and Copilot do.
   [ "$line" = renamed ] && report session-start renamed && sleep 1
+  if [ "$line" = detached ]; then
+    # A hook in a session of its own, as Grok runs them, with no ps to find a terminal.
+    printf '{"session_id":"detached"}' |
+      PATH="$(dirname "$(command -v condr)")" /usr/bin/setsid -w condr agent-hook "$agent" session-start
+    continue
+  fi
   report prompt-submit
   sleep 1
   report stop
@@ -533,6 +539,28 @@ fn prompt_wait_outlasts_a_report_that_only_names_the_conversation() {
         "8000",
     ]);
     assert_eq!(prompted["agent"]["agent_status"], "done");
+}
+
+/// Grok runs its hooks without a controlling terminal; on Linux the hook finds the Pane's
+/// terminal even where `ps` is missing.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_hook_without_a_terminal_or_ps_still_reaches_its_pane() {
+    let server = Server::start();
+    let pane = server.pane();
+    server.ok(&[
+        "agent", "start", "worker", "--kind", "claude", "--pane", &pane,
+    ]);
+    server.ok(&["agent", "prompt", "worker", "detached"]);
+    let deadline = Instant::now() + Duration::from_secs(8);
+    while server.ok(&["agent", "list"])["agents"][0]["session_id"] != "detached" {
+        assert!(
+            Instant::now() < deadline,
+            "the hook never reached the Pane\n{}",
+            server.diagnostics()
+        );
+        thread::sleep(Duration::from_millis(100));
+    }
 }
 
 #[test]

@@ -129,10 +129,21 @@ impl Ancestors {
 }
 
 #[cfg(unix)]
-fn open_controlling_terminal(_pane_process: Option<u32>) -> Option<File> {
+fn open_controlling_terminal(pane_process: Option<u32>) -> Option<File> {
     if let Ok(tty) = File::options().write(true).open("/dev/tty") {
         return Some(tty);
     }
+    // An agent that runs its hooks in a session of their own (Grok) leaves them none.
+    // Linux names the Pane's terminal outright, with no `ps`, which a container may lack.
+    #[cfg(target_os = "linux")]
+    if let Some(terminal) = pane_process
+        .and_then(|pid| std::fs::read_link(format!("/proc/{pid}/fd/0")).ok())
+        .and_then(|path| File::options().write(true).open(path).ok())
+    {
+        return Some(terminal);
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = pane_process;
     // Without a controlling terminal of our own, the nearest ancestor that has one is
     // the agent, or the shell it runs in.
     let mut pid = std::os::unix::process::parent_id();
