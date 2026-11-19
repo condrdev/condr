@@ -20,10 +20,10 @@ mod kimi;
 mod omp;
 mod opencode;
 mod pi;
-mod qwen;
 #[cfg(feature = "runtime")]
 mod process;
 pub mod program_status;
+mod qwen;
 
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
