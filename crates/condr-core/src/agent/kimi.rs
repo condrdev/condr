@@ -1,6 +1,7 @@
-//! Kimi Code, recognized only (ADR 0035).
+//! Kimi Code, fully supported through its own reports (ADR 0071).
 
-use super::{AgentSpec, AgentSupport, InitialPrompt};
+use super::hooks::{HookEntry, HookFormat, HookSpec, HookTarget, entry};
+use super::{AgentEventKind, AgentSpec, AgentSupport, InitialPrompt};
 
 pub(super) const SPEC: AgentSpec = AgentSpec {
     id: "kimi",
@@ -11,10 +12,27 @@ pub(super) const SPEC: AgentSpec = AgentSpec {
     aliases: &["kimi-code"],
     packages: &[],
     resume: &["--session", "{id}"],
-    reports_at_startup: false,
+    // It reports over OSC 7501 once its prompt shows, before any session exists.
+    reports_at_startup: true,
     reads_kitty_keys: false,
+    // `-p` runs one prompt without the TUI.
     initial_prompt: InitialPrompt::None,
-    support: AgentSupport::RecognitionOnly(
-        "Kimi Code's hooks report a subagent's Stop under the main session's ID, so Condr installs none: its state shows only as Kimi Code reports it to the terminal, and its conversations do not resume",
-    ),
+    // A subagent's Stop arrives under the main session's ID, so the hooks only name the
+    // conversation; the state is what Kimi Code reports itself.
+    support: AgentSupport::ProgramStatus(HookSpec {
+        format: HookFormat::TomlArray { events: HOOKS },
+        dir: |target: &HookTarget| target.env_dir("KIMI_CODE_HOME", ".kimi-code"),
+        file: "config.toml",
+        question_tool: None,
+        adjust: None,
+        prompt_ids: false,
+        reply: None,
+        enable: None,
+        note: Some(
+            "Requires Kimi Code 2.4 or newer, which reports its own state; its hooks only name the conversation, and a subagent's Stop shares the main session's ID",
+        ),
+    }),
 };
+
+/// A session starts with its first message or a resume; a subagent starts none.
+const HOOKS: &[HookEntry] = &[entry("SessionStart", AgentEventKind::SessionStart)];

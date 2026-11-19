@@ -65,12 +65,14 @@ printf 'started\n' >> "$CONDR_TEST_STARTS"
 printf '%s\n' "$@" > "$CONDR_TEST_ARGS"
 agent="$(basename "$0")"
 report() { printf '{"session_id":"%s","source":"startup"}' "${2:-fixture}" | condr agent-hook "$agent" "$1"; }
+# Kimi Code reports its own state over OSC 7501; its hooks only name the conversation.
+status() { [ "$agent" = kimi ] && printf '\033]7501;state=%s:app=kimi-code\033\\' "$1"; }
 case "$1" in
   --exit) exit 0 ;;
   --blocked) report permission-request ;;
   --working) report prompt-submit ;;
   --silent | resume) ;;
-  *) report session-start ;;
+  *) report session-start; status idle ;;
 esac
 while IFS= read -r line; do
   printf '%s\n' "$line" >> "$CONDR_TEST_PROMPTS"
@@ -84,8 +86,12 @@ while IFS= read -r line; do
     continue
   fi
   report prompt-submit
+  # Kimi Code clears its record and reports idle again before its turn works.
+  [ "$agent" = kimi ] && status clear && sleep 0.5 && status idle && sleep 0.5
+  status working
   sleep 1
   report stop
+  status done
 done
 "#,
                 )
@@ -277,6 +283,12 @@ fn windows_agent_fixture() {
             .unwrap();
         hook.wait().unwrap();
     };
+    let status = |state: &str| {
+        if slug == "kimi" {
+            print!("\x1b]7501;state={state}:app=kimi-code\x1b\\");
+            std::io::stdout().flush().unwrap();
+        }
+    };
     let args = std::env::args()
         .skip_while(|arg| arg != "--")
         .skip(1)
@@ -292,7 +304,10 @@ fn windows_agent_fixture() {
         Some("--blocked") => report("permission-request", "fixture"),
         Some("--working") => report("prompt-submit", "fixture"),
         Some("--silent") => {}
-        _ => report("session-start", "fixture"),
+        _ => {
+            report("session-start", "fixture");
+            status("idle");
+        }
     }
     for line in std::io::stdin().lock().lines() {
         let line = line.unwrap();
@@ -305,8 +320,16 @@ fn windows_agent_fixture() {
             thread::sleep(Duration::from_secs(1));
         }
         report("prompt-submit", "fixture");
+        if slug == "kimi" {
+            status("clear");
+            thread::sleep(Duration::from_millis(500));
+            status("idle");
+            thread::sleep(Duration::from_millis(500));
+        }
+        status("working");
         thread::sleep(Duration::from_secs(1));
         report("stop", "fixture");
+        status("done");
     }
 }
 
@@ -718,52 +741,25 @@ fn a_codex_that_says_nothing_at_startup_is_ready_once_identified_and_takes_a_fir
     );
 }
 
+/// Kimi Code's hooks only name its conversation; it is waited on through its own OSC
+/// 7501 reports (ADR 0071).
 #[test]
-fn a_recognized_only_agent_refuses_a_wait_at_once_but_takes_prompts() {
+fn an_agent_that_reports_its_own_state_is_waited_on_through_its_reports() {
     let server = Server::start();
     let pane = server.pane();
-    // Kimi's hooks cannot report a state (ADR 0035), so it starts once identified.
-    let started = server.ok(&[
-        "agent", "start", "moon", "--kind", "kimi", "--pane", &pane, "--", "--silent",
+    let started = server.ok(&["agent", "start", "moon", "--kind", "kimi", "--pane", &pane]);
+    assert_eq!(started["agent"]["agent_status"], "idle");
+    let prompted = server.ok(&[
+        "agent",
+        "prompt",
+        "moon",
+        "hello",
+        "--wait",
+        "--timeout",
+        "8000",
     ]);
-    assert_eq!(started["agent"]["agent_status"], "unknown");
-    let begun = Instant::now();
-    assert_eq!(
-        server.err(&[
-            "agent",
-            "wait",
-            "moon",
-            "--until",
-            "idle",
-            "--timeout",
-            "30000"
-        ]),
-        "agent_reports_no_state"
-    );
-    assert_eq!(
-        server.err(&[
-            "agent",
-            "prompt",
-            "moon",
-            "refused",
-            "--wait",
-            "--timeout",
-            "30000"
-        ]),
-        "agent_reports_no_state"
-    );
-    assert!(begun.elapsed() < Duration::from_secs(10), "neither waited");
-    // A prompt that does not wait is delivered, and the refused one never was.
-    server.ok(&["agent", "prompt", "moon", "delivered"]);
-    let deadline = Instant::now() + Duration::from_secs(10);
-    let prompts = server.root.join("prompts");
-    while std::fs::read_to_string(&prompts).unwrap_or_default()
-        != "delivered
-"
-    {
-        assert!(Instant::now() < deadline, "{}", server.diagnostics());
-        thread::sleep(Duration::from_millis(50));
-    }
+    assert_eq!(prompted["agent"]["agent_status"], "done");
+    assert_eq!(prompted["agent"]["session_id"], "fixture");
 }
 
 #[cfg(unix)]

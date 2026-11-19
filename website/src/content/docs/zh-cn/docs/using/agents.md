@@ -7,7 +7,7 @@ description: 在 Condr 中使用并查看命令行 Agent 的运行状态。
 
 ## 支持级别
 
-Condr 仅对官方提供集成的 Agent 提供支持，分为两个级别，取决于 Agent 的 Hook 能汇报的状态信息。如果你常用的 CLI 尚未收录，欢迎提交 [Issue](https://github.com/condrdev/condr/issues) 或 PR。
+Condr 仅对官方提供集成的 Agent 提供支持，分为三个级别，取决于 Agent 如何汇报自身状态。如果你常用的 CLI 尚未收录，欢迎提交 [Issue](https://github.com/condrdev/condr/issues) 或 PR。
 
 ### 完整支持
 
@@ -15,13 +15,15 @@ Condr 仅对官方提供集成的 Agent 提供支持，分为两个级别，取�
 
 Cursor CLI 与 Antigravity CLI 的 Hook 缺少权限弹框事件，因此在等待授权时不会显示为 Blocked。但 Antigravity CLI 在主动向你提问等待回复时，仍会正常显示为 Blocked。
 
+### 经自身上报完整支持
+
+有些 Agent 会自己通过 Program Status Protocol（OSC 7501）向终端上报状态，但它的 Hook 无法区分子 Agent 与主 Agent 的轮次。Condr 只依据这些上报显示其状态，安装 Hook 仅用于记录会话 ID，因此 Server 重启后可以恢复会话，`condr agent wait` 也与完整支持的 Agent 一样可用。在 Agent 上报之前，或其上报无法到达 Condr 时（例如较旧的版本），状态显示为 Unknown。Kimi Code 2.4 及以上版本属于这一级。
+
 ### 仅识别
 
-Condr 从进程识别此类 Agent：运行时侧边栏会显示其图标，退出后图标消失，并且支持通过 `condr agent start` 启动。由于其 Hook 无法提供可靠的状态报告，Condr 不会为其安装 Hook；除非 Agent 自己通过 Program Status Protocol 向终端上报状态（如 Kimi Code），否则状态显示为 Unknown。同时因为缺少 Hook 记录的会话 ID，Server 重启后无法自动恢复会话。
+Condr 从进程识别此类 Agent：运行时侧边栏会显示其图标，退出后图标消失，并且支持通过 `condr agent start` 启动。由于其 Hook 无法提供可靠的状态报告，Condr 不会为其安装 Hook，状态显示为 Unknown。同时因为缺少 Hook 记录的会话 ID，Server 重启后无法自动恢复会话。
 
-对这类 Agent 运行 `condr agent wait` 与 `condr agent prompt --wait` 时，会直接返回 `agent_reports_no_state` 报错，不会等待超时。不带 `--wait` 的 `condr agent prompt` 则可以正常发送指令。
-
-目前仅 Kimi Code 属于这一级，因为它的 Hook 用主 Agent 的会话 ID 上报子 Agent 的 Stop 事件，无法区分二者。在 **设置 › Agent 集成**（Settings › Agent integrations）中，它被标为“仅识别”（Recognition only）。
+对这类 Agent 运行 `condr agent wait` 与 `condr agent prompt --wait` 时，会直接返回 `agent_reports_no_state` 报错，不会等待超时。不带 `--wait` 的 `condr agent prompt` 则可以正常发送指令。目前 Condr 支持的 Agent 中没有属于这一级的。
 
 ## 准备与检查 Agent
 

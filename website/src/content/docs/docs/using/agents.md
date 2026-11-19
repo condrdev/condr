@@ -7,7 +7,7 @@ When several Agents work on your code at the same time, the key to keeping the w
 
 ## Support levels
 
-Condr supports only the Agents it ships an integration for, at two levels depending on what the Agent's Hooks report. If a CLI you use is not supported yet, open an [Issue](https://github.com/condrdev/condr/issues) or a pull request.
+Condr supports only the Agents it ships an integration for, at three levels depending on how the Agent reports its state. If a CLI you use is not supported yet, open an [Issue](https://github.com/condrdev/condr/issues) or a pull request.
 
 ### Fully supported
 
@@ -15,13 +15,15 @@ A fully supported Agent's Hooks report when a turn starts and ends, telling the 
 
 Cursor CLI and Antigravity CLI do not emit events for permission prompts, so they do not enter the Blocked state when awaiting user approval. Antigravity CLI still enters Blocked when waiting for an answer to a question.
 
+### Fully supported through its own reports
+
+Some Agents report their own state to the terminal through the Program Status Protocol (OSC 7501), while their Hooks cannot tell a subagent's turn from the main Agent's. Condr takes their state from those reports alone and installs Hooks only to record the session ID, so their conversations resume after a Server restart and `condr agent wait` works as for any fully supported Agent. Until the Agent reports, or where its reports cannot reach Condr, such as from an older release, its state shows Unknown. Kimi Code 2.4 and newer is supported this way.
+
 ### Recognition only
 
-Condr detects recognition-only Agents by their process: the sidebar displays the Agent's icon while running, removes it upon exit and allows starting it via `condr agent start`. Their Hooks cannot report a reliable state, so Condr installs none, and their state stays Unknown unless the Agent reports it to the terminal itself through the Program Status Protocol, as Kimi Code does. With no session ID from a Hook, their conversations do not resume after a Server restart.
+Condr detects recognition-only Agents by their process: the sidebar displays the Agent's icon while running, removes it upon exit and allows starting it via `condr agent start`. Their Hooks cannot report a reliable state, so Condr installs none and their state stays Unknown. With no session ID from a Hook, their conversations do not resume after a Server restart.
 
-For these Agents, `condr agent wait` and `condr agent prompt --wait` exit immediately with `agent_reports_no_state` rather than waiting for a timeout. Running `condr agent prompt` without `--wait` delivers prompts normally.
-
-Kimi Code is currently the only Agent in this category, as its Hooks report a subagent's completion under the main Agent's session. It is labeled as Recognition only in **Settings › Agent integrations**.
+For these Agents, `condr agent wait` and `condr agent prompt --wait` exit immediately with `agent_reports_no_state` rather than waiting for a timeout. Running `condr agent prompt` without `--wait` delivers prompts normally. No Agent Condr supports is in this category today.
 
 ## Prepare and check Agents
 

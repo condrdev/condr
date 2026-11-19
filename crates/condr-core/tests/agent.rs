@@ -350,24 +350,46 @@ fn a_blocked_agent_says_what_it_waits_for_until_it_moves_on() {
 }
 
 #[test]
-fn a_recognized_only_agent_stays_unknown_whatever_its_hooks_report() {
+fn an_agent_that_reports_its_own_state_takes_only_its_conversation_from_hooks() {
     let mut detector = AgentDetector::new();
     let now = Instant::now();
-    // Hooks configured by hand cannot tell a subagent's Stop from Kimi's own (ADR 0035).
+    // Kimi Code's hooks report a subagent's Stop under the main session's ID (ADR 0071).
     let event = |kind| AgentEvent::new(AgentKind::Kimi, kind, None, Some("root".into()));
-    // Behind a launcher Condr cannot name, its events do not name it either.
-    detector.observe_process(ProcessProbeResult::Unidentified, now);
+    let snapshot = |state| {
+        AgentPublish::Snapshot(AgentSnapshot {
+            session_id: Some("root".into()),
+            kind: AgentKind::Kimi,
+            state,
+            detail: None,
+        })
+    };
+    detector.observe_process(ProcessProbeResult::Agent(AgentKind::Kimi), now);
+    // Before its first report a hook names the conversation and leaves it Unknown.
+    assert_eq!(
+        detector.observe_event(&event(AgentEventKind::SessionStart)),
+        snapshot(AgentState::Unknown)
+    );
+    for kind in [AgentEventKind::PromptSubmit, AgentEventKind::Stop] {
+        assert_eq!(detector.observe_event(&event(kind)), AgentPublish::Nothing);
+    }
+    assert_eq!(
+        detector.resume(),
+        Some(Some(AgentResume {
+            kind: AgentKind::Kimi,
+            session_id: "root".into()
+        }))
+    );
+    // Its own report is its state, and a hook's Stop does not end it.
+    let mut working = report(ProgramState::Working);
+    working.app = Some("kimi-code".into());
+    assert_eq!(
+        detector.observe_status(&working),
+        snapshot(AgentState::Working)
+    );
     assert_eq!(
         detector.observe_event(&event(AgentEventKind::Stop)),
         AgentPublish::Nothing
     );
-    assert_eq!(detector.agent(), None);
-    detector.observe_process(ProcessProbeResult::Agent(AgentKind::Kimi), now);
-    for kind in [AgentEventKind::PromptSubmit, AgentEventKind::Stop] {
-        assert_eq!(detector.observe_event(&event(kind)), AgentPublish::Nothing);
-    }
-    assert_eq!(detector.agent(), Some(AgentKind::Kimi));
-    assert_eq!(detector.resume(), Some(None), "no session ID to resume");
 }
 
 #[test]
@@ -736,7 +758,7 @@ fn program_status_reports_take_over_from_hooks_and_follow_their_lifetime() {
     assert_eq!(detector.observe_reset(), AgentPublish::Nothing);
 
     // A report whose app names an agent the process table cannot see names it, as a
-    // hook does; one from a recognized-only agent counts, its root record being its own.
+    // hook does; Kimi Code's counts, its root record being its own (ADR 0071).
     let mut detector = AgentDetector::new();
     detector.observe_process(ProcessProbeResult::Unidentified, now);
     assert_eq!(

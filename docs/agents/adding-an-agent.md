@@ -7,10 +7,12 @@ Condr supports only the agent CLIs it ships an integration for (ADR 0035). A CLI
 The level follows from what the CLI's own hooks can report, never from how far its integration has been tried.
 
 - **Fully supported**: the hooks report a turn starting, and the main agent's turn ending told apart from a subagent's, so `Working` and `Idle` can be trusted. An agent with no event for a permission prompt or a question still qualifies; its `note` says it never shows `Blocked` for that.
-- An agent that speaks the Program Status Protocol (OSC 7501, ADR 0044) reports its state without hooks, but the level is still decided by its hooks: they alone carry the session ID a restart resumes with. Its reports count once the `app` they carry resolves to the agent through `AgentKind::parse_label`, so its `app` value (`claude-code`, `grok-build`) must be its id, its executable or one of its `aliases`; [program-status-emitters.md](../research/program-status-emitters.md) lists what each CLI sends.
-- **Recognized only**: the process table names it, but its hooks cannot report a state worth trusting. Its `support` is `AgentSupport::RecognitionOnly(reason)`, nothing is installed, and it stays `Unknown` unless it reports through the Program Status Protocol itself. Kimi Code is the example.
+- **Fully supported through its own reports** (ADR 0071): the CLI reports its root record over the Program Status Protocol (OSC 7501, ADR 0044), but its hooks cannot tell a subagent's Stop from the main agent's. Its `support` is `AgentSupport::ProgramStatus(hooks)`, and `hooks` installs only what names the conversation, a session start a subagent does not fire: its events never set the state. Kimi Code is the example.
+- **Recognized only**: the process table names it, but its hooks cannot report a state worth trusting and it reports none itself. Its `support` is `AgentSupport::RecognitionOnly(reason)`, nothing is installed, and it stays `Unknown`.
 
-Never guess a state from the screen (ADR 0014). If the hooks cannot tell the main agent's Stop from a subagent's, the agent is recognized only.
+An agent's reports count once the `app` they carry resolves to it through `AgentKind::parse_label`, so its `app` value (`claude-code`, `grok-build`) must be its id, its executable or one of its `aliases`; [program-status-emitters.md](../research/program-status-emitters.md) lists what each CLI sends.
+
+Never guess a state from the screen (ADR 0014). If the hooks cannot tell the main agent's Stop from a subagent's, the agent is fully supported through its own reports when it speaks the protocol, and recognized only when it does not.
 
 ## What to change
 

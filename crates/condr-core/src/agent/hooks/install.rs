@@ -63,7 +63,7 @@ pub fn run(target: &HookTarget, agent: AgentKind, action: HooksAction) -> io::Re
         path,
         state: state(target, agent)?,
         note: match &agent.spec().support {
-            AgentSupport::Full(hooks) => hooks.note,
+            AgentSupport::Full(hooks) | AgentSupport::ProgramStatus(hooks) => hooks.note,
             AgentSupport::RecognitionOnly(reason) => Some(*reason),
         }
         .map(str::to_owned),
@@ -86,6 +86,25 @@ pub fn state(target: &HookTarget, agent: AgentKind) -> io::Result<HooksState> {
     match &hooks.format {
         HookFormat::NestedMap { .. } | HookFormat::FlatList { .. } => {
             map_state(target, agent, hooks, &path)
+        }
+        HookFormat::TomlArray { events } => {
+            let mut found: Vec<_> = toml_hooks_ours(&read_toml(&path)?, agent, target)
+                .map(toml_entry)
+                .collect();
+            if found.is_empty() {
+                return Ok(HooksState::Missing);
+            }
+            let mut expected: Vec<_> = events
+                .iter()
+                .map(|entry| toml_entry(&toml_item(target, agent, entry)))
+                .collect();
+            found.sort();
+            expected.sort();
+            Ok(if found == expected {
+                HooksState::Installed
+            } else {
+                HooksState::Outdated
+            })
         }
         HookFormat::Plugin { .. } => {
             let Some(config) = read_config(&path)? else {
@@ -128,7 +147,7 @@ pub fn state(target: &HookTarget, agent: AgentKind) -> io::Result<HooksState> {
 pub fn install(target: &HookTarget, agent: AgentKind) -> io::Result<PathBuf> {
     let _transaction = HookTransaction::open(target, agent, true)?;
     let hooks = match &agent.spec().support {
-        AgentSupport::Full(hooks) => hooks,
+        AgentSupport::Full(hooks) | AgentSupport::ProgramStatus(hooks) => hooks,
         AgentSupport::RecognitionOnly(reason) => {
             return Err(io::Error::new(io::ErrorKind::Unsupported, *reason));
         }
@@ -158,6 +177,15 @@ pub fn install(target: &HookTarget, agent: AgentKind) -> io::Result<PathBuf> {
                 items.push(map_item(target, agent, hooks, entry));
             }
             write_config(&path, &root)?;
+        }
+        HookFormat::TomlArray { events } => {
+            let mut document = read_toml(&path)?;
+            let tables = toml_hooks(&path, &mut document)?;
+            tables.retain(|table| !toml_is_ours(table, agent, target));
+            for entry in *events {
+                tables.push(toml_item(target, agent, entry));
+            }
+            write_file(&path, document.to_string().as_bytes())?;
         }
         HookFormat::Plugin { .. } => {
             let manifest = manifest_path(&path);
@@ -215,6 +243,18 @@ pub fn uninstall(target: &HookTarget, agent: AgentKind) -> io::Result<PathBuf> {
             }
             write_config(&path, &root)?;
         }
+        HookFormat::TomlArray { .. } => {
+            if !path.try_exists()? {
+                return Ok(path);
+            }
+            let mut document = read_toml(&path)?;
+            let tables = toml_hooks(&path, &mut document)?;
+            tables.retain(|table| !toml_is_ours(table, agent, target));
+            if tables.is_empty() {
+                document.remove("hooks");
+            }
+            write_file(&path, document.to_string().as_bytes())?;
+        }
         HookFormat::Plugin { .. } => {
             let manifest = manifest_path(&path);
             check_owned(&path, &marker(agent))?;
@@ -262,19 +302,22 @@ fn is_condr(program: &str, target: &HookTarget) -> bool {
         || program == target.executable()
 }
 
+/// Whether a hook command line is `[& ]condr …` or `[& ]"<path>" …`,
+/// `hook_command_for_shell`'s shape, for `agent`.
+fn is_our_command(command: &str, agent: AgentKind, target: &HookTarget) -> bool {
+    let command = command.strip_prefix("& ").unwrap_or(command);
+    let (program, rest) = match command.strip_prefix('"') {
+        Some(quoted) => quoted.split_once('"').unwrap_or((quoted, "")),
+        None => command.split_at(command.find(' ').unwrap_or(command.len())),
+    };
+    is_condr(program, target) && rest.starts_with(&marker(agent))
+}
+
 fn is_ours(hook: &Value, agent: AgentKind, target: &HookTarget) -> bool {
     let command = hook
         .get("command")
         .and_then(Value::as_str)
-        .is_some_and(|command| {
-            // `hook_command_for_shell`'s shape: `[& ]condr …` or `[& ]"<path>" …`.
-            let command = command.strip_prefix("& ").unwrap_or(command);
-            let (program, rest) = match command.strip_prefix('"') {
-                Some(quoted) => quoted.split_once('"').unwrap_or((quoted, "")),
-                None => command.split_at(command.find(' ').unwrap_or(command.len())),
-            };
-            is_condr(program, target) && rest.starts_with(&marker(agent))
-        });
+        .is_some_and(|command| is_our_command(command, agent, target));
     let exec = hook
         .get("exec")
         .and_then(Value::as_str)
@@ -305,7 +348,7 @@ fn map_item(target: &HookTarget, agent: AgentKind, hooks: &HookSpec, entry: &Hoo
             "command": target.hook_command(agent, entry.event, &HookShell::Plain),
             "timeout": entry.timeout_secs,
         }),
-        HookFormat::Plugin { .. } | HookFormat::Script { .. } => {
+        HookFormat::Plugin { .. } | HookFormat::Script { .. } | HookFormat::TomlArray { .. } => {
             unreachable!("only a map holds items")
         }
     };
@@ -485,6 +528,69 @@ fn check_owned(path: &Path, marker: &str) -> io::Result<()> {
 
 /// `None` when the file does not exist. Anything unreadable, oversized or not a JSON
 /// object is an error, so a broken file is never overwritten.
+/// A TOML configuration as written, or an empty one where there is none.
+fn read_toml(path: &Path) -> io::Result<toml_edit::DocumentMut> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => text.parse().map_err(|error| invalid(path, error)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Default::default()),
+        Err(error) => Err(error),
+    }
+}
+
+/// Its `[[hooks]]` array, created when absent.
+fn toml_hooks<'a>(
+    path: &Path,
+    document: &'a mut toml_edit::DocumentMut,
+) -> io::Result<&'a mut toml_edit::ArrayOfTables> {
+    document
+        .entry("hooks")
+        .or_insert(toml_edit::Item::ArrayOfTables(Default::default()))
+        .as_array_of_tables_mut()
+        .ok_or_else(|| invalid(path, "hooks is not an array of tables"))
+}
+
+fn toml_hooks_ours<'a>(
+    document: &'a toml_edit::DocumentMut,
+    agent: AgentKind,
+    target: &'a HookTarget,
+) -> impl Iterator<Item = &'a toml_edit::Table> {
+    document
+        .get("hooks")
+        .and_then(toml_edit::Item::as_array_of_tables)
+        .into_iter()
+        .flat_map(toml_edit::ArrayOfTables::iter)
+        .filter(move |table| toml_is_ours(table, agent, target))
+}
+
+fn toml_is_ours(table: &toml_edit::Table, agent: AgentKind, target: &HookTarget) -> bool {
+    table
+        .get("command")
+        .and_then(toml_edit::Item::as_str)
+        .is_some_and(|command| is_our_command(command, agent, target))
+}
+
+/// What Condr writes for one event of a TOML hook array.
+fn toml_item(target: &HookTarget, agent: AgentKind, entry: &HookEntry) -> toml_edit::Table {
+    let mut table = toml_edit::Table::new();
+    table["event"] = toml_edit::value(entry.native);
+    if let Some(matcher) = entry.matcher {
+        table["matcher"] = toml_edit::value(matcher);
+    }
+    table["command"] = toml_edit::value(target.hook_command(agent, entry.event, &HookShell::Plain));
+    table["timeout"] = toml_edit::value(entry.timeout_secs as i64);
+    table
+}
+
+/// A table's keys and values, as written, to compare installations by.
+fn toml_entry(table: &toml_edit::Table) -> Vec<(String, String)> {
+    let mut entry: Vec<_> = table
+        .iter()
+        .map(|(key, item)| (key.to_owned(), item.to_string().trim().to_owned()))
+        .collect();
+    entry.sort();
+    entry
+}
+
 fn read_config(path: &Path) -> io::Result<Option<Value>> {
     let bytes = match std::fs::metadata(path) {
         Ok(metadata) if metadata.len() > MAX_CONFIG_BYTES => {

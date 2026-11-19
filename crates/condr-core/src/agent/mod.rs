@@ -102,18 +102,22 @@ impl AgentSpec {
     /// Its hook integration; `None` for an agent recognized only.
     pub fn hooks(&self) -> Option<&hooks::HookSpec> {
         match &self.support {
-            AgentSupport::Full(hooks) => Some(hooks),
+            AgentSupport::Full(hooks) | AgentSupport::ProgramStatus(hooks) => Some(hooks),
             AgentSupport::RecognitionOnly(_) => None,
         }
     }
 }
 
-/// How far Condr supports an agent (ADR 0035).
+/// How far Condr supports an agent (ADR 0035, ADR 0071).
 #[derive(Debug)]
 pub enum AgentSupport {
     /// Its hooks report a turn starting and the main agent's turn ending, so its
     /// `Working` and `Idle` can be trusted.
     Full(hooks::HookSpec),
+    /// It reports its own state over OSC 7501, but its hooks cannot tell a subagent's
+    /// Stop from its own: they only name its conversation, and never set its state
+    /// (ADR 0071).
+    ProgramStatus(hooks::HookSpec),
     /// The process table names it, but its hooks cannot report a state worth trusting,
     /// so none are installed and it stays `Unknown`. Carries the reason.
     RecognitionOnly(&'static str),

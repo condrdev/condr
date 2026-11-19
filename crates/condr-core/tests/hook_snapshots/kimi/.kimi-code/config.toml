@@ -1,0 +1,4 @@
+[[hooks]]
+event = "SessionStart"
+command = "condr agent-hook kimi session-start"
+timeout = 5

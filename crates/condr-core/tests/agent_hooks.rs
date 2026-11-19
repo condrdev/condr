@@ -83,14 +83,55 @@ fn new_hook_files_install_refresh_and_remove_without_losing_user_entries() {
         assert!(uninstall(&target, agent).is_err());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"user\":true}");
     }
-    let kimi = run(&target, AgentKind::Kimi, HooksAction::Status).unwrap();
-    assert_eq!(kimi.state, HooksState::Unsupported);
-    assert!(kimi.note.unwrap().contains("subagent"));
+    // An agent recognized only, such as one a newer Server knows, installs nothing.
+    let other = run(&target, AgentKind::Other, HooksAction::Status).unwrap();
+    assert_eq!(other.state, HooksState::Unsupported);
+    assert!(other.note.is_some());
     assert_eq!(
-        install(&target, AgentKind::Kimi).unwrap_err().kind(),
+        install(&target, AgentKind::Other).unwrap_err().kind(),
         std::io::ErrorKind::Unsupported
     );
-    assert!(!target.path(AgentKind::Kimi).exists());
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+/// Kimi Code keeps its hooks in its own `config.toml`: Condr's tables join the person's,
+/// and the rest of the file, comments included, is left as written.
+#[test]
+fn toml_hook_arrays_keep_the_rest_of_the_file() {
+    let (target, root) = target();
+    let path = target.path(AgentKind::Kimi);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let user = "# my settings\ndefault_model = \"k3\"\n\n[[hooks]]\nevent = \"Stop\"\ncommand = \"notify-send done\"\n\n[models.k3]\nprovider = \"kimi\"\n";
+    std::fs::write(&path, user).unwrap();
+    assert_eq!(
+        state(&target, AgentKind::Kimi).unwrap(),
+        HooksState::Missing
+    );
+    install(&target, AgentKind::Kimi).unwrap();
+    assert_eq!(
+        state(&target, AgentKind::Kimi).unwrap(),
+        HooksState::Installed
+    );
+    let installed = std::fs::read_to_string(&path).unwrap();
+    for line in user.lines() {
+        assert!(installed.contains(line), "{installed}");
+    }
+    assert!(
+        installed.contains("'\"/opt/condr bin/condr\" agent-hook kimi session-start'"),
+        "{installed}"
+    );
+    install(&target, AgentKind::Kimi).unwrap();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), installed);
+    let moved = HookTarget {
+        command: "condr".into(),
+        ..target.clone()
+    };
+    assert_eq!(
+        state(&moved, AgentKind::Kimi).unwrap(),
+        HooksState::Outdated
+    );
+    uninstall(&moved, AgentKind::Kimi).unwrap();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), user);
     std::fs::remove_dir_all(root).unwrap();
 }
 

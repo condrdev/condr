@@ -61,6 +61,9 @@ pub(super) enum HookFormat {
         events: &'static [HookEntry],
         exec: bool,
     },
+    /// `[[hooks]]` tables of `event`, `matcher`, `command` and `timeout` in a TOML
+    /// configuration, kept beside the person's own entries and the rest of the file.
+    TomlArray { events: &'static [HookEntry] },
     /// A script Condr owns outright, from a template that may name
     /// `__CONDR_EXECUTABLE__`, `__CONDR_AGENT__` and `__CONDR_AGENT_MARKER__`. `registry`
     /// is the JSON file in the configuration directory whose `plugin` list must name it.

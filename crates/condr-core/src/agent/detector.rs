@@ -251,7 +251,11 @@ impl AgentDetector {
                 session_id: id.clone(),
             }));
         }
-        let (next, detail) = if self.program_status {
+        // An agent that reports its own state names only its conversation through its
+        // hooks, even before its first report (ADR 0071).
+        let (next, detail) = if self.program_status
+            || matches!(agent.spec().support, AgentSupport::ProgramStatus(_))
+        {
             (state, self.detail.clone())
         } else {
             let next = event.apply(state);
