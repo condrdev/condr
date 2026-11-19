@@ -17,11 +17,11 @@ Cursor CLI 与 Antigravity CLI 的 Hook 缺少权限弹框事件，因此在等�
 
 ### 仅识别
 
-Condr 从进程识别此类 Agent：运行时侧边栏会显示其图标，退出后图标消失，并且支持通过 `condr agent start` 启动。由于其 Hook 无法提供可靠的状态报告，Condr 不会为其安装 Hook，状态固定显示为 Unknown。同时因为缺少 Hook 记录的会话 ID，Server 重启后无法自动恢复会话。
+Condr 从进程识别此类 Agent：运行时侧边栏会显示其图标，退出后图标消失，并且支持通过 `condr agent start` 启动。由于其 Hook 无法提供可靠的状态报告，Condr 不会为其安装 Hook；除非 Agent 自己通过 Program Status Protocol 向终端上报状态（如 Kimi Code），否则状态显示为 Unknown。同时因为缺少 Hook 记录的会话 ID，Server 重启后无法自动恢复会话。
 
 对这类 Agent 运行 `condr agent wait` 与 `condr agent prompt --wait` 时，会直接返回 `agent_reports_no_state` 报错，不会等待超时。不带 `--wait` 的 `condr agent prompt` 则可以正常发送指令。
 
-目前仅 Kimi Code 属于这一级，因为它的 Hook 无法区分主 Agent 与子 Agent 的 Stop 事件。在 **设置 › Agent 集成**（Settings › Agent integrations）中，它被标为“仅识别”（Recognition only）。
+目前仅 Kimi Code 属于这一级，因为它的 Hook 用主 Agent 的会话 ID 上报子 Agent 的 Stop 事件，无法区分二者。在 **设置 › Agent 集成**（Settings › Agent integrations）中，它被标为“仅识别”（Recognition only）。
 
 ## 准备与检查 Agent
 

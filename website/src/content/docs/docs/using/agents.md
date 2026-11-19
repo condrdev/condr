@@ -17,11 +17,11 @@ Cursor CLI and Antigravity CLI do not emit events for permission prompts, so the
 
 ### Recognition only
 
-Condr detects recognition-only Agents by their process: the sidebar displays the Agent's icon while running, removes it upon exit and allows starting it via `condr agent start`. Their Hooks cannot report a reliable state, so Condr installs none and their state stays Unknown. With no session ID from a Hook, their conversations do not resume after a Server restart.
+Condr detects recognition-only Agents by their process: the sidebar displays the Agent's icon while running, removes it upon exit and allows starting it via `condr agent start`. Their Hooks cannot report a reliable state, so Condr installs none, and their state stays Unknown unless the Agent reports it to the terminal itself through the Program Status Protocol, as Kimi Code does. With no session ID from a Hook, their conversations do not resume after a Server restart.
 
 For these Agents, `condr agent wait` and `condr agent prompt --wait` exit immediately with `agent_reports_no_state` rather than waiting for a timeout. Running `condr agent prompt` without `--wait` delivers prompts normally.
 
-Kimi Code is currently the only Agent in this category, as its Hooks cannot distinguish subagent completion events from the main Agent's. It is labeled as Recognition only in **Settings › Agent integrations**.
+Kimi Code is currently the only Agent in this category, as its Hooks report a subagent's completion under the main Agent's session. It is labeled as Recognition only in **Settings › Agent integrations**.
 
 ## Prepare and check Agents
 

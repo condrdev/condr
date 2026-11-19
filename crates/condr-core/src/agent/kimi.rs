@@ -15,6 +15,6 @@ pub(super) const SPEC: AgentSpec = AgentSpec {
     reads_kitty_keys: false,
     initial_prompt: InitialPrompt::None,
     support: AgentSupport::RecognitionOnly(
-        "Kimi 1.50 hooks cannot distinguish a subagent's Stop from the main agent's Stop; status integration is unavailable until native hooks identify their agent",
+        "Kimi Code's hooks report a subagent's Stop under the main session's ID, so Condr installs none: its state shows only as Kimi Code reports it to the terminal, and its conversations do not resume",
     ),
 };
