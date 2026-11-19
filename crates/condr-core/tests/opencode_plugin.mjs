@@ -22,7 +22,8 @@ try {
   `)
   writeFileSync("reports", "")
   const plugin = (await import("data:text/javascript;base64," + Buffer.from(
-    source.replace("__CONDR_EXECUTABLE__", JSON.stringify(process.execPath)),
+    source.replace("__CONDR_EXECUTABLE__", JSON.stringify(process.execPath))
+      .replace("__CONDR_AGENT__", '"opencode"').replace("__CONDR_AGENT_MARKER__", "opencode"),
   ).toString("base64"))).default
   const sessions = new Map([
     ["ses_A", { id: "ses_A" }], ["ses_B", { id: "ses_B" }],
