@@ -45,7 +45,8 @@ TURN_SECONDS = 240
 STEPS = ("hooks", "start", "turn", "session", "wait", "resume", "blocked")
 # The dialog a CLI shows in a folder it has not seen, and the keys a user answers it with.
 FIRST_RUN = {"grok": ("Do you trust the contents", ["y"]),
-             "kimi": ("Trust this folder?", ["enter"])}
+             "kimi": ("Trust this folder?", ["enter"]),
+             "codebuddy": ("Do you trust the files", ["enter"])}
 
 
 def write(path, text):
@@ -193,7 +194,19 @@ def kilo(base, model):
     return {}
 
 
-PROFILES = {f.__name__: f for f in (pi, omp, grok, copilot, opencode, kimi, qwen, goose, kilo)}
+def codebuddy(base, model):
+    write(".codebuddy/models.json", json.dumps({
+        "models": [{"id": model, "name": model, "vendor": "condr-e2e",
+                    "apiKey": os.environ[KEY_ENV], "url": base + "/chat/completions",
+                    "supportsToolCall": True}],
+        "availableModels": [model]}))
+    write(".codebuddy/settings.json", json.dumps({"model": model}))
+    # An API key also spares the TUI its login screen.
+    return {"CODEBUDDY_API_KEY": os.environ[KEY_ENV]}
+
+
+PROFILES = {f.__name__: f for f in (pi, omp, grok, copilot, opencode, kimi, qwen, goose, kilo,
+                                    codebuddy)}
 
 
 class Failed(Exception):
@@ -297,22 +310,39 @@ def main(kind):
 
         pane = condr("workspace", "create", "--cwd", WORK)["root_pane"]["pane_id"]
         typed = False
-        try:
-            started = condr("agent", "start", "e2e", "--kind", kind, "--pane", pane,
-                            "--timeout", 60_000)["agent"]["agent_status"]
-        except Failed as error:
-            agent = agent_in(pane)
-            if "agent_not_ready" in str(error):
-                started = "blocked"
-            elif "agent_timeout" in str(error) and agent and agent["agent"] == kind:
-                started, typed = agent["agent_status"], True
-            else:
-                raise
+        # A first-run dialog is answered while `agent start` waits, as a user would: a
+        # CLI silent until it is answered would otherwise hold the start to its timeout.
+        dialog = FIRST_RUN.get(kind)
+        dialog_answered = False
+
+        def answer():
+            nonlocal dialog_answered
+            if dialog and not dialog_answered and dialog[0] in screen(pane):
+                condr("pane", "send-keys", pane, *dialog[1])
+                dialog_answered = True
+
+        launch = subprocess.Popen(
+            ["condr", "agent", "start", "e2e", "--kind", kind, "--pane", str(pane),
+             "--timeout", "60000"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        while launch.poll() is None:
+            answer()
+            time.sleep(1)
+        stdout, stderr = launch.communicate()
+        agent = agent_in(pane)
+        if launch.returncode == 0:
+            started = json.loads(stdout)["agent"]["agent_status"]
+        elif "agent_not_ready" in stderr:
+            started = "blocked"
+        elif "agent_timeout" in stderr and agent and agent["agent"] == kind:
+            started, typed = agent["agent_status"], True
+        else:
+            raise Failed(f"condr agent start: {stderr.strip()}")
         note, ok = started, True
-        if kind in FIRST_RUN and shows(pane, FIRST_RUN[kind][0], 10):
-            condr("pane", "send-keys", pane, *FIRST_RUN[kind][1])
-            note += f", answered its first-run dialog with {'+'.join(FIRST_RUN[kind][1])}"
-            if reports:
+        if dialog and not dialog_answered and shows(pane, dialog[0], 10):
+            answer()
+        if dialog_answered:
+            note += f", answered its first-run dialog with {'+'.join(dialog[1])}"
+            if reports and started != "idle":
                 started = reported(pane, 60) or "silent"
                 note += f" → {started}"
                 ok = started == "idle"

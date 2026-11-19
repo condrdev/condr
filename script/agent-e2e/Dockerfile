@@ -29,6 +29,7 @@ RUN npm install -g --no-audit --no-fund @qwen-code/qwen-code
 RUN curl -fsSL "https://github.com/aaif-goose/goose/releases/latest/download/goose-$(uname -m)-unknown-linux-gnu.tar.gz" \
         | tar -xz -C /usr/local/bin
 RUN npm install -g --no-audit --no-fund @kilocode/cli
+RUN npm install -g --no-audit --no-fund @tencent-ai/codebuddy-code
 
 # A release tag, `nightly` or `latest`, fetched again on every build: run.sh changes FETCHED.
 ARG CONDR_VERSION=nightly

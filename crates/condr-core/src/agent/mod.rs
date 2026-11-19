@@ -7,6 +7,7 @@
 
 mod antigravity;
 mod claude;
+mod codebuddy;
 mod codex;
 mod copilot;
 mod cursor;
@@ -158,6 +159,7 @@ pub enum AgentKind {
     Qwen,
     Goose,
     Kilo,
+    CodeBuddy,
     /// A kind a newer Server reported that this build does not know (ADR 0028): shown as
     /// a generic agent. Nothing detects or launches it, so it is not in [`Self::ALL`]. It
     /// stays last, which the spec table's test relies on.
@@ -165,7 +167,7 @@ pub enum AgentKind {
 }
 
 impl AgentKind {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::Claude,
         Self::Codex,
         Self::OpenCode,
@@ -179,6 +181,7 @@ impl AgentKind {
         Self::Qwen,
         Self::Goose,
         Self::Kilo,
+        Self::CodeBuddy,
     ];
 
     /// The one `match` on the kind: everything else asks its spec.
@@ -197,6 +200,7 @@ impl AgentKind {
             Self::Qwen => &qwen::SPEC,
             Self::Goose => &goose::SPEC,
             Self::Kilo => &kilo::SPEC,
+            Self::CodeBuddy => &codebuddy::SPEC,
             Self::Other => &OTHER,
         }
     }

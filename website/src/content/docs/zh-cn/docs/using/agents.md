@@ -11,7 +11,7 @@ Condr 仅对官方提供集成的 Agent 提供支持，分为三个级别，取�
 
 ### 完整支持
 
-该级别的 Agent Hook 能明确报告会话轮次的开始与结束，并能区分主 Agent 与子 Agent，因此 Working 和 Idle 状态准确可靠。Claude Code、Codex、OpenCode、Pi、Oh My Pi、Antigravity CLI、Grok Build、Cursor CLI、GitHub Copilot CLI、Qwen Code 与 Kilo Code 均属于完整支持。
+该级别的 Agent Hook 能明确报告会话轮次的开始与结束，并能区分主 Agent 与子 Agent，因此 Working 和 Idle 状态准确可靠。Claude Code、Codex、OpenCode、Pi、Oh My Pi、Antigravity CLI、Grok Build、Cursor CLI、GitHub Copilot CLI、Qwen Code、Kilo Code 与 CodeBuddy Code 均属于完整支持。
 
 Cursor CLI 与 Antigravity CLI 的 Hook 缺少权限弹框事件，因此在等待授权时不会显示为 Blocked。但 Antigravity CLI 在主动向你提问等待回复时，仍会正常显示为 Blocked。
 

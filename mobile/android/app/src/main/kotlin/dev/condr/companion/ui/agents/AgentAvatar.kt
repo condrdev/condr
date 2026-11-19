@@ -26,6 +26,7 @@ object AgentMarks {
     mapOf(
       "antigravity" to R.drawable.agent_antigravity,
       "claude" to R.drawable.agent_claude,
+      "codebuddy" to R.drawable.agent_codebuddy,
       "codex" to R.drawable.agent_codex,
       "copilot" to R.drawable.agent_copilot,
       "cursor" to R.drawable.agent_cursor,

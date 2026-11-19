@@ -11,7 +11,7 @@ Condr supports only the Agents it ships an integration for, at three levels depe
 
 ### Fully supported
 
-A fully supported Agent's Hooks report when a turn starts and ends, telling the main Agent apart from subagents, so Working and Idle are reliable. Claude Code, Codex, OpenCode, Pi, Oh My Pi, Antigravity CLI, Grok Build, Cursor CLI, GitHub Copilot CLI, Qwen Code and Kilo Code are fully supported.
+A fully supported Agent's Hooks report when a turn starts and ends, telling the main Agent apart from subagents, so Working and Idle are reliable. Claude Code, Codex, OpenCode, Pi, Oh My Pi, Antigravity CLI, Grok Build, Cursor CLI, GitHub Copilot CLI, Qwen Code, Kilo Code and CodeBuddy Code are fully supported.
 
 Cursor CLI and Antigravity CLI do not emit events for permission prompts, so they do not enter the Blocked state when awaiting user approval. Antigravity CLI still enters Blocked when waiting for an answer to a question.
 
