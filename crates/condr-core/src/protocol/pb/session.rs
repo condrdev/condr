@@ -311,6 +311,7 @@ impl From<AgentKind> for super::AgentKind {
             AgentKind::Copilot => Self::Copilot,
             AgentKind::Kimi => Self::Kimi,
             AgentKind::Qwen => Self::Qwen,
+            AgentKind::Goose => Self::Goose,
             AgentKind::Other => Self::Other,
         }
     }
@@ -339,6 +340,7 @@ pub(crate) fn agent_kind(raw: i32) -> WireResult<AgentKind> {
         super::AgentKind::Copilot => AgentKind::Copilot,
         super::AgentKind::Kimi => AgentKind::Kimi,
         super::AgentKind::Qwen => AgentKind::Qwen,
+        super::AgentKind::Goose => AgentKind::Goose,
         super::AgentKind::Other => AgentKind::Other,
     })
 }

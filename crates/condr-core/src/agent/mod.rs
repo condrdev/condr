@@ -12,6 +12,7 @@ mod copilot;
 mod cursor;
 mod detector;
 mod event;
+mod goose;
 mod grok;
 pub mod hook;
 pub mod hooks;
@@ -154,6 +155,7 @@ pub enum AgentKind {
     Copilot,
     Kimi,
     Qwen,
+    Goose,
     /// A kind a newer Server reported that this build does not know (ADR 0028): shown as
     /// a generic agent. Nothing detects or launches it, so it is not in [`Self::ALL`]. It
     /// stays last, which the spec table's test relies on.
@@ -161,7 +163,7 @@ pub enum AgentKind {
 }
 
 impl AgentKind {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Claude,
         Self::Codex,
         Self::OpenCode,
@@ -173,6 +175,7 @@ impl AgentKind {
         Self::Copilot,
         Self::Kimi,
         Self::Qwen,
+        Self::Goose,
     ];
 
     /// The one `match` on the kind: everything else asks its spec.
@@ -189,6 +192,7 @@ impl AgentKind {
             Self::Copilot => &copilot::SPEC,
             Self::Kimi => &kimi::SPEC,
             Self::Qwen => &qwen::SPEC,
+            Self::Goose => &goose::SPEC,
             Self::Other => &OTHER,
         }
     }

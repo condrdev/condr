@@ -8,7 +8,7 @@ The level follows from what the CLI's own hooks can report, never from how far i
 
 - **Fully supported**: the hooks report a turn starting, and the main agent's turn ending told apart from a subagent's, so `Working` and `Idle` can be trusted. An agent with no event for a permission prompt or a question still qualifies; its `note` says it never shows `Blocked` for that.
 - **Fully supported through its own reports** (ADR 0071): the CLI reports its root record over the Program Status Protocol (OSC 7501, ADR 0044), but its hooks cannot tell a subagent's Stop from the main agent's. Its `support` is `AgentSupport::ProgramStatus(hooks)`, and `hooks` installs only what names the conversation, a session start a subagent does not fire: its events never set the state. Kimi Code is the example.
-- **Recognized only**: the process table names it, but its hooks cannot report a state worth trusting and it reports none itself. Its `support` is `AgentSupport::RecognitionOnly(reason)`, nothing is installed, and it stays `Unknown`.
+- **Recognized only**: the process table names it, but its hooks can neither report a state worth trusting nor name its conversation reliably. Its `support` is `AgentSupport::RecognitionOnly(reason)` and nothing is installed; it stays `Unknown` unless it reports through the Program Status Protocol itself. Goose is the example: a subagent starts its own session in its hooks as the main agent does.
 
 An agent's reports count once the `app` they carry resolves to it through `AgentKind::parse_label`, so its `app` value (`claude-code`, `grok-build`) must be its id, its executable or one of its `aliases`; [program-status-emitters.md](../research/program-status-emitters.md) lists what each CLI sends.
 

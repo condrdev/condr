@@ -21,9 +21,11 @@ Some Agents report their own state to the terminal through the Program Status Pr
 
 ### Recognition only
 
-Condr detects recognition-only Agents by their process: the sidebar displays the Agent's icon while running, removes it upon exit and allows starting it via `condr agent start`. Their Hooks cannot report a reliable state, so Condr installs none and their state stays Unknown. With no session ID from a Hook, their conversations do not resume after a Server restart.
+Condr detects recognition-only Agents by their process: the sidebar displays the Agent's icon while running, removes it upon exit and allows starting it via `condr agent start`. Their Hooks cannot report a reliable state or name their conversation, so Condr installs none, and their state stays Unknown unless the Agent reports it to the terminal itself through the Program Status Protocol. With no session ID from a Hook, their conversations do not resume after a Server restart.
 
-For these Agents, `condr agent wait` and `condr agent prompt --wait` exit immediately with `agent_reports_no_state` rather than waiting for a timeout. Running `condr agent prompt` without `--wait` delivers prompts normally. No Agent Condr supports is in this category today.
+For these Agents, `condr agent wait` and `condr agent prompt --wait` exit immediately with `agent_reports_no_state` rather than waiting for a timeout. Running `condr agent prompt` without `--wait` delivers prompts normally.
+
+Goose is in this category: its Hooks start a subagent's session just as they start the main Agent's, with nothing to tell them apart. It reports its own state through the Program Status Protocol, which Condr shows.
 
 ## Prepare and check Agents
 

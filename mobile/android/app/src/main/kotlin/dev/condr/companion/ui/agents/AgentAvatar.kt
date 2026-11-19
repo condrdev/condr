@@ -29,6 +29,7 @@ object AgentMarks {
       "codex" to R.drawable.agent_codex,
       "copilot" to R.drawable.agent_copilot,
       "cursor" to R.drawable.agent_cursor,
+      "goose" to R.drawable.agent_goose,
       "grok" to R.drawable.agent_grok,
       "kimi" to R.drawable.agent_kimi,
       "omp" to R.drawable.agent_omp,

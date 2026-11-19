@@ -273,7 +273,7 @@ condr agent prompt <目标> <内容> [--wait] [--until <状态>] [--timeout <毫
 condr agent wait <目标> [--until <状态>] [--timeout <毫秒>]
 ```
 
-*支持的种类 (`--kind`)*：`claude`、`codex`、`opencode`、`pi`、`omp`、`antigravity`、`grok`、`cursor`、`copilot`、`kimi`、`qwen`。
+*支持的种类 (`--kind`)*：`claude`、`codex`、`opencode`、`pi`、`omp`、`antigravity`、`grok`、`cursor`、`copilot`、`kimi`、`qwen`、`goose`。
 
 对仅识别的 Agent，`agent wait` 和 `agent prompt --wait` 会立即返回 `agent_reports_no_state` 错误，详见[支持级别](/zh-cn/docs/using/agents/#支持级别)。
 

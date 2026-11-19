@@ -28,6 +28,7 @@ import sys
 import time
 import tomllib
 from pathlib import Path
+from urllib.parse import urlsplit
 
 HOME = Path.home()
 WORK = HOME / "work"
@@ -167,7 +168,19 @@ def qwen(base, model):
     return {}
 
 
-PROFILES = {f.__name__: f for f in (pi, omp, grok, copilot, opencode, kimi, qwen)}
+def goose(base, model):
+    url = urlsplit(base)
+    # Without a configuration file Goose opens its setup wizard.
+    write(".config/goose/config.yaml", f"""GOOSE_PROVIDER: openai
+GOOSE_MODEL: {model}
+GOOSE_TELEMETRY_ENABLED: false
+OPENAI_HOST: {url.scheme}://{url.netloc}
+OPENAI_BASE_PATH: {(url.path.strip("/") + "/chat/completions").lstrip("/")}
+""")
+    return {"OPENAI_API_KEY": os.environ[KEY_ENV]}
+
+
+PROFILES = {f.__name__: f for f in (pi, omp, grok, copilot, opencode, kimi, qwen, goose)}
 
 
 class Failed(Exception):

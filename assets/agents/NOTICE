@@ -25,9 +25,10 @@ https://thesvg.org/icons/<slug>/default.svg:
                                        its mask silhouette is kept
 
 From lobe-icons (https://github.com/lobehub/lobe-icons, MIT, Copyright (c) 2023
-LobeHub), packages/static-svg/icons/qoder.svg:
+LobeHub), as packages/static-svg/icons/<name>.svg:
 
   qoder.svg        Qoder, of Alibaba Cloud
+  goose.svg        Goose, of its maintainers; fetched on 2026-11-19
 
 From Oh My Pi (https://github.com/can1357/oh-my-pi, MIT, Copyright (c) 2025
 Mario Zechner), assets/icon.svg:
