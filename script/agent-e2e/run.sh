@@ -25,7 +25,7 @@ if [[ ${1:-} == --refresh ]]; then
     shift
 fi
 agents=("$@")
-[[ ${#agents[@]} -gt 0 ]] || agents=(pi omp grok copilot opencode kimi)
+[[ ${#agents[@]} -gt 0 ]] || agents=(pi omp grok copilot opencode kimi qwen)
 [[ -f $codex_config ]] || { echo "no Codex config at $codex_config" >&2; exit 1; }
 
 version=${CONDR_VERSION:-nightly}

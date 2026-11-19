@@ -156,7 +156,18 @@ max_context_size = 128000
     return {}
 
 
-PROFILES = {f.__name__: f for f in (pi, omp, grok, copilot, opencode, kimi)}
+def qwen(base, model):
+    write(".qwen/settings.json", json.dumps({
+        "modelProviders": {"openai": [{"id": model, "envKey": KEY_ENV, "baseUrl": base}]},
+        # Picks the provider, which the auth dialog would otherwise ask for.
+        "security": {"auth": {"selectedType": "openai"}},
+        # Ask before shell commands, so the blocked step has a prompt to see.
+        "tools": {"approvalMode": "default"},
+        "model": {"name": model}}))
+    return {}
+
+
+PROFILES = {f.__name__: f for f in (pi, omp, grok, copilot, opencode, kimi, qwen)}
 
 
 class Failed(Exception):
@@ -307,19 +318,31 @@ def main(kind):
 
         # The first prompt goes through `--wait` while the states are watched, so the
         # wait is seen against the turn it waited for.
-        if typed:
-            condr("pane", "send-text", pane, TURN[0])
-            condr("pane", "send-keys", pane, "enter")
-        else:
-            waiting = subprocess.Popen(
+        def first_prompt():
+            if typed:
+                condr("pane", "send-text", pane, TURN[0])
+                condr("pane", "send-keys", pane, "enter")
+                return None
+            return subprocess.Popen(
                 ["condr", "agent", "prompt", str(pane), TURN[0], "--wait",
                  "--timeout", str(TURN_SECONDS * 1000)],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+        waiting = first_prompt()
         returned = []
 
         def poll(trace):
-            if not typed and not returned and waiting.poll() is not None:
+            if waiting and not returned and waiting.poll() is not None:
                 returned.append((list(trace), TURN[1] in screen(pane)))
+
+        # A CLI that reports Idle before its input works drops a prompt sent at once.
+        if watch(pane, until=("working", "blocked"), seconds=20, poll=poll)[-1] == "timeout":
+            step("ready", None, "the prompt sent when `agent start` returned was lost: "
+                 "the CLI reported Idle before its input was ready; sent it again")
+            if waiting:
+                waiting.kill()
+            waiting = first_prompt()
+            returned.clear()
 
         trace = watch(pane, TURN[1], poll=poll)
         step("turn", answered(trace, pane, TURN[1]), " → ".join(trace))

@@ -25,6 +25,9 @@ RUN curl -fsSL https://x.ai/cli/install.sh | HOME=/opt/grok GROK_BIN_DIR=/usr/lo
     && chmod -R a+rX /opt/grok
 # Kimi Code; the older kimi-cli replaces itself with it on first start.
 RUN curl -fsSL https://code.kimi.com/kimi-code/install.sh | KIMI_INSTALL_DIR=/usr/local bash
+RUN npm install -g --no-audit --no-fund @qwen-code/qwen-code
+RUN curl -fsSL "https://github.com/aaif-goose/goose/releases/latest/download/goose-$(uname -m)-unknown-linux-gnu.tar.gz" \
+        | tar -xz -C /usr/local/bin
 
 # A release tag, `nightly` or `latest`, fetched again on every build: run.sh changes FETCHED.
 ARG CONDR_VERSION=nightly

@@ -30,6 +30,8 @@ pub(super) struct HookInput {
     session_id: Option<String>,
     tool_name: Option<String>,
     subagent: bool,
+    /// Qwen Code names the subagent an event fires inside.
+    pub(super) in_subagent: bool,
     pub(super) initial_prompt: bool,
     prompt_id: Option<String>,
     pub(super) fully_idle: Option<bool>,
@@ -134,6 +136,7 @@ impl HookInput {
                 .or_else(|| field("conversationId"))
                 .filter(|id| super::valid_session_id(id)),
             subagent: field("subagentType").is_some_and(|kind| !kind.is_empty()),
+            in_subagent: field("agent_id").is_some_and(|id| !id.is_empty()),
             initial_prompt: field("initialPrompt").is_some_and(|prompt| !prompt.is_empty()),
             prompt_id: field("promptId").filter(|id| super::event::valid_prompt_id(id)),
             fully_idle: value.get("fullyIdle").and_then(serde_json::Value::as_bool),
@@ -208,6 +211,10 @@ mod tests {
             HookInput::parse(br#"{"fullyIdle":true}"#).event(AgentKind::Antigravity, Stop),
             Some(Stop)
         );
+        // Qwen Code names the subagent an event fires inside; the main agent's carry none.
+        let qwen = |json: &[u8]| HookInput::parse(json).event(AgentKind::Qwen, PromptSubmit);
+        assert_eq!(qwen(br#"{"session_id":"root"}"#), Some(PromptSubmit));
+        assert_eq!(qwen(br#"{"session_id":"root","agent_id":"sub-1"}"#), None);
     }
 
     #[test]
