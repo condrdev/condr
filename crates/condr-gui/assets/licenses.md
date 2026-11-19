@@ -328,6 +328,7 @@ https://thesvg.org/icons/<slug>/default.svg:
   qwen.svg         qwen                Qwen, of Alibaba Cloud
   cursor.svg       cursor              Cursor, of Anysphere, Inc.
   grok.svg         grok                Grok, of xAI
+  minimax.svg      minimax             MiniMax, of MiniMax; fetched on 2026-11-19
   antigravity.svg  google-antigravity  Antigravity, of Google LLC; the source is a
                                        masked multi-colour composition, and only
                                        its mask silhouette is kept

@@ -25,7 +25,7 @@ Condr 从进程识别此类 Agent：运行时侧边栏会显示其图标，退�
 
 对这类 Agent 运行 `condr agent wait` 与 `condr agent prompt --wait` 时，会直接返回 `agent_reports_no_state` 报错，不会等待超时。不带 `--wait` 的 `condr agent prompt` 则可以正常发送指令。
 
-Goose 属于这一级：它的 Hook 为子 Agent 开启会话的方式与主 Agent 完全相同，无法区分二者。它会自己通过 Program Status Protocol 上报状态，Condr 会据此显示。
+Goose 与 MiniMax Code 属于这一级。Goose 的 Hook 为子 Agent 开启会话的方式与主 Agent 完全相同，无法区分二者；MiniMax Code 只从它自己的插件系统安装的插件加载 Hook。两者都会自己通过 Program Status Protocol 上报状态，Condr 会据此显示。
 
 ## 准备与检查 Agent
 

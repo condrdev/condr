@@ -22,6 +22,7 @@ Writes /out/<agent>/result.json with the screen and the Server's log beside it.
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -43,6 +44,8 @@ BLOCK = "Use your shell tool to run `echo probe > blocked-probe`, then say done.
 SETTLED = ("idle", "done")
 TURN_SECONDS = 240
 STEPS = ("hooks", "start", "turn", "session", "wait", "resume", "blocked")
+# Where a CLI's executable is not named as its kind.
+EXECUTABLES = {"minimax": "mcode"}
 # The dialog a CLI shows in a folder it has not seen, and the keys a user answers it with.
 FIRST_RUN = {"grok": ("Do you trust the contents", ["y"]),
              "kimi": ("Trust this folder?", ["enter"]),
@@ -205,8 +208,20 @@ def codebuddy(base, model):
     return {"CODEBUDDY_API_KEY": os.environ[KEY_ENV]}
 
 
+def minimax(base, model):
+    # Its own command writes the provider and, with --use, makes its model the default.
+    subprocess.run(["mcode", "provider", "add", "--name", "condr-e2e", "--base-url", base,
+                    "--api-format", "openai-completions", "--model", model,
+                    "--api-key-env", KEY_ENV, "--use"],
+                   check=True, capture_output=True, timeout=120)
+    path = HOME / ".minimax/config.yaml"
+    path.write_text(re.sub(r"(?m)^(dataContribution:\n  enabled:) true$", r"\1 false",
+                           path.read_text()))
+    return {}
+
+
 PROFILES = {f.__name__: f for f in (pi, omp, grok, copilot, opencode, kimi, qwen, goose, kilo,
-                                    codebuddy)}
+                                    codebuddy, minimax)}
 
 
 class Failed(Exception):
@@ -284,7 +299,8 @@ def main(kind):
     os.environ.update(PROFILES[kind](base, model))
     WORK.mkdir()
     subprocess.run(["git", "init", "-q", WORK], check=True)
-    version = subprocess.run([kind, "--version"], capture_output=True, text=True,
+    version = subprocess.run([EXECUTABLES.get(kind, kind), "--version"], capture_output=True,
+                             text=True,
                              timeout=60).stdout.strip().splitlines()
     condr_version = subprocess.run(["condr", "--version"], capture_output=True,
                                    text=True).stdout.strip()

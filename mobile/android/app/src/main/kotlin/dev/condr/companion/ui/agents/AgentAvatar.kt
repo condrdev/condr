@@ -34,6 +34,7 @@ object AgentMarks {
       "grok" to R.drawable.agent_grok,
       "kilo" to R.drawable.agent_kilo,
       "kimi" to R.drawable.agent_kimi,
+      "minimax" to R.drawable.agent_minimax,
       "omp" to R.drawable.agent_omp,
       "opencode" to R.drawable.agent_opencode,
       "pi" to R.drawable.agent_pi,

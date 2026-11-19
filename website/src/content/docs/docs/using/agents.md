@@ -25,7 +25,7 @@ Condr detects recognition-only Agents by their process: the sidebar displays the
 
 For these Agents, `condr agent wait` and `condr agent prompt --wait` exit immediately with `agent_reports_no_state` rather than waiting for a timeout. Running `condr agent prompt` without `--wait` delivers prompts normally.
 
-Goose is in this category: its Hooks start a subagent's session just as they start the main Agent's, with nothing to tell them apart. It reports its own state through the Program Status Protocol, which Condr shows.
+Goose and MiniMax Code are in this category. Goose's Hooks start a subagent's session just as they start the main Agent's, with nothing to tell them apart; MiniMax Code loads Hooks only from plugins its own plugin system installed. Both report their own state through the Program Status Protocol, which Condr shows.
 
 ## Prepare and check Agents
 

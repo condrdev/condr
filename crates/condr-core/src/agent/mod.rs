@@ -19,6 +19,7 @@ pub mod hook;
 pub mod hooks;
 mod kilo;
 mod kimi;
+mod minimax;
 mod omp;
 mod opencode;
 mod pi;
@@ -160,6 +161,7 @@ pub enum AgentKind {
     Goose,
     Kilo,
     CodeBuddy,
+    MiniMax,
     /// A kind a newer Server reported that this build does not know (ADR 0028): shown as
     /// a generic agent. Nothing detects or launches it, so it is not in [`Self::ALL`]. It
     /// stays last, which the spec table's test relies on.
@@ -167,7 +169,7 @@ pub enum AgentKind {
 }
 
 impl AgentKind {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::Claude,
         Self::Codex,
         Self::OpenCode,
@@ -182,6 +184,7 @@ impl AgentKind {
         Self::Goose,
         Self::Kilo,
         Self::CodeBuddy,
+        Self::MiniMax,
     ];
 
     /// The one `match` on the kind: everything else asks its spec.
@@ -201,6 +204,7 @@ impl AgentKind {
             Self::Goose => &goose::SPEC,
             Self::Kilo => &kilo::SPEC,
             Self::CodeBuddy => &codebuddy::SPEC,
+            Self::MiniMax => &minimax::SPEC,
             Self::Other => &OTHER,
         }
     }

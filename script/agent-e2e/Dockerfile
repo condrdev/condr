@@ -30,6 +30,7 @@ RUN curl -fsSL "https://github.com/aaif-goose/goose/releases/latest/download/goo
         | tar -xz -C /usr/local/bin
 RUN npm install -g --no-audit --no-fund @kilocode/cli
 RUN npm install -g --no-audit --no-fund @tencent-ai/codebuddy-code
+RUN npm install -g --no-audit --no-fund @minimax-ai/code
 
 # A release tag, `nightly` or `latest`, fetched again on every build: run.sh changes FETCHED.
 ARG CONDR_VERSION=nightly

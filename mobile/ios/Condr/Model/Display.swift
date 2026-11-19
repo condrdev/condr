@@ -37,7 +37,7 @@ enum AgentMarks {
         "antigravity": .agentAntigravity, "claude": .agentClaude, "codebuddy": .agentCodebuddy,
         "codex": .agentCodex,
         "copilot": .agentCopilot, "cursor": .agentCursor, "grok": .agentGrok,
-        "kilo": .agentKilo, "kimi": .agentKimi, "omp": .agentOmp, "opencode": .agentOpencode, "pi": .agentPi,
+        "kilo": .agentKilo, "kimi": .agentKimi, "minimax": .agentMinimax, "omp": .agentOmp, "opencode": .agentOpencode, "pi": .agentPi,
         "goose": .agentGoose, "qwen": .agentQwen,
     ]
 
