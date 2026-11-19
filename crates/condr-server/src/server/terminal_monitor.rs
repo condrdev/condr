@@ -415,7 +415,18 @@ pub(super) fn apply_agent_refresh(
         state.complete_agent_waits();
         return;
     }
-    let state_changed = previous.map(|agent| agent.state) != next.as_ref().map(|agent| agent.state);
+    // Only a state a turn puts the agent in shows that one began: an agent names its
+    // conversation, clears its record or repeats Idle before it works (Kimi Code).
+    let turn_moved = next.as_ref().is_some_and(|agent| {
+        previous.map(|previous| previous.state) != Some(agent.state)
+            && matches!(
+                agent.state,
+                condr_core::AgentState::Working
+                    | condr_core::AgentState::Blocked
+                    | condr_core::AgentState::Done
+                    | condr_core::AgentState::Error
+            )
+    });
     // The one place that sees both states, so pushes are found here (ADR 0047).
     let alert = next
         .as_ref()
@@ -458,7 +469,7 @@ pub(super) fn apply_agent_refresh(
     if let Some(unseen) = unseen {
         state.set_agent_unseen(pane_id, unseen);
     }
-    state.agent_changed(pane_id, state_changed);
+    state.agent_changed(pane_id, turn_moved);
 }
 
 pub(super) fn apply_terminal_notices(

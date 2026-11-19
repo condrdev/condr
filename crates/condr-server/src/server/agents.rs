@@ -622,10 +622,10 @@ impl RuntimeState {
         }
     }
 
-    /// Only a new state answers a wait for the turn a prompt started: an agent often names
-    /// its conversation before it reports working.
-    pub(super) fn agent_changed(&mut self, pane_id: PaneId, state_changed: bool) {
-        if state_changed {
+    /// Only a turn moving answers a wait for the turn a prompt started; see
+    /// `apply_agent_refresh`.
+    pub(super) fn agent_changed(&mut self, pane_id: PaneId, turn_moved: bool) {
+        if turn_moved {
             for wait in self
                 .agent_control
                 .waiters
