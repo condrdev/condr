@@ -29,7 +29,7 @@ try {
     ["ses_child", { id: "ses_child", parentID: "ses_B" }],
   ])
   const status = new Map([["ses_A", "busy"], ["ses_B", "idle"]])
-  const route = { current: { name: "session", params: { sessionID: "ses_A" } } }
+  const route = { current: { name: "home" } }
   let permission = [], question = []
   const reports = () => readFileSync("reports", "utf8").trim().split("\n").filter(Boolean).map(JSON.parse)
   const waitFor = async (predicate) => {
@@ -47,6 +47,10 @@ try {
     } },
     lifecycle: { onDispose: fn => { dispose = fn } },
   })
+  // The home screen takes a prompt before any conversation exists.
+  await waitFor(() => reports().length > 0)
+  assert.deepEqual(reports()[0], { event: "session-start" }, "the home screen is Idle with no session")
+  route.current = { name: "session", params: { sessionID: "ses_A" } }
   await waitFor(() => reports().at(-1)?.event === "prompt-submit")
   route.current = { name: "session", params: { sessionID: "ses_B" } }
   await waitFor(() => reports().at(-1)?.session_id === "ses_B" && reports().at(-1)?.event === "stop")
@@ -69,7 +73,7 @@ try {
   route.current = { name: "session", params: { sessionID: "ses_A" } }
   await delay(150)
   assert.equal(reports().length, before)
-  console.log("OpenCode: existing-session switch, stale root, child isolation, status and disposal passed")
+  console.log("OpenCode: home screen, existing-session switch, stale root, child isolation, status and disposal passed")
 } finally {
   dispose()
   process.chdir(originalCwd)

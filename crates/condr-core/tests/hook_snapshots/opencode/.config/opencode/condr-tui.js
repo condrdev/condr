@@ -22,24 +22,35 @@ export default {
       try {
         const route = api.route.current
         const id = route.name === "session" ? route.params?.sessionID : undefined
-        const session = id && api.state.session.get(id)
-        if (!session || session.parentID) return
-        if (selected !== id) {
-          if (!await report("session-start", id)) return
-          selected = id
-          last = undefined
+        let event, detail
+        if (id === undefined) {
+          // The home screen takes a prompt but holds no conversation yet: Idle, with no
+          // session to resume.
+          if (selected !== null) {
+            selected = null
+            last = undefined
+          }
+          event = "session-start"
+        } else {
+          const session = api.state.session.get(id)
+          if (!session || session.parentID) return
+          if (selected !== id) {
+            if (!await report("session-start", id)) return
+            selected = id
+            last = undefined
+          }
+          const status = api.state.session.status(id)?.type
+          const [permission] = api.state.session.permission(id)
+          const [question] = api.state.session.question(id)
+          event = permission ? "permission-request"
+            : question ? "question-asked"
+            : status === "busy" || status === "retry" ? "prompt-submit"
+            : status === "idle" ? "stop" : undefined
+          // What the wait is for (ADR 0024); the Rust side bounds it.
+          const text = (value) => typeof value === "string" && value ? value : undefined
+          detail = permission ? text(permission.title) ?? text(permission.permission) ?? text(permission.type)
+            : question ? text(question.questions?.[0]?.question) ?? text(question.question) : undefined
         }
-        const status = api.state.session.status(id)?.type
-        const [permission] = api.state.session.permission(id)
-        const [question] = api.state.session.question(id)
-        const event = permission ? "permission-request"
-          : question ? "question-asked"
-          : status === "busy" || status === "retry" ? "prompt-submit"
-          : status === "idle" ? "stop" : undefined
-        // What the wait is for (ADR 0024); the Rust side bounds it.
-        const text = (value) => typeof value === "string" && value ? value : undefined
-        const detail = permission ? text(permission.title) ?? text(permission.permission) ?? text(permission.type)
-          : question ? text(question.questions?.[0]?.question) ?? text(question.question) : undefined
         // A hook can precede process discovery. A sparse heartbeat also recovers that
         // first report without queuing work or blocking the TUI on child processes.
         const key = `${event}\n${detail ?? ""}`
