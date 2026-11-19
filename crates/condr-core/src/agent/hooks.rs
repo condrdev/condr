@@ -61,9 +61,13 @@ pub(super) enum HookFormat {
         events: &'static [HookEntry],
         exec: bool,
     },
-    /// `[[hooks]]` tables of `event`, `matcher`, `command` and `timeout` in a TOML
-    /// configuration, kept beside the person's own entries and the rest of the file.
-    TomlArray { events: &'static [HookEntry] },
+    /// `[[hooks]]` tables in a TOML configuration, kept beside the person's own entries
+    /// and the rest of the file: the event and its matcher under `keys`' names, then
+    /// `command` and `timeout`.
+    TomlArray {
+        events: &'static [HookEntry],
+        keys: TomlKeys,
+    },
     /// A script Condr owns outright, from a template that may name
     /// `__CONDR_EXECUTABLE__`, `__CONDR_AGENT__` and `__CONDR_AGENT_MARKER__`. `registry`
     /// is the JSON file in the configuration directory whose `plugin` list must name it.
@@ -71,6 +75,15 @@ pub(super) enum HookFormat {
         template: &'static str,
         registry: Option<&'static str>,
     },
+}
+
+/// What a TOML hook table calls its fields.
+#[derive(Debug)]
+pub(super) struct TomlKeys {
+    pub(super) event: &'static str,
+    pub(super) matcher: &'static str,
+    /// Whether each table needs a unique `name`, which Condr makes from its event.
+    pub(super) named: bool,
 }
 
 /// What runs a nested map's command line on Windows, which decides whether a quoted path

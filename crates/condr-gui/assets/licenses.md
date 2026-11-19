@@ -339,6 +339,8 @@ LobeHub), as packages/static-svg/icons/<name>.svg:
   qoder.svg        Qoder, of Alibaba Cloud
   goose.svg        Goose, of its maintainers; fetched on 2026-11-19
   codebuddy.svg    CodeBuddy, of Tencent; fetched on 2026-11-19
+  vibe.svg         mistral: Mistral, of Mistral AI, for Mistral Vibe; fetched on
+                   2026-11-19
 
 From Oh My Pi (https://github.com/can1357/oh-my-pi, MIT, Copyright (c) 2025
 Mario Zechner), assets/icon.svg:

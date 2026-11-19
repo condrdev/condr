@@ -315,6 +315,7 @@ impl From<AgentKind> for super::AgentKind {
             AgentKind::Kilo => Self::Kilo,
             AgentKind::CodeBuddy => Self::CodeBuddy,
             AgentKind::MiniMax => Self::MiniMax,
+            AgentKind::Vibe => Self::Vibe,
             AgentKind::Other => Self::Other,
         }
     }
@@ -347,6 +348,7 @@ pub(crate) fn agent_kind(raw: i32) -> WireResult<AgentKind> {
         super::AgentKind::Kilo => AgentKind::Kilo,
         super::AgentKind::CodeBuddy => AgentKind::CodeBuddy,
         super::AgentKind::MiniMax => AgentKind::MiniMax,
+        super::AgentKind::Vibe => AgentKind::Vibe,
         super::AgentKind::Other => AgentKind::Other,
     })
 }

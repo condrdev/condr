@@ -31,6 +31,10 @@ RUN curl -fsSL "https://github.com/aaif-goose/goose/releases/latest/download/goo
 RUN npm install -g --no-audit --no-fund @kilocode/cli
 RUN npm install -g --no-audit --no-fund @tencent-ai/codebuddy-code
 RUN npm install -g --no-audit --no-fund @minimax-ai/code
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/
+RUN UV_TOOL_DIR=/opt/uv/tools UV_PYTHON_INSTALL_DIR=/opt/uv/python UV_TOOL_BIN_DIR=/usr/local/bin \
+        uv tool install mistral-vibe \
+    && chmod -R a+rX /opt/uv
 
 # A release tag, `nightly` or `latest`, fetched again on every build: run.sh changes FETCHED.
 ARG CONDR_VERSION=nightly

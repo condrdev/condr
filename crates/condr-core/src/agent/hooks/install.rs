@@ -87,7 +87,7 @@ pub fn state(target: &HookTarget, agent: AgentKind) -> io::Result<HooksState> {
         HookFormat::NestedMap { .. } | HookFormat::FlatList { .. } => {
             map_state(target, agent, hooks, &path)
         }
-        HookFormat::TomlArray { events } => {
+        HookFormat::TomlArray { events, keys } => {
             let mut found: Vec<_> = toml_hooks_ours(&read_toml(&path)?, agent, target)
                 .map(toml_entry)
                 .collect();
@@ -96,7 +96,7 @@ pub fn state(target: &HookTarget, agent: AgentKind) -> io::Result<HooksState> {
             }
             let mut expected: Vec<_> = events
                 .iter()
-                .map(|entry| toml_entry(&toml_item(target, agent, entry)))
+                .map(|entry| toml_entry(&toml_item(target, agent, entry, keys)))
                 .collect();
             found.sort();
             expected.sort();
@@ -178,12 +178,12 @@ pub fn install(target: &HookTarget, agent: AgentKind) -> io::Result<PathBuf> {
             }
             write_config(&path, &root)?;
         }
-        HookFormat::TomlArray { events } => {
+        HookFormat::TomlArray { events, keys } => {
             let mut document = read_toml(&path)?;
             let tables = toml_hooks(&path, &mut document)?;
             tables.retain(|table| !toml_is_ours(table, agent, target));
             for entry in *events {
-                tables.push(toml_item(target, agent, entry));
+                tables.push(toml_item(target, agent, entry, keys));
             }
             write_file(&path, document.to_string().as_bytes())?;
         }
@@ -526,8 +526,6 @@ fn check_owned(path: &Path, marker: &str) -> io::Result<()> {
     }
 }
 
-/// `None` when the file does not exist. Anything unreadable, oversized or not a JSON
-/// object is an error, so a broken file is never overwritten.
 /// A TOML configuration as written, or an empty one where there is none.
 fn read_toml(path: &Path) -> io::Result<toml_edit::DocumentMut> {
     match std::fs::read_to_string(path) {
@@ -570,11 +568,19 @@ fn toml_is_ours(table: &toml_edit::Table, agent: AgentKind, target: &HookTarget)
 }
 
 /// What Condr writes for one event of a TOML hook array.
-fn toml_item(target: &HookTarget, agent: AgentKind, entry: &HookEntry) -> toml_edit::Table {
+fn toml_item(
+    target: &HookTarget,
+    agent: AgentKind,
+    entry: &HookEntry,
+    keys: &TomlKeys,
+) -> toml_edit::Table {
     let mut table = toml_edit::Table::new();
-    table["event"] = toml_edit::value(entry.native);
+    if keys.named {
+        table["name"] = toml_edit::value(format!("condr-{}", entry.event.name()));
+    }
+    table[keys.event] = toml_edit::value(entry.native);
     if let Some(matcher) = entry.matcher {
-        table["matcher"] = toml_edit::value(matcher);
+        table[keys.matcher] = toml_edit::value(matcher);
     }
     table["command"] = toml_edit::value(target.hook_command(agent, entry.event, &HookShell::Plain));
     table["timeout"] = toml_edit::value(entry.timeout_secs as i64);
@@ -591,6 +597,8 @@ fn toml_entry(table: &toml_edit::Table) -> Vec<(String, String)> {
     entry
 }
 
+/// `None` when the file does not exist. Anything unreadable, oversized or not a JSON
+/// object is an error, so a broken file is never overwritten.
 fn read_config(path: &Path) -> io::Result<Option<Value>> {
     let bytes = match std::fs::metadata(path) {
         Ok(metadata) if metadata.len() > MAX_CONFIG_BYTES => {

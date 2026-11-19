@@ -1,6 +1,6 @@
 //! Kimi Code, fully supported through its own reports (ADR 0071).
 
-use super::hooks::{HookEntry, HookFormat, HookSpec, HookTarget, entry};
+use super::hooks::{HookEntry, HookFormat, HookSpec, HookTarget, TomlKeys, entry};
 use super::{AgentEventKind, AgentSpec, AgentSupport, InitialPrompt};
 
 pub(super) const SPEC: AgentSpec = AgentSpec {
@@ -20,7 +20,14 @@ pub(super) const SPEC: AgentSpec = AgentSpec {
     // A subagent's Stop arrives under the main session's ID, so the hooks only name the
     // conversation; the state is what Kimi Code reports itself.
     support: AgentSupport::ProgramStatus(HookSpec {
-        format: HookFormat::TomlArray { events: HOOKS },
+        format: HookFormat::TomlArray {
+            events: HOOKS,
+            keys: TomlKeys {
+                event: "event",
+                matcher: "matcher",
+                named: false,
+            },
+        },
         dir: |target: &HookTarget| target.env_dir("KIMI_CODE_HOME", ".kimi-code"),
         file: "config.toml",
         question_tool: None,

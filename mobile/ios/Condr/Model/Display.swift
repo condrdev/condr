@@ -38,7 +38,7 @@ enum AgentMarks {
         "codex": .agentCodex,
         "copilot": .agentCopilot, "cursor": .agentCursor, "grok": .agentGrok,
         "kilo": .agentKilo, "kimi": .agentKimi, "minimax": .agentMinimax, "omp": .agentOmp, "opencode": .agentOpencode, "pi": .agentPi,
-        "goose": .agentGoose, "qwen": .agentQwen,
+        "goose": .agentGoose, "qwen": .agentQwen, "vibe": .agentVibe,
     ]
 
     static func resource(for kind: String?) -> ImageResource? {

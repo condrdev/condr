@@ -27,6 +27,7 @@ mod pi;
 mod process;
 pub mod program_status;
 mod qwen;
+mod vibe;
 
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
@@ -162,6 +163,7 @@ pub enum AgentKind {
     Kilo,
     CodeBuddy,
     MiniMax,
+    Vibe,
     /// A kind a newer Server reported that this build does not know (ADR 0028): shown as
     /// a generic agent. Nothing detects or launches it, so it is not in [`Self::ALL`]. It
     /// stays last, which the spec table's test relies on.
@@ -169,7 +171,7 @@ pub enum AgentKind {
 }
 
 impl AgentKind {
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::Claude,
         Self::Codex,
         Self::OpenCode,
@@ -185,6 +187,7 @@ impl AgentKind {
         Self::Kilo,
         Self::CodeBuddy,
         Self::MiniMax,
+        Self::Vibe,
     ];
 
     /// The one `match` on the kind: everything else asks its spec.
@@ -205,6 +208,7 @@ impl AgentKind {
             Self::Kilo => &kilo::SPEC,
             Self::CodeBuddy => &codebuddy::SPEC,
             Self::MiniMax => &minimax::SPEC,
+            Self::Vibe => &vibe::SPEC,
             Self::Other => &OTHER,
         }
     }

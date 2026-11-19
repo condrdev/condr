@@ -220,8 +220,28 @@ def minimax(base, model):
     return {}
 
 
+def vibe(base, model):
+    write(".vibe/config.toml", f"""active_model = "condr-e2e"
+enable_telemetry = false
+enable_update_checks = false
+
+[[providers]]
+name = "condr-e2e"
+api_base = "{base}"
+api_key_env_var = "{KEY_ENV}"
+backend = "generic"
+api_style = "openai"
+
+[[models]]
+name = "{model}"
+provider = "condr-e2e"
+alias = "condr-e2e"
+""")
+    return {}
+
+
 PROFILES = {f.__name__: f for f in (pi, omp, grok, copilot, opencode, kimi, qwen, goose, kilo,
-                                    codebuddy, minimax)}
+                                    codebuddy, minimax, vibe)}
 
 
 class Failed(Exception):

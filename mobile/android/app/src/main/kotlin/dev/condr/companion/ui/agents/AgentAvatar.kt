@@ -39,6 +39,7 @@ object AgentMarks {
       "opencode" to R.drawable.agent_opencode,
       "pi" to R.drawable.agent_pi,
       "qwen" to R.drawable.agent_qwen,
+      "vibe" to R.drawable.agent_vibe,
     )
 
   /** The mark for the Agent's kind, or none for a kind this build has no mark for. */

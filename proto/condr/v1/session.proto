@@ -108,6 +108,7 @@ enum AgentKind {
   AGENT_KIND_KILO = 14;
   AGENT_KIND_CODE_BUDDY = 15;
   AGENT_KIND_MINI_MAX = 16;
+  AGENT_KIND_VIBE = 17;
 }
 
 // Unknown decodes to UNKNOWN.

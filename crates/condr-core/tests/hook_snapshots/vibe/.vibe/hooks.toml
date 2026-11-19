@@ -1,0 +1,46 @@
+[[hooks]]
+name = "condr-session-start"
+type = "session_start"
+command = "condr agent-hook vibe session-start"
+timeout = 5
+
+[[hooks]]
+name = "condr-prompt-submit"
+type = "pre_agent"
+match = "main"
+command = "condr agent-hook vibe prompt-submit"
+timeout = 5
+
+[[hooks]]
+name = "condr-stop"
+type = "post_agent"
+match = "main"
+command = "condr agent-hook vibe stop"
+timeout = 5
+
+[[hooks]]
+name = "condr-permission-request"
+type = "notification"
+match = "approval_requested"
+command = "condr agent-hook vibe permission-request"
+timeout = 5
+
+[[hooks]]
+name = "condr-question-asked"
+type = "notification"
+match = "question_asked"
+command = "condr agent-hook vibe question-asked"
+timeout = 5
+
+[[hooks]]
+name = "condr-stop-failure"
+type = "notification"
+match = "turn_failed"
+command = "condr agent-hook vibe stop-failure"
+timeout = 5
+
+[[hooks]]
+name = "condr-tool-complete"
+type = "post_tool"
+command = "condr agent-hook vibe tool-complete"
+timeout = 5
