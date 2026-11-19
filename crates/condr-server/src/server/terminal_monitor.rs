@@ -415,6 +415,7 @@ pub(super) fn apply_agent_refresh(
         state.complete_agent_waits();
         return;
     }
+    let state_changed = previous.map(|agent| agent.state) != next.as_ref().map(|agent| agent.state);
     // The one place that sees both states, so pushes are found here (ADR 0047).
     let alert = next
         .as_ref()
@@ -457,7 +458,7 @@ pub(super) fn apply_agent_refresh(
     if let Some(unseen) = unseen {
         state.set_agent_unseen(pane_id, unseen);
     }
-    state.agent_state_changed(pane_id);
+    state.agent_changed(pane_id, state_changed);
 }
 
 pub(super) fn apply_terminal_notices(

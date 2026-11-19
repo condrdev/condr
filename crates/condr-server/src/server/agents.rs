@@ -622,14 +622,18 @@ impl RuntimeState {
         }
     }
 
-    pub(super) fn agent_state_changed(&mut self, pane_id: PaneId) {
-        for wait in self
-            .agent_control
-            .waiters
-            .values_mut()
-            .filter(|wait| wait.pane_id == pane_id)
-        {
-            wait.needs_change = false;
+    /// Only a new state answers a wait for the turn a prompt started: an agent often names
+    /// its conversation before it reports working.
+    pub(super) fn agent_changed(&mut self, pane_id: PaneId, state_changed: bool) {
+        if state_changed {
+            for wait in self
+                .agent_control
+                .waiters
+                .values_mut()
+                .filter(|wait| wait.pane_id == pane_id)
+            {
+                wait.needs_change = false;
+            }
         }
         if let Some(managed) = self.agent_control.names.get_mut(&pane_id)
             && managed.observed

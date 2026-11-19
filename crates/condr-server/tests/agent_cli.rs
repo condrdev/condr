@@ -64,7 +64,7 @@ impl Server {
 printf 'started\n' >> "$CONDR_TEST_STARTS"
 printf '%s\n' "$@" > "$CONDR_TEST_ARGS"
 agent="$(basename "$0")"
-report() { printf '{"session_id":"fixture","source":"startup"}' | condr agent-hook "$agent" "$1"; }
+report() { printf '{"session_id":"%s","source":"startup"}' "${2:-fixture}" | condr agent-hook "$agent" "$1"; }
 case "$1" in
   --exit) exit 0 ;;
   --blocked) report permission-request ;;
@@ -75,6 +75,8 @@ esac
 while IFS= read -r line; do
   printf '%s\n' "$line" >> "$CONDR_TEST_PROMPTS"
   [ "$line" = quit ] && exit 0
+  # Names a new conversation before the turn, as Pi, OMP and Copilot do.
+  [ "$line" = renamed ] && report session-start renamed && sleep 1
   report prompt-submit
   sleep 1
   report stop
@@ -254,7 +256,7 @@ fn windows_agent_fixture() {
             .unwrap();
         writeln!(file, "{text}").unwrap();
     };
-    let report = |event: &str| {
+    let report = |event: &str, session: &str| {
         use std::process::{Command, Stdio};
         let mut hook = Command::new("condr")
             .args(["agent-hook", &slug, event])
@@ -265,7 +267,7 @@ fn windows_agent_fixture() {
         hook.stdin
             .take()
             .unwrap()
-            .write_all(br#"{"session_id":"fixture","source":"startup"}"#)
+            .write_all(format!(r#"{{"session_id":"{session}","source":"startup"}}"#).as_bytes())
             .unwrap();
         hook.wait().unwrap();
     };
@@ -281,10 +283,10 @@ fn windows_agent_fixture() {
     .unwrap();
     match args.first().map(String::as_str) {
         Some("--exit") => return,
-        Some("--blocked") => report("permission-request"),
-        Some("--working") => report("prompt-submit"),
+        Some("--blocked") => report("permission-request", "fixture"),
+        Some("--working") => report("prompt-submit", "fixture"),
         Some("--silent") => {}
-        _ => report("session-start"),
+        _ => report("session-start", "fixture"),
     }
     for line in std::io::stdin().lock().lines() {
         let line = line.unwrap();
@@ -292,9 +294,13 @@ fn windows_agent_fixture() {
         if line == "quit" {
             return;
         }
-        report("prompt-submit");
+        if line == "renamed" {
+            report("session-start", "renamed");
+            thread::sleep(Duration::from_secs(1));
+        }
+        report("prompt-submit", "fixture");
         thread::sleep(Duration::from_secs(1));
-        report("stop");
+        report("stop", "fixture");
     }
 }
 
@@ -506,6 +512,27 @@ fn discovers_on_server_starts_once_and_prompts_by_name() {
         thread::sleep(Duration::from_millis(100));
     }
     assert_eq!(server.ok(&launch)["agent"]["name"], "worker");
+}
+
+/// The first prompt often makes an agent name its conversation before it reports working;
+/// `--wait` waits for the turn, not for that.
+#[test]
+fn prompt_wait_outlasts_a_report_that_only_names_the_conversation() {
+    let server = Server::start();
+    let pane = server.pane();
+    server.ok(&[
+        "agent", "start", "worker", "--kind", "claude", "--pane", &pane,
+    ]);
+    let prompted = server.ok(&[
+        "agent",
+        "prompt",
+        "worker",
+        "renamed",
+        "--wait",
+        "--timeout",
+        "8000",
+    ]);
+    assert_eq!(prompted["agent"]["agent_status"], "done");
 }
 
 #[test]
