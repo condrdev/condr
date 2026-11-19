@@ -13,8 +13,9 @@ pub(super) const SPEC: AgentSpec = AgentSpec {
     aliases: &["github-copilot"],
     packages: &["@github/copilot"],
     resume: &["--resume={id}"],
-    // sessionStart waits for the first prompt.
-    reports_at_startup: false,
+    // sessionStart waits for the first prompt, but from 1.0.107 Copilot reports Idle over
+    // OSC 7501 once its prompt is ready, and a prompt typed sooner is lost.
+    reports_at_startup: true,
     reads_kitty_keys: false,
     initial_prompt: InitialPrompt::Flag("-i"),
     support: AgentSupport::Full(HookSpec {
@@ -30,7 +31,7 @@ pub(super) const SPEC: AgentSpec = AgentSpec {
         reply: None,
         enable: None,
         note: Some(
-            "Copilot can omit its completion hook after an API error; status may stay Working until the next completion or process exit",
+            "Requires Copilot 1.0.107 or newer, which reports its state from startup; older releases can omit the completion hook after an API error, leaving the status Working",
         ),
     }),
 };

@@ -47,7 +47,7 @@ fn new_agents_are_identified_through_native_commands_and_npm_launchers() {
         .args(),
         ["--resume=conversation"]
     );
-    assert!(!AgentKind::Copilot.spec().reports_at_startup);
+    assert!(AgentKind::Copilot.spec().reports_at_startup);
     assert!(!AgentKind::Cursor.spec().reports_at_startup);
 }
 

@@ -90,7 +90,7 @@ Agent 状态只来自 Agent 自身。支持 Program Status Protocol 的 Agent �
 
 1. **检查 Hook 状态**：运行 `condr agent hooks status <agent>`（例如 `condr agent hooks status claude`）。显示 `missing` 时需要安装；显示 `outdated` 时需要重新安装；显示 `unsupported` 表示该 Agent 仅识别，Condr 不会为其安装 Hook，状态会保持 Unknown，详见[支持级别](/zh-cn/docs/using/agents/#支持级别)。对于远程设备，请在 **设置**（Settings）顶部选择该设备并打开 **Agent 集成**（Agent integrations）查看；命令行 `agent hooks` 仅对本机生效。
 2. **确认运行环境位于 Condr Pane 内部**：Hook 仅在环境变量预注入 `CONDR_ENV=1` 的终端会话中触发上报。Condr 无法监视外部独立终端中运行的 Agent 进程。
-3. **识别特定 Agent 的初始上报行为**：Codex、Copilot 及 Antigravity 在收到首次 prompt 输入前不发送状态；Cursor 在执行会话恢复（Resume）期间亦不触发上报，此阶段状态将始终显示为 Unknown。
+3. **识别特定 Agent 的初始上报行为**：Codex 及 Antigravity 在收到首次 prompt 输入前不发送状态；Cursor 在执行会话恢复（Resume）期间亦不触发上报，此阶段状态将始终显示为 Unknown。
 4. **验证 Codex 的 Hook 信任授权**：Codex 要求必须开启 hooks 特性开关并显式授予信任。执行 Condr Hook 安装流程时会尝试自动配置；若配置失败，需手动在 Codex 的 `config.toml` 内追加 `[features] hooks = true`，随后进入 Codex 终端执行 `/hooks` 命令完成信任授权确认。
 5. **激活 Antigravity 插件配置**：完成 Hook 文件部署后，需在 Antigravity CLI 交互环境中手动启用 condr 插件。
 6. **核对 Hook 写入路径一致性**：安装阶段 Condr 根据当前上下文的环境变量（例如 `CLAUDE_CONFIG_DIR`、`CODEX_HOME`）决定 Hook 部署路径。CLI 操作依据当前终端所处环境变量，而图形设置界面基于 Server 进程的环境变量。若 Agent 运行期所寻址的环境变量与 Hook 部署期不一致，将无法加载 Hook 脚本。
