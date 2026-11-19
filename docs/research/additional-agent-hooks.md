@@ -380,3 +380,29 @@ OpenCode、Pi/OMP 的字段名来自各自公开 API 的类型定义，未逐一
 - 本次网关对 Grok、Copilot 发往 Responses 的请求回 400，两者改用 Chat Completions；并发过高时回 `gateway_concurrency_limit`，脚本因此一次最多跑三个容器。Condr 都正确把这些失败报为 error。
 
 未覆盖：Cursor 与 Antigravity（需各自账号）、Claude Code 与 Codex（日常使用；Codex 0.163 起也讲 OSC 7501，其 `reports_at_startup: false` 可能与 Copilot 同理，未验证）、Windows ConPTY、GUI。
+
+## 第二批 Agent（2026-11-19）
+
+同日调研并接入。候选来自三路网页调研（只读官方文档、固定版本源码与 changelog），每个 CLI 再在容器里用真实会话验证。依据 ADR 0071 新增"经自身上报完整支持"一级。`CONDR_VERSION=local script/agent-e2e/run.sh` 的全量结果：
+
+| CLI | 版本 | 级别 | hooks | start | turn | session | wait | resume | blocked |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Kimi Code | 2.6.3 | 经自身上报完整支持 | 通过 | 通过 | 通过 | 通过 | 通过 | 通过 | 通过 |
+| Qwen Code | 0.28.0 | 完整支持 | 通过 | 通过 | 通过 | 通过 | 通过 | 通过 | 通过（`tools.approvalMode: default`） |
+| Kilo Code | 7.8.27 | 完整支持 | 通过 | 通过 | 通过 | 通过 | 通过 | 通过 | 通过（`permission.bash: ask`，Ctrl+C 取消） |
+| CodeBuddy Code | 2.185.0 | 完整支持 | 通过 | 通过 | 见下 | — | — | — | — |
+| Mistral Vibe | 3.1.3 | 完整支持 | 通过 | 通过 | 通过 | 通过 | 通过 | 通过 | 通过（Ctrl+C 取消） |
+| Goose | 1.60.1 | 仅识别 | 不安装 | 通过 | 通过（读屏） | 状态经 OSC 7501 | — | — | — |
+| MiniMax Code | 0.7.8 | 仅识别 | 不安装 | 通过 | 通过（读屏） | 状态经 OSC 7501 | — | — | — |
+
+各 CLI 的要点：
+
+- **Kimi Code**：hooks 是 `~/.kimi-code/config.toml`（`KIMI_CODE_HOME`）里的 `[[hooks]]`；子 Agent 的 `TurnStarted`、`Stop` 与主 Agent 同 `session_id`，`Stop` 不带来源，所以只装 `SessionStart`（第一条消息时触发，子 Agent 不触发），状态全凭 OSC 7501（2.4.0 起，`app=kimi-code`）。它在回合开始前先发 `clear` 再发 `idle`，且在自己的 TUI 里写 OSC 133 `A/B/C`，分别促成了 `--wait` 只认回合状态的修正（d626e1f5）与 ADR 0070。信任弹窗报 `blocked:kind=permission`。无交互式首条提示参数。
+- **Qwen Code**：Claude 格式 hooks，写入 `~/.qwen/settings.json`（`QWEN_HOME`）；`Stop` 只给主 Agent，子 Agent 内触发的事件带 `agent_id`，由 `adjust` 丢弃。OSC 7501 自 0.26.9（`app=qwen-code`，npm 版 Ink 渲染器才发）。**上游问题**：启动约 1 秒就报 idle，但输入框此时尚未就绪，`agent start` 返回后立刻发送的提示词会丢（时有时无，测试脚本记为 NOTE 并重发）。
+- **Kilo Code**：OpenCode 的分支，TUI 插件接口相同，复用 `opencode.js`，装在 `$XDG_CONFIG_HOME/kilo`，登记在 `tui.json`。
+- **CodeBuddy Code**：Claude 格式 hooks，写入 `~/.codebuddy/settings.json`（`CODEBUDDY_CONFIG_DIR`），用户级 hooks 无需在 `/hooks` 确认。不讲 OSC 7501。新目录先问信任，答完才触发 `SessionStart`。交互模式要登录，设了 `CODEBUDDY_API_KEY` 可匿名进入，但这个 key 会拿去 codebuddy.ai 校验：首次探测通过（`5555` 正常返回），之后一直回 504 "API key verification service temporarily unavailable"，所以全量测试的 turn 失败在它的外部服务。已在真实会话里验证 hooks 安装、启动 Idle、提交 Working、`Stop` 到 Done；成功回复后的 session、resume、Blocked 尚未验证。API 出错时它触发的是 `Stop` 而非 `StopFailure`。
+- **Mistral Vibe**：`vibe` 启动器 exec 出 Rust TUI，hooks 由 `vibe-app-server` 子进程执行且没有控制终端，靠 b37fbb8d 的 `/proc` 路径找到 Pane 的终端。`~/.vibe/hooks.toml`（`VIBE_HOME`）里每条 `[[hooks]]` 需唯一 `name`，事件键为 `type`、匹配键为 `match`；`pre_agent`/`post_agent` 以 `match = "main"` 排除子 Agent，`session_start` 不给子 Agent。OSC 7501 自 3.0（`app=vibe`，仅 Unix）。中断不触发任何 hook。
+- **Goose**：子 Agent 也触发 `SessionStart`，带它自己的新 `session_id`，payload 与环境变量都没有区分字段，装 `SessionStart` 会把恢复 ID 换成子 Agent 的，故仅识别（ADR 0071）。OSC 7501 自 1.56（`app=goose`）。没有配置文件时会进入 `goose configure` 向导。
+- **MiniMax Code**：只从它自己插件系统安装的插件加载 hooks，插件状态存在它的数据库里，npm 版没有可写的本地插件目录（`plugin marketplace list` 报 "not available in this build"），故仅识别。OSC 7501 为 `app=mcode`。provider 须用 `mcode provider add … --use` 写入并设为默认，手写的配置会报 setup warning。
+
+未接入：Gemini CLI、Qoder CLI、Kiro、Factory Droid、Devin、Amp、Auggie 需要各自账号或 key；Crush 没有交互式首条提示参数；Cline CLI 与 Hermes 的 hooks 可能在后台 hub 进程里执行，需要先做实验；iFlow 已停服，OpenHands CLI、Continue、Aider 已停止维护；TRAE CLI 的 hooks 没有文档。
