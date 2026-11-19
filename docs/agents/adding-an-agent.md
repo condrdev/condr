@@ -8,7 +8,7 @@ The level follows from what the CLI's own hooks can report, never from how far i
 
 - **Fully supported**: the hooks report a turn starting, and the main agent's turn ending told apart from a subagent's, so `Working` and `Idle` can be trusted. An agent with no event for a permission prompt or a question still qualifies; its `note` says it never shows `Blocked` for that.
 - An agent that speaks the Program Status Protocol (OSC 7501, ADR 0044) reports its state without hooks, but the level is still decided by its hooks: they alone carry the session ID a restart resumes with. Its reports count once the `app` they carry resolves to the agent through `AgentKind::parse_label`, so its `app` value (`claude-code`, `grok-build`) must be its id, its executable or one of its `aliases`; [program-status-emitters.md](../research/program-status-emitters.md) lists what each CLI sends.
-- **Recognized only**: the process table names it, but its hooks cannot report a state worth trusting. Its `support` is `AgentSupport::RecognitionOnly(reason)`, nothing is installed, and it stays `Unknown`. Kimi is the example.
+- **Recognized only**: the process table names it, but its hooks cannot report a state worth trusting. Its `support` is `AgentSupport::RecognitionOnly(reason)`, nothing is installed, and it stays `Unknown` unless it reports through the Program Status Protocol itself. Kimi Code is the example.
 
 Never guess a state from the screen (ADR 0014). If the hooks cannot tell the main agent's Stop from a subagent's, the agent is recognized only.
 
@@ -25,5 +25,6 @@ Never guess a state from the screen (ADR 0014). If the hooks cannot tell the mai
 
 - `cargo test -p condr-core` covers the spec table, process recognition and the snapshots.
 - `cargo test -p condr-gui` covers the mark: its asset test fails when `CONDR_ICON_PATHS` or the `load` match misses it.
+- `script/agent-e2e/run.sh <id>` runs the CLI through a real Session in a throwaway Docker container, on the model the host's Codex config names, and nothing touches the host: hooks, `agent start`, a turn watched from `Working` to `Idle`, the session ID, `agent prompt --wait`, resuming after `server restart`, and a permission prompt. `CONDR_VERSION=local` tests this checkout, built for Linux in a throwaway Rust container; otherwise it tests a release, nightly unless `CONDR_VERSION` names another. A new agent needs its install line in `script/agent-e2e/Dockerfile` and its model configuration in `e2e.py`'s `PROFILES`; its report row goes into `docs/research/additional-agent-hooks.md`.
 - Run one real session in a Condr Pane: install the hooks from Settings, start the CLI, submit a prompt, and watch the sidebar go from `Working` to `Idle`. On Windows, the shell that runs the hook command decides whether a quoted path needs PowerShell's call operator, so check the hooks run there too when the CLI uses PowerShell.
 - A gap in real-session coverage is a known limitation to record, not a reason to change the agent's level.

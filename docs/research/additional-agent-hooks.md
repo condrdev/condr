@@ -347,3 +347,36 @@ Windows 11 笔记本、ConPTY、PowerShell Pane，隔离 Server（`CONDR_SOCKET_
 | Cursor | 无实际等待事件 | 无 |
 
 OpenCode、Pi/OMP 的字段名来自各自公开 API 的类型定义，未逐一在真机上抓包核对；取不到时 `detail` 缺省，状态仍是 `Blocked`。
+
+## 容器化端到端测试（2026-11-19）
+
+`script/agent-e2e/run.sh` 把每个 CLI 放进一次性 Docker 容器（本次 macOS + OrbStack，linux/arm64），起隔离的 Server，模型取主机 Codex 配置的 `gpt-6-astra`，主机上不装任何东西。`condr` 默认是 nightly；`CONDR_VERSION=local` 先在一次性 Rust 容器里把当前工作区编成 Linux 版再测。步骤：hooks 安装、`agent start`（首次运行弹窗按用户会按的键回答）、一轮对话（经 `agent list` 观测必须经过 working 再到 idle/done，屏幕出现答案）、session ID、同一轮上的 `agent prompt --wait`、`server restart` 后恢复且模型记得上一轮、工具审批的 Blocked 与 Esc/Ctrl+C。
+
+修复后（本地构建与 nightly `fdfb3e7d` 结果相同）：
+
+| CLI | 版本 | hooks | start | turn | session | wait | resume | blocked |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Pi | 1.5.2 | 通过 | 通过 | 通过 | 通过 | 通过 | 通过 | 无审批（Pi 无权限系统） |
+| OMP | 19.0.0 | 通过 | 通过 | 通过 | 通过 | 通过 | 通过 | 通过（`tools.approvalMode: always-ask`） |
+| Copilot | 1.0.114 | 通过 | 通过 | 通过 | 通过 | 通过 | 通过 | 通过 |
+| OpenCode | 1.19.6 | 通过 | 通过 | 通过 | 通过 | 通过 | 通过 | 通过（`permission.bash: ask`） |
+| Grok | 1.0.89 | 通过（信任弹窗报 Blocked） | 通过 | 通过 | 通过 | 通过 | 通过 | 通过（`ui.permission_mode = "ask"`，Ctrl+C 取消） |
+| Kimi Code | 2.6.3 | 仅识别 | 通过 | 通过（读屏） | 状态经 OSC 7501 显示 | — | — | — |
+
+修复前查出、已修的：
+
+1. **`agent prompt --wait` 在回合开始前返回**（50757b82）。Snapshot 的任何变化都清掉等待的"需要变化"，第一轮提交后 agent 先报 session ID（状态仍 idle），等待即以旧 idle 返回。现在只有状态变化才算。
+2. **Copilot 启动后马上打入的提示词丢失**（485d9cbd）。Copilot 自 1.0.107 起讲 OSC 7501，启动约 1 秒后报 idle；spec 改为 `reports_at_startup: true`，hooks 说明写明最低版本。
+3. **OpenCode 停在首页时一言不发**（b2f239c6）。插件只在进入会话后上报，`agent start` 等满超时。首页现在报不带会话的 session-start，即 Idle。
+4. **没有 `ps` 的 Linux 上，无终端的 hook 事件丢失**（b37fbb8d）。Grok 1.0.89 在独立会话里跑 hooks（`/dev/tty: No such device or address`），`condr agent-hook` 靠 `ps -o tty=` 找祖先的终端，最小系统（容器）没有 procps，session ID 丢失、无法恢复。Linux 上改为经 `/proc/<Pane 进程>/fd/0` 打开 Pane 的终端。装了 procps 的机器本来不受影响。
+5. **Agent 自己输出的提示符标记让状态半途变 Unknown**（74bf13b3，ADR 0070）。Kimi Code 在自己的 TUI 里写 OSC 133 `A/B/C`，Condr 照协议把 working 当作过期记录丢掉。进程表仍认出该 Agent 时，提示符标记不再生效。
+
+其余结论：
+
+- **kimi-cli 已被 Kimi Code 取代**（1.52 首次启动即自我迁移并退出）。Kimi Code 2.6.3 配置在 `~/.kimi-code/config.toml`，hooks 是该文件里的 `[[hooks]]`（另有插件，但须经它自己的 `/plugins install`），会话在第一条消息时才创建，`SessionStart` 随之触发。实测子 Agent 的 `TurnStarted`、`Stop` 与主 Agent 共用同一 `session_id`，`Stop` 不带来源，仍无法区分，故维持仅识别（fdfb3e7d 更新了说明）。它讲 OSC 7501（`app=kimi-code`，信任弹窗报 `blocked:kind=permission`），状态由此显示；无交互式首条提示参数（`-p` 不开 TUI）。
+- Pi 1.5.2、Grok、Copilot、Kimi Code 都已讲 OSC 7501。Pi 首次启动缺 fd/ripgrep 时边下载边报 idle，期间回车被丢；镜像预装二者。
+- Grok 装了 Condr 的 hooks 后在每个新目录先问文件夹信任（其文档写明），Condr 报 Blocked，detail 为 `Trust this folder?`。Grok 的 ask 模式仍自动放行裸 `touch`，审批对话框用 Ctrl+C 取消、Esc 无效。
+- Kimi Code 的输入框把紧跟粘贴文本的回车当换行；`agent prompt` 的提交方式不受影响。
+- 本次网关对 Grok、Copilot 发往 Responses 的请求回 400，两者改用 Chat Completions；并发过高时回 `gateway_concurrency_limit`，脚本因此一次最多跑三个容器。Condr 都正确把这些失败报为 error。
+
+未覆盖：Cursor 与 Antigravity（需各自账号）、Claude Code 与 Codex（日常使用；Codex 0.163 起也讲 OSC 7501，其 `reports_at_startup: false` 可能与 Copilot 同理，未验证）、Windows ConPTY、GUI。
