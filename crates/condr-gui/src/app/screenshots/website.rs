@@ -151,7 +151,9 @@ pub(crate) fn run(directory: PathBuf) {
 
     let devices = [&local, &build_box, &gpu_box];
     let (window, view) = open(&mut cx, (1280., 800.), devices);
+    // The Agents section folded, so the Workspaces under Needs you have the column.
     update(&mut cx, window, &view, |this, window, cx| {
+        this.window_view_mut(window).agents_collapsed = true;
         this.select_workspace(1, condr, window, cx)
     });
     wait_for(&mut admin, claude, "Claude Code");
@@ -161,7 +163,7 @@ pub(crate) fn run(directory: PathBuf) {
     stage(&mut cx, window, &view, &staged);
     let image = capture(&mut cx, window);
     // Down to the end of build-box: Needs you and the Devices it names, not the whole column.
-    save(&image, &directory, "needs-you", (0., 0., SIDEBAR, 578.));
+    save(&image, &directory, "needs-you", (0., 0., SIDEBAR, 631.));
     save(
         &image,
         &directory,
