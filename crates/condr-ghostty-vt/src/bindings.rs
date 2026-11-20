@@ -837,6 +837,21 @@ impl GhosttyTerminalScreen {
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct GhosttyTerminalScreen(pub ::std::os::raw::c_int);
+impl GhosttyTerminalCursorStyle {
+    pub const GHOSTTY_TERMINAL_CURSOR_STYLE_BAR: GhosttyTerminalCursorStyle =
+        GhosttyTerminalCursorStyle(0);
+    pub const GHOSTTY_TERMINAL_CURSOR_STYLE_BLOCK: GhosttyTerminalCursorStyle =
+        GhosttyTerminalCursorStyle(1);
+    pub const GHOSTTY_TERMINAL_CURSOR_STYLE_UNDERLINE: GhosttyTerminalCursorStyle =
+        GhosttyTerminalCursorStyle(2);
+    pub const GHOSTTY_TERMINAL_CURSOR_STYLE_BLOCK_HOLLOW: GhosttyTerminalCursorStyle =
+        GhosttyTerminalCursorStyle(3);
+    pub const GHOSTTY_TERMINAL_CURSOR_STYLE_MAX_VALUE: GhosttyTerminalCursorStyle =
+        GhosttyTerminalCursorStyle(2147483647);
+}
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub struct GhosttyTerminalCursorStyle(pub ::std::os::raw::c_int);
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct GhosttyTerminalScrollbar {

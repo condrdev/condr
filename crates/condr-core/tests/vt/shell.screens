@@ -1,5 +1,5 @@
 @ 512 bytes
-cursor 3,26 Block
+cursor 3,26 Beam
 |bold italic underline curly inverse strike faint hidden
 |309040 319141 329242 339343 349444 359545 369646 379747
 |256-orange truecolor bg-index
@@ -25,7 +25,7 @@ cursor 3,26 Block
 |
 |
 @ 1024 bytes
-cursor 9,48 Block
+cursor 9,48 Beam
 |bold italic underline curly inverse strike faint hidden
 |309040 319141 329242 339343 349444 359545 369646 379747
 |256-orange truecolor bg-index
@@ -51,7 +51,7 @@ cursor 9,48 Block
 |
 |
 @ 1536 bytes
-cursor 17,23 Block
+cursor 17,23 Beam
 |bold italic underline curly inverse strike faint hidden
 |309040 319141 329242 339343 349444 359545 369646 379747
 |256-orange truecolor bg-index
@@ -77,7 +77,7 @@ cursor 17,23 Block
 |
 |
 @ 2048 bytes
-cursor 23,0 Block
+cursor 23,0 Beam
 |309040 319141 329242 339343 349444 359545 369646 379747
 |256-orange truecolor bg-index
 |CJK 中文字符 宽字符 | emoji 😀👍🏽 | ZWJ 👨‍👩‍👧 | combining é ä
@@ -103,7 +103,7 @@ cursor 23,0 Block
 |* e982a4a feat: History's branch reads like the Changes header, and ↑ ↓ show ahe
 |
 @ 2560 bytes
-cursor 23,11 Block
+cursor 23,11 Beam
 |obody looked at
 |* 846083e (tag: nightly) fix: restarting the GUI or the app no longer shows ever
 |y finished Agent as Done again
@@ -129,7 +129,7 @@ cursor 23,11 Block
 |firmware
 |an OSC 8 li
 @ 2643 bytes
-cursor 23,0 Block
+cursor 23,0 Beam
 |y finished Agent as Done again
 |* 2920826 fix: Alt+N switches Tabs again right after it lands on a Preview or Di
 |ff Tab

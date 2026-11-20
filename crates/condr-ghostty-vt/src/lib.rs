@@ -509,6 +509,12 @@ impl Terminal {
                 )?;
             }
         }
+        // A bar until the program asks for a shape with DECSCUSR, and again after it resets.
+        let bar = sys::GhosttyTerminalCursorStyle::GHOSTTY_TERMINAL_CURSOR_STYLE_BAR;
+        self.set(
+            Opt::GHOSTTY_TERMINAL_OPT_DEFAULT_CURSOR_STYLE,
+            (&raw const bar).cast(),
+        )?;
         // No custom glyphs (ADR 0051).
         let no_glyphs = false;
         self.set(

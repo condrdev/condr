@@ -51,7 +51,7 @@ cursor 20,13 Hidden
 |
 |
 @ 1536 bytes
-cursor 19,2 Block
+cursor 19,2 Beam
 |
 | ▐▛███▛█   Claude Code v2.1.312
 |▝▜██████▀  Opus 5.5 with xhigh effort · API Usage Billing
@@ -207,7 +207,7 @@ cursor 15,11 Hidden
 |  ⎇ no git | cwd: /private/t/condr-fixture
 |  ⏵⏵ bypass permissions on (shift+tab to cycle)
 @ 4608 bytes
-cursor 18,2 Block
+cursor 18,2 Beam
 |
 | ▐▛███▛█   Claude Code v2.1.312
 |▝▜██████▀  Opus 5.5 with xhigh effort · API Usage Billing
@@ -259,7 +259,7 @@ cursor 21,36 Hidden
 |  ⎇ no git | cwd: /private/t/condr-fixture
 |  ⏵⏵ bypass permissions on (shift+tab to cycle)
 @ 5632 bytes
-cursor 0,0 Block
+cursor 0,0 Beam
 |
 |
 |
@@ -285,7 +285,7 @@ cursor 0,0 Block
 |
 |
 @ 5751 bytes
-cursor 0,0 Block
+cursor 0,0 Beam
 |
 |
 |

@@ -123,6 +123,7 @@ types=(
   GhosttySysImage
   GhosttySysLogLevel
   GhosttySysOption
+  GhosttyTerminalCursorStyle
   GhosttyTerminalDesktopNotification
   GhosttyTerminalMemoryUsage
   GhosttyTerminalModeConfig

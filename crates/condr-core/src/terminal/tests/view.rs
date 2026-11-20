@@ -29,15 +29,27 @@ fn decscusr_shape_and_blink_reach_the_snapshot_cursor() {
     let size = TerminalSize::new(1, 4);
     let mut vt = Vt::new(size).unwrap();
     let cursor = |vt: &mut Vt| vt.view(size, 1, None).cursor.unwrap();
-    assert_eq!(cursor(&mut vt).shape, TerminalCursorShape::Block);
+    assert_eq!(
+        cursor(&mut vt).shape,
+        TerminalCursorShape::Beam,
+        "a bar by default"
+    );
     assert!(!cursor(&mut vt).blinking, "default cursor stays steady");
 
-    vt.write(b"\x1b[5 q");
-    assert_eq!(cursor(&mut vt).shape, TerminalCursorShape::Beam);
+    vt.write(b"\x1b[1 q");
+    assert_eq!(cursor(&mut vt).shape, TerminalCursorShape::Block);
     assert!(cursor(&mut vt).blinking);
 
     vt.write(b"\x1b[4 q");
     assert_eq!(cursor(&mut vt).shape, TerminalCursorShape::Underline);
+    assert!(!cursor(&mut vt).blinking);
+
+    vt.write(b"\x1b[0 q");
+    assert_eq!(
+        cursor(&mut vt).shape,
+        TerminalCursorShape::Beam,
+        "reset to the bar"
+    );
     assert!(!cursor(&mut vt).blinking);
 
     vt.write(b"\x1b[?25l");

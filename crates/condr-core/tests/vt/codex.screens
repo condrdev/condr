@@ -1,5 +1,5 @@
 @ 8040 bytes
-cursor 20,2 Block
+cursor 20,2 Beam
 |│ CODEX_NON_INTERACTIVE=1 sh' to update.                                       │
 |│                                                                              │
 |│ See full release notes:                                                      │
@@ -25,7 +25,7 @@ cursor 20,2 Block
 |  GPT-6-Astra xhigh · /private/tmp/condr-fixture
 |  ← for agents · ? for shortcuts                       ⚠ 1 warning · f2 to view
 @ 15921 bytes
-cursor 20,2 Block
+cursor 20,2 Beam
 |│ CODEX_NON_INTERACTIVE=1 sh' to update.                                       │
 |│                                                                              │
 |│ See full release notes:                                                      │
@@ -51,7 +51,7 @@ cursor 20,2 Block
 |  GPT-6-Astra xhigh · /private/tmp/condr-fixture
 |  ← for agents · ? for shortcuts                       ⚠ 1 warning · f2 to view
 @ 24480 bytes
-cursor 20,2 Block
+cursor 20,2 Beam
 |│ CODEX_NON_INTERACTIVE=1 sh' to update.                                       │
 |│                                                                              │
 |│ See full release notes:                                                      │
@@ -77,7 +77,7 @@ cursor 20,2 Block
 |  GPT-6-Astra xhigh · /private/tmp/condr-fixture
 |  ← for agents · ? for shortcuts                       ⚠ 1 warning · f2 to view
 @ 32672 bytes
-cursor 20,2 Block
+cursor 20,2 Beam
 |│ CODEX_NON_INTERACTIVE=1 sh' to update.                                       │
 |│                                                                              │
 |│ See full release notes:                                                      │
@@ -103,7 +103,7 @@ cursor 20,2 Block
 |  GPT-6-Astra xhigh · /private/tmp/condr-fixture
 |  ← for agents · ? for shortcuts                       ⚠ 1 warning · f2 to view
 @ 40935 bytes
-cursor 20,2 Block
+cursor 20,2 Beam
 |│ CODEX_NON_INTERACTIVE=1 sh' to update.                                       │
 |│                                                                              │
 |│ See full release notes:                                                      │
@@ -129,7 +129,7 @@ cursor 20,2 Block
 |  GPT-6-Astra xhigh · /private/tmp/condr-fixture
 |  ← for agents · ? for shortcuts                       ⚠ 1 warning · f2 to view
 @ 49209 bytes
-cursor 20,2 Block
+cursor 20,2 Beam
 |│ CODEX_NON_INTERACTIVE=1 sh' to update.                                       │
 |│                                                                              │
 |│ See full release notes:                                                      │
@@ -155,7 +155,7 @@ cursor 20,2 Block
 |  GPT-6-Astra xhigh · /private/tmp/condr-fixture
 |  ← for agents · ? for shortcuts                       ⚠ 1 warning · f2 to view
 @ 57277 bytes
-cursor 20,2 Block
+cursor 20,2 Beam
 |│ CODEX_NON_INTERACTIVE=1 sh' to update.                                       │
 |│                                                                              │
 |│ See full release notes:                                                      │
@@ -181,7 +181,7 @@ cursor 20,2 Block
 |  GPT-6-Astra xhigh · /private/tmp/condr-fixture
 |  ← for agents · ? for shortcuts                       ⚠ 1 warning · f2 to view
 @ 65729 bytes
-cursor 20,2 Block
+cursor 20,2 Beam
 |
 |
 |  >_ OpenAI Codex (v0.164.0)
@@ -207,7 +207,7 @@ cursor 20,2 Block
 |  GPT-6-Astra xhigh · /private/tmp/condr-fixture
 |  ← for agents · ? for shortcuts                       ⚠ 1 warning · f2 to view
 @ 73575 bytes
-cursor 20,2 Block
+cursor 20,2 Beam
 |  >_ OpenAI Codex (v0.164.0)
 |     /private/tmp/condr-fixture
 |  permissions: YOLO mode
@@ -233,7 +233,7 @@ cursor 20,2 Block
 |  GPT-6-Astra xhigh · /private/tmp/condr-fixture
 |  ← for agents · ? for shortcuts                       ⚠ 1 warning · f2 to view
 @ 81408 bytes
-cursor 20,2 Block
+cursor 20,2 Beam
 |  >_ OpenAI Codex (v0.164.0)
 |     /private/tmp/condr-fixture
 |  permissions: YOLO mode
@@ -259,7 +259,7 @@ cursor 20,2 Block
 |  GPT-6-Astra xhigh · /private/tmp/condr-fixture
 |  ← for agents · ? for shortcuts                       ⚠ 1 warning · f2 to view
 @ 89361 bytes
-cursor 20,2 Block
+cursor 20,2 Beam
 |  >_ OpenAI Codex (v0.164.0)
 |     /private/tmp/condr-fixture
 |  permissions: YOLO mode
@@ -285,7 +285,7 @@ cursor 20,2 Block
 |  GPT-6-Astra xhigh · /private/tmp/condr-fixture
 |  ← for agents · ? for shortcuts                       ⚠ 1 warning · f2 to view
 @ 97389 bytes
-cursor 20,2 Block
+cursor 20,2 Beam
 |  >_ OpenAI Codex (v0.164.0)
 |     /private/tmp/condr-fixture
 |  permissions: YOLO mode
@@ -311,7 +311,7 @@ cursor 20,2 Block
 |  GPT-6-Astra xhigh · /private/tmp/condr-fixture · Calculate 6 times 7
 |  ← for agents · ? for shortcuts                       ⚠ 1 warning · f2 to view
 @ 105214 bytes
-cursor 20,2 Block
+cursor 20,2 Beam
 |  >_ OpenAI Codex (v0.164.0)
 |     /private/tmp/condr-fixture
 |  permissions: YOLO mode
@@ -337,7 +337,7 @@ cursor 20,2 Block
 |  GPT-6-Astra xhigh · /private/tmp/condr-fixture · Calculate 6 times 7
 |  ← for agents · ? for shortcuts                       ⚠ 1 warning · f2 to view
 @ 113090 bytes
-cursor 20,2 Block
+cursor 20,2 Beam
 |  >_ OpenAI Codex (v0.164.0)
 |     /private/tmp/condr-fixture
 |  permissions: YOLO mode
@@ -363,7 +363,7 @@ cursor 20,2 Block
 |  GPT-6-Astra xhigh · /private/tmp/condr-fixture · Calculate 6 times 7
 |  ← for agents · ? for shortcuts                       ⚠ 1 warning · f2 to view
 @ 120962 bytes
-cursor 20,2 Block
+cursor 20,2 Beam
 |  >_ OpenAI Codex (v0.164.0)
 |     /private/tmp/condr-fixture
 |  permissions: YOLO mode
@@ -389,7 +389,7 @@ cursor 20,2 Block
 |  GPT-6-Astra xhigh · /private/tmp/condr-fixture · Calculate 6 times 7
 |  ← for agents · ? for shortcuts                       ⚠ 1 warning · f2 to view
 @ 124867 bytes
-cursor 6,0 Block
+cursor 6,0 Beam
 |Disconnected from this task. Any running work continues.
 |To reconnect, run:
 |  codex resume 01a186ce-781d-7a12-9984-ffbab538ecf5
