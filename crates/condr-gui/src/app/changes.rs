@@ -910,11 +910,8 @@ impl Condr {
                     .w_full()
                     .child(
                         // The Tab header already names the file, its status and its counts.
-                        // Two columns wrap: Kit sizes each to the longest line, which would
-                        // push the new side out of view.
                         Diff::new(&viewer.state)
                             .header_visible(false)
-                            .soft_wrap(!self.files_view.diff_unified)
                             .on_line_click(move |position, _, _, cx| {
                                 let position = position.clone();
                                 let _ = owner.update(cx, |this, _| {
