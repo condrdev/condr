@@ -707,7 +707,7 @@ impl Render for CommandPalette {
 /// to, and an action's key or an Agent's state at the end.
 fn render_row(entry: &Entry, ranges: &[Range<usize>], grouped: bool, cx: &mut App) -> AnyElement {
     let theme = cx.theme();
-    let (muted, highlight) = (theme.muted_foreground, theme.blue);
+    let (muted, highlight) = (theme.muted_foreground, theme.list_highlight_foreground);
     let label = StyledText::new(entry.label.clone()).with_highlights(ranges.iter().map(|range| {
         (
             range.clone(),

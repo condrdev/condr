@@ -5084,8 +5084,8 @@ THE SOFTWARE.
 * BSD 3-Clause "New" or "Revised" License (12)
 * ISC License (8)
 * BSD Zero Clause License (4)
+* Mozilla Public License 2.0 (4)
 * zlib License (4)
-* Mozilla Public License 2.0 (3)
 * BSD 2-Clause "Simplified" License (2)
 * Creative Commons Zero v1.0 Universal (2)
 * Community Data License Agreement Permissive 2.0 (1)
@@ -19164,8 +19164,8 @@ Used by:
 * [gix 0.87.1](https://github.com/GitoxideLabs/gitoxide)
 * [gl_generator 0.14.0](https://github.com/brendanzab/gl-rs/)
 * [gpui-fps 0.6.4](https://github.com/longbridge/gpui-kit/tree/main/crates/fps)
-* [gpui-kit-assets 0.9.0](https://github.com/longbridge/gpui-kit)
-* [gpui-kit 0.9.0](https://github.com/longbridge/gpui-kit)
+* [gpui-kit-assets 0.10.0](https://github.com/longbridge/gpui-kit)
+* [gpui-kit 0.10.0](https://github.com/longbridge/gpui-kit)
 * [granit-parser 0.0.7](https://github.com/bourumir-wyngs/granit-parser)
 * [half 2.7.1](https://github.com/VoidStarKat/half-rs)
 * [ident_case 1.0.1](https://github.com/TedDriggs/ident_case)
@@ -19367,26 +19367,26 @@ limitations under the License.
 
 Used by:
 
-* [gpui-pre-apple 0.3.11](https://github.com/zed-industries/zed)
-* [gpui-pre-collections 0.3.11](https://github.com/zed-industries/zed)
-* [gpui-pre-derive-refineable 0.3.11](https://github.com/zed-industries/zed)
-* [gpui-pre-http-client-tls 0.3.11](https://github.com/zed-industries/zed)
-* [gpui-pre-http-client 0.3.11](https://github.com/zed-industries/zed)
-* [gpui-pre-linux 0.3.11](https://github.com/zed-industries/zed)
-* [gpui-pre-macos 0.3.11](https://github.com/zed-industries/zed)
-* [gpui-pre-macros 0.3.11](https://github.com/zed-industries/zed)
-* [gpui-pre-platform 0.3.11](https://github.com/zed-industries/zed)
-* [gpui-pre-refineable 0.3.11](https://github.com/zed-industries/zed)
-* [gpui-pre-reqwest-client 0.3.11](https://github.com/zed-industries/zed)
-* [gpui-pre-scheduler 0.3.11](https://github.com/zed-industries/zed)
-* [gpui-pre-shared-string 0.3.11](https://github.com/zed-industries/zed)
-* [gpui-pre-sum-tree 0.3.11](https://github.com/zed-industries/zed)
-* [gpui-pre-util 0.3.11](https://github.com/zed-industries/zed)
-* [gpui-pre-wgpu 0.3.11](https://github.com/zed-industries/zed)
-* [gpui-pre-windows 0.3.11](https://github.com/zed-industries/zed)
-* [gpui-pre-ztracing-macro 0.3.11](https://github.com/zed-industries/zed)
-* [gpui-pre-ztracing 0.3.11](https://github.com/zed-industries/zed)
-* [gpui-pre 0.3.11](https://github.com/zed-industries/zed)
+* [gpui-pre-apple 0.3.12](https://github.com/zed-industries/zed)
+* [gpui-pre-collections 0.3.12](https://github.com/zed-industries/zed)
+* [gpui-pre-derive-refineable 0.3.12](https://github.com/zed-industries/zed)
+* [gpui-pre-http-client-tls 0.3.12](https://github.com/zed-industries/zed)
+* [gpui-pre-http-client 0.3.12](https://github.com/zed-industries/zed)
+* [gpui-pre-linux 0.3.12](https://github.com/zed-industries/zed)
+* [gpui-pre-macos 0.3.12](https://github.com/zed-industries/zed)
+* [gpui-pre-macros 0.3.12](https://github.com/zed-industries/zed)
+* [gpui-pre-platform 0.3.12](https://github.com/zed-industries/zed)
+* [gpui-pre-refineable 0.3.12](https://github.com/zed-industries/zed)
+* [gpui-pre-reqwest-client 0.3.12](https://github.com/zed-industries/zed)
+* [gpui-pre-scheduler 0.3.12](https://github.com/zed-industries/zed)
+* [gpui-pre-shared-string 0.3.12](https://github.com/zed-industries/zed)
+* [gpui-pre-sum-tree 0.3.12](https://github.com/zed-industries/zed)
+* [gpui-pre-util 0.3.12](https://github.com/zed-industries/zed)
+* [gpui-pre-wgpu 0.3.12](https://github.com/zed-industries/zed)
+* [gpui-pre-windows 0.3.12](https://github.com/zed-industries/zed)
+* [gpui-pre-ztracing-macro 0.3.12](https://github.com/zed-industries/zed)
+* [gpui-pre-ztracing 0.3.12](https://github.com/zed-industries/zed)
+* [gpui-pre 0.3.12](https://github.com/zed-industries/zed)
 
 Copyright 2022 - 2025 Zed Industries, Inc.
 
@@ -19618,9 +19618,9 @@ Apache License
 
 Used by:
 
-* [gpui-base 0.9.0](https://github.com/longbridge/gpui-kit)
-* [gpui-component-macros 0.9.0](https://crates.io/crates/gpui-component-macros)
-* [gpui-component 0.9.0](https://github.com/longbridge/gpui-kit)
+* [gpui-base 0.10.0](https://github.com/longbridge/gpui-kit)
+* [gpui-component-macros 0.10.0](https://crates.io/crates/gpui-component-macros)
+* [gpui-component 0.10.0](https://github.com/longbridge/gpui-kit)
 
 Copyright 2024 - 2026 Longbridge <https://longbridge.com>
 
@@ -24504,6 +24504,7 @@ THE SOFTWARE.
 Used by:
 
 * [cbindgen 0.28.0](https://github.com/mozilla/cbindgen)
+* [nucleo-matcher 0.3.1](https://github.com/helix-editor/nucleo)
 
 Mozilla Public License Version 2.0
 ==================================
