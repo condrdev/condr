@@ -99,7 +99,8 @@ Condr 会给新 Pane 启动的 zsh、bash 或 fish 加载一段小脚本，标�
 
 * **在提示符之间跳转**：Shell 停在提示符时，macOS 上按 `Cmd + ↑` / `Cmd + ↓`，Windows 和 Linux 上按 `Ctrl + ↑` / `Ctrl + ↓`。
 * **长命令完成时收到通知**：运行 10 秒以上的命令在你没看着的 Pane 里结束时，会弹出系统通知，失败时附带退出码。Agent 里跑的命令不会单独通知，由 Agent 自己的通知覆盖。
+* **光标跟着提示符变**：不管上一个程序把光标改成什么样，输入命令的地方都是闪烁的细线；zsh 的 vi 命令模式下是闪烁的方块；你运行的命令则用终端默认的光标。
 
-你自己的启动文件照常加载：Condr 的脚本与它们并存，不改你的提示符和设置。4.4 之前的 bash（包括 macOS 自带的版本）无法标出命令开始，所以不加载集成；用 Homebrew 装的 bash 可以。
+你自己的启动文件照常加载：Condr 的脚本与它们并存，会在提示符里加上看不见的标记，但不改变它的样子，也不改你的设置。4.4 之前的 bash（包括 macOS 自带的版本）无法标出命令开始，所以不加载集成；用 Homebrew 装的 bash 可以。
 
 在 **设置 › 通用 › Shell 集成**（Settings › General › Shell integration）里可以关闭，也可以在 `[server.terminal]` 下写 `shell_integration = false`。修改对之后新建的 Pane 生效。Windows 上的 Device 暂时没有任何 shell 支持，包括 PowerShell。

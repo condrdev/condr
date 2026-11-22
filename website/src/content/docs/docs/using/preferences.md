@@ -98,11 +98,12 @@ shell = "/opt/homebrew/bin/fish"
 
 ## Shell integration
 
-Condr loads a small script into the zsh, bash or fish that a new Pane starts. The script marks each prompt and each command, which gives you two things:
+Condr loads a small script into the zsh, bash or fish that a new Pane starts. The script marks each prompt and each command, which gives you three things:
 
 * **Jump between prompts**: `Cmd + ↑` / `Cmd + ↓` on macOS, `Ctrl + ↑` / `Ctrl + ↓` on Windows and Linux, while the shell waits at its prompt.
 * **Long commands notify**: when a command that ran for 10 seconds or more finishes in a Pane you are not looking at, a system notification says so, with its exit code when it failed. Commands an Agent ran in stay quiet; the Agent's own notifications cover them.
+* **A cursor that fits the prompt**: a blinking bar where you type, whatever the last program left, a blinking block in zsh's vi command mode, and the terminal's default for the commands you run.
 
-Your own startup files still load as before: Condr's script runs alongside them and changes neither your prompt nor your settings. bash before 4.4, such as the one macOS ships, cannot mark when a command starts, so it gets no integration; Homebrew's bash does.
+Your own startup files still load as before: Condr's script runs alongside them, adds marks to your prompt that you never see, and changes neither how it looks nor your settings. bash before 4.4, such as the one macOS ships, cannot mark when a command starts, so it gets no integration; Homebrew's bash does.
 
 Turn it off under **Settings › General › Shell integration**, or with `shell_integration = false` under `[server.terminal]`. The change applies to new Panes. No shell on a Windows Device gets integration yet, PowerShell included.

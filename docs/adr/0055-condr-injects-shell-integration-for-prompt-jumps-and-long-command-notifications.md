@@ -1,5 +1,7 @@
 # Condr Injects Shell Integration for Prompt Jumps and Long-Command Notifications
 
+> ADR 0072 has the scripts do what Ghostty's integration does: the marks go into the prompt string, `133;B` and `133;P` among them, and the shells report their directory (OSC 7) and set the cursor's shape. "What the shell sends" and where the hooks go below describe the scripts before it.
+
 Status: accepted 2026-10-29. Builds on ADR 0051, whose libghostty-vt tracks OSC 133 prompt marks, and ADR 0054, whose notification path a finished command shares; takes OSC 133 prompt navigation off ADR 0051's "left for later". Selecting a command's output and marking a failed command in the gutter were considered and left out.
 
 libghostty-vt knows where each prompt, command and output begins once the shell marks them with OSC 133, and can scroll the viewport by prompts. Plain zsh and bash mark nothing, so for most people none of it would work. Ghostty, VS Code and WezTerm solve this the same way: the terminal loads a small script into the shell it starts. Condr does too.

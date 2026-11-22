@@ -55,6 +55,24 @@ fn osc_seven_accepts_this_host_and_escaped_paths_but_rejects_foreign_hosts() {
 }
 
 #[test]
+fn kittys_cwd_report_carries_the_path_unencoded() {
+    let host = sysinfo::System::host_name().expect("test host has a name");
+    assert_eq!(
+        reported_cwd_of(&format!("kitty-shell-cwd://{host}/tmp/50%20off ")),
+        Some(PathBuf::from("/tmp/50%20off ")),
+        "kept as sent, a trailing space included"
+    );
+    assert_eq!(
+        reported_cwd_of("kitty-shell-cwd:///plain"),
+        Some(PathBuf::from("/plain"))
+    );
+    assert_eq!(
+        reported_cwd_of("kitty-shell-cwd://foreign.invalid/nope"),
+        None
+    );
+}
+
+#[test]
 fn parsed_cwd_reports_advance_the_observation_generation() {
     let directory = std::env::temp_dir().join(format!(
         "condr-terminal-cwd-generation-{}-{}",

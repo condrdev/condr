@@ -256,6 +256,198 @@ fn bash_prompts_can_be_jumped_between_from_4_4() {
     jumps_between_prompts("bash", "user$", bash_has_marks());
 }
 
+fn wait_for_cursor(runtime: &TerminalRuntime, shape: TerminalCursorShape, why: &str) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        if runtime
+            .view()
+            .cursor
+            .is_some_and(|cursor| cursor.shape == shape && cursor.blinking)
+        {
+            return;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    panic!("{why}: the cursor stayed {:?}", runtime.view().cursor);
+}
+
+/// A blinking bar at the prompt whatever the last program left, a blinking block in vi
+/// command mode around the person's own widget, and the default for a command.
+#[test]
+fn zsh_sets_the_cursor_for_its_prompt_vi_mode_and_commands() {
+    let home = home("zsh-cursor");
+    std::fs::write(
+        home.join(".zshrc"),
+        "PROMPT='user> '\nbindkey -v\nKEYTIMEOUT=1\n\
+         typeset -gi KEYMAP_CHANGES=0\n\
+         zle-keymap-select() { (( ++KEYMAP_CHANGES )) }\nzle -N zle-keymap-select\n",
+    )
+    .unwrap();
+    let Some(runtime) = integrated_shell("zsh", &home, None) else {
+        return;
+    };
+    wait_for(&runtime, "user>");
+    wait_for_cursor(&runtime, TerminalCursorShape::Beam, "first prompt");
+
+    runtime
+        .write(b"printf '\\e[2 q'; echo shaped\r".to_vec())
+        .unwrap();
+    wait_for_prompt_after(&runtime, "shaped", "user>");
+    wait_for_cursor(
+        &runtime,
+        TerminalCursorShape::Beam,
+        "the prompt after a block",
+    );
+
+    runtime
+        .write(b"sleep 3; echo slept-$((40 + 2))".to_vec())
+        .unwrap();
+    runtime.write(b"\x1b".to_vec()).unwrap();
+    wait_for_cursor(&runtime, TerminalCursorShape::Block, "vi command mode");
+    runtime.write(b"\r".to_vec()).unwrap();
+    wait_for_cursor(&runtime, TerminalCursorShape::Beam, "the command's default");
+    assert!(
+        !runtime.visible_text().contains("slept-42"),
+        "reset before the command ended"
+    );
+    wait_for_prompt_after(&runtime, "slept-42", "user>");
+
+    runtime
+        .write(b"echo changes=$(( KEYMAP_CHANGES > 0 ))\r".to_vec())
+        .unwrap();
+    wait_for(&runtime, "changes=1");
+    let _ = std::fs::remove_dir_all(home);
+}
+
+/// The person's own vi mode hooks keep running beside Condr's, in Ghostty's order: a
+/// widget they defined runs after Condr's, so its cursor wins; add-zle-hook-widget runs
+/// Condr's after theirs, so Condr's does.
+#[test]
+fn zsh_runs_the_persons_vi_mode_hooks_in_ghosttys_order() {
+    // Succeeds either way: add-zle-hook-widget stops at a hook that fails.
+    let set_underline = "underline() { [[ $KEYMAP != vicmd ]] || printf '\\e[3 q' }\n";
+    for (name, hook, vicmd) in [
+        (
+            "widget",
+            "zle-keymap-select() { underline }\nzle -N zle-keymap-select\n",
+            TerminalCursorShape::Underline,
+        ),
+        (
+            "azhw",
+            "autoload -Uz add-zle-hook-widget\nadd-zle-hook-widget keymap-select underline\n",
+            TerminalCursorShape::Block,
+        ),
+    ] {
+        let home = home(&format!("zsh-cursor-{name}"));
+        std::fs::write(
+            home.join(".zshrc"),
+            format!("PROMPT='user> '\nbindkey -v\nKEYTIMEOUT=1\n{set_underline}{hook}"),
+        )
+        .unwrap();
+        let Some(runtime) = integrated_shell("zsh", &home, None) else {
+            return;
+        };
+        wait_for(&runtime, "user>");
+        wait_for_cursor(&runtime, TerminalCursorShape::Beam, name);
+        runtime.write(b"\x1b".to_vec()).unwrap();
+        wait_for_cursor(&runtime, vicmd, name);
+        runtime.write(b"i".to_vec()).unwrap();
+        wait_for_cursor(&runtime, TerminalCursorShape::Beam, name);
+        let _ = std::fs::remove_dir_all(home);
+    }
+}
+
+/// The prompt's bar is part of PS1, so it comes after whatever PROMPT_COMMAND printed.
+#[test]
+fn bash_sets_the_cursor_at_its_prompt_from_4_4() {
+    if !bash_has_marks() {
+        return;
+    }
+    let home = home("bash-cursor");
+    std::fs::write(home.join(".bashrc"), "PS1='user$ '\n").unwrap();
+    let Some(runtime) = integrated_shell("bash", &home, None) else {
+        return;
+    };
+    wait_for(&runtime, "user$");
+    runtime
+        .write(b"printf '\\e[2 q'; echo shaped\r".to_vec())
+        .unwrap();
+    wait_for_prompt_after(&runtime, "shaped", "user$");
+    wait_for_cursor(
+        &runtime,
+        TerminalCursorShape::Beam,
+        "the prompt after a block",
+    );
+
+    runtime
+        .write(
+            b"PROMPT_COMMAND+=$'\\n'\"printf '\\\\e[1 q'; echo hooked-\\$((40 + 2))\"\r".to_vec(),
+        )
+        .unwrap();
+    wait_for_prompt_after(&runtime, "hooked-42", "user$");
+    wait_for_cursor(&runtime, TerminalCursorShape::Beam, "after PROMPT_COMMAND");
+    let _ = std::fs::remove_dir_all(home);
+}
+
+/// The directory the shell reported (OSC 7), as the PTY reader recorded it.
+fn wait_for_reported_cwd(runtime: &TerminalRuntime, expected: &Path) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let reported = || runtime.cwd_probe().reported_cwd.lock().unwrap().cwd.clone();
+    while Instant::now() < deadline {
+        if reported().as_deref() == Some(expected) {
+            return;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    panic!("reported {:?}, not {expected:?}", reported());
+}
+
+fn reports_its_directory(program: &str, prompt: &str) {
+    let home = home(&format!("{program}-pwd"));
+    std::fs::write(home.join(".zshrc"), "PROMPT='user> '\n").unwrap();
+    std::fs::write(home.join(".bashrc"), "PS1='user$ '\n").unwrap();
+    let Some(runtime) = integrated_shell(program, &home, None) else {
+        return;
+    };
+    wait_for(&runtime, prompt);
+    // The shell's own $PWD, which may resolve a symlinked temporary directory.
+    let home_dir = std::fs::canonicalize(&home).unwrap();
+    wait_for_reported_cwd(&runtime, &home_dir);
+    std::fs::create_dir_all(home.join("with space")).unwrap();
+    runtime.write(b"cd 'with space'\r".to_vec()).unwrap();
+    wait_for_reported_cwd(&runtime, &home_dir.join("with space"));
+    let _ = std::fs::remove_dir_all(home);
+}
+
+#[test]
+fn zsh_reports_its_directory() {
+    reports_its_directory("zsh", "user>");
+}
+
+#[test]
+fn bash_reports_its_directory_from_4_4() {
+    if bash_has_marks() {
+        reports_its_directory("bash", "user$");
+    }
+}
+
+/// The marks live in PS1 and PS2 only while the prompt shows: a command sees the prompt
+/// as the person set it.
+#[test]
+fn zsh_commands_see_the_prompt_as_the_person_set_it() {
+    let home = home("zsh-unmarked");
+    std::fs::write(home.join(".zshrc"), "PROMPT=$'first\\nuser> '\n").unwrap();
+    let Some(runtime) = integrated_shell("zsh", &home, None) else {
+        return;
+    };
+    wait_for(&runtime, "user>");
+    runtime
+        .write(b"[[ $PS1 == $'first\\nuser> ' ]] && echo clean-$((40 + 2))\r".to_vec())
+        .unwrap();
+    wait_for(&runtime, "clean-42");
+    let _ = std::fs::remove_dir_all(home);
+}
+
 /// Polls until the shell is ready to be typed into, or panics after ten seconds.
 fn ready_shell(runtime: &TerminalRuntime) -> String {
     let deadline = Instant::now() + Duration::from_secs(10);

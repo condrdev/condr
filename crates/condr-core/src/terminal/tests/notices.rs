@@ -234,7 +234,8 @@ fn a_long_shell_command_is_reported_when_it_ends_unless_an_agent_ran_in_it() {
 
     feed(&mut vt, &notices, b"\x1b]133;C\x07");
     age(&notices);
-    feed(&mut vt, &notices, b"\x1b]133;D;2\x07");
+    // As bash's integration ends one, with the shell's id after the status.
+    feed(&mut vt, &notices, b"\x1b]133;D;2;aid=7\x07");
     let finished = probe.take().finished_commands;
     assert_eq!(finished.len(), 1);
     assert_eq!(finished[0].exit_code, Some(2));

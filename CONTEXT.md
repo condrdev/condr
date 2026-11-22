@@ -122,7 +122,7 @@ _Avoid_: Log, commit list
 The interactive command-line environment presented by a Pane. A Terminal remains useful whether or not it currently contains an Agent. Closing a Terminal, or its shell exiting, ends every process started in it except one that detached on purpose: its own session on Unix, a breakaway from the Terminal's Job on Windows (ADR 0030).
 
 **Shell Integration**:
-The small scripts Condr loads into the zsh, bash or fish a Terminal starts, so the shell marks each prompt and command (OSC 133) for prompt jumps and long-command notifications. On unless turned off under Settings › General (ADR 0055).
+The small scripts Condr loads into the zsh, bash or fish a Terminal starts, so the shell marks each prompt, its input and each command (OSC 133) for prompt jumps and long-command notifications, reports its directory (OSC 7) and sets the cursor's shape, as Ghostty's integration does. On unless turned off under Settings › General (ADR 0055, ADR 0072).
 _Avoid_: shell hooks, prompt hooks
 
 **Agent**:
