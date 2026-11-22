@@ -34,7 +34,7 @@ fn decscusr_shape_and_blink_reach_the_snapshot_cursor() {
         TerminalCursorShape::Beam,
         "a bar by default"
     );
-    assert!(!cursor(&mut vt).blinking, "default cursor stays steady");
+    assert!(cursor(&mut vt).blinking, "that blinks, as Ghostty's does");
 
     vt.write(b"\x1b[1 q");
     assert_eq!(cursor(&mut vt).shape, TerminalCursorShape::Block);
@@ -50,7 +50,10 @@ fn decscusr_shape_and_blink_reach_the_snapshot_cursor() {
         TerminalCursorShape::Beam,
         "reset to the bar"
     );
-    assert!(!cursor(&mut vt).blinking);
+    assert!(cursor(&mut vt).blinking, "and its blink");
+
+    vt.write(b"\x1b[?12l");
+    assert!(!cursor(&mut vt).blinking, "DEC mode 12 still stops it");
 
     vt.write(b"\x1b[?25l");
     assert_eq!(cursor(&mut vt).shape, TerminalCursorShape::Hidden);

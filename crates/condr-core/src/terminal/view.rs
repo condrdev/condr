@@ -149,7 +149,8 @@ pub struct TerminalCursor {
     pub row: u16,
     pub column: u16,
     pub shape: TerminalCursorShape,
-    /// DECSCUSR 1/3/5 or DECSET 12 asked for a blinking cursor; the GUI drives the phase.
+    /// The cursor blinks, as it does by default and unless DECSCUSR or DEC mode 12 stop it;
+    /// the GUI drives the phase.
     pub blinking: bool,
 }
 

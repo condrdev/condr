@@ -220,8 +220,8 @@ impl Render for TerminalPanel {
         }
         self.ime_terminal_revision = ime_terminal_revision;
 
-        // Like herdr forwarding DECSCUSR to its host terminal, blink only when the
-        // program asked for it, and only in the focused Pane.
+        // Blink when the VT's cursor does, by default or as the program asked, and only
+        // in the focused Pane.
         let blinking = terminal
             .as_ref()
             .and_then(|terminal| terminal.view.cursor)
