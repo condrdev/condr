@@ -55,7 +55,7 @@ CONDR_LOG=condr_server=debug,condr_core=debug condr server restart
 当窗口尝试连接本机且未发现处于运行态的 Server 时，将自动拉起新实例并等待就绪握手。若拉起失败，连接面板将呈现如下提示：
 
 ```text
-Condr's own server could not start on this device. Connect tries again.
+The Condr server could not start on this device. Click Connect to try again.
 ```
 
 面板伴随的具体错误诊断中会包含 `condr-server did not become ready`、对应 `.stderr` 文件的路径，以及该文件中本次启动以来的输出。常见故障诱因包括：
@@ -78,7 +78,7 @@ Condr's own server could not start on this device. Connect tries again.
 
 * **构建版本差量**：设备名称前的图标会变为黄色，标题右端出现黄色警示三角。将光标悬停在三角上可对比两端具体版本号并获取更新建议。点击警示三角可暂时收起提示，该状态保持至该设备版本再次变动。
 * **本机 Server 滞后于窗口**：完成 Condr 升级后，窗口客户端将弹出提示询问是否重启本机 Server。执行重启将销毁所有终端运行进程，随后重新载入当前的 Workspace 拓扑与 Agent 对话状态。
-* **协议底层不兼容**：连接将被远端阻断，连接面板呈现 `Condr there and here speak different protocol versions`，CLI 端同步抛出 `protocol_mismatch` 错误代码。该状态不可通过重试恢复，必须将两端程序版本升级至匹配状态。
+* **协议底层不兼容**：连接将被远端阻断，连接面板呈现 `Condr there and here are different versions`，CLI 端同步抛出 `protocol_mismatch` 错误代码。该状态不可通过重试恢复，必须将两端程序版本升级至匹配状态。
 
 在两端均更新至匹配版本后，请转至目标设备并在外部终端执行 `condr server restart`，或在 GUI 的 **设置**（Settings）顶部选中该设备、打开 **通用**（General）并点击 **重启 Condr**（Restart Condr）。该操作按钮仅在本地会话或底层通过 SSH 建立连接时可用。
 

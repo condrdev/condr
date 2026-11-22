@@ -75,18 +75,18 @@ devices:
       en: Fingerprint
       zh-CN: 指纹
     needs_name:
-      en: The device needs a name
-      zh-CN: 设备需要一个名称
+      en: Enter a device name
+      zh-CN: 请输入设备名称
     address_taken:
-      en: Another device already uses this address
-      zh-CN: 另一台设备已在使用这个地址
+      en: This address is already used by another device
+      zh-CN: 该地址已被其它设备使用
   update_restart:
     title:
       en: Restart Condr to finish updating?
       zh-CN: 重启 Condr 以完成更新？
     description:
-      en: 'This device still runs Condr %{server}; this window is %{this}. Programs in its terminals end; Workspaces and Agent conversations reopen.'
-      zh-CN: '这台设备仍在运行 Condr %{server}，而这个窗口是 %{this}。它终端里的程序会结束；Workspace 和 Agent 会话会重新打开。'
+      en: 'This device still runs Condr %{server}; this window is %{this}. Restarting restores as much of your work as it can.'
+      zh-CN: '这台设备仍在运行 Condr %{server}，而这个窗口是 %{this}。重启后将尽可能恢复工作状态。'
     ok:
       en: Restart
       zh-CN: 重启
@@ -98,8 +98,8 @@ devices:
       en: 'Delete “%{name}”?'
       zh-CN: '删除“%{name}”？'
     description:
-      en: This removes the device from Condr. Its terminals keep running.
-      zh-CN: 这会把这台设备从 Condr 中移除。它的终端会继续运行。
+      en: This removes the device from Condr.
+      zh-CN: 将此台设备从 Condr 中移除。
     ok:
       en: Delete
       zh-CN: 删除

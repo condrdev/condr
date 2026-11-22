@@ -36,8 +36,8 @@ changes:
     en: No changes
     zh-CN: 没有变更
   truncated:
-    en: 'Only the first %{count} changes are listed; add a .gitignore for the rest.'
-    zh-CN: '只列出前 %{count} 项变更；其余的请用 .gitignore 忽略。'
+    en: 'Only the first %{count} changes are listed here.'
+    zh-CN: '此处只列出前 %{count} 项变更。'
   section:
     conflicts:
       en: 'Conflicts (%{count})'

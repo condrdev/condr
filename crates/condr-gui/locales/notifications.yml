@@ -31,5 +31,5 @@ notifications:
       en: Condr notifications work
       zh-CN: Condr 通知可以正常显示
     body:
-      en: Agents that finish or need you while you look elsewhere show up like this.
-      zh-CN: 你在看别处时，完成或需要你处理的 Agent 会这样提醒你。
+      en: Agents that need you while Condr is in the background show up like this.
+      zh-CN: 当程序在后台时，需要你处理的 Agent 会这样提醒你。

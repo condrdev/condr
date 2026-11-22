@@ -4,8 +4,8 @@ transfers:
     en: Upload
     zh-CN: 上传
   folder_refused:
-    en: '“%{name}” is a folder. Only files can be uploaded; archive it first.'
-    zh-CN: '“%{name}”是文件夹。只能上传文件，请先把它打包。'
+    en: '“%{name}” is a folder. Only files can be uploaded for now.'
+    zh-CN: '“%{name}”是文件夹。目前只支持文件上传。'
   replace:
     title_in_root:
       one:
@@ -36,8 +36,8 @@ transfers:
         en: Skip
         zh-CN: 跳过
       other:
-        en: Skip These
-        zh-CN: 跳过这些
+        en: Skip All
+        zh-CN: 跳过全部
   not_connected:
     en: '%{device} is not connected'
     zh-CN: '%{device} 未连接'

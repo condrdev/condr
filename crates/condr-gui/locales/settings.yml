@@ -8,7 +8,7 @@ settings:
     zh-CN: '无法打开设置：%{error}'
   device_offline:
     en: This device's settings appear once it connects.
-    zh-CN: 这台设备连接后，这里会显示它的设置。
+    zh-CN: 待设备连接后显示它的设置。
   terminal:
     en: Terminal
     zh-CN: 终端
@@ -16,8 +16,8 @@ settings:
     en: Connected
     zh-CN: 已连接
   reachability_locked:
-    en: Change this on the device or over SSH. It can cut this connection.
-    zh-CN: 请在那台设备上或通过 SSH 更改。此更改可能切断当前连接。
+    en: This change can cut this connection. Make it on the remote device.
+    zh-CN: 此更改可能切断当前连接。请在远程设备上进行修改。
   licenses:
     title:
       en: Licenses
@@ -43,8 +43,8 @@ settings:
       en: Power
       zh-CN: 电源
     keep_awake_description:
-      en: No screen blanking, lock or idle sleep while Condr is running.
-      zh-CN: Condr 运行期间不熄屏、不锁屏，也不因闲置而睡眠。
+      en: Keeps your device from blanking the screen, locking or sleeping when idle.
+      zh-CN: 保持你的设备不熄屏、不锁屏，也不因闲置而睡眠。
   developer:
     open_failed:
       en: 'Couldn''t open %{location}'
@@ -109,8 +109,8 @@ settings:
       en: Condr is up to date.
       zh-CN: Condr 已是最新版本。
     look_now:
-      en: Look for a newer build now.
-      zh-CN: 立即查找更新的版本。
+      en: Check for a new version now.
+      zh-CN: 立即检查新版本。
     available:
       en: '%{name} is available'
       zh-CN: '%{name} 已发布'
@@ -144,13 +144,13 @@ settings:
       zh-CN: 语言
     language_description:
       en: Follow the system language, or pick one.
-      zh-CN: 跟随系统语言，或自选一种。
+      zh-CN: 跟随系统语言，或自定义。
     theme:
       en: Theme
       zh-CN: 主题
     theme_description:
       en: Follow the system appearance, or pick one.
-      zh-CN: 跟随系统外观，或自选一种。
+      zh-CN: 跟随系统外观，或自定义。
     system:
       en: System
       zh-CN: 跟随系统
@@ -167,8 +167,8 @@ settings:
       en: Font
       zh-CN: 字体
     font_description:
-      en: Font family used by every terminal.
-      zh-CN: 所有终端使用的字体。
+      en: Font family used in terminals.
+      zh-CN: 终端中使用的字体。
     font_size:
       en: Font size
       zh-CN: 字号
@@ -242,10 +242,10 @@ settings:
       zh-CN: 登录时启动 Condr
     autostart_remote:
       en: 'Run `condr server autostart on` on that device.'
-      zh-CN: '在那台设备上运行 `condr server autostart on`。'
+      zh-CN: '在目标设备上运行 `condr server autostart on`。'
     autostart_description:
-      en: Reachable after a restart. No window opens.
-      zh-CN: 重启后仍可连接，不会打开窗口。
+      en: Starts automatically after the device restarts.
+      zh-CN: 设备重启后可自动启动。
   restart:
     ok:
       en: Restart
@@ -272,14 +272,14 @@ settings:
       en: Stops every pane and agent on this device.
       zh-CN: 这会停止这台设备上的所有 Pane 和 Agent。
     pending_description:
-      en: Saved changes apply once Condr restarts. Every pane and agent on this device stops.
-      zh-CN: 已保存的更改将在 Condr 重启后生效。这台设备上的所有 Pane 和 Agent 都会停止。
+      en: Saved changes apply once Condr restarts.
+      zh-CN: 已保存的更改将在 Condr 重启后生效。
     confirm_title:
       en: Restart Condr on this device?
       zh-CN: 要重启这台设备上的 Condr 吗？
     confirm_description:
-      en: Every pane and agent on this device stops; Condr windows reconnect on their own.
-      zh-CN: 这台设备上的所有 Pane 和 Agent 都会停止；Condr 窗口会自动重新连接。
+      en: Every pane and agent on this device stops.
+      zh-CN: 这台设备上的所有 Pane 和 Agent 都会停止。
   network:
     title:
       en: Network
@@ -387,8 +387,8 @@ settings:
       en: Peer-to-peer
       zh-CN: Peer-to-peer
     p2p_description:
-      en: Works from any network. No port to open.
-      zh-CN: 在任何网络下都能连接，无需开放端口。
+      en: Connects directly or through a relay, from any network.
+      zh-CN: 点对点或通过中继连接，支持任何网络环境。
     tcp_description:
       en: Devices dial this computer's address.
       zh-CN: 其他设备直接连接这台电脑的地址。
@@ -421,14 +421,14 @@ settings:
       en: Restart Condr to finish
       zh-CN: 重启 Condr 以完成设置
     restart_body:
-      en: Devices can connect once Condr restarts. Every pane and agent on this device stops.
-      zh-CN: Condr 重启后其他设备即可连接。这台设备上的所有 Pane 和 Agent 都会停止。
+      en: Devices can connect once Condr restarts.
+      zh-CN: Condr 重启后其他设备即可连接。
     restarting:
       en: Restarting Condr…
       zh-CN: 正在重启 Condr…
     ready:
-      en: Condr on your phone scans a code; another computer pastes its link.
-      zh-CN: 手机上的 Condr 扫描配对码；其他电脑粘贴它的链接。
+      en: Scan the pairing code with Condr on your phone, or paste the pairing link on another computer.
+      zh-CN: 请打开手机上的 Condr 扫描配对码，或者在其他电脑粘贴配对链接。
     show_code:
       en: Show pairing code
       zh-CN: 显示配对码
@@ -445,8 +445,8 @@ settings:
       en: '%{name} is paired'
       zh-CN: '%{name} 已配对'
     paired_body:
-      en: It's listed under Devices and connects from now on.
-      zh-CN: 它已列在“设备”下，今后会自动连接。
+      en: Added to the list of paired devices.
+      zh-CN: 已添加至配对设备列表。
     pair_another:
       en: Pair another device
       zh-CN: 配对其他设备
@@ -461,10 +461,10 @@ settings:
       zh-CN: '%{time} 后过期'
     new_code:
       en: New code
-      zh-CN: 换一个配对码
+      zh-CN: 更换配对码
     scan:
-      en: Scan with Condr on your phone
-      zh-CN: 用手机上的 Condr 扫描
+      en: Scan with the Condr app on your phone
+      zh-CN: 用手机上的 Condr 应用扫描
     choose_address:
       en: Choose the address the new device dials
       zh-CN: 选择新设备要连接的地址
@@ -476,8 +476,8 @@ settings:
       en: Devices
       zh-CN: 设备
     empty:
-      en: No devices yet. Pair one with the code above.
-      zh-CN: 还没有设备。用上方的配对码配对一台。
+      en: No paired devices.
+      zh-CN: 没有已配对的设备。
     this_window:
       en: This window
       zh-CN: 此窗口
@@ -485,14 +485,14 @@ settings:
       en: Revoke
       zh-CN: 取消配对
     revoke_this_window:
-      en: It is how this window connects.
-      zh-CN: 此窗口正是通过它连接的。
+      en: Current connection.
+      zh-CN: 当前连接。
     revoke_title:
       en: 'Revoke “%{name}”?'
       zh-CN: '要取消与“%{name}”的配对吗？'
     revoke_description:
-      en: It disconnects now and needs a new pairing code to connect again.
-      zh-CN: 它会立即断开，之后需要新的配对码才能再次连接。
+      en: Revokes the device's pairing and disconnects it.
+      zh-CN: 撤销该设备的配对并断开连接。
     revoke_ok:
       en: Revoke
       zh-CN: 取消配对

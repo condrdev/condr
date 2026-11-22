@@ -2,35 +2,35 @@ _version: 2
 connection:
   advice:
     incompatible_protocol:
-      en: Condr there and here speak different protocol versions, so trying again will not help. Update both to the same version.
-      zh-CN: 两端的 Condr 协议版本不同，重试也无济于事。请把两端更新到同一版本。
+      en: Condr there and here are different versions. Update both to the same version.
+      zh-CN: 两端的 Condr 版本不同，请将两端更新到同一版本。
     local_start_failed:
-      en: Condr's own server could not start on this device. Connect tries again.
-      zh-CN: Condr 自己的服务无法在这台设备上启动。点击“连接”会再试一次。
+      en: The Condr server could not start on this device. Click Connect to try again.
+      zh-CN: Condr 服务无法在这台设备上启动。请点击“连接”重试。
     ssh_not_running:
-      en: SSH reached the device, but Condr is not running there. Start it with `condr server start` on the device.
-      zh-CN: SSH 已连上那台设备，但 Condr 没有在运行。在那台设备上用 `condr server start` 启动它。
+      en: SSH connected, but no Condr server was found. Run `condr server start` on the device.
+      zh-CN: SSH 已连接，但未找到 Condr 服务。请在目标设备上执行启动命令 `condr server start`。
     nothing_listening:
-      en: Nothing answers at this address. Check that Condr is running there and that the address is right.
-      zh-CN: 这个地址没有任何响应。确认 Condr 在那里运行，并且地址无误。
+      en: Nothing answers at this address. Check that the address is right and that the Condr server is running.
+      zh-CN: 目标地址没有响应。请确认地址是否正确或 Condr 服务是否正常。
     no_answer:
-      en: The device did not answer. Check that it is awake and on the network.
-      zh-CN: 设备没有响应。确认它没有休眠并且已联网。
+      en: The device did not answer.
+      zh-CN: 设备没有响应。
     unreachable:
-      en: This device cannot reach that address. Check the network and any VPN.
-      zh-CN: 这台设备无法访问那个地址。检查网络和 VPN。
+      en: Cannot reach that address. Check the network and VPN settings.
+      zh-CN: 无法访问目标地址。请检查网络和 VPN 设置。
     refused:
-      en: The device refused this connection. Check that this device is still paired there.
-      zh-CN: 对方设备拒绝了这次连接。确认这台设备仍与它配对。
+      en: The device refused the connection. Check that the devices are still paired.
+      zh-CN: 对方拒绝了连接。请确认设备配对状态是否正常。
     closed:
-      en: The device closed the connection. Condr there may have stopped or restarted.
-      zh-CN: 对方设备关闭了连接。那里的 Condr 可能已停止或重启。
+      en: The device closed the connection. Check that the Condr server is running there.
+      zh-CN: 对方关闭了连接。请检查 Condr 服务状态是否正常。
     ssh_failed:
-      en: SSH could not reach the device. Try the same `ssh` destination from a terminal on this device.
-      zh-CN: SSH 无法连上那台设备。在这台设备的终端里试试同一个 `ssh` 目标。
+      en: SSH could not connect. Check your SSH configuration.
+      zh-CN: SSH 连接失败。请检查 SSH 连接配置。
     retry:
-      en: Connect tries again. The reason below says what went wrong.
-      zh-CN: 点击“连接”会再试一次。下方的原因说明了出错的地方。
+      en: Click Connect to try again.
+      zh-CN: 点击“连接”进行重试。
   title:
     reconnecting:
       en: 'Reconnecting to %{device}…'

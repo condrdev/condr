@@ -8,28 +8,28 @@ navigation:
       en: Close Workspace?
       zh-CN: 关闭 Workspace？
     description:
-      en: The workspace terminals will be stopped. Files are not deleted.
-      zh-CN: 这个 Workspace 的终端会被停止，文件不会被删除。
+      en: The workspace terminals will be stopped. Files on disk are not deleted.
+      zh-CN: 这个 Workspace 的终端会被停止，磁盘中的文件不会被删除。
   close_pane:
     title:
       en: Close Pane?
       zh-CN: 关闭 Pane？
     agent:
-      en: '%{agent} is running in this Pane and will be stopped.'
-      zh-CN: '%{agent} 正在这个 Pane 中运行，关闭后会被停止。'
+      en: '%{agent} is running and will be stopped.'
+      zh-CN: '%{agent} 正在运行，关闭后会被停止。'
     agents:
-      en: '%{count} agents are running in this Pane and will be stopped.'
-      zh-CN: '这个 Pane 中有 %{count} 个 Agent 正在运行，关闭后都会被停止。'
+      en: '%{count} agents are running and will be stopped.'
+      zh-CN: '当前有 %{count} 个 Agent 正在运行，关闭后会被停止。'
   close_tab:
     title:
       en: Close Tab?
       zh-CN: 关闭 Tab？
     agent:
-      en: '%{agent} is running in this Tab and will be stopped.'
-      zh-CN: '%{agent} 正在这个 Tab 中运行，关闭后会被停止。'
+      en: '%{agent} is running and will be stopped.'
+      zh-CN: '%{agent} 正在运行，关闭后会被停止。'
     agents:
-      en: '%{count} agents are running in this Tab and will be stopped.'
-      zh-CN: '这个 Tab 中有 %{count} 个 Agent 正在运行，关闭后都会被停止。'
+      en: '%{count} agents are running and will be stopped.'
+      zh-CN: '当前有 %{count} 个 Agent 正在运行，关闭后都会被停止。'
   create:
     en: Create
     zh-CN: 创建

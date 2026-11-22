@@ -20,7 +20,7 @@ dialogs:
     zh-CN: 请输入路径
   folder_picker_closed:
     en: The folder picker closed without a result
-    zh-CN: 文件夹选择器关闭了，没有返回结果
+    zh-CN: 文件夹选择器关闭后没有返回结果
   rename_workspace:
     en: Rename Workspace
     zh-CN: 重命名 Workspace

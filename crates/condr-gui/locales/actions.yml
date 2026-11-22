@@ -9,8 +9,8 @@ actions:
         en: '%{count} transfers are running'
         zh-CN: '有 %{count} 个传输正在进行'
     description:
-      en: Quitting cancels it and leaves nothing half-written behind.
-      zh-CN: 退出会取消传输，不会留下写了一半的文件。
+      en: Quitting cancels the transfers in progress.
+      zh-CN: 退出将会取消正在进行的传输。
     quit:
       en: Quit
       zh-CN: 退出

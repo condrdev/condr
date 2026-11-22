@@ -179,7 +179,7 @@ tasks:
         zh-CN: 保存对“%{title}”的修改？
       description:
         en: Your changes are lost if you don't save them.
-        zh-CN: 不保存的话，修改会丢失。
+        zh-CN: 未保存的修改将会丢失。
       discard:
         en: Discard
         zh-CN: 放弃

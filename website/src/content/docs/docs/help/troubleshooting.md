@@ -55,7 +55,7 @@ CONDR_LOG=condr_server=debug,condr_core=debug condr server restart
 When the window connects to this machine and finds no running Server, it starts a new one and waits for its handshake. If that fails, the connection page shows:
 
 ```text
-Condr's own server could not start on this device. Connect tries again.
+The Condr server could not start on this device. Click Connect to try again.
 ```
 
 The detailed reason under it includes `condr-server did not become ready`, the path of the `.stderr` file, and that file's output since this start. Common causes:
@@ -78,7 +78,7 @@ If you run `condr server stop` while the window is open, the window notices the 
 
 * **Different builds**: the icon before the Device's name turns amber, and an amber warning triangle appears at the heading's right end. Hover over the triangle to compare the two versions and see which side to update. Clicking the triangle hides the notice until that Device's version changes again.
 * **The local Server is older than the window**: after you update Condr, the window asks whether to restart the local Server. Restarting ends every process running in its terminals, then reopens the current Workspaces and Agent conversations.
-* **Incompatible protocols**: the connection is refused, the connection page shows `Condr there and here speak different protocol versions`, and the CLI returns the error code `protocol_mismatch`. Retrying does not help; both sides must be updated to matching versions.
+* **Incompatible protocols**: the connection is refused, the connection page shows `Condr there and here are different versions`, and the CLI returns the error code `protocol_mismatch`. Retrying does not help; both sides must be updated to matching versions.
 
 Once both sides run matching versions, go to the target Device and run `condr server restart` in a terminal outside Condr, or pick it at the top of **Settings**, open **General** and click **Restart Condr**. That button is available only over a local or SSH connection.
 

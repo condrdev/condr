@@ -151,18 +151,18 @@ files:
       en: '%{path} changed on disk'
       zh-CN: '%{path} 在磁盘上已更改'
     description:
-      en: Something else changed it since you opened it. Overwrite it with your text, or discard your edits and load it again.
-      zh-CN: 你打开它之后，它被别处修改了。用你的文本覆盖它，或者放弃你的编辑并重新加载。
+      en: Another program changed this file. Overwrite it, or discard your edits and reload it.
+      zh-CN: 该文件已被其它程序修改。请重新保存，或者放弃编辑并重新加载。
   unsaved:
     title:
       en: '%{path} has unsaved changes'
       zh-CN: '%{path} 有未保存的更改'
     conflicted:
-      en: It changed on disk since you opened it. Overwrite it with your text, copy your text, or discard it.
-      zh-CN: 你打开它之后，它在磁盘上被修改了。用你的文本覆盖它、复制你的文本，或者放弃它。
+      en: Another program changed this file. Overwrite it, copy your text, or discard your edits.
+      zh-CN: 该文件已被其它程序修改。请覆盖保存、复制文本，或者放弃编辑。
     orphaned:
-      en: Its Preview Tab no longer shows it. Save your text to the file, copy it, or discard it.
-      zh-CN: 它的 Preview Tab 已不再显示它。把你的文本保存到文件、复制它，或者放弃它。
+      en: Its Preview Tab no longer shows this file. Save it, copy your text, or discard your edits.
+      zh-CN: Preview Tab 已不再显示该文件。请保存、复制文本，或者放弃编辑。
   save_prompt:
     title:
       en: 'Save changes to %{path}?'
@@ -171,8 +171,8 @@ files:
       en: 'Your changes are lost if you don''t save them.'
       zh-CN: 如果不保存，你的更改将会丢失。
     disconnected:
-      en: The device is not connected, so the file cannot be saved now. Copy your text to keep it.
-      zh-CN: 设备未连接，现在无法保存文件。复制你的文本以保留它。
+      en: The device is not connected, so the file cannot be saved now.
+      zh-CN: 设备未连接，现在无法保存文件。
   choice:
     cancel:
       en: Cancel

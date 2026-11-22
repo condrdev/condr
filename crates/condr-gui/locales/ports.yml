@@ -44,20 +44,20 @@ ports:
       en: Forward a Port
       zh-CN: 转发端口
     description:
-      en: Reach a service running on a remote Device at localhost on this machine.
-      zh-CN: 通过这台机器的 localhost 访问远程设备上运行的服务。
+      en: Forward a port on a remote Device to this machine.
+      zh-CN: 将远程设备上的端口转发至本地。
     no_device:
-      en: Connect a remote Device to forward its ports.
-      zh-CN: 连接一台远程设备，即可转发它的端口。
+      en: Connect a remote Device first to forward its ports.
+      zh-CN: 请先连接远程设备，即可转发它的端口。
     device:
       en: Device
       zh-CN: 设备
     device_port:
       en: 'Port on %{device}'
-      zh-CN: '%{device} 上的端口'
+      zh-CN: '%{device} 的端口'
     local_port:
-      en: Port on this machine
-      zh-CN: 这台机器上的端口
+      en: Local port
+      zh-CN: 本地的端口
     forward:
       en: Forward
       zh-CN: 转发
@@ -79,8 +79,8 @@ ports:
         en: '%{count} connections'
         zh-CN: '%{count} 个连接'
     refused:
-      en: 'The last connection was refused: nothing listens on port %{port}.'
-      zh-CN: '上一个连接被拒绝：端口 %{port} 上没有服务在监听。'
+      en: 'Connection refused: nothing listens on port %{port}.'
+      zh-CN: '连接被拒绝：端口 %{port} 上没有服务在监听。'
     open_in_browser:
       en: Open in Browser
       zh-CN: 在浏览器中打开
