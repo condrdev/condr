@@ -9,7 +9,8 @@
 //!
 //! It starts a TCP Server with one Workspace, opens Condr against it, and saves one PNG
 //! per state: the Workspace, the Command Palette's pages, Tasks mode with Tasks and with an
-//! Agent in every column and with columns folded, the Ports page empty, with forwards, for one Device, the right
+//! Agent in every column and with columns folded, the same Agents in the sidebar's Agents
+//! section by Workspace, by state and in the tree's order, the Ports page empty, with forwards, for one Device, the right
 //! sidebar's transfer strip, the left sidebar with its Device folded, and a finished
 //! download's toast. The website's screenshots come from the same window, in `website`.
 
@@ -476,6 +477,27 @@ fn agents(
     shot(cx, window, directory, "11f-tasks-folded");
     update(cx, window, view, |this, window, cx| {
         this.toggle_tasks(window, cx)
+    });
+
+    // The same Agents in the sidebar's section (ADR 0067, ADR 0074): by Workspace and
+    // urgency, by state, and in the tree's order.
+    for (name, by_state, tree_order) in [
+        ("12-agents-section", false, false),
+        ("12b-agents-by-state", true, false),
+        ("12c-agents-tree-order", false, true),
+    ] {
+        update(cx, window, view, move |this, _, cx| {
+            this.main_view_mut().agents_order = super::sidebar::AgentsOrder {
+                by_state,
+                tree_order,
+            };
+            cx.notify();
+        });
+        shot(cx, window, directory, name);
+    }
+    update(cx, window, view, |this, _, cx| {
+        this.main_view_mut().agents_order = Default::default();
+        cx.notify();
     });
 }
 
