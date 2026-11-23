@@ -1,9 +1,10 @@
 //! The Agents section at the bottom of the left sidebar (ADR 0067): every Agent the
-//! window's tree lists, grouped by Workspace and most urgent first, in a height its
-//! top-edge handle sets.
+//! window's tree lists, grouped by Workspace or by state and most urgent first or in the
+//! tree's order (ADR 0074), in a height its top-edge handle sets.
 
 use super::*;
 use crate::app::change_tree::row_highlight;
+use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::resizable::resize_handle;
 use rust_i18n::t;
 
@@ -19,6 +20,16 @@ const FOLD_SPRING: SpringConfig = SpringConfig::new(900., 60., 1.);
 /// Settled within half a percent of the way, under two pixels on a tall section.
 const FOLD_EPSILON: f32 = 0.005;
 
+/// How a window's section groups and orders its Agents, from its heading's menu
+/// (ADR 0074); the default is ADR 0067's, by Workspace and by urgency.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(in crate::app) struct AgentsOrder {
+    /// Grouped under their states rather than their Workspaces.
+    pub(in crate::app) by_state: bool,
+    /// In the tree's order, only `Blocked` and `Error` ahead, rather than by urgency.
+    pub(in crate::app) tree_order: bool,
+}
+
 /// One Agent the section lists: where it lives and how it shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::app) struct AgentRow {
@@ -26,18 +37,37 @@ pub(in crate::app) struct AgentRow {
     pub(in crate::app) workspace_id: WorkspaceId,
     pub(in crate::app) pane_id: PaneId,
     pub(in crate::app) status: SidebarStatusVisual,
+    /// Its place in `URGENCY`, or the one it had when it was selected; `rank_agents`
+    /// sets it, and by state it is the row's group.
+    pub(in crate::app) rank: usize,
 }
 
-/// Groups each Workspace's Agents, the group with the most urgent Agent first and the
-/// most urgent first within it; ties keep Session order, the rows coming in it. The
-/// anchored Agent keeps the rank it had when it was selected, and so does its group.
+/// By state, the rows sort by rank. By Workspace, each Workspace's Agents form a group,
+/// the group with the most urgent Agent first and the most urgent first within it; in
+/// the tree's order only `Blocked` and `Error` rank ahead of the rest. Ties keep Session
+/// order, the rows coming in it. The anchored Agent keeps the rank it had when it was
+/// selected, and so does its group.
 pub(in crate::app) fn rank_agents(
     rows: &mut [AgentRow],
     anchor: Option<((ConnectionKey, PaneId), usize)>,
+    order: AgentsOrder,
 ) {
-    let rank = |row: &AgentRow| match anchor {
-        Some((pane, rank)) if pane == (row.key, row.pane_id) => rank,
-        _ => urgency(row.status),
+    for row in rows.iter_mut() {
+        row.rank = match anchor {
+            Some((pane, rank)) if pane == (row.key, row.pane_id) => rank,
+            _ => urgency(row.status),
+        };
+    }
+    if order.by_state {
+        rows.sort_by_key(|row| row.rank);
+        return;
+    }
+    let rank = |row: &AgentRow| {
+        if order.tree_order {
+            row.rank.min(NEEDS_YOU_RANKS)
+        } else {
+            row.rank
+        }
     };
     // Each Workspace in Session order, with its most urgent rank.
     let mut groups: Vec<((ConnectionKey, WorkspaceId), usize)> = Vec::new();
@@ -70,10 +100,57 @@ pub(in crate::app) fn agents_height(view: &WindowView) -> Pixels {
         .max(MIN_AGENTS_HEIGHT)
 }
 
+/// The heading's menu: Group, then Order, which is greyed while grouping by state, where
+/// every order is Session order (ADR 0074).
+fn agents_order_menu(menu: PopupMenu, order: AgentsOrder, owner: WeakEntity<Condr>) -> PopupMenu {
+    let item = |label, checked, disabled, next: AgentsOrder| {
+        let owner = owner.clone();
+        PopupMenuItem::new(label)
+            .checked(checked)
+            .disabled(disabled)
+            .on_click(move |_, window, cx| {
+                let _ = owner.update(cx, |this, cx| this.set_agents_order(next, window, cx));
+            })
+    };
+    let by_state = |by_state| AgentsOrder { by_state, ..order };
+    let tree_order = |tree_order| AgentsOrder {
+        tree_order,
+        ..order
+    };
+    menu.label(t!("sidebar.agents_order.group"))
+        .item(item(
+            t!("sidebar.agents_order.workspace"),
+            !order.by_state,
+            false,
+            by_state(false),
+        ))
+        .item(item(
+            t!("sidebar.agents_order.state"),
+            order.by_state,
+            false,
+            by_state(true),
+        ))
+        .separator()
+        .label(t!("sidebar.agents_order.order"))
+        .item(item(
+            t!("sidebar.agents_order.urgency"),
+            !order.tree_order,
+            order.by_state,
+            tree_order(false),
+        ))
+        .item(item(
+            t!("sidebar.agents_order.sidebar"),
+            order.tree_order,
+            order.by_state,
+            tree_order(true),
+        ))
+}
+
 impl Condr {
-    /// Every Agent a window with `scope` lists, in the section's order. A Device that is
-    /// not connected lists none, as in "Needs you".
-    pub(in crate::app) fn agent_rows(&self, scope: WindowScope) -> Vec<AgentRow> {
+    /// Every Agent the window's section lists, in its order. A Device that is not
+    /// connected lists none, as in "Needs you".
+    pub(in crate::app) fn agent_rows(&self, view: &WindowView) -> Vec<AgentRow> {
+        let scope = view.scope;
         let mut rows = Vec::new();
         for connection in &self.connections {
             let key = connection.key;
@@ -91,12 +168,13 @@ impl Condr {
                             workspace_id: workspace.id(),
                             pane_id: pane.id(),
                             status,
+                            rank: 0,
                         });
                     }
                 }
             }
         }
-        rank_agents(&mut rows, self.agents_anchor);
+        rank_agents(&mut rows, self.agents_anchor, view.agents_order);
         rows
     }
 
@@ -112,7 +190,7 @@ impl Condr {
         if self.in_tasks_mode(self.window_view(window)) {
             return self.step_task_card(step, true, window, cx);
         }
-        let rows = self.agent_rows(self.window_view(window).scope);
+        let rows = self.agent_rows(self.window_view(window));
         if rows.is_empty() {
             return;
         }
@@ -129,6 +207,12 @@ impl Condr {
         self.select_pane(row.key, row.pane_id, window, cx);
     }
 
+    fn set_agents_order(&mut self, order: AgentsOrder, window: &Window, cx: &mut Context<Self>) {
+        self.window_view_mut(window).agents_order = order;
+        self.schedule_state_save(cx);
+        cx.notify();
+    }
+
     fn toggle_agents_section(&mut self, window: &Window, cx: &mut Context<Self>) {
         let view = self.window_view_mut(window);
         view.agents_collapsed = !view.agents_collapsed;
@@ -142,7 +226,8 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let rows = self.agent_rows(view.scope);
+        let rows = self.agent_rows(view);
+        let order = view.agents_order;
         let collapsed = view.agents_collapsed;
         let owner = cx.weak_entity();
         let label = t!("sidebar.agents");
@@ -198,6 +283,24 @@ impl Condr {
             .when(!summary.is_empty(), |this| {
                 this.child(status_counts(&summary, cx).font_normal())
             })
+            // Open, the menu that groups and orders the rows; its popover takes the press,
+            // so the heading does not fold.
+            .when(!collapsed, |this| {
+                let order_owner = owner.clone();
+                let label = t!("sidebar.agents_order.button");
+                this.child(div().flex_1()).child(
+                    Button::new("agents-order")
+                        .debug_selector(|| "agents-order".into())
+                        .xsmall()
+                        .ghost()
+                        .icon(Icon::new(gpui_kit::assets::IconName::ListFilter).size_3p5())
+                        .tooltip(label.clone())
+                        .accessibility_label(label)
+                        .dropdown_menu(move |menu, _, _| {
+                            agents_order_menu(menu, order, order_owner.clone())
+                        }),
+                )
+            })
             .on_click(move |_, window, cx| {
                 let _ = heading_owner.update(cx, |this, cx| this.toggle_agents_section(window, cx));
             });
@@ -215,6 +318,7 @@ impl Condr {
                 workspace_id,
                 pane_id,
                 status,
+                rank,
             } = *row;
             let Some(connection) = self.connection(key) else {
                 continue;
@@ -228,19 +332,32 @@ impl Condr {
             let Some(agent) = connection.model.agents.get(&pane_id) else {
                 continue;
             };
-            // A muted heading over each Workspace's Agents; it does nothing when clicked.
-            if group != Some((key, workspace_id)) {
-                group = Some((key, workspace_id));
-                let name = if several_devices {
-                    format!("{} · {}", workspace.name(), connection.label)
+            let workspace_name = if several_devices {
+                format!("{} · {}", workspace.name(), connection.label)
+            } else {
+                workspace.name().to_owned()
+            };
+            // A muted heading over each group's Agents; it does nothing when clicked.
+            let this_group = if order.by_state {
+                (None, rank)
+            } else {
+                (Some((key, workspace_id)), 0)
+            };
+            if group != Some(this_group) {
+                group = Some(this_group);
+                let (selector, name) = if order.by_state {
+                    let state = urgency_status(rank);
+                    (
+                        format!("agents-state-{}", state.key),
+                        state.label.to_owned(),
+                    )
                 } else {
-                    workspace.name().to_owned()
+                    let selector = format!("agents-group-{key}-{}", workspace_id.as_u64());
+                    (selector, workspace_name.clone())
                 };
                 items.push(
                     div()
-                        .debug_selector(move || {
-                            format!("agents-group-{key}-{}", workspace_id.as_u64())
-                        })
+                        .debug_selector(move || selector.clone())
                         .px_1()
                         .pt_1()
                         .truncate()
@@ -274,10 +391,15 @@ impl Condr {
                 ))
                 // What it waits for or why it halted, while it says so (ADR 0024).
                 .when_some(agent.detail.clone(), |item, text| item.detail(text))
-                // Named only while it wants something or works; a quiet row stays quiet.
-                .when(!matches!(status.key, "idle" | "unknown"), |item| {
-                    item.label_end(status.label, status.tone.color(cx))
+                // By state its heading names the state, so the row names its Workspace.
+                .when(order.by_state, |item| {
+                    item.label_end(workspace_name, cx.theme().muted_foreground)
                 })
+                // Named only while it wants something or works; a quiet row stays quiet.
+                .when(
+                    !order.by_state && !matches!(status.key, "idle" | "unknown"),
+                    |item| item.label_end(status.label, status.tone.color(cx)),
+                )
                 .active(
                     key == self.presented_key(view)
                         && self.terminal_input.target == Some((key, pane_id)),
@@ -369,8 +491,8 @@ impl Condr {
 
 #[cfg(test)]
 mod tests {
-    use super::{AgentRow, rank_agents};
-    use crate::app::sidebar::{BELL_SIDEBAR_STATUS, agent_sidebar_status};
+    use super::{AgentRow, AgentsOrder, rank_agents};
+    use crate::app::sidebar::{BELL_SIDEBAR_STATUS, agent_sidebar_status, urgency_status};
     use condr_core::{AgentDisplayState, PaneId, WorkspaceId};
 
     fn row(pane: u64, state: AgentDisplayState) -> AgentRow {
@@ -383,6 +505,7 @@ mod tests {
             workspace_id: WorkspaceId::from_u64(workspace),
             pane_id: PaneId::from_u64(pane),
             status: agent_sidebar_status(state),
+            rank: 0,
         }
     }
 
@@ -395,7 +518,7 @@ mod tests {
             in_workspace(2, 4, AgentDisplayState::Blocked),
             in_workspace(3, 5, AgentDisplayState::Working),
         ];
-        rank_agents(&mut rows, None);
+        rank_agents(&mut rows, None, AgentsOrder::default());
         // Workspace 2 holds the Blocked one; 1 and 3 tie on Working and keep Session order.
         assert_eq!(panes(&rows), [4, 3, 2, 1, 5]);
     }
@@ -419,8 +542,9 @@ mod tests {
                 ..row(8, AgentDisplayState::Idle)
             },
         ];
-        rank_agents(&mut rows, None);
-        assert_eq!(panes(&rows), [8, 5, 7, 3, 6, 2, 1, 4]);
+        rank_agents(&mut rows, None, AgentsOrder::default());
+        // Blocked and Error ahead of a bell (ADR 0074).
+        assert_eq!(panes(&rows), [5, 7, 8, 3, 6, 2, 1, 4]);
     }
 
     #[test]
@@ -436,12 +560,81 @@ mod tests {
             ]
         };
         let mut rows = session();
-        rank_agents(&mut rows, Some(((1, PaneId::from_u64(3)), done_rank)));
+        rank_agents(
+            &mut rows,
+            Some(((1, PaneId::from_u64(3)), done_rank)),
+            AgentsOrder::default(),
+        );
         // Still among the Done, so the next one after it is pane 4.
         assert_eq!(panes(&rows), [3, 4, 2, 1]);
         // Once another is selected, it ranks as what it is now.
         let mut rows = session();
-        rank_agents(&mut rows, None);
+        rank_agents(&mut rows, None, AgentsOrder::default());
         assert_eq!(panes(&rows), [4, 2, 1, 3]);
+    }
+
+    #[test]
+    fn the_trees_order_moves_only_what_needs_a_person() {
+        let session = || {
+            vec![
+                in_workspace(1, 1, AgentDisplayState::Idle),
+                in_workspace(1, 2, AgentDisplayState::Working),
+                in_workspace(2, 3, AgentDisplayState::Done),
+                in_workspace(2, 4, AgentDisplayState::Idle),
+                in_workspace(3, 5, AgentDisplayState::Working),
+                in_workspace(3, 6, AgentDisplayState::Error),
+                in_workspace(3, 7, AgentDisplayState::Blocked),
+            ]
+        };
+        let tree_order = AgentsOrder {
+            by_state: false,
+            tree_order: true,
+        };
+        let mut rows = session();
+        rank_agents(&mut rows, None, tree_order);
+        // Workspace 3 leads with its Blocked and Error; the rest keep Session order.
+        assert_eq!(panes(&rows), [7, 6, 5, 1, 2, 3, 4]);
+        let mut rows = session();
+        rank_agents(&mut rows, None, AgentsOrder::default());
+        assert_eq!(panes(&rows), [7, 6, 5, 3, 4, 2, 1]);
+    }
+
+    #[test]
+    fn by_state_the_rows_fall_under_their_states_the_anchored_one_under_its_old_one() {
+        let done_rank = super::urgency(agent_sidebar_status(AgentDisplayState::Done));
+        let session = || {
+            vec![
+                in_workspace(1, 1, AgentDisplayState::Idle),
+                in_workspace(1, 2, AgentDisplayState::Done),
+                in_workspace(2, 3, AgentDisplayState::Unknown),
+                in_workspace(2, 4, AgentDisplayState::Working),
+                in_workspace(1, 5, AgentDisplayState::Blocked),
+                // Pane 6 was Done when selected; seeing it made it Idle.
+                in_workspace(2, 6, AgentDisplayState::Idle),
+            ]
+        };
+        for tree_order in [false, true] {
+            let mut rows = session();
+            let order = AgentsOrder {
+                by_state: true,
+                tree_order,
+            };
+            rank_agents(
+                &mut rows,
+                Some(((1, PaneId::from_u64(6)), done_rank)),
+                order,
+            );
+            // Within a state every order is Session order.
+            assert_eq!(panes(&rows), [5, 2, 6, 4, 1, 3]);
+            let headings = rows
+                .iter()
+                .map(|row| urgency_status(row.rank).key)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                headings,
+                ["blocked", "done", "done", "working", "idle", "idle"],
+                "an Unknown Agent sits with the Idle ones"
+            );
+        }
     }
 }

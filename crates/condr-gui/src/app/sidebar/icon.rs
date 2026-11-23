@@ -189,7 +189,8 @@ const WORKING_FADE_FPS: f32 = 30.;
 pub(in crate::app) fn agent_status_summary(
     statuses: impl IntoIterator<Item = SidebarStatusVisual>,
 ) -> Vec<(SidebarStatusVisual, usize)> {
-    let rank = |status: &SidebarStatusVisual| URGENCY.iter().position(|key| *key == status.key);
+    let rank =
+        |status: &SidebarStatusVisual| URGENCY.iter().position(|ranked| ranked.key == status.key);
     let mut summary: Vec<(SidebarStatusVisual, usize)> = Vec::new();
     let statuses = statuses.into_iter().map(|status| {
         if status.key == "unknown" {
@@ -208,18 +209,35 @@ pub(in crate::app) fn agent_status_summary(
     summary
 }
 
-/// How urgently each state wants a person, most first.
-const URGENCY: [&str; 6] = ["bell", "blocked", "error", "done", "working", "idle"];
+/// How urgently each state wants a person, most first: what "Needs you" lists ahead of a
+/// bell (ADR 0074).
+const URGENCY: [SidebarStatusVisual; 6] = [
+    agent_sidebar_status(AgentDisplayState::Blocked),
+    agent_sidebar_status(AgentDisplayState::Error),
+    BELL_SIDEBAR_STATUS,
+    agent_sidebar_status(AgentDisplayState::Done),
+    agent_sidebar_status(AgentDisplayState::Working),
+    agent_sidebar_status(AgentDisplayState::Idle),
+];
+
+/// The ranks of `Blocked` and `Error`, which lead `URGENCY` and the Agents section in
+/// any order (ADR 0074).
+pub(in crate::app) const NEEDS_YOU_RANKS: usize = 2;
 
 /// Where a state ranks by `URGENCY`, an unknown one with the idle.
 pub(in crate::app) fn urgency(status: SidebarStatusVisual) -> usize {
     URGENCY
         .iter()
-        .position(|key| *key == status.key)
+        .position(|ranked| ranked.key == status.key)
         .unwrap_or(URGENCY.len() - 1)
 }
 
-pub(in crate::app) fn agent_sidebar_status(state: AgentDisplayState) -> SidebarStatusVisual {
+/// The state a rank stands for, which names a heading of the Agents section by state.
+pub(in crate::app) fn urgency_status(rank: usize) -> SidebarStatusVisual {
+    URGENCY[rank.min(URGENCY.len() - 1)]
+}
+
+pub(in crate::app) const fn agent_sidebar_status(state: AgentDisplayState) -> SidebarStatusVisual {
     match state {
         AgentDisplayState::Unknown => SidebarStatusVisual {
             glyph: SidebarGlyph::Info,

@@ -485,6 +485,7 @@ impl Condr {
             .agents_height
             .map(|height| px(height).max(MIN_AGENTS_HEIGHT));
         main_view.agents_collapsed = restored_state.agents_collapsed;
+        main_view.agents_order = restored_state.agents_order;
         if let Some(width) = restored_state.changes_width {
             main_view.changes_width = px(width).max(MIN_CHANGES_WIDTH).min(MAX_CHANGES_WIDTH);
         }

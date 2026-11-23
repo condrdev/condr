@@ -66,6 +66,28 @@ sidebar:
   no_agents:
     en: No agents
     zh-CN: 没有 Agent
+  agents_order:
+    button:
+      en: Group and Order
+      zh-CN: 分组和排序
+    group:
+      en: Group
+      zh-CN: 分组
+    workspace:
+      en: Workspace
+      zh-CN: Workspace
+    state:
+      en: State
+      zh-CN: 状态
+    order:
+      en: Order
+      zh-CN: 排序
+    urgency:
+      en: Urgency
+      zh-CN: 紧急程度
+    sidebar:
+      en: Sidebar Order
+      zh-CN: 侧栏顺序
   command_palette:
     en: Command Palette
     zh-CN: 命令面板

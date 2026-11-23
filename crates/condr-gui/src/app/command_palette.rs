@@ -230,7 +230,7 @@ impl Condr {
                     .presented_session()
                     .is_some_and(|session| !session.workspaces().is_empty())
             }),
-            Needs::Agents => !self.agent_rows(self.active_view().scope).is_empty(),
+            Needs::Agents => !self.agent_rows(self.active_view()).is_empty(),
             Needs::Changes => {
                 self.presented_workspace().is_some() && self.draws_workspace(self.active_view())
             }

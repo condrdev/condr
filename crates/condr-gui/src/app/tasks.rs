@@ -484,7 +484,8 @@ mod tests {
         ];
         rank_column(&mut cards);
         let panes: Vec<u64> = cards.iter().map(|card| card.pane_id.as_u64()).collect();
-        assert_eq!(panes, [3, 2, 4, 1]);
+        // A bell after Blocked and Error (ADR 0074).
+        assert_eq!(panes, [2, 4, 1, 3]);
     }
 
     #[test]

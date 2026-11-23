@@ -8,6 +8,7 @@ use gpui_kit::component::kbd::Kbd;
 use item::*;
 use rust_i18n::t;
 
+pub(super) use agents::AgentsOrder;
 pub(super) use drag_drop::*;
 pub(super) use icon::*;
 

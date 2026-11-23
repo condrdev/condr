@@ -1,5 +1,5 @@
-//! The Agents section (ADR 0067): its Workspace groups and their order, the keys that
-//! step through it, and folding it to its heading.
+//! The Agents section (ADR 0067, ADR 0074): its Workspace and state groups and their
+//! order, the keys that step through it, and folding it to its heading.
 
 use super::layout::agent_changed;
 use super::*;
@@ -179,6 +179,50 @@ fn the_agents_section_lists_every_workspaces_agents_most_urgent_first() {
         Some((1, done)),
         "a click selects the Agent's Pane"
     );
+
+    // The heading's button opens its menu rather than folding the section (ADR 0074).
+    let button = window
+        .debug_bounds("agents-order")
+        .expect("open, the heading carries the button that groups and orders");
+    window.simulate_click(button.center(), Modifiers::default());
+    window.run_until_parked();
+    window.simulate_keystrokes("escape");
+    window.run_until_parked();
+    assert!(!window.read(|app| view.read(app).main_view().agents_collapsed));
+
+    let set_order = |window: &mut VisualTestContext, by_state| {
+        window.update(|_, cx| {
+            view.update(cx, |this, cx| {
+                this.main_view_mut().agents_order = crate::app::sidebar::AgentsOrder {
+                    by_state,
+                    tree_order: false,
+                };
+                cx.notify();
+            });
+        });
+        window.update(|window, cx| _ = window.draw(cx));
+    };
+    set_order(window, true);
+    let state = |window: &mut VisualTestContext, key: &str| {
+        window
+            .debug_bounds(leaked_selector(format!("agents-state-{key}")))
+            .expect("each state with an Agent heads its group")
+    };
+    assert!(
+        window
+            .debug_bounds(leaked_selector(format!("agents-group-1-{}", busy.as_u64())))
+            .is_none(),
+        "by state, no Workspace heads a group"
+    );
+    assert!(
+        state(window, "blocked").bottom() <= row(window, blocked).top()
+            && row(window, blocked).bottom() <= state(window, "working").top()
+            && state(window, "working").bottom() <= row(window, working).top()
+            && row(window, working).bottom() <= state(window, "idle").top()
+            && state(window, "idle").bottom() <= row(window, done).top(),
+        "each Agent under its state, the Done seen before it was clicked under Idle"
+    );
+    set_order(window, false);
 
     let open = window.debug_bounds("agents-section").unwrap();
     let heading = window.debug_bounds("agents-heading").unwrap();

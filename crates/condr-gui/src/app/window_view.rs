@@ -82,6 +82,7 @@ pub(super) struct WindowView {
     /// window (ADR 0067).
     pub(super) agents_height: Option<Pixels>,
     pub(super) agents_collapsed: bool,
+    pub(super) agents_order: sidebar::AgentsOrder,
     pub(super) changes_width: Pixels,
     /// The title bar's Tab strip scrolls when the Tabs outgrow it; a newly active Tab
     /// is scrolled into view once, which `last_scrolled_tab` remembers across renders.
@@ -156,6 +157,7 @@ impl WindowView {
             sidebar_collapsed: false,
             agents_height: None,
             agents_collapsed: false,
+            agents_order: sidebar::AgentsOrder::default(),
             changes_width: INITIAL_CHANGES_WIDTH,
             tab_strip_scroll: ScrollHandle::new(),
             last_scrolled_tab: Cell::new(None),
@@ -598,16 +600,14 @@ impl Condr {
         cx: &mut Context<Self>,
     ) {
         let owner = cx.entity();
-        let (sidebar_width, sidebar_collapsed, agents_height, agents_collapsed, changes_width) = {
-            let main = self.main_view();
-            (
-                main.sidebar_width,
-                main.sidebar_collapsed,
-                main.agents_height,
-                main.agents_collapsed,
-                main.changes_width,
-            )
-        };
+        let main = self.main_view();
+        let (sidebar_width, sidebar_collapsed, changes_width) = (
+            main.sidebar_width,
+            main.sidebar_collapsed,
+            main.changes_width,
+        );
+        let (agents_height, agents_collapsed, agents_order) =
+            (main.agents_height, main.agents_collapsed, main.agents_order);
         cx.defer(move |cx| {
             let options = WindowOptions {
                 window_bounds: Some(bounds),
@@ -621,6 +621,7 @@ impl Condr {
                     view.sidebar_collapsed = sidebar_collapsed;
                     view.agents_height = agents_height;
                     view.agents_collapsed = agents_collapsed;
+                    view.agents_order = agents_order;
                     view.changes_width = changes_width;
                     if scope == WindowScope::Tasks {
                         // Tasks keeps one set of preferences, and its selection, wherever

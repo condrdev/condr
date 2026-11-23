@@ -147,9 +147,9 @@ fn workspace_row_summarizes_agents_by_urgency_and_upstream_by_divergence() {
     assert_eq!(
         summary,
         [
-            ("bell", 1),
             ("blocked", 1),
             ("error", 1),
+            ("bell", 1),
             ("done", 2),
             ("working", 1),
             ("idle", 2)

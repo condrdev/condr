@@ -36,6 +36,8 @@ pub(super) struct GuiState {
     /// The Agents section's height, and whether it is folded to its heading (ADR 0067).
     pub agents_height: Option<f32>,
     pub agents_collapsed: bool,
+    /// How the Agents section groups and orders its rows (ADR 0074).
+    pub agents_order: super::sidebar::AgentsOrder,
     pub changes_width: Option<f32>,
     /// Diff Tabs show one column rather than two (ADR 0046).
     pub diff_unified: bool,
@@ -261,6 +263,7 @@ impl GuiState {
 /// `proto/`: nothing else reads it. A value this build does not know is dropped, which
 /// costs a window position or a sidebar choice at most.
 mod wire {
+    use super::super::sidebar::AgentsOrder;
     use super::super::tasks::{TasksDensity, TasksLayout, TasksPrefs, TasksScope};
     use super::{
         DetachedWindowState, SavedScope, SidebarView, TasksWindowState, WindowRect, WindowState,
@@ -295,6 +298,11 @@ mod wire {
         tasks: Option<Tasks>,
         #[prost(message, optional, tag = "12")]
         tasks_window: Option<TasksWindow>,
+        /// The Agents section by state, and in the tree's order (ADR 0074).
+        #[prost(bool, tag = "13")]
+        agents_by_state: bool,
+        #[prost(bool, tag = "14")]
+        agents_tree_order: bool,
     }
 
     /// The Tasks window (ADR 0069).
@@ -441,6 +449,8 @@ mod wire {
                 sidebar_collapsed: state.sidebar_collapsed,
                 agents_height: state.agents_height,
                 agents_collapsed: state.agents_collapsed,
+                agents_by_state: state.agents_order.by_state,
+                agents_tree_order: state.agents_order.tree_order,
                 tasks: Some({
                     let (scope_server, scope_workspace) = match state.tasks.scope {
                         TasksScope::All => (None, None),
@@ -527,6 +537,10 @@ mod wire {
                 sidebar_collapsed: state.sidebar_collapsed,
                 agents_height: state.agents_height,
                 agents_collapsed: state.agents_collapsed,
+                agents_order: AgentsOrder {
+                    by_state: state.agents_by_state,
+                    tree_order: state.agents_tree_order,
+                },
                 tasks_open: state.tasks.as_ref().is_some_and(|tasks| tasks.on),
                 tasks: state
                     .tasks
@@ -712,6 +726,7 @@ impl Condr {
             sidebar_collapsed: self.main_view().sidebar_collapsed,
             agents_height: self.main_view().agents_height.map(Into::into),
             agents_collapsed: self.main_view().agents_collapsed,
+            agents_order: self.main_view().agents_order,
             tasks_open: self.main_view().page == ContentPage::Tasks,
             tasks: self.tasks_view().tasks,
             tasks_window: self
@@ -853,6 +868,7 @@ impl Condr {
 #[cfg(test)]
 mod tests {
     // Not `super::*`: the app module's glob brings in GPUI's `#[test]` macro.
+    use super::super::sidebar::AgentsOrder;
     use super::{
         DetachedWindowState, GuiState, STATE_FILE_NAME, SavedScope, ServerState, TasksWindowState,
         WindowRect, WindowState, WorkspaceState, on_a_display,
@@ -877,6 +893,10 @@ mod tests {
             sidebar_collapsed: true,
             agents_height: Some(180.),
             agents_collapsed: true,
+            agents_order: AgentsOrder {
+                by_state: true,
+                tree_order: true,
+            },
             tasks_open: true,
             tasks: super::super::tasks::TasksPrefs {
                 layout: super::super::tasks::TasksLayout::List,

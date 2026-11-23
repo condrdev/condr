@@ -38,7 +38,7 @@ Condr 界面划分为四个功能区：
   * 状态标识：分支落后/超前上游时标注提交数（`↑N ↓N`）。
   * 右键菜单：支持重命名、新建 Git Worktree 或关闭工作区。
 * **Agent 状态列**：按工作区归类列出所有 Agent，图标角标反映实时生命周期。
-* **Agent 分段**：侧栏底部标题为 **Agent** 的分段，列出所有 Workspace 和设备上的 Agent，按 Workspace 分组，最需要处理的排在前面（Blocked 与 Error，其次是还没看过的 Done，再次是 Working，最后是 Idle）；有 Agent 需要你处理的 Workspace 排到最上面。每行显示 Agent 的任务，处于 Blocked、Error、Done 或 Working 时右侧显示状态；Agent 说明了在等什么时，下一行显示它在等什么。点击一行即可直达对应 Pane；刚选中的那一行会留在原位，直到你选中另一个。拖动标题上方的分隔线可以调整高度，点击标题可以收起到只剩标题，此时标题旁按状态显示 Agent 数量。`Cmd + ]` / `Cmd + [`（Windows 和 Linux 上为 `Alt + ]` / `Alt + [`）按它的顺序逐个切换。
+* **Agent 分段**：侧栏底部标题为 **Agent** 的分段，列出所有 Workspace 和设备上的 Agent，按 Workspace 分组，最需要处理的排在前面（Blocked 与 Error，其次是响铃，然后是还没看过的 Done，再次是 Working，最后是 Idle）；有 Agent 需要你处理的 Workspace 排到最上面。标题右侧的按钮可以改为按状态分组，也可以改为保持侧栏顺序，这样状态变化不会让行移动；无论怎么选，Blocked 与 Error 都排在最前。每行显示 Agent 的任务，处于 Blocked、Error、Done 或 Working 时右侧显示状态（按状态分组时显示所在 Workspace）；Agent 说明了在等什么时，下一行显示它在等什么。点击一行即可直达对应 Pane；刚选中的那一行会留在原位，直到你选中另一个。拖动标题上方的分隔线可以调整高度，点击标题可以收起到只剩标题，此时标题旁按状态显示 Agent 数量。`Cmd + ]` / `Cmd + [`（Windows 和 Linux 上为 `Alt + ]` / `Alt + [`）按它的顺序逐个切换。
 * **辅助工具**：
   * 底部咖啡图标：一键保持屏幕常亮（防休眠）。
   * 底部齿轮图标：系统设置（有新版本可用时显示红点）。

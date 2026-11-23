@@ -61,7 +61,7 @@ Every key combination not declared on this page passes through to the child proc
 | Previous Agent | `Cmd + [` | `Alt + [` |
 | Next Agent | `Cmd + ]` | `Alt + ]` |
 
-* **Order**: the order of the sidebar's Agents section, grouped by Workspace with the most urgent first, across every Device; wraps around at either end. In Tasks mode, the cards' order, column by column, within the scope; the Agent's terminal opens beside the cards.
+* **Order**: the order of the sidebar's Agents section, as its heading's button groups and orders it, across every Device; wraps around at either end. In Tasks mode, the cards' order, column by column, within the scope; the Agent's terminal opens beside the cards.
 * **Starting point**: when the focused Pane runs no Agent, Next goes to the first Agent and Previous to the last.
 * On Windows and Linux, a program in the terminal no longer receives `Alt + [`; [rebind](#change-a-shortcut) these if it needs it.
 
