@@ -48,15 +48,6 @@ fn clamp_utf16_range(text: &str, range: Range<usize>) -> ClampedUtf16Range {
     }
 }
 
-fn terminal_ime_cell(cursor: TerminalCursor, size: TerminalSize, offset: usize) -> (usize, usize) {
-    let columns = usize::from(size.columns.max(1));
-    let cell = usize::from(cursor.row)
-        .saturating_mul(columns)
-        .saturating_add(usize::from(cursor.column))
-        .saturating_add(offset);
-    (cell / columns, cell % columns)
-}
-
 impl TerminalComposition {
     pub(super) fn target(&self) -> (ConnectionKey, PaneId) {
         (self.connection_key, self.pane_id)
@@ -68,6 +59,14 @@ impl TerminalComposition {
 
     pub(super) fn belongs_to_target(&self, target: Option<(ConnectionKey, PaneId)>) -> bool {
         target == Some((self.connection_key, self.pane_id))
+    }
+
+    /// The text with the IME's insertion point as a byte offset.
+    fn marked(&self) -> MarkedText {
+        MarkedText {
+            text: self.text.clone(),
+            caret: clamp_utf16_boundary(&self.text, self.selected_range.start, false).0,
+        }
     }
 
     fn replace(
@@ -248,21 +247,23 @@ impl EntityInputHandler for Condr {
         _: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
-        let (key, offset) = self.active_terminal_composition().map_or_else(
-            || self.terminal_input.target.map(|key| (key, 0)),
-            |composition| {
-                let (_, offset) = clamp_utf16_boundary(&composition.text, range.start, false);
-                Some(((composition.connection_key, composition.pane_id), offset))
-            },
-        )?;
+        let composition = self.active_terminal_composition();
+        let key = composition.map_or(self.terminal_input.target, |composition| {
+            Some(composition.target())
+        })?;
         let geometry = self.terminal_geometry.get(&key)?;
         let terminal = &self.terminal(key.0, key.1)?.view;
         let cursor = terminal.cursor?;
-        let (row, column) = terminal_ime_cell(cursor, terminal.size, offset);
+        // Where the element draws the composition, so the candidates sit under it.
+        let column = composition.map_or(cursor.column, |composition| {
+            let (byte, _) = clamp_utf16_boundary(&composition.text, range.start, false);
+            PreeditLayout::new(&composition.marked(), cursor.column, terminal.size.columns)
+                .column_of(byte)
+        });
         Some(Bounds::new(
             point(
-                geometry.bounds.left() + geometry.cell_size.width * column,
-                geometry.bounds.top() + geometry.cell_size.height * row,
+                geometry.bounds.left() + geometry.cell_size.width * usize::from(column),
+                geometry.bounds.top() + geometry.cell_size.height * usize::from(cursor.row),
             ),
             geometry.cell_size,
         ))
@@ -290,25 +291,19 @@ impl Condr {
         &self,
         connection_key: ConnectionKey,
         pane_id: PaneId,
-    ) -> Option<String> {
+    ) -> Option<MarkedText> {
         self.active_terminal_composition()
             .filter(|composition| composition.belongs_to(connection_key, pane_id))
-            .map(|composition| composition.text.clone())
+            .map(TerminalComposition::marked)
     }
 }
 
 #[cfg(test)]
 mod ime_tests {
     use crate::app::terminal_input::TerminalInputState;
-    use condr_core::{
-        PaneId, Session, SplitDirection, TerminalCursor, TerminalCursorShape, TerminalKey,
-        TerminalSize,
-    };
+    use condr_core::{PaneId, Session, SplitDirection, TerminalKey};
 
-    use super::{
-        TerminalComposition, commit_terminal_composition, terminal_ime_cell,
-        update_terminal_composition,
-    };
+    use super::{TerminalComposition, commit_terminal_composition, update_terminal_composition};
 
     fn pane_ids() -> (PaneId, PaneId) {
         let mut session = Session::new();
@@ -450,21 +445,15 @@ mod ime_tests {
     }
 
     #[test]
-    fn candidate_cell_uses_the_requested_utf16_start() {
-        let cursor = TerminalCursor {
-            row: 0,
-            column: 3,
-            shape: TerminalCursorShape::Block,
-            blinking: false,
-        };
-
+    fn the_insertion_point_is_a_byte_offset_into_the_composition() {
+        let mut composition = composition("");
+        composition.replace(None, "你好", Some(1..1));
+        assert_eq!(composition.marked().caret, 3);
+        composition.replace(None, "ni hc", None);
         assert_eq!(
-            terminal_ime_cell(cursor, TerminalSize::new(3, 5), 0),
-            (0, 3)
-        );
-        assert_eq!(
-            terminal_ime_cell(cursor, TerminalSize::new(3, 5), 3),
-            (1, 1)
+            composition.marked().caret,
+            5,
+            "at the end when the IME names none"
         );
     }
 }

@@ -4,6 +4,7 @@ mod decoration;
 mod geometry;
 mod images;
 mod input;
+mod preedit;
 
 use crate::{Condr, ConnectionKey};
 use cache::{ShapedCell, TerminalRenderCacheKey, cell_font};
@@ -36,6 +37,7 @@ use input::{
     TerminalInputHandler, accumulated_wheel_steps, pointer_event_hits, terminal_modifiers,
     terminal_mouse_button, terminal_mouse_position, terminal_position, wheel_steps,
 };
+pub(crate) use preedit::{MarkedText, PreeditLayout};
 use smol_str::SmolStr;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -60,7 +62,7 @@ pub(crate) struct TerminalElementProps {
     pub(crate) connection_key: ConnectionKey,
     pub(crate) pane_id: PaneId,
     pub(crate) terminal: Arc<TerminalView>,
-    pub(crate) marked_text: Option<String>,
+    pub(crate) marked_text: Option<MarkedText>,
     pub(crate) selection: Option<TerminalSelection>,
     pub(crate) hovered_link: Option<HoveredTerminalLink>,
     pub(crate) runtime_epoch: Option<RuntimeEpoch>,
@@ -99,15 +101,15 @@ pub(crate) struct PrepaintState {
     /// In the order to paint them within each layer; tests read them.
     pub(crate) images: Vec<PreparedImage>,
     cells: Vec<ShapedCell>,
-    /// Painted after `cells`: the cursor block and the character or IME text
-    /// repainted on top of it.
-    overlay_quads: Vec<PaintQuad>,
+    /// Painted after `cells`: the IME composition's background and underline, then the
+    /// cursor, with the character or composition text repainted on top; tests read them.
+    pub(crate) overlay_quads: Vec<PaintQuad>,
     overlay_cells: Vec<ShapedCell>,
     /// Underlines and overlines, painted over `cells`; tests read them.
     pub(crate) decorations: Decorations,
     /// How far below a row's top an underline sits, as shaped text would put it.
     underline_y: Pixels,
-    cell_size: Size<Pixels>,
+    pub(crate) cell_size: Size<Pixels>,
 }
 
 impl TerminalElement {
@@ -459,38 +461,28 @@ impl Element for TerminalElement {
         let mut overlay_quads = Vec::new();
         let mut overlay_cells = Vec::new();
         if let Some(cursor) = self.props.terminal.cursor {
-            let cursor_origin = point(
-                bounds.left() + cell_size.width * usize::from(cursor.column),
-                bounds.top() + cell_size.height * usize::from(cursor.row),
-            );
-            let cursor_color = palette.cursor;
-            // Shape the character under the cursor so a block cursor can
-            // repaint it in the background color, and so the cursor grows to
-            // cover wide characters instead of splitting them.
-            let cursor_cell = self
-                .props
-                .terminal
-                .cell(cursor.row, cursor.column)
-                .filter(|cell| !cell.text.trim().is_empty());
-            let cursor_text = cursor_cell.map(|cell| {
+            let cell_origin = |column: u16| {
+                point(
+                    bounds.left() + cell_size.width * usize::from(column),
+                    bounds.top() + cell_size.height * usize::from(cursor.row),
+                )
+            };
+            let shape_text = |text: &str, font: Font, color: Hsla| {
                 window.text_system().shape_line(
-                    cell.text.as_str().into(),
+                    text.to_owned().into(),
                     font_size,
                     &[TextRun {
-                        len: cell.text.len(),
-                        font: cell_font(style.font(), &cell.text, cell.flags),
-                        color: palette.cursor_text,
+                        len: text.len(),
+                        font,
+                        color,
                         background_color: None,
                         underline: None,
                         strikethrough: None,
                     }],
                     None,
                 )
-            });
-            let cursor_width = cursor_text
-                .as_ref()
-                .map_or(cell_size.width, |line| line.width.max(cell_size.width));
-            let cursor_bounds = Bounds::new(cursor_origin, size(cursor_width, cell_size.height));
+            };
+            let cursor_color = palette.cursor;
             // Only the focused pane shows a filled cursor; unfocused panes
             // demote every visible shape to a hollow outline.
             let focused = self.props.focus_handle.is_focused(window);
@@ -501,6 +493,55 @@ impl Element for TerminalElement {
                 _ if self.props.cursor_blink_hidden => TerminalCursorShape::Hidden,
                 shape => shape,
             };
+            // IME composition text takes the cells it covers, underlined, and the cursor
+            // shows at the IME's insertion point within it.
+            let preedit = self
+                .props
+                .marked_text
+                .as_ref()
+                .filter(|marked| !marked.text.is_empty())
+                .map(|marked| {
+                    let columns = self.props.terminal.size.columns;
+                    (marked, PreeditLayout::new(marked, cursor.column, columns))
+                });
+            let (cursor_column, cursor_text, cursor_width) = match &preedit {
+                Some((_, layout)) => {
+                    let width = layout.char_at(layout.caret).map_or(1, |shown| shown.width);
+                    (layout.caret, None, cell_size.width * usize::from(width))
+                }
+                None => {
+                    // Shape the character under the cursor so a block cursor can
+                    // repaint it in the background color, and so the cursor grows to
+                    // cover wide characters instead of splitting them.
+                    let cursor_text = self
+                        .props
+                        .terminal
+                        .cell(cursor.row, cursor.column)
+                        .filter(|cell| !cell.text.trim().is_empty())
+                        .map(|cell| {
+                            let font = cell_font(style.font(), &cell.text, cell.flags);
+                            shape_text(&cell.text, font, palette.cursor_text)
+                        });
+                    let width = cursor_text
+                        .as_ref()
+                        .map_or(cell_size.width, |line| line.width.max(cell_size.width));
+                    (cursor.column, cursor_text, width)
+                }
+            };
+            let cursor_origin = cell_origin(cursor_column);
+            let cursor_bounds = Bounds::new(cursor_origin, size(cursor_width, cell_size.height));
+            if let Some((_, layout)) = &preedit {
+                let start = cell_origin(layout.start);
+                let width = cell_size.width * usize::from(layout.end - layout.start);
+                overlay_quads.push(fill(
+                    Bounds::new(start, size(width, cell_size.height)),
+                    palette.background,
+                ));
+                overlay_quads.push(fill(
+                    Bounds::new(point(start.x, start.y + underline_y), size(width, px(1.))),
+                    style.color,
+                ));
+            }
             match shape {
                 TerminalCursorShape::Block => {
                     overlay_quads.push(fill(cursor_bounds, cursor_color));
@@ -530,33 +571,21 @@ impl Element for TerminalElement {
                 }
                 TerminalCursorShape::Hidden => {}
             }
-
-            if let Some(marked_text) = self
-                .props
-                .marked_text
-                .as_ref()
-                .filter(|text| !text.is_empty())
-            {
-                overlay_cells.push(ShapedCell {
-                    origin: cursor_origin,
-                    line: Rc::new(window.text_system().shape_line(
-                        marked_text.clone().into(),
-                        font_size,
-                        &[TextRun {
-                            len: marked_text.len(),
-                            font: style.font(),
-                            color: style.color,
-                            background_color: None,
-                            underline: Some(UnderlineStyle {
-                                thickness: px(1.),
-                                color: Some(style.color),
-                                wavy: false,
-                            }),
-                            strikethrough: None,
-                        }],
-                        None,
-                    )),
-                });
+            if let Some((marked, layout)) = &preedit {
+                for shown in &layout.chars {
+                    let under_block =
+                        shape == TerminalCursorShape::Block && shown.column == cursor_column;
+                    let color = if under_block {
+                        palette.cursor_text
+                    } else {
+                        style.color
+                    };
+                    let text = &marked.text[shown.bytes.clone()];
+                    overlay_cells.push(ShapedCell {
+                        origin: cell_origin(shown.column),
+                        line: Rc::new(shape_text(text, style.font(), color)),
+                    });
+                }
             }
         }
 

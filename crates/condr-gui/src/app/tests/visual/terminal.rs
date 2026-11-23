@@ -2124,6 +2124,106 @@ fn underlines_and_overlines_are_drawn_apart_from_the_text_in_their_own_colour() 
     );
 }
 
+/// The composition takes the cells from the cursor, and the cursor shows at the IME's
+/// insertion point within it rather than where the terminal put it.
+#[test]
+fn the_cursor_follows_the_ime_insertion_point_inside_the_composition() {
+    let _serial_guard = acquire_visual_test_lock();
+    let workspace_root = TestDirectory::new("terminal-preedit");
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                root_directory: workspace_root.0.clone(),
+            });
+        });
+    });
+    let mut pane_id = None;
+    assert!(wait_until_event_driven(window, |window| {
+        pane_id = window.read(|app| {
+            let session = view.read(app).active_session()?;
+            Some(
+                session
+                    .workspaces()
+                    .first()?
+                    .tabs()
+                    .first()?
+                    .focused_pane()?
+                    .id(),
+            )
+        });
+        pane_id.is_some()
+    }));
+    let pane_id = pane_id.unwrap();
+
+    let cell = |text: &str| TerminalCell {
+        text: text.into(),
+        foreground: TerminalColor::Default,
+        background: TerminalColor::Default,
+        underline_color: TerminalColor::Default,
+        flags: 0,
+        hyperlink: None,
+    };
+    let mut cells = vec![cell("a"), cell("b")];
+    cells.resize_with(10, || cell(" "));
+    let terminal = TerminalView {
+        selection: None,
+        revision: 1,
+        size: TerminalSize::new(1, 10),
+        display_offset: 0,
+        mouse_tracking: TerminalMouseTracking::None,
+        cells,
+        cursor: Some(condr_core::TerminalCursor {
+            row: 0,
+            column: 2,
+            shape: condr_core::TerminalCursorShape::Beam,
+            blinking: false,
+        }),
+        images: Vec::new(),
+    };
+    let (_, prepaint) = window.draw(point(px(0.), px(0.)), size(px(400.), px(40.)), |_, cx| {
+        TerminalElement::new(
+            view.clone(),
+            TerminalElementProps {
+                focus_handle: cx.focus_handle(),
+                connection_key: 1,
+                pane_id,
+                terminal: std::sync::Arc::new(terminal),
+                // The IME's insertion point sits before 你.
+                marked_text: Some(crate::terminal_element::MarkedText {
+                    text: "ni你".into(),
+                    caret: 2,
+                }),
+                selection: None,
+                hovered_link: None,
+                runtime_epoch: None,
+                cursor_blink_hidden: false,
+                render_cache: Rc::new(RefCell::new(TerminalRenderCache::default())),
+                scroll_remainder: Rc::new(RefCell::new(point(0., 0.))),
+            },
+        )
+    });
+
+    let cell_width = prepaint.cell_size.width;
+    let spans = prepaint
+        .overlay_quads
+        .iter()
+        .map(|quad| {
+            (
+                quad.bounds.origin.x / cell_width,
+                quad.bounds.size.width / cell_width,
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(spans[0], (2., 4.), "n, i and the wide 你 cover their cells");
+    assert_eq!(spans[1], (2., 4.), "underlined");
+    // Unfocused, the cursor is a hollow block, as wide as the character it sits on.
+    assert_eq!(spans[2], (4., 2.), "the cursor sits on 你");
+}
+
 #[test]
 fn selected_block_elements_stay_visible_in_the_selection_text_color() {
     let _serial_guard = acquire_visual_test_lock();
@@ -2565,7 +2665,9 @@ fn closing_a_preedit_owner_discards_its_late_commit_before_accepting_new_input()
             this.terminal_input.target = Some((1, old_pane));
             this.replace_and_mark_text_in_range(None, "old preedit", None, window, cx);
             assert_eq!(
-                this.marked_text_for(1, old_pane).as_deref(),
+                this.marked_text_for(1, old_pane)
+                    .map(|marked| marked.text)
+                    .as_deref(),
                 Some("old preedit")
             );
 

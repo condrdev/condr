@@ -78,6 +78,14 @@ fn encoded(
     }
 }
 
+/// How many grid cells `character` takes, 0, 1 or 2, by the width table the terminal lays
+/// printed text out with; what an IME's composition shows ahead of being printed is laid
+/// out by it too.
+pub fn codepoint_width(character: char) -> u8 {
+    // SAFETY: a pure function of its argument.
+    unsafe { sys::ghostty_unicode_codepoint_width(u32::from(character)) }
+}
+
 /// What a program that turned on focus reports (mode 1004) reads when its terminal gains
 /// or loses focus.
 pub fn focus_report(focused: bool) -> Vec<u8> {

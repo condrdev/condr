@@ -91,6 +91,7 @@ functions=(
   ghostty_terminal_selection_format_alloc
   ghostty_terminal_set
   ghostty_terminal_vt_write
+  ghostty_unicode_codepoint_width
 )
 types=(
   GhosttyBuffer

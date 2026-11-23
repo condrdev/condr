@@ -31,6 +31,8 @@ pub use clone::{
     MAX_CLONE_URL_BYTES, clone_directory_name, validate_clone_url, validate_directory_name,
 };
 #[cfg(feature = "runtime")]
+pub use condr_ghostty_vt::codepoint_width;
+#[cfg(feature = "runtime")]
 pub use config::{config_path, read_config_text, read_config_value, update_config_values};
 pub use files::{
     BrowsedDirectory, DirectoryEntry, DirectoryListing, FileContent, FileKind, FileMutation,

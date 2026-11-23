@@ -2484,3 +2484,6 @@ unsafe extern "C" {
         out_written: *mut usize,
     ) -> GhosttyResult;
 }
+unsafe extern "C" {
+    pub fn ghostty_unicode_codepoint_width(cp: u32) -> u8;
+}

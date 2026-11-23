@@ -56,8 +56,8 @@ use crate::assets::{APP_LOGO, CondrAssets};
 const REPOSITORY_URL: &str = "https://github.com/condrdev/condr";
 const DOCS_URL: &str = "https://condr.dev/docs/start/getting-started";
 use crate::terminal_element::{
-    HoveredTerminalLink, TerminalElement, TerminalElementProps, TerminalPalette,
-    TerminalRenderCache, link_at,
+    HoveredTerminalLink, MarkedText, PreeditLayout, TerminalElement, TerminalElementProps,
+    TerminalPalette, TerminalRenderCache, link_at,
 };
 use changes::*;
 use condr_client::SessionModel;
@@ -73,7 +73,7 @@ use condr_core::{
     AgentAlert, AgentDisplayState, AgentKind, AgentSnapshot, BrowsedDirectory, CommitDetails,
     CommitSummary, DirectoryListing, FileContent, FileDiff, GitLog, PaneDirection, PaneId,
     PaneLayout, ProxyMode, ProxySetting, Session, SessionSnapshot, SplitDirection, Tab, TabContent,
-    TabId, TerminalCommand, TerminalCursor, TerminalKey, TerminalKeyEventKind, TerminalModifiers,
+    TabId, TerminalCommand, TerminalKey, TerminalKeyEventKind, TerminalModifiers,
     TerminalMouseButton, TerminalMouseEvent, TerminalMouseTracking, TerminalPosition,
     TerminalSelection, TerminalSelectionUnit, TerminalSize, Workspace, WorkspaceId,
 };
