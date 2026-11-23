@@ -4,44 +4,6 @@
 
 按优先级排列。每项写清为什么、做到哪、什么时候停。
 
-### 移动端 Companion（iOS 与 Android）
-
-**状态**：1–7 步已在 iOS 完成，推送随桌面 0.1.14 与 TestFlight 0.1 (4) 发布。Android（第 8 步）已按 ADR 0048 实现：配对、Agents / Devices / Settings、自绘终端、锁与推送都在模拟器上走通，APK 随 Companion 自己的版本发布（ADR 0049）。剩下的是 Android 真机验证和 FCM：Firebase 项目建好之前，发布的 APK 收不到推送。
-
-**为什么**：离开电脑时，用户最想知道哪个 Agent 做完了、哪个在等自己。厂商的 Remote Control 只管自家的 Agent；Condr 已经有跨 Agent、跨 Device 的「Needs you」列表和 `detail`，把它们带到手机上是这一层能做、单个厂商不会做的事。
-
-**已定**：
-
-- 两端 UI 都用原生开发。
-- 客户端逻辑只有一份 Rust 实现，经 uniffi 生成 Swift 与 Kotlin 绑定。iroh、Noise 和 Condr 协议编进同一个库，每个平台只链接这一个库，所以不用 iroh 官方的 Swift 与 Kotlin 绑定：同一工具链构建的两个 Rust 静态库会因标准库和分配器的内部符号重复而链接失败，两个 uniffi framework 还会在 `RustBuffer` 上冲突（ADR 0039）。
-- 手机支持 `p2p://` 与 `tcp://`，和桌面共用同一份连接与握手代码。
-- 推送经 Condr 运营的 Condr Cloud。原生 App 的推送经 APNs 和 FCM，它们的凭据只能放在 Condr 运营的服务端，不能放进每个用户的 Server（ADR 0047）。
-- 推送正文是明文：Agent 名称与状态、`detail`、Workspace、终端标题和 Server 名称。Condr Cloud、苹果和谷歌都看得到这些，但看不到终端内容。手机端没有 Notification Service Extension。
-- Condr Cloud 用设备 key 认证，和 relay 一样不需要登录。Server 和手机各用自己的 device key 签一个五分钟有效的令牌；手机凭它登记推送 token，以及允许哪些 Server 给它推送，Server 凭它推送。Server 和手机都不新增凭据，协议只在 `Hello` 里加一个字段。代价是 Condr Cloud 要落盘保存哪些 Server 可以推给哪部手机，以 Device id 记录。
-
-**做到哪**（按顺序）：
-
-1. ADR：0039 定客户端库的边界（`condr-core` 的 `runtime` feature、`condr-client`、`condr-mobile` 与 `mobile/` 目录），0040 定手机自己绑定 iroh endpoint、配对、前后台和密钥存放，0041 定手机在 Pane 里是又一个窗口：和桌面一样输入、滚动、选择并接管终端尺寸，不改 Session 结构。
-2. 客户端库：按 ADR 0039 拆出 crate 并加上 uniffi 绑定，产出 xcframework 与 AAR，CI 增加 iOS 与 Android 目标；按 ADR 0041 加 `WatchTerminals`，帧率上限和视口提示等实测后再定。
-3. 配对与连接：桌面 Settings 的 Invite 把链接显示成二维码，TCP 的二维码先让用户选定手机能访问的地址（ADR 0040），手机扫码配对，Server 照常记进 `authorized-clients`。走 Peer-to-peer 的 Server 要开启 `[server.p2p] enabled`，配对引导要提示这一步。App 只在前台保持连接，回到前台时重连并重新 Bootstrap；后台全靠推送。
-4. 查看：各 Device 的 Workspace 与 Agent 状态、「Needs you」列表、Pane 的终端视图（打开时接管尺寸）。
-5. 终端交互：按 ADR 0041 实现输入、按键排、滚动、选择与鼠标模式。
-6. iOS 公开测试：TestFlight 公开链接，要求桌面端 0.1.13 或更新；只在手机端或协议变化时上传新 build；Beta App Review 用 App 内的静态 Demo。官网文档加手机端与隐私政策两页，联系邮箱 `hello@condr.dev`。
-7. 推送：已按 ADR 0047 实现。Condr Cloud 以 Cloudflare Worker 运行在 push.condr.dev，按来源 IP 和调用方限速；SECURITY.md 与隐私政策页写明它保存 Device id、推送 token、允许推送的 Server 及手机给它们起的名字和最后登记时间，它、苹果和谷歌看得到通知正文，看不到终端内容。Agent 完成、失败或进入 Blocked 时推送，点开后重新拉取 Server 的权威状态。只接 APNs 与 FCM，不接国内厂商通道或聚合推送：没有 GMS 的 Android 手机只在前台更新。FCM 这条路已写好，随 Android 在真机验证。
-8. Android：已按 ADR 0048 实现，终端由手机自绘 Server 的格子。正式版之前以签名 APK 在 GitHub Releases 发布，Google Play 随首个正式版。
-
-**要实测的风险**：蜂窝网络下打洞可能更常失败，流量更多经 relay.condr.dev 转发，会推高带宽成本，也会碰到 relay 对每个客户端的限速；Wi-Fi 与蜂窝切换时连接能否保住（iroh 1.0 支持 QUIC multipath，未验证），保不住就走第 3 步的重连；手机不显示的 Git 与文件事件在蜂窝流量里占多少（ADR 0041）。
-
-**停在哪**：不把桌面 GUI 的全部功能搬到手机；`ssh://` 不在这一方向内，手机要内置 SSH 客户端，等有需求再议；不做 Web 客户端。
-
-### 更多官方支持的 Agent CLI
-
-**为什么**：Condr 只做官方支持的 Agent，未支持的 CLI 通过 Issue 或 PR 加入（ADR 0035）。每种 Agent 已经收拢成一个所有字段必填的规格模块，Settings 和文档也已区分“完整支持”和“仅识别”。加一种 Agent 要改哪几处，写在 `docs/agents/adding-an-agent.md`。
-
-**做到哪**：按两级门槛逐个评估并加入新的官方 Agent。候选来自 2026-10-06 对其他工具所支持 CLI 的调查。级别只看 hooks 能报告什么，是否做过真机验证另行记录。
-
-**停在哪**：不做用户自定义 Agent，GUI 启动菜单在摩擦记录里，不接入 ACP，也不为没有 hook 的 CLI 猜状态。
-
 ### 终端内搜索
 
 **为什么**：这一项原本在摩擦记录里等证据。Agent 的输出很长，要在里面找一段报错或一个路径，现在只能靠滚动。对外宣布后，新用户会拿 Condr 和他们用惯的终端比较，而这些终端都能搜索。
@@ -125,7 +87,6 @@ ADR 要回答三个问题：
 - GUI 里启动 Agent 的菜单：列出这台 Device 上装了哪些 Agent，点一下就在 Pane 里启动。现在在终端里输入命令已经够快；从任务启动 Agent 由 ADR 0068 的 Start 承担。真要做时，用协议里现成的 `AgentCommand::Available` 和 `Start`。
 - 定时任务：按 cron 启动新的 Agent，或定时给已有的 Agent 发提示。现有的 `agent start`、`agent prompt` 和 `agent wait` 已经覆盖了大半。它会让 Condr 从看着 Agent 干活走向无人值守地派活，用户的期待也会跟着变，所以等有人提出需求再定。
 - `observe` 与 `control` 两级 capability（观察者拿 Bootstrap 和视觉流，不能输入、改布局、读文件；配对时决定，`condr server clients` 可看可改；开 Stream，即转发与文件传输，归 `control`，ADR 0061）：触发条件是第二个人开始共用同一个 Server。之后再谈设备密钥进 OS Keychain、密钥轮换、审计日志。不做账号体系、不做公网 listener。
-- Kimi hooks（等上游能区分主任务与子 agent 的 Stop）。
 
 ## 远期
 

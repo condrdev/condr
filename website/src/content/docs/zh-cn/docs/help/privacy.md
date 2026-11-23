@@ -33,7 +33,7 @@ Condr 没有账号，也没有统计分析。桌面端、Server 与手机端都�
 * **Face ID、指纹或屏幕锁**：App 锁向 iOS 或 Android 请求验证，Condr 仅接收验证是否通过的结果，无法读取你的生物特征数据。
 * **本地网络**：用于在同一 Wi-Fi 下直接连接电脑。
 * **连接**：App 仅连接与它配对的电脑；当电脑使用 Peer-to-peer 时，还会连接上述中继与 DNS；你允许通知时，还会连接 Condr Cloud。连接仅在 App 打开时保持。
-* **通知**：App 只在你第一次配对后询问一次。如果你拒绝，App 不会连接 Condr Cloud。在手机设置里关闭通知即可停止推送。Android App 暂不支持通知。
+* **通知**：App 只在你第一次配对后询问一次。如果你拒绝，App 不会连接 Condr Cloud。在手机设置里关闭通知即可停止推送。
 * **崩溃报告与 TestFlight 反馈**：如果你在 iOS 设置里选择与开发者共享崩溃数据，或从 TestFlight 发送反馈，Apple 会按照 [Apple 隐私政策](https://www.apple.com/legal/privacy/)把它们转交给我们。如果你从 Google Play 安装 Android App，并选择与 Google 共享使用情况和诊断信息，Google 会按照 [Google 隐私权政策](https://policies.google.com/privacy)以同样方式把崩溃报告转交给我们。
 
 ---

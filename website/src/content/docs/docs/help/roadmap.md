@@ -9,18 +9,6 @@ Condr is in Public Preview. This page lists what comes next; the order is the or
 
 ## Next
 
-### Mobile apps (iOS and Android)
-
-**Both in early preview.** The iPhone app is in public beta on TestFlight, and the Android app ships as a signed APK in its own releases on GitHub; see [Mobile app](/docs/using/mobile/). Both show the Agents on each of your Devices and the Needs you list, and open Panes so you can read and reply.
-
-The iPhone app gets a push notification when an Agent finishes, fails or needs you. It travels through Condr Cloud, a small service Condr runs, to Apple's push service, and says which Agent, its state, the Workspace, the terminal's title and the Server's name, never anything from the terminal itself; see [Privacy](/docs/help/privacy/). Next, the Android app gets the same notifications through Google's push service; a phone without Google services will update only while the app is open.
-
-Condr comes to the App Store and Google Play with its first stable release.
-
-### More officially supported Agent CLIs
-
-Condr will officially support more popular Agent CLIs, each marked fully supported or recognition only by its [support level](/docs/using/agents/#support-levels). If a CLI you use is not on the list yet, open an Issue or a pull request.
-
 ### Search in the terminal
 
 Search the current Pane's terminal, including what has scrolled off screen, with matches highlighted and scrolled into view.
@@ -68,7 +56,6 @@ These will happen, but after everything above, and each waits for its own trigge
 | Team collaboration and permissions | Several people really need to share one Server |
 | An editor | Reviewing changes often calls for quick code edits, and Open in cannot open a remote Device's files in a local editor |
 | A built-in browser | Switching between the system browser and Condr to check forwarded ports is still a frequent annoyance |
-| A task board | So many tasks run at once that the sidebar and the Needs you list can no longer keep track of them |
 
 ---
 

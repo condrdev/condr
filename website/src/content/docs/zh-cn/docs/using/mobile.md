@@ -3,7 +3,7 @@ title: 手机端
 description: 在 iPhone 上安装 Condr，与你的电脑配对，离开工位时也能查看并回复 Agent。
 ---
 
-手机版 Condr（iPhone 与 Android）可显示所有已配对电脑上的 Agent，将等待你处理的 Agent 置于最前，并支持打开任意 Pane 进行查看与回复。iPhone 版目前通过 TestFlight 公开测试；Android 版以 APK 形式在 GitHub 上单独发布，首个正式版时上架 Google Play（详见[路线图](/zh-cn/docs/help/roadmap/)）。
+手机版 Condr（iPhone 与 Android）可显示所有已配对电脑上的 Agent，将等待你处理的 Agent 置于最前，并支持打开任意 Pane 进行查看与回复。iPhone 版目前通过 TestFlight 公开测试；Android 版以 APK 形式在 GitHub 上单独发布，首个正式版时上架 Google Play。
 
 ---
 
@@ -56,7 +56,7 @@ description: 在 iPhone 上安装 Condr，与你的电脑配对，离开工位�
 
 ## 限制
 
-* App 仅在打开时保持连接。Agent 完成、出错或需要你介入时，iPhone 版会收到通知；Android 版暂不支持通知，支持后将需要 Google Play 服务。详见[路线图](/zh-cn/docs/help/roadmap/)。
+* App 仅在打开时保持连接。Agent 完成、出错或需要你介入时，App 会收到通知；Android 上这需要 Google Play 服务，没有它的手机仅在 App 打开时刷新。
 * 通过 SSH 连接的电脑无法与手机配对，请使用 Peer-to-peer 或 TCP。
 * 仅支持手机，暂无 iPad 或平板布局。
 

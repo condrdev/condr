@@ -9,18 +9,6 @@ Condr 正处于公开预览阶段。本页列出后续准备开发的功能，�
 
 ## 接下来
 
-### 手机端（iOS 与 Android）
-
-**两端均为早期预览**。iPhone 版通过 TestFlight 公开测试，Android 版以签名 APK 形式在 GitHub 上单独发布，详见[手机端](/zh-cn/docs/using/mobile/)。两端都能查看各设备上的 Agent 与 Needs you 列表，打开 Pane 进行阅读和回复。
-
-当 Agent 完成、出错或需要你介入时，iPhone 会收到推送通知。通知经 Condr 运营的 Condr Cloud 转交 Apple 的推送服务，内容包括 Agent 名称与状态、Workspace、终端标题和 Server 名称，不含任何终端内容，详见[隐私](/zh-cn/docs/help/privacy/)。接下来，Android 版也将经由 Google 推送服务收到同样的通知；未搭载 Google 服务的手机仅在 App 打开时刷新。
-
-App Store 与 Google Play 上架将随 Condr 首个正式版一并进行。
-
-### 更多官方支持的 Agent CLI
-
-Condr 将官方支持更多常用的 Agent CLI，并按[支持级别](/zh-cn/docs/using/agents/#支持级别)标明完整支持或仅识别。如果你常用的 CLI 尚未列出，欢迎提交 Issue 或 PR。
-
 ### 终端内搜索
 
 支持在当前 Pane 的终端缓冲区中搜索，包括已滚出可视区域的内容。匹配项会自动高亮，并支持跳转定位。
@@ -68,7 +56,6 @@ Workspace 将展示当前分支关联的 GitHub PR、PR 状态及 CI 检查结�
 | 团队协作与权限管理 | 出现多人共用同一个 Server 的真实需求 |
 | 编辑器 | 审查改动时经常需要顺手修改代码，而远程设备上的文件无法通过“在 … 中打开”（Open in）在本机编辑器中打开 |
 | 内置浏览器 | 为查看转发的端口在系统浏览器和 Condr 之间来回切换，仍是常见的不便 |
-| 任务看板 | 同时进行的任务多到侧栏和 Needs you 列表已经看不过来 |
 
 ---
 

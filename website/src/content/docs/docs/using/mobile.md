@@ -3,7 +3,7 @@ title: Mobile app
 description: Install Condr on your iPhone or Android phone, pair it with your computers, and check on and answer your Agents away from your desk.
 ---
 
-Condr for iPhone and Android shows every Agent on the computers you pair with it, lists the ones waiting for you first, and opens any Pane so you can read and reply. The iPhone app is in public beta on TestFlight; the Android app ships as an APK in its own releases on GitHub until it reaches Google Play with the first stable release (see the [Roadmap](/docs/help/roadmap/)).
+Condr for iPhone and Android shows every Agent on the computers you pair with it, lists the ones waiting for you first, and opens any Pane so you can read and reply. The iPhone app is in public beta on TestFlight; the Android app ships as an APK in its own releases on GitHub until it reaches Google Play with the first stable release.
 
 ---
 
@@ -56,7 +56,7 @@ To try the app without a computer, tap **No computer to pair? Try Demo** under *
 
 ## Limits
 
-* The app is connected only while it is open. The iPhone app gets a notification when an Agent finishes, fails or needs you; the Android app gets none yet, and once it does they will need Google Play services. See the [Roadmap](/docs/help/roadmap/).
+* The app is connected only while it is open. It gets a notification when an Agent finishes, fails or needs you; on Android that takes Google Play services, and a phone without them updates only while the app is open.
 * Computers connected over SSH can't be paired with the phone. Use Peer-to-peer or TCP.
 * Phones only; no iPad or tablet layout.
 

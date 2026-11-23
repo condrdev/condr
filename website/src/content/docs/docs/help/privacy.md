@@ -33,7 +33,7 @@ Condr has no accounts and no analytics. Neither the desktop app, the Server, nor
 * **Face ID, fingerprint or screen lock**: the app lock asks iOS or Android, which tells Condr only whether you were recognized.
 * **Local network**: used to connect directly to a computer on the same Wi-Fi.
 * **Connections**: the app connects only to the computers you paired with it, to the relay and DNS above when a computer uses Peer-to-peer, and to Condr Cloud if you allow notifications. It connects only while it is open.
-* **Notifications**: the app asks once, after your first pairing. If you decline, it never contacts Condr Cloud. Turning notifications off in the phone's settings stops them. The Android app doesn't get notifications yet.
+* **Notifications**: the app asks once, after your first pairing. If you decline, it never contacts Condr Cloud. Turning notifications off in the phone's settings stops them.
 * **Crash reports and TestFlight feedback**: if you share crash data with app developers in iOS Settings, or send feedback from TestFlight, Apple passes it to us under [Apple's privacy policy](https://www.apple.com/legal/privacy/). If you installed the Android app from Google Play and share usage and diagnostics with Google, Google passes crash reports to us the same way, under [Google's privacy policy](https://policies.google.com/privacy).
 
 ---
