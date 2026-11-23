@@ -742,5 +742,36 @@ fn a_workspace_above_several_repositories_shows_each_one() {
         "History lists web's commit instead"
     );
 
+    // A Root that is a repository itself shows its own changes beside the ones under it,
+    // and History's menu offers each.
+    run_git(&root, ["init", "-q", "-b", "main"]);
+    std::fs::write(root.join("root.txt"), "root\n").unwrap();
+    let tab = window.debug_bounds("sidebar-view-changes").unwrap();
+    window.simulate_click(tab.center(), Modifiers::default());
+    window.update(|window, cx| _ = window.draw(cx));
+    let refresh = window.debug_bounds("sidebar-refresh").unwrap();
+    window.simulate_click(refresh.center(), Modifiers::default());
+    assert!(
+        wait_until(window, |window| {
+            window.update(|window, cx| _ = window.draw(cx));
+            window.debug_bounds("change-root.txt").is_some()
+                && window.debug_bounds("change-web/notes.txt").is_some()
+        }),
+        "the Root's own change is listed beside the ones under it"
+    );
+    assert!(window.debug_bounds("changes-tracked-dir-web").is_some());
+    // As IntelliJ does, the Root's own is a node too, which folds its files alone.
+    let node = window.debug_bounds("changes-untracked-dir-").unwrap();
+    window.simulate_click(node.center(), Modifiers::default());
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
+    assert!(window.debug_bounds("change-root.txt").is_none());
+    assert!(window.debug_bounds("change-web/notes.txt").is_some());
+    let tab = window.debug_bounds("sidebar-view-history").unwrap();
+    window.simulate_click(tab.center(), Modifiers::default());
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
+    assert!(window.debug_bounds("history-repository").is_some());
+
     let _ = std::fs::remove_dir_all(&root);
 }

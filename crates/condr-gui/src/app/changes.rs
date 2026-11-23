@@ -677,8 +677,26 @@ impl Condr {
             .into_any_element()
     }
 
-    /// The Changes view's body: the sections and their trees, a repository under the Root
-    /// a node of its own (ADR 0073), or why there are none.
+    /// What a repository goes by in Changes and History: its directory under the Root, or
+    /// the Workspace's name for the Root's own (ADR 0073).
+    pub(super) fn repository_name(
+        &self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        directory: &RelativePath,
+    ) -> String {
+        if !directory.as_str().is_empty() {
+            return directory.to_string();
+        }
+        self.connection(key)
+            .and_then(|connection| connection.session()?.workspace(workspace_id))
+            .map(|workspace| workspace.name().to_owned())
+            .unwrap_or_default()
+    }
+
+    /// The Changes view's body: the sections and their trees, each repository a node of its
+    /// own when there are several or it lies under the Root (ADR 0073), or why there are
+    /// none.
     fn render_changes_list(
         &self,
         key: ConnectionKey,
@@ -699,7 +717,7 @@ impl Condr {
             .repositories
             .iter()
             .map(|repository| repository.directory.as_relative_path())
-            .filter(|directory| !directory.as_str().is_empty())
+            .filter(|directory| !directory.as_str().is_empty() || git.repositories.len() > 1)
             .collect();
 
         let mut list = v_flex()
@@ -770,16 +788,23 @@ impl Condr {
                     path.to_relative_path_buf(),
                 ))
             };
-            for row in tree_rows(&rows, &nodes, folded) {
-                let node = match &row {
-                    TreeRow::Directory { path, depth: 0, .. } => git
+            for mut row in tree_rows(&rows, &nodes, folded) {
+                let node = match &mut row {
+                    TreeRow::Directory {
+                        label,
+                        path,
+                        depth: 0,
+                        ..
+                    } => git
                         .repositories
                         .iter()
                         .find(|repository| repository.directory == *path)
                         .map(|repository| {
-                            let count = rows
+                            *label = self.repository_name(key, workspace_id, path);
+                            let count = shown_changes(repository, against)
+                                .entries
                                 .iter()
-                                .filter(|entry| entry.path.starts_with(path))
+                                .filter(|entry| ChangesSection::of(entry.status) == section)
                                 .count();
                             (count, repository.branch.clone())
                         }),

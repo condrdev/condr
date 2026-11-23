@@ -735,9 +735,9 @@ enum TerminalProgressState {
   TERMINAL_PROGRESS_STATE_PAUSED = 4;
 }
 
-// The fields up to `head` are the repository the Root is in. When it is in none, they
-// stay empty, `changes` present for a 0.2 Client, and `repositories` lists each one right
-// under the Root (ADR 0073).
+// The fields up to `head` are the repository the Root is in, and `repositories` lists
+// each one right under the Root (ADR 0073). When the Root is in none they stay empty,
+// `head` absent and `changes` present for a 0.2 Client.
 message WorkspaceGitSnapshot {
   uint64 workspace_id = 1;
   optional string branch = 2;

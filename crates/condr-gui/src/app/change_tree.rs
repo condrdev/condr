@@ -72,7 +72,8 @@ fn compact_count(n: u32) -> String {
 /// Changed files as a directory tree, the way Zed's git panel shows them: a
 /// directory that holds nothing but one directory folds into it (`src/app`), files sort after
 /// directories, and both sort by name. A repository's directory under the Root stays a row
-/// of its own, its node (ADR 0073).
+/// of its own, its node; the Root's own repository, named by the empty path, is a node
+/// first that holds what lies in no other (ADR 0073).
 #[derive(Debug, PartialEq)]
 enum ChangeNode<'a> {
     Directory {
@@ -92,6 +93,29 @@ fn change_tree<'a>(
     entries: &[&'a GitChangeEntry],
     repositories: &[&RelativePath],
 ) -> Vec<ChangeNode<'a>> {
+    let nested: Vec<&RelativePath> = repositories
+        .iter()
+        .copied()
+        .filter(|directory| !directory.as_str().is_empty())
+        .collect();
+    if nested.len() < repositories.len() {
+        let (theirs, own): (Vec<&GitChangeEntry>, Vec<&GitChangeEntry>) =
+            entries.iter().partition(|entry| {
+                nested
+                    .iter()
+                    .any(|directory| entry.path.starts_with(directory))
+            });
+        // Its label is the caller's: the Workspace's name.
+        let own = (!own.is_empty()).then(|| ChangeNode::Directory {
+            label: String::new(),
+            path: RelativePathBuf::new(),
+            children: change_tree(&own, &[]),
+        });
+        return own
+            .into_iter()
+            .chain(change_tree(&theirs, &nested))
+            .collect();
+    }
     #[derive(Default)]
     struct Builder<'a> {
         directories: std::collections::BTreeMap<String, Builder<'a>>,
@@ -523,5 +547,20 @@ mod tests {
             panic!("api is a directory");
         };
         assert_eq!(labels(children), ["src"]);
+
+        // The Root's own repository is a node first, holding what lies in no other.
+        let entries = [
+            entry("web/app.ts"),
+            entry("src/main.rs"),
+            entry("README.md"),
+        ];
+        let refs: Vec<&GitChangeEntry> = entries.iter().collect();
+        let tree = change_tree(&refs, &[RelativePath::new(""), RelativePath::new("web")]);
+        assert_eq!(labels(&tree), ["", "web"]);
+        let ChangeNode::Directory { path, children, .. } = &tree[0] else {
+            panic!("the Root's own repository is a node");
+        };
+        assert_eq!(path, RelativePath::new(""));
+        assert_eq!(labels(children), ["src", "README.md"]);
     }
 }

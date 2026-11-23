@@ -245,10 +245,10 @@ fn decode_pane_agent(agent: super::PaneAgentSnapshot) -> WireResult<PaneAgentSna
 }
 
 fn encode_git(git: &WorkspaceGitSnapshot) -> super::WorkspaceGitSnapshot {
-    // The Root's own repository rides the fields a 0.2 peer reads; the ones under a Root
-    // that is in none ride `repositories`, beside an empty `changes` that peer requires.
+    // The Root's own repository rides the fields a 0.2 peer reads, the ones under the Root
+    // ride `repositories`; without an own one an empty `changes` stands in for that peer.
     let (own, repositories) = match git.root_repository() {
-        Some(own) => (Some(own), &[][..]),
+        Some(own) => (Some(own), &git.repositories[1..]),
         None => (None, &git.repositories[..]),
     };
     let encode_base = |base: &GitBaseChanges| super::GitBaseChanges {
@@ -296,8 +296,10 @@ fn decode_git(git: super::WorkspaceGitSnapshot) -> WireResult<WorkspaceGitSnapsh
             commit: head.commit,
         })
     };
-    let repositories = if git.repositories.is_empty() {
-        vec![RepositoryGitSnapshot {
+    let mut repositories = Vec::new();
+    // A Server that sends `repositories` sends `head` exactly when the Root is in one.
+    if git.repositories.is_empty() || git.head.is_some() {
+        repositories.push(RepositoryGitSnapshot {
             directory: RelativePathBuf::new(),
             branch: git.branch,
             linked_worktree: git.linked_worktree,
@@ -305,29 +307,25 @@ fn decode_git(git: super::WorkspaceGitSnapshot) -> WireResult<WorkspaceGitSnapsh
             changes: required(git.changes, "Git changes")?.try_into()?,
             base: decode_base(git.base)?,
             head: decode_head(git.head),
-        }]
-    } else {
-        git.repositories
-            .into_iter()
-            .map(|repository| {
-                let directory = relative_path(repository.directory)?;
-                if !crate::valid_diff_path(&directory) || directory.components().count() != 1 {
-                    return Err(malformed(format!(
-                        "{directory:?} is not a repository directory"
-                    )));
-                }
-                Ok(RepositoryGitSnapshot {
-                    directory,
-                    branch: repository.branch,
-                    linked_worktree: repository.linked_worktree,
-                    upstream: repository.upstream.map(Into::into),
-                    changes: required(repository.changes, "Git changes")?.try_into()?,
-                    base: decode_base(repository.base)?,
-                    head: decode_head(repository.head),
-                })
-            })
-            .collect::<WireResult<_>>()?
-    };
+        });
+    }
+    for repository in git.repositories {
+        let directory = relative_path(repository.directory)?;
+        if !crate::valid_diff_path(&directory) || directory.components().count() != 1 {
+            return Err(malformed(format!(
+                "{directory:?} is not a repository directory"
+            )));
+        }
+        repositories.push(RepositoryGitSnapshot {
+            directory,
+            branch: repository.branch,
+            linked_worktree: repository.linked_worktree,
+            upstream: repository.upstream.map(Into::into),
+            changes: required(repository.changes, "Git changes")?.try_into()?,
+            base: decode_base(repository.base)?,
+            head: decode_head(repository.head),
+        });
+    }
     Ok(WorkspaceGitSnapshot {
         workspace_id: workspace(git.workspace_id),
         repositories,

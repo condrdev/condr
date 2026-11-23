@@ -704,21 +704,20 @@ fn refresh_workspace(
     let mut working_tree_changed = forced || pending.iter().any(|path| !is_git_marker(path));
     // The known repositories a changed path that they do not ignore lies in. A path in none
     // changes Files only.
+    let holds = |git: &RepositoryGit, path: &PathBuf| {
+        RelativePathBuf::from_path(path)
+            .is_ok_and(|path| git.repository.to_repository(&path).is_some())
+    };
     let mut touched = Vec::new();
     let mut unheld = false;
     for git in &known {
-        let held: Vec<&PathBuf> = pending
-            .iter()
-            .filter(|path| path.starts_with(git.repository.directory().to_path("")))
-            .collect();
+        let held: Vec<&PathBuf> = pending.iter().filter(|path| holds(git, path)).collect();
         if !held.is_empty() && !git.repository.ignores_all(held) {
             touched.push(git.repository.directory());
         }
     }
     for path in &pending {
-        unheld |= !known
-            .iter()
-            .any(|git| path.starts_with(git.repository.directory().to_path("")));
+        unheld |= !known.iter().any(|git| holds(git, path));
     }
     let storm = entry.storm;
     let ignored = filesystem_due

@@ -54,14 +54,14 @@ History only reads the repository: it does not check out, revert or create commi
 
 ## Several repositories in one Workspace
 
-When a Workspace's folder is not a Git repository itself but holds repositories directly inside it, such as `api/` and `web/`, Condr shows each of them:
+When a Workspace's folder holds repositories directly inside it, such as `api/` and `web/`, Condr shows each of them, beside the folder's own repository if it is one:
 
 - **Changes** lists every repository with changes as a row of its own inside the Conflicts, Tracked and Untracked groups, with how many files it holds there and its branch. A repository without changes is not listed.
 - **History** shows one repository at a time; the menu in its top row names each repository's branch and switches between them.
 - **Files** grays out what each repository ignores.
-- The Workspace's row in the left sidebar says how many repositories it holds, and a repository cloned into the folder appears on its own.
+- The Workspace's row in the left sidebar shows the folder's own branch, or, when the folder is no repository, how many repositories it holds. A repository cloned into the folder appears on its own.
 
-Only repositories directly inside the folder count, not deeper ones or submodules. Such a Workspace compares only against HEAD and cannot create a Worktree. When the folder is itself inside a repository, Condr shows that repository alone, and Changes lists only what lies inside the folder.
+Only repositories directly inside the folder count, submodules included, not deeper ones. The folder's own repository lists its changes as before and leaves what lies in those repositories to them. Only the folder's own repository can compare against a base branch or create a Worktree; without one, the Workspace compares only against HEAD. When the folder is a subfolder of a repository, Changes lists only what lies inside it.
 
 ## Browse and preview project files (Files & Preview)
 

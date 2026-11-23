@@ -680,8 +680,8 @@ pub struct PaneAgentSnapshot {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WorkspaceGitSnapshot {
     pub workspace_id: WorkspaceId,
-    /// The one the Root is in, else each one right under the Root, by name (ADR 0073);
-    /// never empty.
+    /// The one the Root is in, if any, first, then each one right under the Root, by name
+    /// (ADR 0073); never empty.
     pub repositories: Vec<RepositoryGitSnapshot>,
 }
 

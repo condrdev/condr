@@ -333,6 +333,54 @@ fn a_scan_walks_only_the_repositories_a_change_touched() {
 }
 
 #[test]
+fn a_change_in_a_repository_under_the_roots_own_walks_that_one_alone() {
+    let fixture = Repository::new();
+    let root = fixture.root.join("work");
+    unborn_repository(&root);
+    unborn_repository(&root.join("api"));
+    let mut state = RuntimeState::new(&fixture.root.join("server.sock"));
+    let workspace_id = state.session.create_workspace(root.clone()).unwrap();
+    set_workspace_git(
+        &mut state,
+        workspace_id,
+        workspace_repositories(&root).unwrap(),
+    );
+    let state = Arc::new(Mutex::new(state));
+    let weak = Arc::downgrade(&state);
+    let mut watched = Watched::new(root.clone());
+    let scan = |watched: &mut Watched, pending: &[&str]| {
+        watched.pending.extend(pending.iter().map(PathBuf::from));
+        watched.filesystem_due = Some(Instant::now());
+        assert!(refresh_workspace(workspace_id, watched, None, &weak));
+    };
+    let changes = || -> Vec<(String, Vec<String>)> {
+        state.lock().unwrap().workspace_git[&workspace_id]
+            .iter()
+            .map(|git| {
+                let paths = git.changes.entries.iter().map(|e| e.path.to_string());
+                (git.repository.directory().to_string(), paths.collect())
+            })
+            .collect()
+    };
+
+    watched.forced = true;
+    scan(&mut watched, &[]);
+    std::fs::write(root.join("own.txt"), "own\n").unwrap();
+    std::fs::write(root.join("api/a.txt"), "a\n").unwrap();
+    scan(&mut watched, &["api/a.txt"]);
+    assert_eq!(
+        changes(),
+        [
+            (String::new(), Vec::new()),
+            ("api".to_owned(), vec!["api/a.txt".to_owned()]),
+        ],
+        "the Root's own file was not among the changed paths"
+    );
+    scan(&mut watched, &["own.txt"]);
+    assert_eq!(changes()[0].1, ["own.txt"]);
+}
+
+#[test]
 fn a_change_inside_any_git_directory_counts_as_its_repository_and_never_its_objects() {
     let mut watched = Watched::new(PathBuf::from("/work"));
     watched.git_dirs = vec![

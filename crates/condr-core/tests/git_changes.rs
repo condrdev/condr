@@ -513,6 +513,44 @@ fn a_root_in_no_repository_shows_each_one_right_under_it_with_its_paths() {
 }
 
 #[test]
+fn a_root_in_a_repository_also_shows_each_one_right_under_it() {
+    let root = scratch_repository("nested");
+    commit_file(&root, "README.md", "root\n");
+    let sub = root.join("sub");
+    init_repository(&sub);
+    commit_file(&sub, "lib.rs", "one\n");
+    git(&sub, ["checkout", "-q", "-b", "feature"]);
+    // The Root's repository records it as a gitlink, which a change inside it modifies.
+    git(&root, ["add", "sub"]);
+    git(&root, ["commit", "-q", "-m", "add sub"]);
+    fs::write(root.join("README.md"), "root\nmore\n").unwrap();
+    fs::write(sub.join("lib.rs"), "one\ntwo\n").unwrap();
+
+    let repositories = workspace_repositories(&root).unwrap();
+    let found: Vec<(&str, Option<&str>)> = repositories
+        .iter()
+        .map(|repository| (repository.directory().as_str(), repository.branch()))
+        .collect();
+    assert_eq!(found, [("", Some("main")), ("sub", Some("feature"))]);
+    let (own, nested) = (&repositories[0], &repositories[1]);
+    assert_eq!(
+        summary(&own.changes(None).unwrap().0),
+        [("README.md", GitChangeStatus::Modified)],
+        "what lies in the nested one is its own"
+    );
+    assert_eq!(
+        summary(&nested.changes(None).unwrap().0),
+        [("sub/lib.rs", GitChangeStatus::Modified)]
+    );
+    let lib = RelativePath::new("sub/lib.rs");
+    assert_eq!(own.to_repository(lib), None);
+    assert_eq!(nested.to_repository(lib).unwrap().as_str(), "lib.rs");
+    assert!(nested.file_diff(lib, None, None, false).is_ok());
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn a_root_below_its_work_trees_top_sees_only_what_is_under_it() {
     let root = scratch_repository("scoped");
     commit_file(&root, ".gitignore", "*.log\n");

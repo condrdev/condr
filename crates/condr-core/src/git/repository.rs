@@ -53,6 +53,9 @@ pub struct GitRepository {
     /// Where that Root sits in the work tree, `packages/web`; empty unless the Root is
     /// below the work tree's top. The Workspace sees only what is under it.
     scope: RelativePathBuf,
+    /// The directories under the Root that hold repositories of their own, which this one
+    /// leaves to them; only the Root's own repository has any.
+    nested: Vec<RelativePathBuf>,
 }
 
 impl GitRepository {
@@ -91,13 +94,19 @@ impl GitRepository {
     /// sees of this repository.
     pub fn to_repository(&self, path: &RelativePath) -> Option<RelativePathBuf> {
         let inside = path.strip_prefix(&self.directory).ok()?;
-        Some(joined(&self.scope, inside))
+        (!self.leaves(path)).then(|| joined(&self.scope, inside))
     }
 
-    /// A work-tree path as the Root names it; `None` when it lies outside the Root.
+    /// A work-tree path as the Root names it; `None` when it lies outside the Root or in a
+    /// repository nested under it.
     pub fn to_workspace(&self, path: &RelativePath) -> Option<RelativePathBuf> {
         let inside = path.strip_prefix(&self.scope).ok()?;
-        Some(joined(&self.directory, inside))
+        Some(joined(&self.directory, inside)).filter(|path| !self.leaves(path))
+    }
+
+    /// Whether a Root-relative path lies in a repository nested under this one.
+    fn leaves(&self, path: &RelativePath) -> bool {
+        self.nested.iter().any(|nested| path.starts_with(nested))
     }
 
     /// `changes` with work-tree paths, kept to what lies under the Root and named from it;
@@ -223,18 +232,17 @@ fn joined(prefix: &RelativePath, path: &RelativePath) -> RelativePathBuf {
 }
 
 /// The repositories a Workspace whose Root Directory is `root` shows (ADR 0073): the one
-/// the Root is in, else each one whose work tree's top is a directory right under it, by
-/// name. A child that cannot be read is left out, so one broken repository hides no other.
+/// the Root is in, if any, first, then each one whose work tree's top is a directory right
+/// under it, by name. A child that cannot be read is left out, so one broken repository
+/// hides no other.
 pub fn workspace_repositories(root: impl AsRef<Path>) -> Result<Vec<GitRepository>, GitError> {
     let root = root.as_ref();
-    if let Some(repository) = discover_repository(root)? {
-        return Ok(vec![repository]);
-    }
+    let own = discover_repository(root)?;
     let mut names: Vec<String> = fs::read_dir(root)
         .map_err(|error| GitError(format!("cannot list {}: {error}", root.display())))?
         .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
         // A `.git` directory or file; checked before gix opens anything, as most children
-        // of a Root that is no repository are not repositories either.
+        // are not repositories.
         .filter(|name| root.join(name).join(".git").exists())
         .collect();
     names.sort();
@@ -249,6 +257,13 @@ pub fn workspace_repositories(root: impl AsRef<Path>) -> Result<Vec<GitRepositor
             Ok(_) => {}
             Err(error) => tracing::warn!("cannot read the repository {name}: {error}"),
         }
+    }
+    if let Some(mut own) = own {
+        own.nested = repositories
+            .iter()
+            .map(|nested| nested.directory.clone())
+            .collect();
+        repositories.insert(0, own);
     }
     Ok(repositories)
 }
@@ -304,6 +319,7 @@ pub fn discover_repository(path: impl AsRef<Path>) -> Result<Option<GitRepositor
         head,
         directory: RelativePathBuf::new(),
         scope,
+        nested: Vec::new(),
     }))
 }
 

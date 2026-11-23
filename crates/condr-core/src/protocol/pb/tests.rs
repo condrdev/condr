@@ -786,6 +786,14 @@ fn repositories_under_the_root_ride_beside_the_fields_an_older_peer_reads() {
     assert!(git.repositories.is_empty());
     assert_eq!(decoded(git).unwrap(), Some(own));
 
+    // Beside the ones under the Root, which a 0.2 peer leaves unread.
+    let nested = workspace_git(vec![repository("", "main"), repository("sub", "login")]);
+    let git = wire(&nested);
+    assert_eq!(git.branch.as_deref(), Some("main"));
+    assert_eq!(git.changes.as_ref().unwrap().entries.len(), 1);
+    assert_eq!(git.repositories.len(), 1);
+    assert_eq!(decoded(git).unwrap(), Some(nested));
+
     // A repository is one directory right under the Root.
     for directory in ["api/src", "..", ""] {
         let mut git = wire(&workspace_git(vec![repository("api", "main")]));

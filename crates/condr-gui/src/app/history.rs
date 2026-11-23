@@ -24,7 +24,7 @@ pub(super) struct DiffCommit {
 impl Condr {
     /// History's first row, level with Changes' comparison row: the branch the commits are
     /// on and `↑N ↓N` against its upstream, as the Workspace's row in the left sidebar shows.
-    /// Above several repositories the branch is a menu of them (ADR 0073).
+    /// With several repositories the branch is a menu of them (ADR 0073).
     pub(super) fn render_history_head(
         &self,
         key: ConnectionKey,
@@ -41,7 +41,7 @@ impl Condr {
                 .clone()
                 .unwrap_or_else(|| t!("history.detached").into_owned())
         };
-        let control = if git.root_repository().is_some() {
+        let control = if git.repositories.len() == 1 && git.root_repository().is_some() {
             // `px_1`, `h_5` and the colour are an xsmall ghost Button's, so the name reads
             // like "Against HEAD" and sits where it does. Without a base that Button is
             // disabled, and Kit dims a disabled one's label so.
@@ -61,7 +61,8 @@ impl Condr {
                 .into_any_element()
         } else {
             let label = |repository: &RepositoryGitSnapshot| {
-                format!("{} · {}", repository.directory, branch(repository))
+                let name = self.repository_name(key, workspace_id, &repository.directory);
+                format!("{name} · {}", branch(repository))
             };
             let choices: Vec<(RelativePathBuf, String)> = git
                 .repositories
@@ -730,8 +731,10 @@ impl Condr {
             .connection(key)
             .and_then(|connection| connection.model.workspace_git.get(&workspace_id))
             .and_then(|git| {
+                // The innermost: the Root's own, first, holds every path.
                 git.repositories
                     .iter()
+                    .rev()
                     .find(|repository| path.starts_with(&repository.directory))
             })
             .map(|repository| repository.directory.clone())
