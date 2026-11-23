@@ -288,8 +288,10 @@ impl Condr {
             agents: agents.len(),
             busy,
             managed,
-            dirty: git.is_some_and(|git| !git.changes.entries.is_empty()),
-            branch: git.and_then(|git| git.branch.clone()),
+            dirty: git.is_some_and(|git| git.change_entries().next().is_some()),
+            branch: git
+                .and_then(WorkspaceGitSnapshot::root_repository)
+                .and_then(|own| own.branch.clone()),
         })
     }
 }

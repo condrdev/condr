@@ -21,22 +21,30 @@ pub(super) struct DiffCommit {
     pub(super) commit: CommitSummary,
 }
 
-/// History's first row, level with Changes' comparison row: the branch the commits are
-/// on and `↑N ↓N` against its upstream, as the Workspace's row in the left sidebar shows.
-pub(super) fn history_branch(git: &WorkspaceGitSnapshot, cx: &App) -> AnyElement {
-    h_flex()
-        .flex_none()
-        .w_full()
-        .px_1()
-        .py_1()
-        .gap_2()
-        .justify_between()
-        .items_center()
-        .text_xs()
-        // `px_1`, `h_5` and the colour are an xsmall ghost Button's, so the name reads
-        // like "Against HEAD" and sits where it does. Without a base that Button is
-        // disabled, and Kit dims a disabled one's label so.
-        .child(
+impl Condr {
+    /// History's first row, level with Changes' comparison row: the branch the commits are
+    /// on and `↑N ↓N` against its upstream, as the Workspace's row in the left sidebar shows.
+    /// Above several repositories the branch is a menu of them (ADR 0073).
+    pub(super) fn render_history_head(
+        &self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        git: &WorkspaceGitSnapshot,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(shown) = self.history_repository(key, workspace_id, git) else {
+            return div().into_any_element();
+        };
+        let branch = |repository: &RepositoryGitSnapshot| {
+            repository
+                .branch
+                .clone()
+                .unwrap_or_else(|| t!("history.detached").into_owned())
+        };
+        let control = if git.root_repository().is_some() {
+            // `px_1`, `h_5` and the colour are an xsmall ghost Button's, so the name reads
+            // like "Against HEAD" and sits where it does. Without a base that Button is
+            // disabled, and Kit dims a disabled one's label so.
             div()
                 .h_5()
                 .px_1()
@@ -44,25 +52,124 @@ pub(super) fn history_branch(git: &WorkspaceGitSnapshot, cx: &App) -> AnyElement
                 .items_center()
                 .min_w_0()
                 .truncate()
-                .text_color(if git.base.is_some() {
+                .text_color(if shown.base.is_some() {
                     cx.theme().secondary_foreground
                 } else {
                     cx.theme().muted_foreground.opacity(0.5)
                 })
-                .child(
-                    git.branch
-                        .clone()
-                        .unwrap_or_else(|| t!("history.detached").into_owned()),
-                ),
-        )
-        .children(git.upstream.and_then(upstream_counts).map(|counts| {
-            div()
-                .debug_selector(|| "history-upstream".into())
-                .flex_none()
-                .pr_2()
-                .child(upstream_label(&counts, cx))
-        }))
-        .into_any_element()
+                .child(branch(shown))
+                .into_any_element()
+        } else {
+            let label = |repository: &RepositoryGitSnapshot| {
+                format!("{} · {}", repository.directory, branch(repository))
+            };
+            let choices: Vec<(RelativePathBuf, String)> = git
+                .repositories
+                .iter()
+                .map(|repository| (repository.directory.clone(), label(repository)))
+                .collect();
+            let current = shown.directory.clone();
+            let owner = cx.weak_entity();
+            Button::new("history-repository")
+                .debug_selector(|| "history-repository".into())
+                .ghost()
+                .xsmall()
+                .label(label(shown))
+                .dropdown_caret(true)
+                .dropdown_menu(move |menu, _, _| {
+                    choices.iter().fold(menu, |menu, (directory, label)| {
+                        let owner = owner.clone();
+                        let directory = directory.clone();
+                        menu.item(
+                            PopupMenuItem::new(label.clone())
+                                .checked(directory == current)
+                                .on_click(move |_, _, cx| {
+                                    let _ = owner.update(cx, |this, cx| {
+                                        this.choose_history_repository(
+                                            key,
+                                            workspace_id,
+                                            directory.clone(),
+                                            cx,
+                                        );
+                                    });
+                                }),
+                        )
+                    })
+                })
+                .into_any_element()
+        };
+        h_flex()
+            .flex_none()
+            .w_full()
+            .px_1()
+            .py_1()
+            .gap_2()
+            .justify_between()
+            .items_center()
+            .text_xs()
+            .child(control)
+            .children(shown.upstream.and_then(upstream_counts).map(|counts| {
+                div()
+                    .debug_selector(|| "history-upstream".into())
+                    .flex_none()
+                    .pr_2()
+                    .child(upstream_label(&counts, cx))
+            }))
+            .into_any_element()
+    }
+
+    /// The repository History shows: this Client's pick for the Workspace, which it does
+    /// not save, else the first (ADR 0073).
+    pub(super) fn history_repository<'a>(
+        &self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        git: &'a WorkspaceGitSnapshot,
+    ) -> Option<&'a RepositoryGitSnapshot> {
+        self.files_view
+            .history_repositories
+            .get(&(key, workspace_id))
+            .and_then(|chosen| {
+                git.repositories
+                    .iter()
+                    .find(|repository| repository.directory == *chosen)
+            })
+            .or_else(|| git.repositories.first())
+    }
+
+    /// The directory of the repository History shows, empty for the Root's own.
+    fn history_directory(&self, key: ConnectionKey, workspace_id: WorkspaceId) -> RelativePathBuf {
+        self.connection(key)
+            .and_then(|connection| connection.model.workspace_git.get(&workspace_id))
+            .and_then(|git| self.history_repository(key, workspace_id, git))
+            .map(|repository| repository.directory.clone())
+            .unwrap_or_default()
+    }
+
+    /// Shows another repository's History: what was loaded of the last one goes, and the
+    /// rebuild asks for the first page.
+    pub(super) fn choose_history_repository(
+        &mut self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        directory: RelativePathBuf,
+        cx: &mut Context<Self>,
+    ) {
+        if self.history_directory(key, workspace_id) == directory {
+            return;
+        }
+        self.files_view
+            .history_repositories
+            .insert((key, workspace_id), directory);
+        self.files_view
+            .selected_commits
+            .remove(&(key, workspace_id));
+        if let Some(connection) = self.connection_mut(key) {
+            connection.resources.logs.remove(&workspace_id);
+            connection.resources.pending_logs.remove(&workspace_id);
+        }
+        cx.notify();
+    }
 }
 
 impl Condr {
@@ -257,7 +364,8 @@ impl Condr {
                     let id = commit.id.clone();
                     cx.defer(move |cx| {
                         let _ = owner.update(cx, |this, cx| {
-                            this.request_commit(key, workspace_id, id);
+                            let repository = this.history_directory(key, workspace_id);
+                            this.request_commit(key, workspace_id, repository, id);
                             cx.notify();
                         });
                     });
@@ -292,7 +400,7 @@ impl Condr {
                 path.to_relative_path_buf(),
             ))
         };
-        for row in tree_rows(&entries, folded) {
+        for row in tree_rows(&entries, &[], folded) {
             list =
                 list.child(self.render_commit_file_row(key, workspace_id, commit, row, shown, cx));
         }
@@ -533,6 +641,7 @@ impl Condr {
         let from = (skip > 0)
             .then(|| connection.resources.logs.get(&workspace_id)?.from.clone())
             .flatten();
+        let repository = self.history_directory(key, workspace_id);
         if let Some(request_id) = self.send_request(key, |server_id, session_id, request_id| {
             ClientMessage::GitLog {
                 server_id,
@@ -542,6 +651,7 @@ impl Condr {
                 from,
                 skip,
                 limit: HISTORY_PAGE,
+                repository,
             }
         }) && let Some(connection) = self.connection_mut(key)
         {
@@ -566,7 +676,13 @@ impl Condr {
         self.request_log(key, workspace_id, 0);
     }
 
-    fn request_commit(&mut self, key: ConnectionKey, workspace_id: WorkspaceId, commit: String) {
+    fn request_commit(
+        &mut self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        repository: RelativePathBuf,
+        commit: String,
+    ) {
         let slot = (workspace_id, commit.clone());
         if self
             .connection(key)
@@ -581,6 +697,7 @@ impl Condr {
                 request_id,
                 workspace_id,
                 commit,
+                repository,
             }
         }) && let Some(connection) = self.connection_mut(key)
         {
@@ -607,8 +724,19 @@ impl Condr {
         }) {
             return;
         }
-        // The message's body for the header comes with the commit's own details.
-        self.request_commit(key, workspace_id, commit.clone());
+        // The message's body for the header comes with the commit's own details, from the
+        // repository the path lies in.
+        let repository = self
+            .connection(key)
+            .and_then(|connection| connection.model.workspace_git.get(&workspace_id))
+            .and_then(|git| {
+                git.repositories
+                    .iter()
+                    .find(|repository| path.starts_with(&repository.directory))
+            })
+            .map(|repository| repository.directory.clone())
+            .unwrap_or_default();
+        self.request_commit(key, workspace_id, repository, commit.clone());
         if let Some(request_id) = self.send_request(key, |server_id, session_id, request_id| {
             ClientMessage::GitDiff {
                 server_id,

@@ -170,6 +170,8 @@ message GitLogRequest {
   optional string from = 5;
   uint32 skip = 6;
   uint32 limit = 7;
+  // The repository's directory under the Root; empty for the one the Root is in (ADR 0073).
+  string repository = 8;
 }
 
 // One commit's message and files (ADR 0046).
@@ -179,6 +181,8 @@ message GitCommitRequest {
   uint64 request_id = 3;
   uint64 workspace_id = 4;
   string commit = 5;
+  // As `GitLogRequest.repository`.
+  string repository = 6;
 }
 
 // Rescans a Workspace's files and Git status now, as its watcher would (ADR 0046). There
@@ -731,8 +735,23 @@ enum TerminalProgressState {
   TERMINAL_PROGRESS_STATE_PAUSED = 4;
 }
 
+// The fields up to `head` are the repository the Root is in. When it is in none, they
+// stay empty, `changes` present for a 0.2 Client, and `repositories` lists each one right
+// under the Root (ADR 0073).
 message WorkspaceGitSnapshot {
   uint64 workspace_id = 1;
+  optional string branch = 2;
+  bool linked_worktree = 3;
+  GitUpstream upstream = 4;
+  GitChanges changes = 5;
+  GitBaseChanges base = 6;
+  GitHead head = 7;
+  repeated RepositoryGit repositories = 8;
+}
+
+// A repository right under a Workspace's Root, its paths relative to the Root.
+message RepositoryGit {
+  string directory = 1;
   optional string branch = 2;
   bool linked_worktree = 3;
   GitUpstream upstream = 4;

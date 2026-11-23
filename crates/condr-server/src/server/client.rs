@@ -719,7 +719,11 @@ pub(super) fn handle_client(
             } => {
                 let repository = if commit.is_some() {
                     // A commit's own changes name a renamed file's old path.
-                    workspace_repository(&state, server_id, session_id, workspace_id)
+                    workspace_root(&state, server_id, session_id, workspace_id)
+                        .and_then(|_| {
+                            repository_holding(&state, workspace_id, &path)
+                                .ok_or_else(|| NOT_IN_REPOSITORY.to_string())
+                        })
                         .map(|repository| (repository, None, None))
                 } else {
                     compared_side(&state, server_id, session_id, workspace_id, &path, against)
@@ -803,9 +807,11 @@ pub(super) fn handle_client(
                 from,
                 skip,
                 limit,
+                repository,
             } => {
                 // A long history walks for a while: off this loop (ADR 0046).
-                let repository = workspace_repository(&state, server_id, session_id, workspace_id);
+                let repository =
+                    workspace_repository(&state, server_id, session_id, workspace_id, &repository);
                 let outbound = outbound.clone();
                 #[cfg(test)]
                 let state = Arc::clone(&state);
@@ -844,9 +850,11 @@ pub(super) fn handle_client(
                 request_id,
                 workspace_id,
                 commit,
+                repository,
             } => {
                 // Up to a thousand files to count: off this loop (ADR 0046).
-                let repository = workspace_repository(&state, server_id, session_id, workspace_id);
+                let repository =
+                    workspace_repository(&state, server_id, session_id, workspace_id, &repository);
                 let outbound = outbound.clone();
                 thread::spawn(move || {
                     let result = answer_or_fail(
@@ -878,25 +886,14 @@ pub(super) fn handle_client(
                 workspace_id,
                 path,
             } => {
-                // The listing reads the disk: never under the state lock.
-                let repository = {
-                    let state = state.lock().or_abort();
-                    state
-                        .workspace_git
-                        .get(&workspace_id)
-                        .map(|git| git.repository.clone())
-                };
+                // The listing reads the disk: never under the state lock. The ignore rules
+                // are those of the repository the directory is in, if any (ADR 0073).
+                let repository = repository_holding(&state, workspace_id, &path);
                 let result =
                     workspace_root(&state, server_id, session_id, workspace_id).and_then(|root| {
                         let mut listing = condr_core::list_directory(&root, &path)?;
-                        // The ignore rules are the repository's, so the directory is
-                        // named from the work tree root, which may be above the Workspace.
-                        if let Some(repository) = repository
-                            && let Ok(in_repository) =
-                                path.to_path(&root).strip_prefix(repository.root())
-                            && let Ok(in_repository) = RelativePathBuf::from_path(in_repository)
-                        {
-                            repository.mark_ignored(&in_repository, &mut listing);
+                        if let Some(repository) = repository {
+                            repository.mark_ignored(&path, &mut listing);
                         }
                         Ok(listing)
                     });
@@ -1166,7 +1163,6 @@ pub(super) fn handle_client(
 /// The largest History page a Client may ask for; the wire refuses more (ADR 0046).
 const MAX_LOG_PAGE: u32 = 1000;
 
-/// The repository a Workspace is in, for History's requests.
 /// Answers one `AgentCommand`. A start first waits, up to its own timeout, for a fresh
 /// Pane's shell to reach its first prompt (ADR 0059).
 fn agent_request(
@@ -1241,6 +1237,29 @@ fn agent_request(
     }
 }
 
+const NOT_IN_REPOSITORY: &str = "the path is not in a Git repository of the Workspace";
+
+/// The repository of a Workspace that holds `path`, relative to the Root (ADR 0073).
+fn repository_holding(
+    state: &Arc<Mutex<RuntimeState>>,
+    workspace_id: WorkspaceId,
+    path: &relative_path::RelativePath,
+) -> Option<GitRepository> {
+    holding(&state.lock().or_abort(), workspace_id, path).map(|git| git.repository.clone())
+}
+
+fn holding<'a>(
+    state: &'a RuntimeState,
+    workspace_id: WorkspaceId,
+    path: &relative_path::RelativePath,
+) -> Option<&'a RepositoryGit> {
+    state
+        .workspace_git
+        .get(&workspace_id)?
+        .iter()
+        .find(|git| git.repository.to_repository(path).is_some())
+}
+
 /// What a working-tree diff of `path` compares with: the repository, where `against`'s side
 /// has a renamed file, and the base when `against` names one (ADR 0034).
 fn compared_side(
@@ -1261,10 +1280,7 @@ fn compared_side(
     // One lock: a Workspace closed in between is "unknown", not "not in a repository".
     let state = state.lock().or_abort();
     checked_root(&state, server_id, session_id, workspace_id)?;
-    let git = state
-        .workspace_git
-        .get(&workspace_id)
-        .ok_or_else(|| "the Workspace is not in a Git repository".to_string())?;
+    let git = holding(&state, workspace_id, path).ok_or_else(|| NOT_IN_REPOSITORY.to_string())?;
     let (changes, base) = match (against, &git.base) {
         (DiffBase::Head, _) => (&git.changes, None),
         (DiffBase::MergeBase, Some((base, changes))) => (changes, Some(base.clone())),
@@ -1281,11 +1297,13 @@ fn compared_side(
     Ok((git.repository.clone(), old_path, base))
 }
 
+/// The repository whose directory under the Root is `directory`, for History's requests.
 fn workspace_repository(
     state: &Arc<Mutex<RuntimeState>>,
     server_id: ServerId,
     session_id: SessionId,
     workspace_id: WorkspaceId,
+    directory: &relative_path::RelativePath,
 ) -> Result<condr_core::GitRepository, String> {
     workspace_root(state, server_id, session_id, workspace_id)?;
     state
@@ -1293,8 +1311,11 @@ fn workspace_repository(
         .or_abort()
         .workspace_git
         .get(&workspace_id)
+        .into_iter()
+        .flatten()
+        .find(|git| git.repository.directory() == directory)
         .map(|git| git.repository.clone())
-        .ok_or_else(|| "the Workspace is not in a Git repository".to_string())
+        .ok_or_else(|| "the Workspace has no such Git repository".to_string())
 }
 
 fn workspace_root(

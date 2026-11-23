@@ -76,16 +76,16 @@ impl Condr {
             .or_else(|| connection.model.terminal_titles.get(&card.pane_id).cloned())
             .unwrap_or_else(|| kind.label().to_owned());
         let git = connection.model.workspace_git.get(&card.workspace_id);
-        let branch = git.and_then(|git| git.branch.clone());
+        let own = git.and_then(WorkspaceGitSnapshot::root_repository);
+        let branch = own.and_then(|own| own.branch.clone());
         let changes = git.map_or(GitDiffStat::default(), |git| {
-            git.changes
-                .entries
-                .iter()
-                .filter_map(|entry| entry.stat)
-                .fold(GitDiffStat::default(), |total, stat| GitDiffStat {
+            git.change_entries().filter_map(|entry| entry.stat).fold(
+                GitDiffStat::default(),
+                |total, stat| GitDiffStat {
                     added: total.added + stat.added,
                     deleted: total.deleted + stat.deleted,
-                })
+                },
+            )
         });
         Some(CardFacts {
             kind,
@@ -94,7 +94,7 @@ impl Condr {
             branch,
             device: connection.label.clone(),
             changes,
-            upstream: git.and_then(|git| git.upstream).and_then(upstream_counts),
+            upstream: own.and_then(|own| own.upstream).and_then(upstream_counts),
             detail: agent.detail.clone(),
         })
     }

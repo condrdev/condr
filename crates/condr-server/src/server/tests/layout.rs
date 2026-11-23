@@ -326,8 +326,7 @@ fn layout_commands_create_and_remove_a_managed_worktree_without_deleting_its_bra
     assert!(child.worktree().unwrap().is_managed());
     assert_eq!(
         state
-            .workspace_git
-            .get(&child_workspace_id)
+            .root_repository(child_workspace_id)
             .and_then(|git| git.repository.branch()),
         Some("feature/server-flow")
     );
@@ -347,14 +346,17 @@ fn layout_commands_create_and_remove_a_managed_worktree_without_deleting_its_bra
     run_git(&child_root, &["add", "agent.txt"]);
     run_git(&child_root, &["commit", "-m", "agent work"]);
     let recorded = state.recorded_base(child_workspace_id);
-    let next = discover_repository(&child_root)
+    let next = workspace_repositories(&child_root)
         .unwrap()
-        .map(|repository| WorkspaceGit::from_repository(repository, recorded.as_deref()).unwrap());
+        .into_iter()
+        .map(|repository| RepositoryGit::from_repository(repository, recorded.as_deref()).unwrap())
+        .collect();
     apply_workspace_git_refresh(&mut state, child_workspace_id, &child_root, next);
     let snapshot = workspace_git_snapshot(
         child_workspace_id,
         &state.workspace_git[&child_workspace_id],
     );
+    let snapshot = snapshot.root_repository().unwrap().clone();
     assert!(snapshot.changes.entries.is_empty());
     let base = snapshot.base.expect("a forked worktree has a base");
     assert_eq!(Some(base.branch.as_str()), parent_branch.as_deref());
@@ -590,14 +592,14 @@ fn git_branch_refresh_accepts_activity_from_any_workspace_pane_without_notify() 
         .session
         .split_pane(first_pane, condr_core::SplitDirection::Horizontal, 0.5)
         .unwrap();
-    let git = discover_repository(&repository).unwrap();
+    let git = workspace_repositories(&repository).unwrap();
     set_workspace_git(&mut state, workspace_id, git);
 
     let state = Arc::new(Mutex::new(state));
     {
         let mut locked = state.lock().unwrap();
         let watcher = GitWatcher::without_filesystem(Arc::downgrade(&state));
-        watcher.watch(workspace_id, repository.clone(), None);
+        watcher.watch(workspace_id, repository.clone(), Vec::new());
         locked.git_watcher = Some(watcher);
     }
     run_git(&repository, &["checkout", "-b", "feature/second-pane"]);
@@ -612,8 +614,7 @@ fn git_branch_refresh_accepts_activity_from_any_workspace_pane_without_notify() 
         let refreshed = state
             .lock()
             .unwrap()
-            .workspace_git
-            .get(&workspace_id)
+            .root_repository(workspace_id)
             .and_then(|git| git.repository.branch())
             == Some("feature/second-pane");
         if refreshed {

@@ -36,9 +36,9 @@ pub use messages::{
     AgentCommand, AgentError, AgentInfo, AgentResponse, BootstrapBatch, BootstrapHeader,
     BootstrapRecord, ClientMessage, ClipboardImageFormat, DiffBase, GitBaseChanges, GitHead,
     LayoutCommand, LayoutResult, PaneAgentSnapshot, PaneTerminalFrame, PaneTerminalMetadata,
-    PaneTerminalSnapshot, RelativeAge, RuntimeEpoch, ServerAdminCommand, ServerAdminResponse,
-    ServerClientInfo, ServerId, ServerLogRecord, ServerMessage, ServerSetting, ServerSettings,
-    SessionBootstrap, SessionEvent, SessionId, SessionOverview, TerminalFrameBatch,
+    PaneTerminalSnapshot, RelativeAge, RepositoryGitSnapshot, RuntimeEpoch, ServerAdminCommand,
+    ServerAdminResponse, ServerClientInfo, ServerId, ServerLogRecord, ServerMessage, ServerSetting,
+    ServerSettings, SessionBootstrap, SessionEvent, SessionId, SessionOverview, TerminalFrameBatch,
     TerminalFrameChunk, UnknownMessage, Uptime, WorkspaceGitSnapshot, relative_age, uptime_text,
 };
 pub use stream::{

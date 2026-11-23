@@ -12,6 +12,13 @@ sidebar:
   detached:
     en: detached
     zh-CN: 分离 HEAD
+  repositories:
+    one:
+      en: '%{count} repository'
+      zh-CN: '%{count} 个仓库'
+    other:
+      en: '%{count} repositories'
+      zh-CN: '%{count} 个仓库'
   workspace_menu:
     rename:
       en: Rename Workspace

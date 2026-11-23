@@ -385,7 +385,8 @@ impl Condr {
                 .model
                 .workspace_git
                 .get(&card.workspace_id)
-                .and_then(|git| git.branch.clone()),
+                .and_then(WorkspaceGitSnapshot::root_repository)
+                .and_then(|own| own.branch.clone()),
         );
         let state = if self.task_starting(card.key, task.id) {
             t!("tasks.todo.starting")
@@ -524,7 +525,8 @@ impl Condr {
             .unwrap_or_default();
         let branch = connection
             .and_then(|connection| connection.model.workspace_git.get(&card.workspace_id))
-            .and_then(|git| git.branch.clone())
+            .and_then(WorkspaceGitSnapshot::root_repository)
+            .and_then(|own| own.branch.clone())
             .unwrap_or_default();
         list_row(
             fit,

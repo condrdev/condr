@@ -410,7 +410,8 @@ fn tcp_reconnect_bootstraps_authoritative_agent_and_git_state() {
             .workspace_git
             .iter()
             .any(|git| {
-                git.workspace_id == workspace_id && git.branch.as_deref() == Some("main")
+                git.workspace_id == workspace_id
+                    && git.repositories[0].branch.as_deref() == Some("main")
             })
     );
 

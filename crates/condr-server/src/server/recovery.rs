@@ -188,7 +188,7 @@ impl RuntimeState {
             set_workspace_git(
                 &mut state,
                 workspace_id,
-                discover_repository(root).ok().flatten(),
+                condr_core::workspace_repositories(root).unwrap_or_default(),
             );
         }
         let startup_terminals = started_runtimes

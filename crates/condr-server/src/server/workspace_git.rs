@@ -1,10 +1,10 @@
-//! What the Server knows about a Workspace's repository (ADR 0017): the discovered
-//! repository plus its working-tree changes, recomputed as one unit so branch, upstream and
+//! What the Server knows about a Workspace's repositories (ADR 0017, ADR 0073): each one
+//! discovered plus its working-tree changes, recomputed as one unit so branch, upstream and
 //! file list never disagree, and the filesystem watcher that asks for those recomputations.
 
 use super::*;
-use condr_core::protocol::{GitBaseChanges, GitHead};
-use condr_core::{GitBase, GitChanges, GitError, GitFingerprint};
+use condr_core::protocol::{GitBaseChanges, GitHead, RepositoryGitSnapshot};
+use condr_core::{GitBase, GitChanges, GitError, GitFingerprint, workspace_repositories};
 use notify::Watcher as _;
 use std::collections::HashMap;
 use std::panic::{self, AssertUnwindSafe};
@@ -14,16 +14,17 @@ use std::sync::Weak;
 #[cfg(test)]
 mod tests;
 
-/// One Workspace's Git state. Equality decides whether a refresh is worth an event.
+/// One repository a Workspace shows: the one its Root is in, or one right under its Root
+/// (ADR 0073). Equality decides whether a refresh is worth an event.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct WorkspaceGit {
+pub(super) struct RepositoryGit {
     pub(super) repository: GitRepository,
     pub(super) changes: GitChanges,
     /// The base and the working tree against it (ADR 0034).
     pub(super) base: Option<(GitBase, GitChanges)>,
 }
 
-impl WorkspaceGit {
+impl RepositoryGit {
     /// A repository just discovered, before its changes were computed; the watcher's first
     /// refresh fills them in off the state lock.
     pub(super) fn discovered(repository: GitRepository) -> Self {
@@ -39,14 +40,20 @@ impl WorkspaceGit {
         repository: GitRepository,
         recorded: Option<&str>,
     ) -> Result<Self, GitError> {
-        // A base that cannot be resolved costs the base view, never the HEAD one.
-        let base = repository.base(recorded).unwrap_or_else(|error| {
-            tracing::warn!(
-                "cannot resolve the base of {}: {error}",
-                repository.root().display()
-            );
+        // A base that cannot be resolved costs the base view, never the HEAD one. A
+        // repository under the Root has none: one comparison row cannot name a base for
+        // each (ADR 0073).
+        let base = if repository.directory().as_str().is_empty() {
+            repository.base(recorded).unwrap_or_else(|error| {
+                tracing::warn!(
+                    "cannot resolve the base of {}: {error}",
+                    repository.root().display()
+                );
+                None
+            })
+        } else {
             None
-        });
+        };
         let (changes, base_changes) = repository.changes(base.as_ref())?;
         Ok(Self {
             repository,
@@ -62,35 +69,51 @@ impl RuntimeState {
         let workspace = self.session.workspace(workspace_id)?;
         workspace.worktree()?.base_branch().map(str::to_owned)
     }
+
+    /// The repository a Workspace's Root is in, which alone has worktrees, a base and
+    /// Tasks (ADR 0073).
+    pub(super) fn root_repository(&self, workspace_id: WorkspaceId) -> Option<&RepositoryGit> {
+        self.workspace_git
+            .get(&workspace_id)?
+            .first()
+            .filter(|git| git.repository.directory().as_str().is_empty())
+    }
 }
 
 pub(super) fn workspace_git_snapshot(
     workspace_id: WorkspaceId,
-    git: &WorkspaceGit,
+    repositories: &[RepositoryGit],
 ) -> WorkspaceGitSnapshot {
     WorkspaceGitSnapshot {
         workspace_id,
-        branch: git.repository.branch().map(str::to_owned),
-        linked_worktree: git.repository.is_linked_worktree(),
-        upstream: git.repository.upstream(),
-        changes: git.changes.clone(),
-        base: git.base.as_ref().map(|(base, changes)| GitBaseChanges {
-            branch: base.name().to_owned(),
-            changes: changes.clone(),
-        }),
-        head: Some(GitHead {
-            commit: git.repository.head().map(str::to_owned),
-        }),
+        repositories: repositories
+            .iter()
+            .map(|git| RepositoryGitSnapshot {
+                directory: git.repository.directory().to_relative_path_buf(),
+                branch: git.repository.branch().map(str::to_owned),
+                linked_worktree: git.repository.is_linked_worktree(),
+                upstream: git.repository.upstream(),
+                changes: git.changes.clone(),
+                base: git.base.as_ref().map(|(base, changes)| GitBaseChanges {
+                    branch: base.name().to_owned(),
+                    changes: changes.clone(),
+                }),
+                head: Some(GitHead {
+                    commit: git.repository.head().map(str::to_owned),
+                }),
+            })
+            .collect(),
     }
 }
 
-/// Records a scan result and tells clients when it differs from what they know. `false`
-/// when the Workspace is gone or has moved, so the result was for nobody.
+/// Records a scan result and tells clients when it differs from what they know; no
+/// repository at all means the Workspace has no Git. `false` when the Workspace is gone or
+/// has moved, so the result was for nobody.
 pub(super) fn apply_workspace_git_refresh(
     state: &mut RuntimeState,
     workspace_id: WorkspaceId,
     root: &Path,
-    next: Option<WorkspaceGit>,
+    next: Vec<RepositoryGit>,
 ) -> bool {
     if state
         .session
@@ -99,61 +122,82 @@ pub(super) fn apply_workspace_git_refresh(
     {
         return false;
     }
-    if state.workspace_git.get(&workspace_id) == next.as_ref() {
+    if state
+        .workspace_git
+        .get(&workspace_id)
+        .map_or(&[][..], Vec::as_slice)
+        == next.as_slice()
+    {
         return true;
     }
-    let git = match next {
-        Some(git) => {
-            let snapshot = workspace_git_snapshot(workspace_id, &git);
-            state.watch_workspace_git(workspace_id, root, Some(&git.repository));
-            state.workspace_git.insert(workspace_id, git);
-            Some(snapshot)
-        }
-        None => {
-            state.workspace_git.remove(&workspace_id);
-            None
-        }
-    };
+    state.watch_workspace_git(workspace_id, root, &next);
+    let git = install_workspace_git(state, workspace_id, next);
     state.publish_background(SessionEvent::WorkspaceGitChanged { workspace_id, git });
     true
 }
 
-/// Installs a freshly discovered repository for a Workspace that was just created or
-/// restored, announces it, and asks the watcher for the first full scan.
+/// Puts `repositories` in place for the Workspace and gives its snapshot, `None` for none.
+fn install_workspace_git(
+    state: &mut RuntimeState,
+    workspace_id: WorkspaceId,
+    repositories: Vec<RepositoryGit>,
+) -> Option<WorkspaceGitSnapshot> {
+    if repositories.is_empty() {
+        state.workspace_git.remove(&workspace_id);
+        return None;
+    }
+    let snapshot = workspace_git_snapshot(workspace_id, &repositories);
+    state.workspace_git.insert(workspace_id, repositories);
+    Some(snapshot)
+}
+
+/// Installs freshly discovered repositories for a Workspace that was just created or
+/// restored, announces them, and asks the watcher for the first full scan.
 pub(super) fn set_workspace_git(
     state: &mut RuntimeState,
     workspace_id: WorkspaceId,
-    git: Option<GitRepository>,
+    repositories: Vec<GitRepository>,
 ) {
-    let git = git.map(WorkspaceGit::discovered);
-    let changed = state.workspace_git.get(&workspace_id) != git.as_ref();
+    let repositories: Vec<RepositoryGit> = repositories
+        .into_iter()
+        .map(RepositoryGit::discovered)
+        .collect();
+    let changed = state
+        .workspace_git
+        .get(&workspace_id)
+        .map_or(&[][..], Vec::as_slice)
+        != repositories.as_slice();
     let root = state
         .session
         .workspace(workspace_id)
         .map(|workspace| workspace.root_directory().to_path_buf());
     if let Some(root) = &root {
-        state.watch_workspace_git(workspace_id, root, git.as_ref().map(|git| &git.repository));
+        state.watch_workspace_git(workspace_id, root, &repositories);
     }
-    match git {
-        Some(git) => {
-            state.workspace_git.insert(workspace_id, git);
-        }
-        None => {
-            state.workspace_git.remove(&workspace_id);
-        }
-    }
+    let git = install_workspace_git(state, workspace_id, repositories);
     // Clients learn Git state from events now that a layout change no longer makes
     // them fetch a Bootstrap; a Workspace created on a repository announces it here.
     if changed {
-        let git = state
-            .workspace_git
-            .get(&workspace_id)
-            .map(|git| workspace_git_snapshot(workspace_id, git));
         state.publish_background(SessionEvent::WorkspaceGitChanged { workspace_id, git });
     }
     if let Some(watcher) = &state.git_watcher {
         watcher.refresh(workspace_id);
     }
+}
+
+/// Each repository's git directory, by its directory under the Root.
+fn git_dirs<'a>(
+    repositories: impl IntoIterator<Item = &'a GitRepository>,
+) -> Vec<(RelativePathBuf, PathBuf)> {
+    repositories
+        .into_iter()
+        .map(|repository| {
+            (
+                repository.directory().to_relative_path_buf(),
+                repository.git_directory().to_path_buf(),
+            )
+        })
+        .collect()
 }
 
 impl RuntimeState {
@@ -162,14 +206,17 @@ impl RuntimeState {
     pub(super) fn start_git_watcher(&mut self, state: Weak<Mutex<RuntimeState>>) {
         let watcher = GitWatcher::start(state);
         for workspace in self.session.workspaces() {
-            let git_dir = self
-                .workspace_git
-                .get(&workspace.id())
-                .map(|git| git.repository.git_directory().to_path_buf());
+            let git_dirs = git_dirs(
+                self.workspace_git
+                    .get(&workspace.id())
+                    .into_iter()
+                    .flatten()
+                    .map(|git| &git.repository),
+            );
             watcher.watch(
                 workspace.id(),
                 workspace.root_directory().to_path_buf(),
-                git_dir,
+                git_dirs,
             );
             watcher.refresh(workspace.id());
         }
@@ -180,13 +227,13 @@ impl RuntimeState {
         &self,
         workspace_id: WorkspaceId,
         root: &Path,
-        repository: Option<&GitRepository>,
+        repositories: &[RepositoryGit],
     ) {
         if let Some(watcher) = &self.git_watcher {
             watcher.watch(
                 workspace_id,
                 root.to_path_buf(),
-                repository.map(|repository| repository.git_directory().to_path_buf()),
+                git_dirs(repositories.iter().map(|git| &git.repository)),
             );
         }
     }
@@ -223,7 +270,7 @@ enum WatchMessage {
     Watch {
         workspace_id: WorkspaceId,
         root: PathBuf,
-        git_dir: Option<PathBuf>,
+        git_dirs: Vec<(RelativePathBuf, PathBuf)>,
     },
     Retain(Vec<WorkspaceId>),
     Refresh(WorkspaceId),
@@ -248,15 +295,17 @@ struct Watched {
     /// `/private/var`), inotify and ReadDirectoryChangesW the watched spelling.
     real_root: PathBuf,
     root_subscribed: bool,
-    git_dir: Option<PathBuf>,
-    /// A git directory outside the root that has its own watch.
-    git_dir_subscribed: Option<PathBuf>,
+    /// Each repository's git directory, by its directory under the root.
+    git_dirs: Vec<(RelativePathBuf, PathBuf)>,
+    /// The git directories outside the root, which have watches of their own.
+    git_dirs_subscribed: Vec<PathBuf>,
     /// Paths changed since the last filesystem scan, relative to the root.
     pending: Vec<PathBuf>,
     filesystem_due: Option<Instant>,
     terminal_due: Option<Instant>,
     scanned_at: Option<Instant>,
-    fingerprint: Option<GitFingerprint>,
+    /// Each repository's fingerprint at the last scan, by its directory.
+    fingerprints: HashMap<RelativePathBuf, Option<GitFingerprint>>,
     forced: bool,
     /// The last window dropped paths past `MAX_PENDING_PATHS`.
     overflow: bool,
@@ -307,11 +356,16 @@ impl GitWatcher {
         }
     }
 
-    pub(super) fn watch(&self, workspace_id: WorkspaceId, root: PathBuf, git_dir: Option<PathBuf>) {
+    pub(super) fn watch(
+        &self,
+        workspace_id: WorkspaceId,
+        root: PathBuf,
+        git_dirs: Vec<(RelativePathBuf, PathBuf)>,
+    ) {
         let _ = self.messages.send(WatchMessage::Watch {
             workspace_id,
             root,
-            git_dir,
+            git_dirs,
         });
     }
 
@@ -371,13 +425,13 @@ impl Watched {
             real_root: resolved(&root),
             root,
             root_subscribed: false,
-            git_dir: None,
-            git_dir_subscribed: None,
+            git_dirs: Vec::new(),
+            git_dirs_subscribed: Vec::new(),
             pending: Vec::new(),
             filesystem_due: None,
             terminal_due: None,
             scanned_at: None,
-            fingerprint: None,
+            fingerprints: HashMap::new(),
             forced: false,
             overflow: false,
             storm: false,
@@ -402,10 +456,23 @@ impl Watched {
             .min()
     }
 
-    fn record_scan(&mut self, now: Instant, fingerprint: Option<GitFingerprint>) {
+    fn record_scan(
+        &mut self,
+        now: Instant,
+        fingerprints: HashMap<RelativePathBuf, Option<GitFingerprint>>,
+    ) {
         self.scanned_at = Some(now);
-        self.fingerprint = fingerprint;
+        self.fingerprints = fingerprints;
         self.terminal_due = None;
+    }
+
+    fn unwatch(&mut self, watcher: &mut notify::RecommendedWatcher) {
+        if self.root_subscribed {
+            let _ = watcher.unwatch(&self.root);
+        }
+        for git_dir in self.git_dirs_subscribed.drain(..) {
+            let _ = watcher.unwatch(&git_dir);
+        }
     }
 }
 
@@ -446,21 +513,14 @@ fn run_watcher(
             Some(WatchMessage::Watch {
                 workspace_id,
                 root,
-                git_dir,
+                git_dirs,
             }) => {
                 let entry = watched
                     .entry(workspace_id)
                     .or_insert_with(|| Watched::new(root.clone()));
                 if entry.root != root {
-                    if let Some(watcher) = &mut watcher
-                        && entry.root_subscribed
-                    {
-                        let _ = watcher.unwatch(&entry.root);
-                    }
-                    if let Some(watcher) = &mut watcher
-                        && let Some(git_dir) = &entry.git_dir_subscribed
-                    {
-                        let _ = watcher.unwatch(git_dir);
+                    if let Some(watcher) = &mut watcher {
+                        entry.unwatch(watcher);
                     }
                     *entry = Watched::new(root);
                 }
@@ -470,9 +530,7 @@ fn run_watcher(
                     entry.root_subscribed =
                         subscribe(watcher, &entry.root, notify::RecursiveMode::Recursive);
                 }
-                if let Some(git_dir) = git_dir {
-                    watch_git_dir(entry, watcher.as_mut(), git_dir);
-                }
+                watch_git_dirs(entry, watcher.as_mut(), git_dirs);
             }
             Some(WatchMessage::Retain(keep)) => {
                 let gone: Vec<WorkspaceId> = watched
@@ -481,15 +539,10 @@ fn run_watcher(
                     .filter(|id| !keep.contains(id))
                     .collect();
                 for workspace_id in gone {
-                    if let Some(entry) = watched.remove(&workspace_id)
+                    if let Some(mut entry) = watched.remove(&workspace_id)
                         && let Some(watcher) = &mut watcher
                     {
-                        if entry.root_subscribed {
-                            let _ = watcher.unwatch(&entry.root);
-                        }
-                        if let Some(git_dir) = entry.git_dir_subscribed {
-                            let _ = watcher.unwatch(&git_dir);
-                        }
+                        entry.unwatch(watcher);
                     }
                 }
             }
@@ -568,13 +621,14 @@ fn refresh_isolated(
         entry.filesystem_due = None;
         entry.forced = false;
         entry.overflow = false;
-        entry.record_scan(Instant::now(), None);
+        entry.record_scan(Instant::now(), HashMap::new());
         true
     })
 }
 
 /// The only background scan/commit path. Both sources run serially here, so an older
-/// terminal scan can never publish after a newer filesystem scan.
+/// terminal scan can never publish after a newer filesystem scan. Only the repositories a
+/// changed path, a moved ref or a forced refresh touched walk their status (ADR 0073).
 fn refresh_workspace(
     workspace_id: WorkspaceId,
     entry: &mut Watched,
@@ -612,63 +666,113 @@ fn refresh_workspace(
             entry.terminal_due = None;
             return true;
         }
-        let known = state.workspace_git.get(&workspace_id).map(|git| {
-            (
-                git.repository.clone(),
-                git.base.as_ref().map(|(base, _)| base.clone()),
-            )
-        });
+        let known = state
+            .workspace_git
+            .get(&workspace_id)
+            .cloned()
+            .unwrap_or_default();
         (known, state.recorded_base(workspace_id))
     };
-    // Terminal output alone does not justify a status walk when ref files did not move.
-    // Record the fingerprint before scanning: a switch racing the scan differs next time.
-    let fingerprint = known
-        .as_ref()
-        .and_then(|(repository, base)| repository.fingerprint(base.as_ref()));
-    let terminal_changed =
-        terminal_due && (fingerprint.is_none() || fingerprint != entry.fingerprint);
+    // Terminal output alone does not justify a status walk when no ref file moved; with no
+    // repository known it rediscovers, as one may have appeared. Record the fingerprints
+    // before scanning: a switch racing the scan differs next time.
+    let fingerprints: HashMap<RelativePathBuf, Option<GitFingerprint>> = known
+        .iter()
+        .map(|git| {
+            let base = git.base.as_ref().map(|(base, _)| base);
+            (
+                git.repository.directory().to_relative_path_buf(),
+                git.repository.fingerprint(base),
+            )
+        })
+        .collect();
+    let moved: Vec<RelativePathBuf> = fingerprints
+        .iter()
+        .filter(|(directory, fingerprint)| {
+            fingerprint.is_none() || entry.fingerprints.get(*directory) != Some(*fingerprint)
+        })
+        .map(|(directory, _)| directory.clone())
+        .collect();
+    let terminal_changed = terminal_due && (known.is_empty() || !moved.is_empty());
     if terminal_due {
-        entry.record_scan(now, fingerprint.clone());
+        entry.record_scan(now, fingerprints.clone());
     }
     if !filesystem_due && !terminal_changed {
         return true;
     }
     // Index/ref-only updates do not invalidate Files/Preview; terminal activity never did.
-    let mut working_tree_changed = forced || pending.iter().any(|path| path != Path::new(".git"));
-    let next = match discover_repository(&entry.root) {
-        Ok(None) => {
-            entry.record_scan(now, fingerprint);
-            Ok(None)
+    let mut working_tree_changed = forced || pending.iter().any(|path| !is_git_marker(path));
+    // The known repositories a changed path that they do not ignore lies in. A path in none
+    // changes Files only.
+    let mut touched = Vec::new();
+    let mut unheld = false;
+    for git in &known {
+        let held: Vec<&PathBuf> = pending
+            .iter()
+            .filter(|path| path.starts_with(git.repository.directory().to_path("")))
+            .collect();
+        if !held.is_empty() && !git.repository.ignores_all(held) {
+            touched.push(git.repository.directory());
         }
-        Ok(Some(repository)) => {
-            if filesystem_due
-                && !forced
-                && (overflow || !entry.storm)
-                && repository.ignores_all(&pending)
-            {
-                entry.storm = overflow;
-                if !terminal_changed {
-                    return true;
-                }
-                working_tree_changed = false;
-            }
-            entry.storm = false;
-            watch_git_dir(entry, watcher, repository.git_directory().to_path_buf());
-            entry.record_scan(now, fingerprint);
-            WorkspaceGit::from_repository(repository, recorded.as_deref()).map(Some)
+    }
+    for path in &pending {
+        unheld |= !known
+            .iter()
+            .any(|git| path.starts_with(git.repository.directory().to_path("")));
+    }
+    let storm = entry.storm;
+    let ignored = filesystem_due
+        && !forced
+        && (overflow || !storm)
+        && !pending.is_empty()
+        && !unheld
+        && touched.is_empty();
+    if ignored {
+        entry.storm = overflow;
+        if !terminal_changed {
+            return true;
         }
+        working_tree_changed = false;
+    }
+    entry.storm = false;
+    // Paths dropped past the cap, or hidden in a storm, may lie in any repository.
+    let everything = forced || (filesystem_due && !ignored && (overflow || storm));
+    let discovered = match workspace_repositories(&entry.root) {
+        Ok(discovered) => discovered,
         Err(error) => {
-            entry.record_scan(now, fingerprint);
-            Err(error)
-        }
-    };
-    let next = match next {
-        Ok(next) => next,
-        Err(error) => {
+            entry.record_scan(now, fingerprints);
             tracing::warn!("Git scan of {} failed: {error}", entry.root.display());
             return true;
         }
     };
+    watch_git_dirs(entry, watcher, git_dirs(&discovered));
+    entry.record_scan(now, fingerprints);
+    let next: Vec<RepositoryGit> = discovered
+        .into_iter()
+        .map(|repository| {
+            let directory = repository.directory();
+            let previous = known
+                .iter()
+                .find(|git| git.repository.directory() == directory);
+            let walk = everything
+                || previous.is_none_or(|previous| previous.repository != repository)
+                || (!ignored && touched.contains(&directory))
+                || (terminal_changed && moved.iter().any(|moved| moved == directory));
+            match previous {
+                Some(previous) if !walk => previous.clone(),
+                _ => RepositoryGit::from_repository(repository.clone(), recorded.as_deref())
+                    .unwrap_or_else(|error| {
+                        tracing::warn!(
+                            "Git scan of {} failed: {error}",
+                            repository.root().display()
+                        );
+                        previous
+                            .cloned()
+                            .unwrap_or_else(|| RepositoryGit::discovered(repository))
+                    }),
+            }
+        })
+        .collect();
     let Some(shared) = state.upgrade() else {
         return false;
     };
@@ -702,28 +806,38 @@ fn subscribe(
     }
 }
 
-/// A linked worktree keeps HEAD and index outside its root, so that directory gets its own
-/// watch; the main worktree's `.git` is under the recursive root watch already.
-fn watch_git_dir(
+/// A linked worktree, and the repository a Root below its top is in, keep HEAD and index
+/// outside the root, so those directories get their own watches; a git directory under the
+/// root is under the recursive root watch already.
+fn watch_git_dirs(
     entry: &mut Watched,
     watcher: Option<&mut notify::RecommendedWatcher>,
-    git_dir: PathBuf,
+    git_dirs: Vec<(RelativePathBuf, PathBuf)>,
 ) {
-    if git_dir.starts_with(&entry.root) {
-        entry.git_dir = Some(git_dir);
-        return;
-    }
-    if entry.git_dir_subscribed.as_ref() != Some(&git_dir)
-        && let Some(watcher) = watcher
-    {
-        if let Some(previous) = entry.git_dir_subscribed.take() {
-            let _ = watcher.unwatch(&previous);
+    if let Some(watcher) = watcher {
+        let outside: Vec<&PathBuf> = git_dirs
+            .iter()
+            .map(|(_, git_dir)| git_dir)
+            .filter(|git_dir| {
+                !git_dir.starts_with(&entry.root) && !git_dir.starts_with(&entry.real_root)
+            })
+            .collect();
+        entry.git_dirs_subscribed.retain(|subscribed| {
+            let keep = outside.contains(&subscribed);
+            if !keep {
+                let _ = watcher.unwatch(subscribed);
+            }
+            keep
+        });
+        for git_dir in outside {
+            if !entry.git_dirs_subscribed.contains(git_dir)
+                && subscribe(watcher, git_dir, notify::RecursiveMode::NonRecursive)
+            {
+                entry.git_dirs_subscribed.push(git_dir.clone());
+            }
         }
-        if subscribe(watcher, &git_dir, notify::RecursiveMode::NonRecursive) {
-            entry.git_dir_subscribed = Some(git_dir.clone());
-        }
     }
-    entry.git_dir = Some(git_dir);
+    entry.git_dirs = git_dirs;
 }
 
 fn resolved(path: &Path) -> PathBuf {
@@ -731,13 +845,18 @@ fn resolved(path: &Path) -> PathBuf {
 }
 
 /// The path relative to the Workspace root when `path` can change its Git status; the
-/// object store never does, and a change under the git directory counts as `.git` itself.
+/// object store never does, and a change under a git directory counts as its repository's
+/// `.git` itself.
 fn relevant_change(entry: &Watched, path: &Path) -> Option<PathBuf> {
-    if let Some(git_dir) = &entry.git_dir
-        && let Ok(inside) = path.strip_prefix(git_dir)
+    // The innermost one: a linked worktree's git directory lies inside its main one's.
+    if let Some((directory, inside)) = entry
+        .git_dirs
+        .iter()
+        .filter_map(|(directory, git_dir)| Some((directory, path.strip_prefix(git_dir).ok()?)))
+        .min_by_key(|(_, inside)| inside.components().count())
     {
         return (!inside.starts_with("objects") && !inside.starts_with("lfs"))
-            .then(|| PathBuf::from(".git"));
+            .then(|| directory.to_path("").join(".git"));
     }
     let relative = path
         .strip_prefix(&entry.root)
@@ -751,10 +870,21 @@ fn relevant_change(entry: &Watched, path: &Path) -> Option<PathBuf> {
     {
         return None;
     }
-    if relative.starts_with(".git") {
-        let inside = relative.strip_prefix(".git").unwrap_or(relative);
-        return (!inside.starts_with("objects") && !inside.starts_with("lfs"))
-            .then(|| PathBuf::from(".git"));
+    // A `.git` at any depth: the Root's own, a repository's under it, or a nested one.
+    let mut components = relative.components();
+    let mut marker = PathBuf::new();
+    while let Some(component) = components.next() {
+        marker.push(component);
+        if component.as_os_str() == ".git" {
+            let inside = components.as_path();
+            return (!inside.starts_with("objects") && !inside.starts_with("lfs"))
+                .then_some(marker);
+        }
     }
     Some(relative.to_path_buf())
+}
+
+/// A path [`relevant_change`] gave for a change inside a git directory.
+fn is_git_marker(path: &Path) -> bool {
+    path.file_name().is_some_and(|name| name == ".git")
 }

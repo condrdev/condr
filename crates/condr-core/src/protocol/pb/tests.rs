@@ -710,6 +710,7 @@ fn a_refresh_and_a_full_context_diff_round_trip() {
             from: Some("8f3c".into()),
             skip: 100,
             limit: 100,
+            repository: "api".into(),
         },
         ClientMessage::GitCommit {
             server_id: crate::protocol::ServerId(1),
@@ -717,10 +718,79 @@ fn a_refresh_and_a_full_context_diff_round_trip() {
             request_id: 6,
             workspace_id: crate::WorkspaceId::from_u64(3),
             commit: "8f3c".into(),
+            repository: "api".into(),
         },
     ] {
         let encoded = super::ClientMessage::try_from(&message).unwrap();
         assert_eq!(ClientMessage::try_from(encoded).unwrap(), message);
+    }
+}
+
+#[test]
+fn repositories_under_the_root_ride_beside_the_fields_an_older_peer_reads() {
+    use crate::protocol::{RepositoryGitSnapshot, WorkspaceGitSnapshot};
+    let repository = |directory: &str, branch: &str| RepositoryGitSnapshot {
+        directory: directory.into(),
+        branch: Some(branch.into()),
+        linked_worktree: false,
+        upstream: Some(crate::GitUpstream {
+            ahead: 1,
+            behind: 0,
+        }),
+        changes: crate::GitChanges {
+            entries: vec![crate::GitChangeEntry {
+                path: relative_path::RelativePath::new(directory).join("lib.rs"),
+                old_path: None,
+                status: crate::GitChangeStatus::Modified,
+                stat: None,
+            }],
+            truncated: false,
+        },
+        base: None,
+        head: Some(crate::protocol::GitHead {
+            commit: Some("8f3c".into()),
+        }),
+    };
+    let workspace_git = |repositories| {
+        BootstrapRecord::WorkspaceGit(WorkspaceGitSnapshot {
+            workspace_id: crate::WorkspaceId::from_u64(3),
+            repositories,
+        })
+    };
+    let wire = |record: &BootstrapRecord| {
+        let encoded = super::BootstrapRecord::try_from(record).unwrap();
+        let Some(bootstrap_record::Record::WorkspaceGit(git)) = encoded.record else {
+            panic!("a Git record");
+        };
+        git
+    };
+    let decoded = |git: super::WorkspaceGitSnapshot| {
+        decode_bootstrap_record(super::BootstrapRecord {
+            record: Some(bootstrap_record::Record::WorkspaceGit(git)),
+        })
+    };
+
+    let several = workspace_git(vec![repository("api", "main"), repository("web", "login")]);
+    let git = wire(&several);
+    // A 0.2 peer reads these: no branch, no History, and the `changes` it requires, empty.
+    assert_eq!(git.branch, None);
+    assert_eq!(git.head, None);
+    assert_eq!(git.changes, Some(Default::default()));
+    assert_eq!(git.repositories.len(), 2);
+    assert_eq!(decoded(git).unwrap(), Some(several));
+
+    // The Root's own repository rides the old fields alone, as an older Server sends it.
+    let own = workspace_git(vec![repository("", "main")]);
+    let git = wire(&own);
+    assert_eq!(git.branch.as_deref(), Some("main"));
+    assert!(git.repositories.is_empty());
+    assert_eq!(decoded(git).unwrap(), Some(own));
+
+    // A repository is one directory right under the Root.
+    for directory in ["api/src", "..", ""] {
+        let mut git = wire(&workspace_git(vec![repository("api", "main")]));
+        git.repositories[0].directory = directory.into();
+        assert!(decoded(git).is_err(), "{directory:?}");
     }
 }
 

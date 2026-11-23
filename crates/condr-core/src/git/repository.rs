@@ -5,8 +5,10 @@ use std::sync::atomic::AtomicBool;
 use std::time::SystemTime;
 
 use super::GitUpstream;
+use super::changes::{GitChangeEntry, GitChanges};
 use gix::bstr::ByteSlice as _;
 use gix::refs::transaction::PreviousValue;
+use relative_path::{RelativePath, RelativePathBuf};
 
 /// Modification times of the files that move the branch, its head or its upstream. Equal
 /// fingerprints mean a rediscovery would report the same branch and ahead/behind counts, so
@@ -45,6 +47,12 @@ pub struct GitRepository {
     upstream: Option<GitUpstream>,
     /// The commit `HEAD` points at, as hex; `None` while `HEAD` is unborn (ADR 0046).
     head: Option<String>,
+    /// Where the work tree sits under the Root it was found for, `api`; empty when that
+    /// Root is inside it (ADR 0073).
+    directory: RelativePathBuf,
+    /// Where that Root sits in the work tree, `packages/web`; empty unless the Root is
+    /// below the work tree's top. The Workspace sees only what is under it.
+    scope: RelativePathBuf,
 }
 
 impl GitRepository {
@@ -72,6 +80,44 @@ impl GitRepository {
 
     pub fn head(&self) -> Option<&str> {
         self.head.as_deref()
+    }
+
+    /// The work tree's directory under the Root, `api`; empty when the Root is inside it.
+    pub fn directory(&self) -> &RelativePath {
+        &self.directory
+    }
+
+    /// A Root-relative path as the work tree names it; `None` outside what the Workspace
+    /// sees of this repository.
+    pub fn to_repository(&self, path: &RelativePath) -> Option<RelativePathBuf> {
+        let inside = path.strip_prefix(&self.directory).ok()?;
+        Some(joined(&self.scope, inside))
+    }
+
+    /// A work-tree path as the Root names it; `None` when it lies outside the Root.
+    pub fn to_workspace(&self, path: &RelativePath) -> Option<RelativePathBuf> {
+        let inside = path.strip_prefix(&self.scope).ok()?;
+        Some(joined(&self.directory, inside))
+    }
+
+    /// `changes` with work-tree paths, kept to what lies under the Root and named from it;
+    /// an old path outside the Root is dropped.
+    pub(super) fn workspace_changes(&self, changes: GitChanges) -> GitChanges {
+        let entries = changes
+            .entries
+            .into_iter()
+            .filter_map(|entry| {
+                Some(GitChangeEntry {
+                    path: self.to_workspace(&entry.path)?,
+                    old_path: entry.old_path.and_then(|old| self.to_workspace(&old)),
+                    ..entry
+                })
+            })
+            .collect();
+        GitChanges {
+            entries,
+            truncated: changes.truncated,
+        }
     }
 
     /// `None` only when a HEAD file is unreadable; the other files are optional and their
@@ -165,8 +211,51 @@ fn real_path(path: &Path) -> Result<PathBuf, GitError> {
     gix::path::realpath(path).map_err(|error| GitError(format!("cannot resolve path: {error}")))
 }
 
+/// `prefix` and `path` as one path, without the trailing `/` joining an empty one leaves.
+fn joined(prefix: &RelativePath, path: &RelativePath) -> RelativePathBuf {
+    if prefix.as_str().is_empty() {
+        path.to_relative_path_buf()
+    } else if path.as_str().is_empty() {
+        prefix.to_relative_path_buf()
+    } else {
+        prefix.join(path)
+    }
+}
+
+/// The repositories a Workspace whose Root Directory is `root` shows (ADR 0073): the one
+/// the Root is in, else each one whose work tree's top is a directory right under it, by
+/// name. A child that cannot be read is left out, so one broken repository hides no other.
+pub fn workspace_repositories(root: impl AsRef<Path>) -> Result<Vec<GitRepository>, GitError> {
+    let root = root.as_ref();
+    if let Some(repository) = discover_repository(root)? {
+        return Ok(vec![repository]);
+    }
+    let mut names: Vec<String> = fs::read_dir(root)
+        .map_err(|error| GitError(format!("cannot list {}: {error}", root.display())))?
+        .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+        // A `.git` directory or file; checked before gix opens anything, as most children
+        // of a Root that is no repository are not repositories either.
+        .filter(|name| root.join(name).join(".git").exists())
+        .collect();
+    names.sort();
+    let mut repositories = Vec::new();
+    for name in names {
+        match discover_repository(root.join(&name)) {
+            // A link into another repository's subdirectory is not a work tree's top.
+            Ok(Some(mut repository)) if repository.scope.as_str().is_empty() => {
+                repository.directory = RelativePathBuf::from(name);
+                repositories.push(repository);
+            }
+            Ok(_) => {}
+            Err(error) => tracing::warn!("cannot read the repository {name}: {error}"),
+        }
+    }
+    Ok(repositories)
+}
+
 /// The repository whose work tree contains `path`; `None` outside any work tree, which
-/// includes a path inside a `.git` directory.
+/// includes a path inside a `.git` directory. Paths its methods take and give are relative
+/// to `path`.
 pub fn discover_repository(path: impl AsRef<Path>) -> Result<Option<GitRepository>, GitError> {
     let path = real_path(path.as_ref())?;
     let repo = match gix::discover(&path) {
@@ -185,6 +274,11 @@ pub fn discover_repository(path: impl AsRef<Path>) -> Result<Option<GitRepositor
     if path.starts_with(&git_directory) {
         return Ok(None);
     }
+    let scope = path
+        .strip_prefix(&root)
+        .ok()
+        .and_then(|scope| RelativePathBuf::from_path(scope).ok())
+        .ok_or_else(|| GitError(format!("{} is outside its work tree", path.display())))?;
     let linked_worktree = repo.kind() == gix::repository::Kind::LinkedWorkTree;
 
     // `ref: refs/heads/<name>` names the branch, an unborn one too; a detached HEAD has none.
@@ -208,6 +302,8 @@ pub fn discover_repository(path: impl AsRef<Path>) -> Result<Option<GitRepositor
         upstream_ref,
         upstream,
         head,
+        directory: RelativePathBuf::new(),
+        scope,
     }))
 }
 

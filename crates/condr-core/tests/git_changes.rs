@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use condr_core::{
     DiffLineKind, FileDiffContent, GitChangeStatus, GitDiffStat, MAX_DIFF_BYTES, OldFile,
-    discover_repository,
+    discover_repository, workspace_repositories,
 };
 
 static NEXT_REPO: AtomicU64 = AtomicU64::new(0);
@@ -23,14 +23,19 @@ fn scratch_repository(name: &str) -> PathBuf {
         NEXT_REPO.fetch_add(1, Ordering::Relaxed)
     ));
     let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).unwrap();
+    init_repository(&root);
+    root
+}
+
+fn init_repository(root: &Path) {
+    fs::create_dir_all(root).unwrap();
+    let root = root.to_path_buf();
     git(&root, ["init", "-q", "-b", "main"]);
     git(&root, ["config", "user.email", "condr@example.com"]);
     git(&root, ["config", "user.name", "Condr"]);
     git(&root, ["config", "commit.gpgsign", "false"]);
     // Git for Windows turns this on system-wide; a checkout's line breaks are the test's.
     git(&root, ["config", "core.autocrlf", "false"]);
-    root
 }
 
 fn git<const N: usize>(cwd: &Path, args: [&str; N]) {
@@ -403,6 +408,168 @@ fn mark_ignored_flags_the_listing_entries_the_ignore_rules_exclude() {
             .map(|entry| (entry.name.as_str(), entry.ignored))
             .collect::<Vec<_>>(),
         [("build.log", true), ("main.rs", false)]
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn a_root_in_no_repository_shows_each_one_right_under_it_with_its_paths() {
+    // Its parent is no repository: a scratch repository's name, without `git init`.
+    let parent = scratch_repository("several");
+    fs::remove_dir_all(parent.join(".git")).unwrap();
+    let api = parent.join("api");
+    init_repository(&api);
+    commit_file(&api, ".gitignore", "target/\n");
+    commit_file(&api, "src/lib.rs", "one\n");
+    let web = parent.join("web");
+    init_repository(&web);
+    commit_file(&web, "app.ts", "app\n");
+    git(&web, ["checkout", "-q", "-b", "login"]);
+    git(&api, ["worktree", "add", "-q", "-b", "wt", "../linked"]);
+    git(&parent, ["init", "-q", "--bare", "bare.git"]);
+    fs::create_dir_all(parent.join("plain/.hidden")).unwrap();
+    fs::write(parent.join("notes.txt"), "notes\n").unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&web, parent.join("link")).unwrap();
+
+    let repositories = workspace_repositories(&parent).unwrap();
+    let found: Vec<(&str, Option<&str>)> = repositories
+        .iter()
+        .map(|repository| (repository.directory().as_str(), repository.branch()))
+        .collect();
+    let mut expected = vec![
+        ("api", Some("main")),
+        ("link", Some("login")),
+        ("linked", Some("wt")),
+        ("web", Some("login")),
+    ];
+    if cfg!(not(unix)) {
+        expected.remove(1);
+    }
+    assert_eq!(found, expected);
+    let api_repository = &repositories[0];
+
+    fs::write(api.join("src/lib.rs"), "one\ntwo\n").unwrap();
+    fs::write(api.join("src/new.rs"), "new\n").unwrap();
+    let changes = api_repository.changes(None).unwrap().0;
+    assert_eq!(
+        summary(&changes),
+        [
+            ("api/src/lib.rs", GitChangeStatus::Modified),
+            ("api/src/new.rs", GitChangeStatus::Untracked),
+        ]
+    );
+    let diff = api_repository
+        .file_diff(RelativePath::new("api/src/lib.rs"), None, None, false)
+        .unwrap();
+    assert_eq!(diff.path.as_str(), "api/src/lib.rs");
+    assert!(matches!(diff.content, FileDiffContent::Text { ref hunks } if !hunks.is_empty()));
+    assert_eq!(
+        api_repository
+            .old_file(RelativePath::new("api/src/lib.rs"), None, None)
+            .unwrap(),
+        OldFile::Text("one\n".into())
+    );
+    assert!(
+        api_repository
+            .file_diff(RelativePath::new("web/app.ts"), None, None, false)
+            .is_err(),
+        "a path in another repository is not this one's"
+    );
+
+    fs::create_dir_all(api.join("target")).unwrap();
+    let mut listing = condr_core::list_directory(&parent, RelativePath::new("api")).unwrap();
+    api_repository.mark_ignored(RelativePath::new("api"), &mut listing);
+    assert!(
+        listing
+            .entries
+            .iter()
+            .any(|entry| entry.name == "target" && entry.ignored)
+    );
+    assert!(api_repository.ignores_all([Path::new("api/target/out.o")]));
+    assert!(!api_repository.ignores_all([Path::new("api/src/lib.rs")]));
+    assert!(!api_repository.ignores_all([Path::new("web/app.ts")]));
+
+    let head = api_repository.head().unwrap().to_owned();
+    let commit = api_repository.commit(&head).unwrap();
+    assert_eq!(
+        summary(&commit.changes),
+        [("api/src/lib.rs", GitChangeStatus::Added)]
+    );
+    assert!(
+        api_repository
+            .commit_file_diff(&head, RelativePath::new("api/src/lib.rs"), false)
+            .is_ok()
+    );
+
+    // A Root inside one of them shows that one alone, its paths its own.
+    let inside = workspace_repositories(&api).unwrap();
+    assert_eq!(inside.len(), 1);
+    assert_eq!(inside[0].directory().as_str(), "");
+
+    git(&api, ["worktree", "remove", "--force", "../linked"]);
+    let _ = fs::remove_dir_all(&parent);
+}
+
+#[test]
+fn a_root_below_its_work_trees_top_sees_only_what_is_under_it() {
+    let root = scratch_repository("scoped");
+    commit_file(&root, ".gitignore", "*.log\n");
+    commit_file(&root, "packages/web/src/app.ts", "app\n");
+    commit_file(&root, "other/kept.txt", "kept\n");
+    commit_file(&root, "other/moved.txt", "moving\ncontent\n");
+    fs::write(root.join("packages/web/src/app.ts"), "app\nmore\n").unwrap();
+    fs::write(root.join("other/kept.txt"), "changed\n").unwrap();
+    fs::write(root.join("packages/web/new.ts"), "new\n").unwrap();
+    git(&root, ["mv", "other/moved.txt", "packages/web/moved.txt"]);
+    let web = root.join("packages/web");
+
+    let repositories = workspace_repositories(&web).unwrap();
+    assert_eq!(repositories.len(), 1);
+    let repository = &repositories[0];
+    assert_eq!(repository.directory().as_str(), "");
+    let changes = repository.changes(None).unwrap().0;
+    assert_eq!(
+        summary(&changes),
+        [
+            ("moved.txt", GitChangeStatus::Renamed),
+            ("new.ts", GitChangeStatus::Untracked),
+            ("src/app.ts", GitChangeStatus::Modified),
+        ]
+    );
+    assert_eq!(
+        changes.entries[0].old_path, None,
+        "where it came from lies outside the Root"
+    );
+    assert!(
+        repository
+            .file_diff(RelativePath::new("src/app.ts"), None, None, false)
+            .is_ok()
+    );
+
+    fs::write(web.join("build.log"), "noise\n").unwrap();
+    let mut listing = condr_core::list_directory(&web, RelativePath::new("")).unwrap();
+    repository.mark_ignored(RelativePath::new(""), &mut listing);
+    assert!(
+        listing
+            .entries
+            .iter()
+            .any(|entry| entry.name == "build.log" && entry.ignored)
+    );
+
+    git(&root, ["add", "-A"]);
+    git(&root, ["commit", "-q", "-m", "both"]);
+    let head = discover_repository(&web).unwrap().unwrap();
+    let commit = head.commit(head.head().unwrap()).unwrap();
+    assert_eq!(
+        summary(&commit.changes),
+        [
+            ("moved.txt", GitChangeStatus::Renamed),
+            ("new.ts", GitChangeStatus::Added),
+            ("src/app.ts", GitChangeStatus::Modified),
+        ],
+        "a commit's files outside the Root are not listed"
     );
 
     let _ = fs::remove_dir_all(&root);

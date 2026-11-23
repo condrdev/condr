@@ -31,10 +31,6 @@ A new Managed Worktree can start from any branch, including one that exists only
 
 On Windows, a WSL 2 distribution connects as a Device of its own, so Agents running in it are recognized and report their state, and Git works on the Linux side. **Connect Remote Device** lists the distributions installed on this machine.
 
-### Changes across several repositories
-
-A Workspace opened on a folder that holds several repositories shows Changes and History for each repository one level down, grouped by repository.
-
 ---
 
 ## Waiting for more feedback

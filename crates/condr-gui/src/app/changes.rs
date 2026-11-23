@@ -3,10 +3,10 @@
 //! Everything shown here is Server data; the Client only asks and draws.
 
 use super::change_tree::{
-    TreeRow, diff_stat, directory_row, disclosure, file_row, row_highlight, row_menu, tree_rows,
+    TreeRow, diff_stat, directory_row, disclosure, file_row, repository_row, row_highlight,
+    row_menu, tree_rows,
 };
 use super::files::language_for;
-use super::history::history_branch;
 use super::placeholders::{Oversized, empty_state, failed_state, list_note, too_large};
 use super::sidebar::CondrIconName;
 use super::viewer_header::{header_meta, mode_toggle, viewer_header};
@@ -316,18 +316,18 @@ impl Condr {
                 .into_any_element();
         };
         // A Server that sends `head` serves History (ADR 0046).
-        let history = git.as_ref().is_some_and(|git| git.head.is_some());
+        let history = git
+            .as_ref()
+            .and_then(|git| git.repositories.first())
+            .is_some_and(|repository| repository.head.is_some());
         let view = match self.sidebar_view_for(key, workspace_id, git.is_some()) {
             SidebarView::History if !history => SidebarView::Changes,
             view => view,
         };
         let against = self.workspace_diff_base(key, workspace_id);
-        let shown = git.as_ref().map(|git| shown_changes(git, against));
-        let count = shown.map(|changes| changes.entries.len());
-        let total = shown.and_then(|changes| {
-            changes
-                .entries
-                .iter()
+        let count = git.as_ref().map(|git| shown_entries(git, against).count());
+        let total = git.as_ref().and_then(|git| {
+            shown_entries(git, against)
                 .filter_map(|entry| entry.stat)
                 .reduce(|sum, stat| GitDiffStat {
                     added: sum.added + stat.added,
@@ -355,7 +355,8 @@ impl Condr {
                     .child(self.render_changes_list(
                         key,
                         workspace_id,
-                        shown_changes(git, against),
+                        git,
+                        against,
                         shown_diff,
                         cx,
                     ))
@@ -369,7 +370,10 @@ impl Condr {
                 .flex_1()
                 .min_h_0()
                 .w_full()
-                .children(git.as_ref().map(|git| history_branch(git, cx)))
+                .children(
+                    git.as_ref()
+                        .map(|git| self.render_history_head(key, workspace_id, git, cx)),
+                )
                 .child(self.render_history(key, workspace_id, shown_diff.as_deref(), cx))
                 .into_any_element(),
         };
@@ -506,7 +510,9 @@ impl Condr {
         workspace_id: WorkspaceId,
         git: &WorkspaceGitSnapshot,
     ) -> DiffBase {
-        if git.base.is_some()
+        if git
+            .root_repository()
+            .is_some_and(|repository| repository.base.is_some())
             && self
                 .files_view
                 .changes_against_base
@@ -551,7 +557,8 @@ impl Condr {
             }
             None => {
                 let git = connection.model.workspace_git.get(&workspace_id)?;
-                shown_changes(git, self.diff_base(key, workspace_id, git))
+                let against = self.diff_base(key, workspace_id, git);
+                return shown_entries(git, against).find(|entry| entry.path == path);
             }
         };
         changes.entries.iter().find(|entry| entry.path == path)
@@ -611,7 +618,10 @@ impl Condr {
             .ghost()
             .xsmall()
             .label(comparison_label(git, against));
-        let control = match git.base.as_ref().map(|base| base.branch.clone()) {
+        let base = git
+            .root_repository()
+            .and_then(|repository| repository.base.as_ref());
+        let control = match base.map(|base| base.branch.clone()) {
             None => button
                 .disabled(true)
                 .tooltip(t!("changes.no_base"))
@@ -667,22 +677,30 @@ impl Condr {
             .into_any_element()
     }
 
-    /// The Changes view's body: the sections and their trees, or why there are none.
+    /// The Changes view's body: the sections and their trees, a repository under the Root
+    /// a node of its own (ADR 0073), or why there are none.
     fn render_changes_list(
         &self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
-        changes: &GitChanges,
+        git: &WorkspaceGitSnapshot,
+        against: DiffBase,
         shown: Option<RelativePathBuf>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         // Copied out so the rows below can take `cx` again.
         let theme = cx.theme();
         let (radius, muted, warning) = (theme.radius, theme.muted_foreground, theme.warning);
-        let entries = &changes.entries;
+        let entries: Vec<&GitChangeEntry> = shown_entries(git, against).collect();
         if entries.is_empty() {
             return empty_state(t!("changes.none"), cx);
         }
+        let nodes: Vec<&RelativePath> = git
+            .repositories
+            .iter()
+            .map(|repository| repository.directory.as_relative_path())
+            .filter(|directory| !directory.as_str().is_empty())
+            .collect();
 
         let mut list = v_flex()
             .id("condr-changes-list")
@@ -692,7 +710,11 @@ impl Condr {
             .px_1()
             .pb_1()
             .overflow_y_scrollbar();
-        if changes.truncated {
+        if git
+            .repositories
+            .iter()
+            .any(|repository| shown_changes(repository, against).truncated)
+        {
             list = list.child(list_note(
                 t!("changes.truncated", count = MAX_GIT_CHANGES),
                 warning,
@@ -701,6 +723,7 @@ impl Condr {
         for section in ChangesSection::ORDER {
             let rows: Vec<&GitChangeEntry> = entries
                 .iter()
+                .copied()
                 .filter(|entry| ChangesSection::of(entry.status) == section)
                 .collect();
             if rows.is_empty() {
@@ -747,12 +770,27 @@ impl Condr {
                     path.to_relative_path_buf(),
                 ))
             };
-            for row in tree_rows(&rows, folded) {
+            for row in tree_rows(&rows, &nodes, folded) {
+                let node = match &row {
+                    TreeRow::Directory { path, depth: 0, .. } => git
+                        .repositories
+                        .iter()
+                        .find(|repository| repository.directory == *path)
+                        .map(|repository| {
+                            let count = rows
+                                .iter()
+                                .filter(|entry| entry.path.starts_with(path))
+                                .count();
+                            (count, repository.branch.clone())
+                        }),
+                    _ => None,
+                };
                 list = list.child(self.render_change_row(
                     key,
                     workspace_id,
                     section,
                     row,
+                    node,
                     shown.as_deref(),
                     cx,
                 ));
@@ -762,12 +800,15 @@ impl Condr {
     }
 
     /// A Changes row: a directory folds, a file opens in the Diff Tab and has the file menu.
+    /// `node` is a repository's file count and branch when the directory is its node.
+    #[allow(clippy::too_many_arguments)]
     fn render_change_row(
         &self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
         section: ChangesSection,
         row: TreeRow<'_>,
+        node: Option<(usize, Option<String>)>,
         shown: Option<&RelativePath>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -782,17 +823,22 @@ impl Condr {
                 // The section is part of the id: the same directory in two sections is two
                 // rows, and rows sharing an id would share one click state.
                 let id = format!("{}-dir-{path}", section.selector());
-                directory_row(id, label, depth, folded, cx)
-                    .on_click(move |_, _, cx| {
-                        let _ = owner.update(cx, |this, cx| {
-                            let dir = (key, workspace_id, section, path.clone());
-                            if !this.files_view.collapsed_change_dirs.remove(&dir) {
-                                this.files_view.collapsed_change_dirs.insert(dir);
-                            }
-                            cx.notify();
-                        });
-                    })
-                    .into_any_element()
+                match node {
+                    Some((count, branch)) => {
+                        repository_row(id, label, folded, count, branch.as_deref(), cx)
+                    }
+                    None => directory_row(id, label, depth, folded, cx),
+                }
+                .on_click(move |_, _, cx| {
+                    let _ = owner.update(cx, |this, cx| {
+                        let dir = (key, workspace_id, section, path.clone());
+                        if !this.files_view.collapsed_change_dirs.remove(&dir) {
+                            this.files_view.collapsed_change_dirs.insert(dir);
+                        }
+                        cx.notify();
+                    });
+                })
+                .into_any_element()
             }
             TreeRow::File { name, entry, depth } => {
                 let selected = shown == Some(entry.path.as_relative_path());
@@ -1185,17 +1231,32 @@ impl Condr {
     }
 }
 
-/// The change list a comparison shows; `HEAD`'s when the Server reports no base.
-fn shown_changes(git: &WorkspaceGitSnapshot, against: DiffBase) -> &GitChanges {
-    match (against, &git.base) {
+/// The change list a comparison shows of a repository; `HEAD`'s when the Server reports no
+/// base.
+fn shown_changes(repository: &RepositoryGitSnapshot, against: DiffBase) -> &GitChanges {
+    match (against, &repository.base) {
         (DiffBase::MergeBase, Some(base)) => &base.changes,
-        _ => &git.changes,
+        _ => &repository.changes,
     }
 }
 
-/// What the Changes header and the Diff Tab header say a comparison is against.
+/// What a comparison shows of every repository of the Workspace, in their order.
+fn shown_entries(
+    git: &WorkspaceGitSnapshot,
+    against: DiffBase,
+) -> impl Iterator<Item = &GitChangeEntry> {
+    git.repositories
+        .iter()
+        .flat_map(move |repository| &shown_changes(repository, against).entries)
+}
+
+/// What the Changes header and the Diff Tab header say a comparison is against; only the
+/// repository the Root is in has a base.
 fn comparison_label(git: &WorkspaceGitSnapshot, against: DiffBase) -> Cow<'static, str> {
-    match (against, &git.base) {
+    let base = git
+        .root_repository()
+        .and_then(|repository| repository.base.as_ref());
+    match (against, base) {
         (DiffBase::MergeBase, Some(base)) => t!("changes.comparison.base", branch = base.branch),
         _ => t!("changes.comparison.head"),
     }

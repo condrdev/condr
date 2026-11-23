@@ -371,7 +371,11 @@ pub(in crate::app) fn repository_workspaces(
         .flat_map(|session| session.workspaces())
         .filter(|workspace| {
             workspace.worktree().is_none()
-                && connection.model.workspace_git.contains_key(&workspace.id())
+                && connection
+                    .model
+                    .workspace_git
+                    .get(&workspace.id())
+                    .is_some_and(|git| git.root_repository().is_some())
         })
         .map(|workspace| {
             (

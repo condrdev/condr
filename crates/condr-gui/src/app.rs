@@ -64,10 +64,10 @@ use condr_client::SessionModel;
 use condr_client::frames::ClientTerminal;
 use condr_core::agent_hooks::{HooksAction, HooksReport, HooksState};
 use condr_core::protocol::{
-    AgentCommand, AgentResponse, ClientMessage, LayoutCommand, LayoutResult, RuntimeEpoch,
-    ServerAdminCommand, ServerAdminResponse, ServerClientInfo, ServerId, ServerLogRecord,
-    ServerMessage, ServerSetting, SessionBootstrap, SessionEvent, SessionId, UnknownMessage,
-    WorkspaceGitSnapshot,
+    AgentCommand, AgentResponse, ClientMessage, LayoutCommand, LayoutResult, RepositoryGitSnapshot,
+    RuntimeEpoch, ServerAdminCommand, ServerAdminResponse, ServerClientInfo, ServerId,
+    ServerLogRecord, ServerMessage, ServerSetting, SessionBootstrap, SessionEvent, SessionId,
+    UnknownMessage, WorkspaceGitSnapshot,
 };
 use condr_core::{
     AgentAlert, AgentDisplayState, AgentKind, AgentSnapshot, BrowsedDirectory, CommitDetails,

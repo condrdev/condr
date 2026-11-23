@@ -38,6 +38,13 @@ changes:
   truncated:
     en: 'Only the first %{count} changes are listed here.'
     zh-CN: '此处只列出前 %{count} 项变更。'
+  repository_files:
+    one:
+      en: '%{count} file'
+      zh-CN: '%{count} 个文件'
+    other:
+      en: '%{count} files'
+      zh-CN: '%{count} 个文件'
   section:
     conflicts:
       en: 'Conflicts (%{count})'

@@ -154,6 +154,7 @@ fn a_request_that_panics_is_answered_with_an_error() {
                 from: None,
                 skip: 0,
                 limit: 10,
+                repository: Default::default(),
             },
         )
         .unwrap();

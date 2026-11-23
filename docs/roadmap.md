@@ -48,7 +48,7 @@ ADR 要回答三个问题：
 2. CLI：`condr workspace create` 能新建 Managed Worktree，同样可选起点，并可在新 Workspace 的第一个 Pane 里启动 Agent、发出第一条提示；JSON 返回新的 Workspace 与 Pane。内嵌 Skill 写上“一个 Agent 一个 worktree”的编排方式。
 3. 初始化：仓库里一份可以提交的声明，写明要从父仓库复制的被忽略文件（考虑沿用 `.worktreeinclude` 的写法）、setup 命令和 teardown 命令，从父仓库已提交的版本读取。Server 在 `CreateWorktree` 之后复制文件，在新 Workspace 的第一个 Pane 里执行 setup，输出留在终端里；要启动 Agent 的，等 setup 结束再启动。Remove Worktree 之前执行 teardown。这是在执行仓库里写下的命令，所以第一次执行和声明内容变化时都要用户确认，确认记在 Server 这台机器上；Windows 要有 PowerShell 的写法。
 
-**停在哪**：setup 失败不自动删除 worktree，输出留在 Pane 里给人看。不做后台服务的监管、端口分配或反向代理（端口见“探测 Workspace 里的端口”）。不做一个任务在多个仓库各开一个 worktree（见“多仓库 Workspace 的 Changes”）。
+**停在哪**：setup 失败不自动删除 worktree，输出留在 Pane 里给人看。不做后台服务的监管、端口分配或反向代理（端口见“探测 Workspace 里的端口”）。不做一个任务在多个仓库各开一个 worktree（见 ADR 0073）。
 
 ### 公开预览收尾，拿到第一批外部用户
 
@@ -70,14 +70,6 @@ ADR 要回答三个问题：
 **做到哪**（落地前先写 ADR）：沿用 ADR 0015 的 bridge，Client 执行 `wsl.exe -d <distro> -- condr server bridge`，经 stdin/stdout 跑同一套协议，得到一个 `wsl://<distro>` Device。Server 跑在发行版里，Agent 检测、hooks 和 Git 都在 Linux 一侧照常工作。Connect Remote Device 列出本机已装的发行版；发行版里还没有 `condr` 时，给出安装命令。`condr --device` 同样可以直连。
 
 **停在哪**：只做 WSL 2。不自动在发行版里安装 `condr`，和 SSH 一样留给以后的远端安装。不做 Windows 与 WSL 之间的路径翻译。
-
-### 多仓库 Workspace 的 Changes
-
-**为什么**：常见的做法是把几个仓库放在一个父目录下，一起交给 Agent。今天只有 Workspace 在某个仓库里时才有 Changes，父目录本身不是仓库，右侧栏就只剩 Files。
-
-**做到哪**（落地前先写 ADR）：Server 找出 Root Directory 下一层的子仓库，各算一份状态；Changes 和 History 按仓库分组，Diff Tab 用“仓库 + 路径”定位。ADR 要说明 Base Branch 和 Managed Worktree 在多仓库下的含义；先只做查看。
-
-**停在哪**：只往下找一层，不处理 submodule。多仓库 Workspace 不能新建 Managed Worktree：一个任务在多个仓库各开一个 worktree，会改变“一个 Workspace 一个 Root Directory”的模型，等真实需求再议。
 
 ## 按摩擦记录再做
 

@@ -31,10 +31,6 @@ Workspace 将展示当前分支关联的 GitHub PR、PR 状态及 CI 检查结�
 
 在 Windows 上，WSL 2 发行版可以作为独立的设备连接，其中运行的 Agent 能被识别并上报状态，Git 也在 Linux 一侧照常工作。**连接远程设备**（Connect Remote Device）会列出本机已安装的发行版。
 
-### 多仓库的改动
-
-在包含多个仓库的父目录上打开 Workspace 时，变更（Changes）和历史（History）会按仓库分组，列出下一层每个仓库的改动与提交。
-
 ---
 
 ## 等待更多反馈

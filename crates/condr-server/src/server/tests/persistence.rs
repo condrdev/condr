@@ -601,9 +601,10 @@ fn server_restart_restores_structure_with_fresh_terminal_state() {
     assert_eq!(bootstrap.terminals.len(), 2);
     assert!(bootstrap.agents.is_empty());
     assert!(bootstrap.workspace_git.iter().any(|git| {
+        let own = git.root_repository().unwrap();
         git.workspace_id == restored_workspace_id
-            && git.branch.as_deref() == Some("ph6-restore")
-            && !git.linked_worktree
+            && own.branch.as_deref() == Some("ph6-restore")
+            && !own.linked_worktree
     }));
     assert!(bootstrap.terminals.iter().all(|terminal| {
         !view_text(terminal.view.as_ref().unwrap()).contains("CONDR_OLD_RUNTIME_MARKER")

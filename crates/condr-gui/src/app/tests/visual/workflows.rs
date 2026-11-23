@@ -379,7 +379,7 @@ fn worktree_actions_use_the_workspace_context_and_real_server() {
                 condr
                     .connection(1)
                     .and_then(|connection| connection.model.workspace_git.get(workspace_id))
-                    .and_then(|git| git.branch.as_deref())
+                    .and_then(|git| git.root_repository()?.branch.as_deref())
                     == Some(created_branch.as_str())
             })
         })
@@ -517,7 +517,7 @@ fn worktree_actions_use_the_workspace_context_and_real_server() {
             .model
             .workspace_git
             .values()
-            .any(|git| git.branch.as_deref() == Some("feature/ui"))
+            .any(|git| git.repositories[0].branch.as_deref() == Some("feature/ui"))
     }));
 }
 

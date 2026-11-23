@@ -339,20 +339,23 @@ fn bootstrap_assembler_reassembles_multiple_record_chunks() {
         }),
         BootstrapRecord::WorkspaceGit(WorkspaceGitSnapshot {
             workspace_id,
-            branch: Some("feature/wire-chunks".into()),
-            linked_worktree: true,
-            upstream: Some(condr_core::GitUpstream {
-                ahead: 2,
-                behind: 1,
-            }),
-            changes: Default::default(),
-            base: Some(condr_core::protocol::GitBaseChanges {
-                branch: "origin/main".into(),
+            repositories: vec![RepositoryGitSnapshot {
+                directory: Default::default(),
+                branch: Some("feature/wire-chunks".into()),
+                linked_worktree: true,
+                upstream: Some(condr_core::GitUpstream {
+                    ahead: 2,
+                    behind: 1,
+                }),
                 changes: Default::default(),
-            }),
-            head: Some(condr_core::protocol::GitHead {
-                commit: Some("8f3c".into()),
-            }),
+                base: Some(condr_core::protocol::GitBaseChanges {
+                    branch: "origin/main".into(),
+                    changes: Default::default(),
+                }),
+                head: Some(condr_core::protocol::GitHead {
+                    commit: Some("8f3c".into()),
+                }),
+            }],
         }),
         BootstrapRecord::ZoomedPane(pane_id),
     ];
@@ -525,12 +528,15 @@ fn bootstrap_assembler_rejects_duplicate_ids_per_record_kind() {
         }),
         BootstrapRecord::WorkspaceGit(WorkspaceGitSnapshot {
             workspace_id,
-            branch: None,
-            linked_worktree: false,
-            upstream: None,
-            changes: Default::default(),
-            base: None,
-            head: None,
+            repositories: vec![RepositoryGitSnapshot {
+                directory: Default::default(),
+                branch: None,
+                linked_worktree: false,
+                upstream: None,
+                changes: Default::default(),
+                base: None,
+                head: None,
+            }],
         }),
         BootstrapRecord::ZoomedPane(pane_id),
     ];

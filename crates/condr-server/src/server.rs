@@ -46,7 +46,7 @@ use condr_core::{
     TerminalHyperlinkBudget, TerminalNoticeBatch, TerminalNoticeProbe, TerminalProgress,
     TerminalRuntime, TerminalSize, TerminalUpdate, TerminalView, TerminalViewFrame,
     TerminalViewSource, WorkspaceId, create_worktree, discover_repository, open_worktree,
-    remove_worktree, validate_worktree_removal,
+    remove_worktree, validate_worktree_removal, workspace_repositories,
 };
 use config::{
     load_shell, load_shell_integration, load_worktree_root, save_proxy, save_shell,
@@ -560,7 +560,8 @@ struct RuntimeState {
     /// Panes whose Agent reported `Done` while no Client had them focused, until one
     /// focuses them or the Agent moves on (ADR 0052).
     agent_unseen: std::collections::HashSet<PaneId>,
-    workspace_git: std::collections::HashMap<WorkspaceId, WorkspaceGit>,
+    /// Each Workspace's repositories, never an empty list (ADR 0073).
+    workspace_git: std::collections::HashMap<WorkspaceId, Vec<RepositoryGit>>,
     /// Owns Git refresh scheduling for filesystem and terminal activity; `None` until
     /// the state has its shared handle, and in unit tests.
     git_watcher: Option<GitWatcher>,

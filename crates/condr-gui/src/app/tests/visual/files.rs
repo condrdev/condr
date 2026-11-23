@@ -1086,7 +1086,8 @@ fn preview_tab_marks_changed_lines_in_its_gutter_and_on_its_scrollbar() {
                 view.read(app)
                     .active_connection()
                     .and_then(|connection| connection.model.workspace_git.values().next())
-                    .is_some_and(|git| git.base.is_some())
+                    .and_then(|git| git.root_repository())
+                    .is_some_and(|own| own.base.is_some())
             })
         }),
         "the Server should report the Workspace's Git with its base branch"

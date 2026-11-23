@@ -52,12 +52,14 @@ impl GitRepository {
         Ok(log)
     }
 
-    /// `id`'s message and the files it changed against its first parent, renames tracked as
-    /// the repository configures them, with line counts unless the list is truncated.
+    /// `id`'s message and the files under the Root it changed against its first parent,
+    /// renames tracked as the repository configures them, with line counts unless the list
+    /// is truncated.
     pub fn commit(&self, id: &str) -> Result<CommitDetails, GitError> {
         let repo = self.open()?;
         let commit = repo.find_commit(commit_id(id)?).map_err(git_error)?;
-        let entries = changed_entries(&repo, &commit)?;
+        let mut entries = changed_entries(&repo, &commit)?;
+        entries.retain(|path, _| self.to_workspace(path).is_some());
         let truncated = entries.len() > MAX_GIT_CHANGES;
         let mut entries: Vec<GitChangeEntry> =
             entries.into_values().take(MAX_GIT_CHANGES).collect();
@@ -74,7 +76,7 @@ impl GitRepository {
             author,
             time,
             message: commit.message_raw_sloppy().to_string(),
-            changes: GitChanges { entries, truncated },
+            changes: self.workspace_changes(GitChanges { entries, truncated }),
         })
     }
 
@@ -86,16 +88,14 @@ impl GitRepository {
         path: &RelativePath,
         full_context: bool,
     ) -> Result<FileDiff, GitError> {
-        if !crate::valid_diff_path(path) {
-            return Err(GitError("invalid path for a diff".into()));
-        }
+        let (repository_path, _) = self.diff_paths(path, None)?;
         let repo = self.open()?;
         let commit = repo.find_commit(commit_id(id)?).map_err(git_error)?;
         let old_path = changed_entries(&repo, &commit)?
-            .remove(path)
+            .remove(&repository_path)
             .and_then(|entry| entry.old_path);
         let mut differ = Differ::commit(&repo, &commit)?;
-        let content = differ.diff(path, old_path.as_deref(), |diff, input| {
+        let content = differ.diff(&repository_path, old_path.as_deref(), |diff, input| {
             if full_context {
                 let lines = input.before.len().max(input.after.len());
                 let content = hunks_content(diff, input, u32::try_from(lines).unwrap_or(u32::MAX))?;

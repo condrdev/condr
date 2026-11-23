@@ -335,21 +335,31 @@ impl Condr {
                                 let workspace_id = workspace.id();
                                 let workspace_name = workspace.name().to_owned();
                                 let git = connection.model.workspace_git.get(&workspace_id);
+                                let own = git.and_then(WorkspaceGitSnapshot::root_repository);
                                 // Every Workspace gets its second line, `detached` and no
-                                // repository included, so the rows keep one height.
-                                let detail = git.map_or_else(
-                                    || t!("sidebar.no_git").into_owned(),
-                                    |git| {
-                                        git.branch
-                                            .clone()
-                                            .unwrap_or_else(|| t!("sidebar.detached").into_owned())
-                                    },
-                                );
+                                // repository included, so the rows keep one height. Above
+                                // several repositories it counts them (ADR 0073).
+                                let detail = match (git, own) {
+                                    (None, _) => t!("sidebar.no_git").into_owned(),
+                                    (Some(_), Some(own)) => own
+                                        .branch
+                                        .clone()
+                                        .unwrap_or_else(|| t!("sidebar.detached").into_owned()),
+                                    (Some(git), None) => {
+                                        let count = git.repositories.len();
+                                        if count == 1 {
+                                            t!("sidebar.repositories.one", count = count)
+                                        } else {
+                                            t!("sidebar.repositories.other", count = count)
+                                        }
+                                        .into_owned()
+                                    }
+                                };
                                 let upstream =
-                                    git.and_then(|git| git.upstream).and_then(upstream_counts);
+                                    own.and_then(|own| own.upstream).and_then(upstream_counts);
                                 let mut statuses = Vec::new();
-                                let supports_worktrees = git
-                                    .is_some_and(|git| !git.linked_worktree)
+                                let supports_worktrees = own
+                                    .is_some_and(|own| !own.linked_worktree)
                                     && workspace.worktree().is_none();
                                 let managed_worktree = workspace
                                     .worktree()

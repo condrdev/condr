@@ -27,7 +27,7 @@ pub struct GitDiffStat {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct GitChangeEntry {
-    /// Relative to the work tree root.
+    /// Relative to the Workspace's Root Directory (ADR 0073).
     pub path: RelativePathBuf,
     /// The previous path of a renamed file.
     pub old_path: Option<RelativePathBuf>,

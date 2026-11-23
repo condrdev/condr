@@ -307,6 +307,13 @@ fn rejected_snapshot_is_typed_and_keeps_the_connection_usable() {
 
 #[test]
 fn snapshot_change_is_replayed_after_the_bootstrap_cursor() {
+    // Empty, unlike the temporary directory, whose repositories would announce Git first.
+    let root = std::env::temp_dir().join(format!(
+        "condr-replayed-{}-{}",
+        std::process::id(),
+        unique_suffix()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
     let (handle, endpoint, thread) = start();
     let mut first = connect_and_bootstrap(&endpoint);
     let mut second = connect_and_bootstrap(&endpoint);
@@ -321,7 +328,7 @@ fn snapshot_change_is_replayed_after_the_bootstrap_cursor() {
             request_id: 1,
             command: LayoutCommand::CreateWorkspace {
                 name: None,
-                root_directory: std::env::temp_dir(),
+                root_directory: root.clone(),
             },
         },
     )
@@ -387,6 +394,7 @@ fn snapshot_change_is_replayed_after_the_bootstrap_cursor() {
     drop(first);
     drop(second);
     thread.join().unwrap().unwrap();
+    let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]

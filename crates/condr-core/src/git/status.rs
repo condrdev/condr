@@ -52,13 +52,13 @@ impl GitRepository {
             } else {
                 &mut worktree
             };
-            side.extend(fold_status_item(item));
+            side.extend(fold_status_item(item).filter(|item| self.sees(item.0.as_ref())));
         }
-        let head = listed(
+        let head = self.workspace_changes(listed(
             &repo,
             None,
             head_index.into_iter().chain(worktree.iter().cloned()),
-        )?;
+        )?);
         let Some(base) = base else {
             return Ok((head, None));
         };
@@ -70,15 +70,39 @@ impl GitRepository {
             None,
             gix::status::tree_index::TrackRenames::AsConfigured,
             |change, _, _| {
-                base_index.extend(fold_status_item(gix::status::Item::TreeIndex(
-                    change.into_owned(),
-                )));
+                base_index.extend(
+                    fold_status_item(gix::status::Item::TreeIndex(change.into_owned()))
+                        .filter(|item| self.sees(item.0.as_ref())),
+                );
                 Ok::<_, std::convert::Infallible>(std::ops::ControlFlow::Continue(()))
             },
         )
         .map_err(git_error)?;
         let base = listed(&repo, Some(base), base_index.into_iter().chain(worktree))?;
-        Ok((head, Some(base)))
+        Ok((head, Some(self.workspace_changes(base))))
+    }
+
+    /// Whether a work-tree path lies under the Root, which alone the Workspace sees.
+    fn sees(&self, path: &BStr) -> bool {
+        self.to_workspace(&git_path(path)).is_some()
+    }
+
+    /// `path` and `old_path`, relative to the Root, as the work tree names them.
+    pub(super) fn diff_paths(
+        &self,
+        path: &RelativePath,
+        old_path: Option<&RelativePath>,
+    ) -> Result<(RelativePathBuf, Option<RelativePathBuf>), GitError> {
+        let invalid = || GitError("invalid path for a diff".into());
+        if !crate::valid_diff_path(path) || old_path.is_some_and(|old| !crate::valid_diff_path(old))
+        {
+            return Err(invalid());
+        }
+        let path = self.to_repository(path).ok_or_else(invalid)?;
+        let old_path = old_path
+            .map(|old| self.to_repository(old).ok_or_else(invalid))
+            .transpose()?;
+        Ok((path, old_path))
     }
 
     /// `path`'s working-tree content against `HEAD`, or against `base`'s merge base, as
@@ -97,13 +121,10 @@ impl GitRepository {
         base: Option<&GitBase>,
         full_context: bool,
     ) -> Result<FileDiff, GitError> {
-        if !crate::valid_diff_path(path) || old_path.is_some_and(|old| !crate::valid_diff_path(old))
-        {
-            return Err(GitError("invalid path for a diff".into()));
-        }
+        let (repository_path, old_path) = self.diff_paths(path, old_path)?;
         let repo = self.open()?;
         let mut differ = Differ::new(&repo, base)?;
-        let content = differ.diff(path, old_path, |diff, input| {
+        let content = differ.diff(&repository_path, old_path.as_deref(), |diff, input| {
             if full_context {
                 let lines = input.before.len().max(input.after.len());
                 let content = hunks_content(diff, input, u32::try_from(lines).unwrap_or(u32::MAX))?;
@@ -130,10 +151,8 @@ impl GitRepository {
         base: Option<&GitBase>,
     ) -> Result<OldFile, GitError> {
         use std::io::Read;
-        if !crate::valid_diff_path(path) || old_path.is_some_and(|old| !crate::valid_diff_path(old))
-        {
-            return Err(GitError("invalid path for a diff".into()));
-        }
+        let (path, old_path) = self.diff_paths(path, old_path)?;
+        let (path, old_path) = (path.as_relative_path(), old_path.as_deref());
         if fs::symlink_metadata(path.to_path(&self.root)).is_ok_and(|meta| meta.is_symlink()) {
             return Ok(OldFile::None);
         }
@@ -185,13 +204,20 @@ impl GitRepository {
         Ok(OldFile::Text(String::from_utf8_lossy(&text).into_owned()))
     }
 
-    /// Whether every one of `paths`, relative to the work tree, is excluded by the ignore
-    /// rules, so a change to them cannot change the status. `false` on any doubt.
+    /// Whether every one of `paths`, relative to the Root, is excluded by the ignore rules,
+    /// so a change to them cannot change the status. `false` on any doubt.
     pub fn ignores_all<P: AsRef<Path>>(&self, paths: impl IntoIterator<Item = P>) -> bool {
         self.with_excludes(|root, excludes| {
             let mut any = false;
             for path in paths {
-                let path = path.as_ref();
+                let Some(path) = RelativePathBuf::from_path(path.as_ref())
+                    .ok()
+                    .and_then(|path| self.to_repository(&path))
+                else {
+                    return false;
+                };
+                let path = path.to_path("");
+                let path = path.as_path();
                 any = true;
                 // A deleted path has no metadata; treating it as a file only matters for a
                 // directory-only ignore pattern, where a wrong answer costs one
@@ -206,9 +232,12 @@ impl GitRepository {
         .unwrap_or(false)
     }
 
-    /// Flags the entries of `listing`, a directory `directory` relative to the work tree,
-    /// that the ignore rules exclude (ADR 0018). On any doubt nothing is flagged.
+    /// Flags the entries of `listing`, a directory `directory` relative to the Root, that
+    /// the ignore rules exclude (ADR 0018). On any doubt nothing is flagged.
     pub fn mark_ignored(&self, directory: &RelativePath, listing: &mut crate::DirectoryListing) {
+        let Some(directory) = self.to_repository(directory) else {
+            return;
+        };
         self.with_excludes(|_, excludes| {
             for entry in &mut listing.entries {
                 let path = directory.join(&entry.name).to_path("");

@@ -21,7 +21,7 @@ fn a_rename_moves_the_preview_tab_and_refreshes_files_without_notify() {
     {
         let mut locked = state.lock().unwrap();
         let watcher = GitWatcher::without_filesystem(Arc::downgrade(&state));
-        watcher.watch(workspace_id, root.clone(), None);
+        watcher.watch(workspace_id, root.clone(), Vec::new());
         locked.git_watcher = Some(watcher);
     }
 
@@ -84,7 +84,7 @@ fn a_refresh_rescans_the_workspace_and_refuses_an_unknown_one() {
     {
         let mut locked = state.lock().unwrap();
         let watcher = GitWatcher::without_filesystem(Arc::downgrade(&state));
-        watcher.watch(workspace_id, root.clone(), None);
+        watcher.watch(workspace_id, root.clone(), Vec::new());
         locked.git_watcher = Some(watcher);
     }
     let files_changed = |state: &Arc<Mutex<RuntimeState>>| {
@@ -148,7 +148,7 @@ fn the_old_side_is_heads_text_and_refuses_an_unknown_workspace_or_a_missing_base
         let git = discover_repository(&root).unwrap().unwrap();
         state
             .workspace_git
-            .insert(workspace_id, WorkspaceGit::discovered(git));
+            .insert(workspace_id, vec![RepositoryGit::discovered(git)]);
         workspace_id
     };
     let mut old_file = |request_id, workspace_id, against| {
@@ -189,6 +189,151 @@ fn the_old_side_is_heads_text_and_refuses_an_unknown_workspace_or_a_missing_base
 
     handle.stop();
     drop(stream);
+    thread.join().unwrap().unwrap();
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// ADR 0073: above several repositories, a diff's path picks the repository it lies in,
+/// History names its repository, and Files dims by the right one's rules.
+#[test]
+fn the_repository_a_path_or_a_history_request_names_answers() {
+    let root = std::env::temp_dir().join(format!(
+        "condr-server-several-{}-{}",
+        std::process::id(),
+        unique_suffix()
+    ));
+    for name in ["api", "web"] {
+        let repository = root.join(name);
+        std::fs::create_dir_all(&repository).unwrap();
+        run_git(&repository, &["init", "-q", "-b", "main"]);
+        run_git(&repository, &["config", "user.email", "condr@example.com"]);
+        run_git(&repository, &["config", "user.name", "Condr"]);
+        run_git(&repository, &["config", "commit.gpgsign", "false"]);
+        run_git(&repository, &["config", "core.autocrlf", "false"]);
+        std::fs::write(repository.join(".gitignore"), format!("{name}.log\n")).unwrap();
+        std::fs::write(repository.join("notes.txt"), format!("{name}\n")).unwrap();
+        run_git(&repository, &["add", "."]);
+        run_git(
+            &repository,
+            &["commit", "-q", "-m", &format!("{name} notes")],
+        );
+        std::fs::write(repository.join("notes.txt"), "changed\n").unwrap();
+        std::fs::write(repository.join("api.log"), "log\n").unwrap();
+    }
+
+    let (handle, endpoint, thread) = start();
+    let connection = ClientConnection::connect(&endpoint, "several").unwrap();
+    let bootstrap = connection.bootstrap().unwrap().clone();
+    let mut stream = connection.into_stream();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    let (workspace_id, api_head) = {
+        let mut state = handle.state.lock().unwrap();
+        let workspace_id = state.session.create_workspace(root.clone()).unwrap();
+        let repositories: Vec<RepositoryGit> = workspace_repositories(&root)
+            .unwrap()
+            .into_iter()
+            .map(|repository| RepositoryGit::from_repository(repository, None).unwrap())
+            .collect();
+        let api_head = repositories[0].repository.head().unwrap().to_owned();
+        state.workspace_git.insert(workspace_id, repositories);
+        (workspace_id, api_head)
+    };
+    let (server_id, session_id) = (bootstrap.server_id, bootstrap.session_id);
+    let mut ask = |message: ClientMessage| {
+        condr_core::protocol::write_message(&mut stream, &message).unwrap();
+        wait_for_message(&mut stream, |reply| {
+            matches!(
+                reply,
+                ServerMessage::GitOldFile { request_id: 1, .. }
+                    | ServerMessage::GitLog { request_id: 2, .. }
+                    | ServerMessage::GitCommit { request_id: 3, .. }
+                    | ServerMessage::Directory { request_id: 4, .. }
+            )
+        })
+    };
+    let old_file = |ask: &mut dyn FnMut(ClientMessage) -> ServerMessage, path: &str| {
+        let ServerMessage::GitOldFile { result, .. } = ask(ClientMessage::GitOldFile {
+            server_id,
+            session_id,
+            request_id: 1,
+            workspace_id,
+            path: path.into(),
+            against: DiffBase::Head,
+        }) else {
+            unreachable!("the predicate only accepts replies");
+        };
+        result
+    };
+    assert_eq!(
+        old_file(&mut ask, "web/notes.txt"),
+        Ok(condr_core::OldFile::Text("web\n".into()))
+    );
+    assert_eq!(
+        old_file(&mut ask, "api/notes.txt"),
+        Ok(condr_core::OldFile::Text("api\n".into()))
+    );
+    assert!(old_file(&mut ask, "notes.txt").is_err());
+
+    let log = |ask: &mut dyn FnMut(ClientMessage) -> ServerMessage, repository: &str| {
+        let ServerMessage::GitLog { result, .. } = ask(ClientMessage::GitLog {
+            server_id,
+            session_id,
+            request_id: 2,
+            workspace_id,
+            from: None,
+            skip: 0,
+            limit: 10,
+            repository: repository.into(),
+        }) else {
+            unreachable!("the predicate only accepts replies");
+        };
+        result
+    };
+    assert_eq!(
+        log(&mut ask, "web").unwrap().commits[0].subject,
+        "web notes"
+    );
+    assert!(log(&mut ask, "").is_err(), "the Root is in no repository");
+
+    let ServerMessage::GitCommit { result, .. } = ask(ClientMessage::GitCommit {
+        server_id,
+        session_id,
+        request_id: 3,
+        workspace_id,
+        commit: api_head,
+        repository: "api".into(),
+    }) else {
+        unreachable!("the predicate only accepts replies");
+    };
+    let paths: Vec<String> = result
+        .unwrap()
+        .changes
+        .entries
+        .iter()
+        .map(|entry| entry.path.to_string())
+        .collect();
+    assert_eq!(paths, ["api/.gitignore", "api/notes.txt"]);
+
+    let mut api_log_ignored = |directory: &str| {
+        let ServerMessage::Directory { result, .. } = ask(ClientMessage::ListDirectory {
+            server_id,
+            session_id,
+            request_id: 4,
+            workspace_id,
+            path: directory.into(),
+        }) else {
+            unreachable!("the predicate only accepts replies");
+        };
+        let listing = result.unwrap();
+        let entry = listing.entries.iter().find(|entry| entry.name == "api.log");
+        entry.unwrap().ignored
+    };
+    assert!(api_log_ignored("api"));
+    assert!(!api_log_ignored("web"), "web ignores only web.log");
+
+    handle.stop();
     thread.join().unwrap().unwrap();
     let _ = std::fs::remove_dir_all(root);
 }

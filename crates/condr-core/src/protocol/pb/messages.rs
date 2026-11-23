@@ -13,10 +13,10 @@ use crate::protocol::{
     AgentCommand, AgentError, AgentInfo, AgentResponse, BootstrapBatch, BootstrapHeader,
     BootstrapRecord, ClientMessage, ClipboardImageFormat, DiffBase, GitBaseChanges, GitHead,
     LayoutCommand, LayoutResult, PaneAgentSnapshot, PaneTerminalFrame, PaneTerminalMetadata,
-    PaneTerminalSnapshot, RuntimeEpoch, ServerAdminCommand, ServerAdminResponse, ServerClientInfo,
-    ServerId, ServerLogRecord, ServerMessage, ServerSetting, ServerSettings, SessionEvent,
-    SessionId, SessionOverview, TerminalFrameBatch, TerminalFrameChunk, UnknownMessage,
-    WorkspaceGitSnapshot,
+    PaneTerminalSnapshot, RepositoryGitSnapshot, RuntimeEpoch, ServerAdminCommand,
+    ServerAdminResponse, ServerClientInfo, ServerId, ServerLogRecord, ServerMessage, ServerSetting,
+    ServerSettings, SessionEvent, SessionId, SessionOverview, TerminalFrameBatch,
+    TerminalFrameChunk, UnknownMessage, WorkspaceGitSnapshot,
 };
 use crate::snapshot::MAX_SNAPSHOT_PANES;
 use crate::{
@@ -245,41 +245,92 @@ fn decode_pane_agent(agent: super::PaneAgentSnapshot) -> WireResult<PaneAgentSna
 }
 
 fn encode_git(git: &WorkspaceGitSnapshot) -> super::WorkspaceGitSnapshot {
+    // The Root's own repository rides the fields a 0.2 peer reads; the ones under a Root
+    // that is in none ride `repositories`, beside an empty `changes` that peer requires.
+    let (own, repositories) = match git.root_repository() {
+        Some(own) => (Some(own), &[][..]),
+        None => (None, &git.repositories[..]),
+    };
+    let encode_base = |base: &GitBaseChanges| super::GitBaseChanges {
+        branch: base.branch.clone(),
+        changes: Some((&base.changes).into()),
+    };
+    let encode_head = |head: &GitHead| super::GitHead {
+        commit: head.commit.clone(),
+    };
     super::WorkspaceGitSnapshot {
         workspace_id: git.workspace_id.as_u64(),
-        branch: git.branch.clone(),
-        linked_worktree: git.linked_worktree,
-        upstream: git.upstream.as_ref().map(Into::into),
-        changes: Some((&git.changes).into()),
-        base: git.base.as_ref().map(|base| super::GitBaseChanges {
-            branch: base.branch.clone(),
-            changes: Some((&base.changes).into()),
-        }),
-        head: git.head.as_ref().map(|head| super::GitHead {
-            commit: head.commit.clone(),
-        }),
+        branch: own.and_then(|own| own.branch.clone()),
+        linked_worktree: own.is_some_and(|own| own.linked_worktree),
+        upstream: own.and_then(|own| own.upstream.as_ref().map(Into::into)),
+        changes: Some(own.map_or_else(Default::default, |own| (&own.changes).into())),
+        base: own.and_then(|own| own.base.as_ref().map(encode_base)),
+        head: own.and_then(|own| own.head.as_ref().map(encode_head)),
+        repositories: repositories
+            .iter()
+            .map(|repository| super::RepositoryGit {
+                directory: repository.directory.to_string(),
+                branch: repository.branch.clone(),
+                linked_worktree: repository.linked_worktree,
+                upstream: repository.upstream.as_ref().map(Into::into),
+                changes: Some((&repository.changes).into()),
+                base: repository.base.as_ref().map(encode_base),
+                head: repository.head.as_ref().map(encode_head),
+            })
+            .collect(),
     }
 }
 
 fn decode_git(git: super::WorkspaceGitSnapshot) -> WireResult<WorkspaceGitSnapshot> {
-    Ok(WorkspaceGitSnapshot {
-        workspace_id: workspace(git.workspace_id),
-        branch: git.branch,
-        linked_worktree: git.linked_worktree,
-        upstream: git.upstream.map(Into::into),
-        changes: required(git.changes, "Git changes")?.try_into()?,
-        base: git
-            .base
-            .map(|base| {
-                Ok::<_, WireError>(GitBaseChanges {
-                    branch: base.branch,
-                    changes: required(base.changes, "base changes")?.try_into()?,
+    let decode_base = |base: Option<super::GitBaseChanges>| {
+        base.map(|base| {
+            Ok::<_, WireError>(GitBaseChanges {
+                branch: base.branch,
+                changes: required(base.changes, "base changes")?.try_into()?,
+            })
+        })
+        .transpose()
+    };
+    let decode_head = |head: Option<super::GitHead>| {
+        head.map(|head| GitHead {
+            commit: head.commit,
+        })
+    };
+    let repositories = if git.repositories.is_empty() {
+        vec![RepositoryGitSnapshot {
+            directory: RelativePathBuf::new(),
+            branch: git.branch,
+            linked_worktree: git.linked_worktree,
+            upstream: git.upstream.map(Into::into),
+            changes: required(git.changes, "Git changes")?.try_into()?,
+            base: decode_base(git.base)?,
+            head: decode_head(git.head),
+        }]
+    } else {
+        git.repositories
+            .into_iter()
+            .map(|repository| {
+                let directory = relative_path(repository.directory)?;
+                if !crate::valid_diff_path(&directory) || directory.components().count() != 1 {
+                    return Err(malformed(format!(
+                        "{directory:?} is not a repository directory"
+                    )));
+                }
+                Ok(RepositoryGitSnapshot {
+                    directory,
+                    branch: repository.branch,
+                    linked_worktree: repository.linked_worktree,
+                    upstream: repository.upstream.map(Into::into),
+                    changes: required(repository.changes, "Git changes")?.try_into()?,
+                    base: decode_base(repository.base)?,
+                    head: decode_head(repository.head),
                 })
             })
-            .transpose()?,
-        head: git.head.map(|head| GitHead {
-            commit: head.commit,
-        }),
+            .collect::<WireResult<_>>()?
+    };
+    Ok(WorkspaceGitSnapshot {
+        workspace_id: workspace(git.workspace_id),
+        repositories,
     })
 }
 
@@ -426,6 +477,7 @@ impl TryFrom<&ClientMessage> for super::ClientMessage {
                 from,
                 skip,
                 limit,
+                repository,
             } => Message::GitLog(super::GitLogRequest {
                 server_id: server_id.0,
                 session_id: session_id.0,
@@ -434,6 +486,7 @@ impl TryFrom<&ClientMessage> for super::ClientMessage {
                 from: from.clone(),
                 skip: *skip,
                 limit: *limit,
+                repository: repository.to_string(),
             }),
             ClientMessage::GitCommit {
                 server_id,
@@ -441,12 +494,14 @@ impl TryFrom<&ClientMessage> for super::ClientMessage {
                 request_id,
                 workspace_id,
                 commit,
+                repository,
             } => Message::GitCommit(super::GitCommitRequest {
                 server_id: server_id.0,
                 session_id: session_id.0,
                 request_id: *request_id,
                 workspace_id: workspace_id.as_u64(),
                 commit: commit.clone(),
+                repository: repository.to_string(),
             }),
             ClientMessage::ListDirectory {
                 server_id,
@@ -668,6 +723,7 @@ fn decode_client_message(message: super::ClientMessage) -> WireResult<ClientMess
                 from: request.from,
                 skip: request.skip,
                 limit: request.limit,
+                repository: relative_path(request.repository)?,
             },
             Message::GitCommit(request) => ClientMessage::GitCommit {
                 server_id: ServerId(request.server_id),
@@ -675,6 +731,7 @@ fn decode_client_message(message: super::ClientMessage) -> WireResult<ClientMess
                 request_id: request.request_id,
                 workspace_id: workspace(request.workspace_id),
                 commit: request.commit,
+                repository: relative_path(request.repository)?,
             },
             Message::ListDirectory(request) => ClientMessage::ListDirectory {
                 server_id: ServerId(request.server_id),

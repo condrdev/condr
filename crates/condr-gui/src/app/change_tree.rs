@@ -6,6 +6,8 @@ use super::sidebar::CondrIconName;
 use super::*;
 use condr_core::{GitChangeEntry, GitChangeStatus, GitDiffStat};
 use gpui_kit::component::menu::ContextMenu;
+use gpui_kit::component::tag::Tag;
+use rust_i18n::t;
 
 /// The glyph and colour a status shows, as Zed draws them: a square with a plus, a dot or
 /// a minus in the theme's success, warning and danger colours; a conflict warns.
@@ -69,13 +71,14 @@ fn compact_count(n: u32) -> String {
 
 /// Changed files as a directory tree, the way Zed's git panel shows them: a
 /// directory that holds nothing but one directory folds into it (`src/app`), files sort after
-/// directories, and both sort by name.
+/// directories, and both sort by name. A repository's directory under the Root stays a row
+/// of its own, its node (ADR 0073).
 #[derive(Debug, PartialEq)]
 enum ChangeNode<'a> {
     Directory {
         /// The folded segments joined with `/`.
         label: String,
-        /// The directory's repository-relative path, the key of its collapsed state.
+        /// The directory's Root-relative path, the key of its collapsed state.
         path: RelativePathBuf,
         children: Vec<ChangeNode<'a>>,
     },
@@ -85,7 +88,10 @@ enum ChangeNode<'a> {
     },
 }
 
-fn change_tree<'a>(entries: &[&'a GitChangeEntry]) -> Vec<ChangeNode<'a>> {
+fn change_tree<'a>(
+    entries: &[&'a GitChangeEntry],
+    repositories: &[&RelativePath],
+) -> Vec<ChangeNode<'a>> {
     #[derive(Default)]
     struct Builder<'a> {
         directories: std::collections::BTreeMap<String, Builder<'a>>,
@@ -104,13 +110,20 @@ fn change_tree<'a>(entries: &[&'a GitChangeEntry]) -> Vec<ChangeNode<'a>> {
         }
     }
 
-    fn finish<'a>(builder: Builder<'a>, parent: &RelativePath) -> Vec<ChangeNode<'a>> {
+    fn finish<'a>(
+        builder: Builder<'a>,
+        parent: &RelativePath,
+        repositories: &[&RelativePath],
+    ) -> Vec<ChangeNode<'a>> {
         let mut nodes = Vec::new();
         for (name, mut child) in builder.directories {
             let mut label = name.clone();
             let mut path = parent.join(&name);
             // Fold a chain of lone directories into one row.
-            while child.files.is_empty() && child.directories.len() == 1 {
+            while !repositories.contains(&path.as_relative_path())
+                && child.files.is_empty()
+                && child.directories.len() == 1
+            {
                 let (next_name, next) = child.directories.pop_first().expect("one entry");
                 label.push('/');
                 label.push_str(&next_name);
@@ -119,7 +132,7 @@ fn change_tree<'a>(entries: &[&'a GitChangeEntry]) -> Vec<ChangeNode<'a>> {
             }
             nodes.push(ChangeNode::Directory {
                 label,
-                children: finish(child, &path),
+                children: finish(child, &path, repositories),
                 path,
             });
         }
@@ -142,7 +155,7 @@ fn change_tree<'a>(entries: &[&'a GitChangeEntry]) -> Vec<ChangeNode<'a>> {
             .collect();
         insert(&mut root, &components, entry);
     }
-    finish(root, RelativePath::new(""))
+    finish(root, RelativePath::new(""), repositories)
 }
 
 /// A tree row's left padding: the section gutter plus one indent per level. A file row
@@ -157,7 +170,7 @@ pub(super) fn tree_indent(depth: usize, past_chevron: bool) -> Rems {
 pub(super) enum TreeRow<'a> {
     Directory {
         label: String,
-        /// The directory's repository-relative path, the key of its folded state.
+        /// The directory's Root-relative path, the key of its folded state.
         path: RelativePathBuf,
         depth: usize,
         folded: bool,
@@ -169,9 +182,11 @@ pub(super) enum TreeRow<'a> {
     },
 }
 
-/// The rows `entries` show as a tree, leaving out what the directories `folded` names hold.
+/// The rows `entries` show as a tree, `repositories` as nodes of their own, leaving out what
+/// the directories `folded` names hold.
 pub(super) fn tree_rows<'a>(
     entries: &[&'a GitChangeEntry],
+    repositories: &[&RelativePath],
     folded: impl Fn(&RelativePath) -> bool,
 ) -> Vec<TreeRow<'a>> {
     fn walk<'a>(
@@ -205,7 +220,7 @@ pub(super) fn tree_rows<'a>(
         }
     }
     let mut rows = Vec::new();
-    walk(change_tree(entries), 0, &folded, &mut rows);
+    walk(change_tree(entries, repositories), 0, &folded, &mut rows);
     rows
 }
 
@@ -357,6 +372,39 @@ pub(super) fn directory_row(
         .child(div().min_w_0().flex_1().truncate().child(label))
 }
 
+/// A repository's node in Changes (ADR 0073): a directory row that also says how many files
+/// it holds there and, as IntelliJ does, its branch as a tag.
+pub(super) fn repository_row(
+    id: String,
+    label: String,
+    folded: bool,
+    count: usize,
+    branch: Option<&str>,
+    cx: &App,
+) -> Stateful<Div> {
+    let files = if count == 1 {
+        t!("changes.repository_files.one", count = count)
+    } else {
+        t!("changes.repository_files.other", count = count)
+    };
+    let branch = branch.map_or_else(|| t!("sidebar.detached"), |branch| branch.to_owned().into());
+    directory_row(id, label, 0, folded, cx)
+        .child(
+            div()
+                .flex_none()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(files),
+        )
+        .child(
+            Tag::secondary()
+                .xsmall()
+                .flex_none()
+                .max_w(rems(8.))
+                .child(div().truncate().child(branch)),
+        )
+}
+
 /// A file row: its status glyph, its name, cut short to fit, and `+N −N`. A deleted file's
 /// name is struck through, and muted unless it is the one shown.
 pub(super) fn file_row(
@@ -423,7 +471,7 @@ mod tests {
             entry("Cargo.toml"),
         ];
         let refs: Vec<&GitChangeEntry> = entries.iter().collect();
-        let tree = change_tree(&refs);
+        let tree = change_tree(&refs, &[]);
         let ChangeNode::Directory {
             label,
             path,
@@ -454,5 +502,26 @@ mod tests {
         assert!(matches!(&children[1], ChangeNode::File { name, .. } if name == "dock.rs"));
         assert!(matches!(&tree[1], ChangeNode::File { name, .. } if name == "Cargo.toml"));
         assert!(matches!(&tree[2], ChangeNode::File { name, .. } if name == "README.md"));
+    }
+
+    #[test]
+    fn a_repository_under_the_root_stays_a_node_of_its_own() {
+        let entries = [entry("api/src/lib.rs"), entry("web/app.ts")];
+        let refs: Vec<&GitChangeEntry> = entries.iter().collect();
+        let labels = |tree: &[ChangeNode<'_>]| -> Vec<String> {
+            tree.iter()
+                .map(|node| match node {
+                    ChangeNode::Directory { label, .. } => label.clone(),
+                    ChangeNode::File { name, .. } => name.clone(),
+                })
+                .collect()
+        };
+        assert_eq!(labels(&change_tree(&refs, &[])), ["api/src", "web"]);
+        let tree = change_tree(&refs, &[RelativePath::new("api"), RelativePath::new("web")]);
+        assert_eq!(labels(&tree), ["api", "web"]);
+        let ChangeNode::Directory { children, .. } = &tree[0] else {
+            panic!("api is a directory");
+        };
+        assert_eq!(labels(children), ["src"]);
     }
 }

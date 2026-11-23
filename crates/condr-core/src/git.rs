@@ -21,7 +21,7 @@ pub use changes::{
 pub use repository::{
     GitBase, GitError, GitFingerprint, GitRepository, branch_is_checked_out, create_worktree,
     delete_branch_at, discover_repository, open_worktree, remove_worktree,
-    validate_worktree_removal, worktree_destination,
+    validate_worktree_removal, workspace_repositories, worktree_destination,
 };
 
 /// How far the branch has diverged from its upstream, as of the last local fetch.

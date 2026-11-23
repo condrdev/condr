@@ -297,9 +297,13 @@ impl Condr {
                         notify = true;
                     }
                     SessionEvent::WorkspaceGitChanged { workspace_id, git } => {
+                        // `HEAD` moved in the repository History shows: it shows the new
+                        // commits (ADR 0046, ADR 0073).
+                        let head = git
+                            .as_ref()
+                            .and_then(|git| self.history_repository(key, workspace_id, git))
+                            .and_then(|repository| repository.head.clone());
                         let connection = &mut self.connections[index];
-                        // `HEAD` moved: History shows the new commits (ADR 0046).
-                        let head = git.as_ref().and_then(|git| git.head.as_ref());
                         let head_moved = connection
                             .resources
                             .logs

@@ -95,6 +95,8 @@ pub enum ClientMessage {
         from: Option<String>,
         skip: u32,
         limit: u32,
+        /// [`RepositoryGitSnapshot::directory`]: which repository (ADR 0073).
+        repository: RelativePathBuf,
     },
     /// One commit's message and files (ADR 0046), answered with [`ServerMessage::GitCommit`].
     GitCommit {
@@ -103,6 +105,8 @@ pub enum ClientMessage {
         request_id: u64,
         workspace_id: WorkspaceId,
         commit: String,
+        /// [`RepositoryGitSnapshot::directory`]: which repository (ADR 0073).
+        repository: RelativePathBuf,
     },
     /// One level of a Workspace's directory tree for the Files sidebar (ADR 0018),
     /// answered with [`ServerMessage::Directory`].
@@ -676,6 +680,32 @@ pub struct PaneAgentSnapshot {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WorkspaceGitSnapshot {
     pub workspace_id: WorkspaceId,
+    /// The one the Root is in, else each one right under the Root, by name (ADR 0073);
+    /// never empty.
+    pub repositories: Vec<RepositoryGitSnapshot>,
+}
+
+impl WorkspaceGitSnapshot {
+    /// The repository the Root is in, which alone has worktrees, a base and Tasks.
+    pub fn root_repository(&self) -> Option<&RepositoryGitSnapshot> {
+        self.repositories
+            .first()
+            .filter(|repository| repository.directory.as_str().is_empty())
+    }
+
+    /// Every repository's working-tree changes against `HEAD`.
+    pub fn change_entries(&self) -> impl Iterator<Item = &crate::GitChangeEntry> {
+        self.repositories
+            .iter()
+            .flat_map(|repository| &repository.changes.entries)
+    }
+}
+
+/// One repository a Workspace shows, every path in it relative to the Root (ADR 0073).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RepositoryGitSnapshot {
+    /// Its work tree's directory under the Root, `api`; empty when the Root is inside it.
+    pub directory: RelativePathBuf,
     pub branch: Option<String>,
     pub linked_worktree: bool,
     pub upstream: Option<crate::GitUpstream>,

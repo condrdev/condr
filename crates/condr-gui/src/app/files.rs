@@ -29,7 +29,7 @@ pub(super) struct FilesViewState {
     pub(super) changes_against_base: HashSet<(ConnectionKey, WorkspaceId)>,
     pub(super) collapsed_changes_sections: HashSet<ChangesSection>,
     /// Directories folded shut in the Changes tree, by connection, Workspace, section and
-    /// repository path; Workspace ids repeat across Servers, and a directory with both a
+    /// Root-relative path; Workspace ids repeat across Servers, and a directory with both a
     /// tracked change and a new file is a row in two sections.
     pub(super) collapsed_change_dirs:
         HashSet<(ConnectionKey, WorkspaceId, ChangesSection, RelativePathBuf)>,
@@ -43,6 +43,9 @@ pub(super) struct FilesViewState {
     pub(super) diff_commits: HashMap<(ConnectionKey, WorkspaceId), super::history::DiffCommit>,
     /// The commit each Workspace's History lists the files of, below its commits.
     pub(super) selected_commits: HashMap<(ConnectionKey, WorkspaceId), String>,
+    /// The repository each Workspace above several shows in History (ADR 0073); this
+    /// Client's view, never remembered.
+    pub(super) history_repositories: HashMap<(ConnectionKey, WorkspaceId), RelativePathBuf>,
     /// Directories folded shut in those files' tree, whichever commit is selected.
     pub(super) collapsed_commit_dirs: HashSet<(ConnectionKey, WorkspaceId, RelativePathBuf)>,
     /// The Diff Tab shows a commit's whole message, not only its subject.
@@ -107,6 +110,8 @@ impl FilesViewState {
         self.diff_commits
             .retain(|(connection, id), _| workspace_live(*connection, *id));
         self.selected_commits
+            .retain(|(connection, id), _| workspace_live(*connection, *id));
+        self.history_repositories
             .retain(|(connection, id), _| workspace_live(*connection, *id));
         self.collapsed_commit_dirs
             .retain(|(connection, id, _)| workspace_live(*connection, *id));
@@ -496,9 +501,7 @@ impl Condr {
             .connection(key)
             .and_then(|connection| connection.model.workspace_git.get(&workspace_id))
             .is_some_and(|git| {
-                git.changes
-                    .entries
-                    .iter()
+                git.change_entries()
                     .any(|entry| entry.path.starts_with(path))
             });
         tree_row(selector, depth, RowKind::Directory { open: expanded }, cx)
@@ -564,7 +567,7 @@ impl Condr {
         let status = self
             .connection(key)
             .and_then(|connection| connection.model.workspace_git.get(&workspace_id))
-            .and_then(|git| git.changes.entries.iter().find(|entry| entry.path == path))
+            .and_then(|git| git.change_entries().find(|entry| entry.path == path))
             .map(|entry| entry.status);
         tree_row(selector, depth, RowKind::File { selected }, cx)
             .on_click(move |_, window, cx| {
@@ -1032,7 +1035,7 @@ impl Condr {
         let entry = self
             .connection(key)
             .and_then(|connection| connection.model.workspace_git.get(&workspace_id))
-            .and_then(|git| git.changes.entries.iter().find(|entry| entry.path == path));
+            .and_then(|git| git.change_entries().find(|entry| entry.path == path));
         let summary = image.and_then(|image| match image {
             Some(Ok(image)) => Some(image_summary(image)),
             _ => None,

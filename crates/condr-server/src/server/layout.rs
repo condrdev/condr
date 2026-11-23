@@ -50,7 +50,7 @@ pub(super) struct TerminalRestartSpec {
 pub(super) enum PreparedExternalLayout {
     CreateWorkspace {
         root: PathBuf,
-        git: Option<GitRepository>,
+        git: Vec<GitRepository>,
         name: Option<String>,
         /// The Server made `root`, so a Workspace that is not created after all takes it
         /// back while it is still empty (ADR 0059).
@@ -167,7 +167,7 @@ pub(super) fn prepare_external_layout(
         ExternalLayoutPlan::CreateWorkspace { root, name } => {
             validate_root_directory(&root)?;
             Ok(PreparedExternalLayout::CreateWorkspace {
-                git: discover_repository(&root).ok().flatten(),
+                git: workspace_repositories(&root).unwrap_or_default(),
                 root,
                 name,
                 made_directory: false,
@@ -188,7 +188,7 @@ pub(super) fn prepare_external_layout(
             std::fs::create_dir(&root)
                 .map_err(|error| format!("cannot create {}: {error}", root.display()))?;
             Ok(PreparedExternalLayout::CreateWorkspace {
-                git: discover_repository(&root).ok().flatten(),
+                git: workspace_repositories(&root).unwrap_or_default(),
                 root,
                 name,
                 made_directory: true,
@@ -968,7 +968,7 @@ pub(super) fn apply_prepared_external_layout(
                 tab_id,
                 pane_id,
             };
-            set_workspace_git(state, workspace_id, Some(child));
+            set_workspace_git(state, workspace_id, vec![child]);
             Ok(effect)
         }
         PreparedExternalLayout::OpenWorktree {
@@ -1049,7 +1049,7 @@ pub(super) fn apply_prepared_external_layout(
             };
             let mut effect = commit_layout_candidate(state, candidate, None, started)?;
             effect.result = result;
-            set_workspace_git(state, workspace_id, Some(child));
+            set_workspace_git(state, workspace_id, vec![child]);
             Ok(effect)
         }
         PreparedExternalLayout::RemoveWorktreeReady { .. } => {

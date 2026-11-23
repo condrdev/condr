@@ -208,8 +208,7 @@ impl RuntimeState {
         Some(LastPlace {
             path: workspace.root_directory().to_path_buf(),
             branch: self
-                .workspace_git
-                .get(&workspace_id)
+                .root_repository(workspace_id)
                 .and_then(|git| git.repository.branch().map(str::to_owned)),
             base_branch: association
                 .and_then(|association| association.base_branch().map(str::to_owned)),
@@ -430,7 +429,7 @@ impl RuntimeState {
             && self
                 .session
                 .workspace_by_root(path)
-                .is_some_and(|workspace| self.workspace_git.contains_key(&workspace.id()));
+                .is_some_and(|workspace| self.root_repository(workspace.id()).is_some());
         if open {
             Ok(())
         } else {

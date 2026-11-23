@@ -52,6 +52,17 @@ Switch the right sidebar to **History** to see the commits of the Workspace's cu
 
 History only reads the repository: it does not check out, revert or create commits. Clicking a file in **Changes** returns the Diff Tab to the working tree.
 
+## Several repositories in one Workspace
+
+When a Workspace's folder is not a Git repository itself but holds repositories directly inside it, such as `api/` and `web/`, Condr shows each of them:
+
+- **Changes** lists every repository with changes as a row of its own inside the Conflicts, Tracked and Untracked groups, with how many files it holds there and its branch. A repository without changes is not listed.
+- **History** shows one repository at a time; the menu in its top row names each repository's branch and switches between them.
+- **Files** grays out what each repository ignores.
+- The Workspace's row in the left sidebar says how many repositories it holds, and a repository cloned into the folder appears on its own.
+
+Only repositories directly inside the folder count, not deeper ones or submodules. Such a Workspace compares only against HEAD and cannot create a Worktree. When the folder is itself inside a repository, Condr shows that repository alone, and Changes lists only what lies inside the folder.
+
 ## Browse and preview project files (Files & Preview)
 
 - **Switch to the file tree**: switch the tab at the top of the right sidebar to **Files** to expand and browse project folders as you would in a file manager.

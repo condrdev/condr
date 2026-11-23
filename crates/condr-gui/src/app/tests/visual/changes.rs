@@ -331,7 +331,7 @@ fn the_changes_comparison_switches_between_head_and_the_base_branch() {
                 view.read(app)
                     .active_connection()
                     .and_then(|connection| connection.model.workspace_git.values().next())
-                    .and_then(|git| git.base.as_ref())
+                    .and_then(|git| git.root_repository()?.base.as_ref())
                     .is_some_and(|base| base.branch == "main")
             })
         }),
@@ -636,4 +636,111 @@ fn history_lists_commits_and_shows_one_commits_file_in_the_diff_tab() {
     );
 
     let _ = std::fs::remove_dir_all(&repository);
+}
+
+/// A Workspace above several repositories lists each one's changes under a node of its own,
+/// and History shows the repository its menu picks (ADR 0073).
+#[test]
+fn a_workspace_above_several_repositories_shows_each_one() {
+    let _serial_guard = acquire_visual_test_lock();
+    let root = std::env::temp_dir().join(format!(
+        "condr-gui-several-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    let mut heads = Vec::new();
+    for name in ["api", "web"] {
+        let repository = root.join(name);
+        std::fs::create_dir_all(&repository).unwrap();
+        run_git(&repository, ["init", "-q", "-b", "main"]);
+        run_git(&repository, ["config", "user.email", "condr@example.com"]);
+        run_git(&repository, ["config", "user.name", "Condr"]);
+        run_git(&repository, ["config", "commit.gpgsign", "false"]);
+        std::fs::write(repository.join("notes.txt"), "alpha\n").unwrap();
+        run_git(&repository, ["add", "notes.txt"]);
+        // Its own message, so the two commits differ even within one second.
+        run_git(&repository, ["commit", "-q", "-m", name]);
+        std::fs::write(repository.join("notes.txt"), "beta\n").unwrap();
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repository)
+            .args(["rev-parse", "--short=7", "HEAD"])
+            .output()
+            .unwrap();
+        let head = String::from_utf8(output.stdout).unwrap().trim().to_owned();
+        // `debug_bounds` takes a static name.
+        heads.push(&*format!("commit-{head}").leak());
+    }
+
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|window, cx| _ = window.draw(cx));
+    let button = window.debug_bounds("open-project").unwrap();
+    window.simulate_click(button.center(), Modifiers::default());
+    let selected_root = root.clone();
+    window.simulate_path_prompt_response(move |_| Some(vec![selected_root]));
+    assert!(wait_until(window, |window| {
+        window.read(|app| {
+            view.read(app)
+                .active_session()
+                .is_some_and(|session| !session.workspaces().is_empty())
+        })
+    }));
+    window.update(|window, cx| _ = window.draw(cx));
+    let toggle = window.debug_bounds("toggle-changes").unwrap();
+    window.simulate_click(toggle.center(), Modifiers::default());
+    assert!(
+        wait_until(window, |window| {
+            window.update(|window, cx| _ = window.draw(cx));
+            window.debug_bounds("change-api/notes.txt").is_some()
+                && window.debug_bounds("change-web/notes.txt").is_some()
+        }),
+        "each repository's change is listed, named from the Root"
+    );
+    assert!(window.debug_bounds("changes-tracked-dir-web").is_some());
+
+    // A node folds its repository's tree and no other.
+    let node = window.debug_bounds("changes-tracked-dir-api").unwrap();
+    window.simulate_click(node.center(), Modifiers::default());
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
+    assert!(window.debug_bounds("change-api/notes.txt").is_none());
+    assert!(window.debug_bounds("change-web/notes.txt").is_some());
+
+    // History opens on the first repository; its menu shows another's commits.
+    let tab = window.debug_bounds("sidebar-view-history").unwrap();
+    window.simulate_click(tab.center(), Modifiers::default());
+    assert!(
+        wait_until(window, |window| {
+            window.update(|window, cx| _ = window.draw(cx));
+            window.debug_bounds(heads[0]).is_some()
+        }),
+        "History lists api's commit"
+    );
+    assert!(window.debug_bounds("history-repository").is_some());
+    let (key, workspace_id) = window.read(|app| {
+        let view = view.read(app);
+        let session = view.active_session().unwrap();
+        (
+            view.active_connection().unwrap().key,
+            session.workspaces()[0].id(),
+        )
+    });
+    // The menu item calls this; GPUI's test window cannot address a popup menu's rows.
+    window.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            view.choose_history_repository(key, workspace_id, "web".into(), cx);
+        });
+    });
+    assert!(
+        wait_until(window, |window| {
+            window.update(|window, cx| _ = window.draw(cx));
+            window.debug_bounds(heads[1]).is_some() && window.debug_bounds(heads[0]).is_none()
+        }),
+        "History lists web's commit instead"
+    );
+
+    let _ = std::fs::remove_dir_all(&root);
 }
