@@ -280,6 +280,16 @@ fn sidebar_agent_selector(pane_id: PaneId) -> &'static str {
     leaked_selector(format!("agent-1-{}", pane_id.as_u64()))
 }
 
+/// An empty directory every test may make a Workspace's Root. The system's temp directory
+/// itself would do, but a Server looks for a repository in every directory right under a
+/// Root (ADR 0073), and one full of other programs' leftovers made that slow. Nothing
+/// writes into it, so every test and every run shares it.
+fn empty_root() -> std::path::PathBuf {
+    let root = std::env::temp_dir().join("condr-empty-root");
+    std::fs::create_dir_all(&root).unwrap();
+    root
+}
+
 struct TestDirectory(std::path::PathBuf);
 
 impl TestDirectory {
@@ -301,9 +311,51 @@ impl TestDirectory {
 
 impl Drop for TestDirectory {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
+        remove_test_directory(&self.0);
     }
 }
+
+/// Removes a test's directory, a repository's included. Windows refuses to delete a file
+/// that is open or read-only, as Git makes every object, where the file system cannot
+/// delete the POSIX way, so it clears read-only and tries again before saying what stays.
+/// A test makes its directory before its Server, so the Server has let go of it by then.
+fn remove_test_directory(path: &std::path::Path) {
+    for attempt in 1..=5 {
+        match std::fs::remove_dir_all(path) {
+            Ok(()) => return,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+            Err(error) if attempt == 5 => {
+                eprintln!("could not remove {}: {error}", path.display());
+            }
+            Err(_) => {
+                clear_read_only(path);
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+fn clear_read_only(directory: &std::path::Path) {
+    for entry in std::fs::read_dir(directory).into_iter().flatten().flatten() {
+        let path = entry.path();
+        let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if metadata.is_dir() {
+            clear_read_only(&path);
+        } else if metadata.is_file() && metadata.permissions().readonly() {
+            let mut permissions = metadata.permissions();
+            // Windows clears the attribute; Unix, where this would open the file to all, never runs it.
+            #[allow(clippy::permissions_set_readonly_false)]
+            permissions.set_readonly(false);
+            let _ = std::fs::set_permissions(&path, permissions);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn clear_read_only(_: &std::path::Path) {}
 
 fn run_git<I, S>(cwd: &std::path::Path, args: I)
 where

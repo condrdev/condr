@@ -6,7 +6,7 @@ fn overview_frames_fit_near_the_snapshot_and_terminal_metadata_limits() {
     let state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
     let mut overview = SessionOverview::from(&state.bootstrap());
     let mut session = Session::new();
-    let workspace = session.create_workspace(std::env::temp_dir()).unwrap();
+    let workspace = session.create_workspace(empty_root()).unwrap();
     session.rename_workspace(workspace, "x".repeat(MAX_PERSISTED_SNAPSHOT_BYTES - 4096));
     overview.snapshot = session.snapshot();
     validate_persistable_snapshot(&overview.snapshot).unwrap();
@@ -40,7 +40,7 @@ fn lightweight_queries_and_admin_never_capture_terminal_views() {
     let mut client = ClientConnection::connect_overview(&endpoint, "inspect").unwrap();
     let LayoutResult::WorkspaceCreated { pane_id, .. } = client
         .layout(LayoutCommand::CreateWorkspace {
-            root_directory: std::env::temp_dir(),
+            root_directory: empty_root(),
             name: None,
         })
         .unwrap()
@@ -146,7 +146,7 @@ fn invalid_workspace_roots_preserve_authoritative_layout_focus_and_terminals() {
             request_id: 1,
             command: LayoutCommand::CreateWorkspace {
                 name: None,
-                root_directory: std::env::temp_dir(),
+                root_directory: empty_root(),
             },
         },
     )

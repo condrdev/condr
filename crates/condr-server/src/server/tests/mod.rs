@@ -23,7 +23,7 @@ mod viewers;
 mod watch;
 
 use super::*;
-use crate::test_support::unique_suffix;
+use crate::test_support::{empty_root, unique_suffix};
 
 fn test_endpoint() -> Endpoint {
     Endpoint::local(std::env::temp_dir().join(format!(

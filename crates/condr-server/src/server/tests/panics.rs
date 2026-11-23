@@ -24,7 +24,7 @@ fn live_pane(
             request_id: 1,
             command: LayoutCommand::CreateWorkspace {
                 name: None,
-                root_directory: std::env::temp_dir(),
+                root_directory: empty_root(),
             },
         },
     )
@@ -134,10 +134,7 @@ fn a_request_that_panics_is_answered_with_an_error() {
         .unwrap();
     let workspace_id = {
         let mut state = handle.state.lock().unwrap();
-        let workspace_id = state
-            .session
-            .create_workspace(std::env::temp_dir())
-            .unwrap();
+        let workspace_id = state.session.create_workspace(empty_root()).unwrap();
         state
             .injected_panics
             .insert(("git-log", workspace_id.as_u64()));

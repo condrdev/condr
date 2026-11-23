@@ -103,7 +103,7 @@ fn closing_the_tasks_window_keeps_the_main_window_and_the_unsaved_form() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                root_directory: std::env::temp_dir(),
+                root_directory: empty_root(),
             });
         });
     });

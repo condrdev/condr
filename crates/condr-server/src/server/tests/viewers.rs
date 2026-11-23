@@ -13,7 +13,7 @@ fn a_client_can_acknowledge_attention_while_terminal_is_closing() {
         let mut state = handle.state.lock().unwrap();
         state
             .session
-            .create_workspace(std::env::temp_dir())
+            .create_workspace(empty_root())
             .expect("Workspace capacity");
         let pane_id = state.session.workspaces()[0].tabs()[0]
             .focused_pane()
@@ -117,7 +117,7 @@ fn focus_follows_the_last_client_and_ends_when_it_leaves() {
         let mut state = handle.state.lock().unwrap();
         state
             .session
-            .create_workspace(std::env::temp_dir())
+            .create_workspace(empty_root())
             .expect("Workspace capacity");
         let pane_id = state.session.workspaces()[0].tabs()[0]
             .focused_pane()
@@ -199,7 +199,7 @@ fn the_sizing_holder_looking_away_lets_any_client_resize() {
             request_id: 1,
             command: LayoutCommand::CreateWorkspace {
                 name: None,
-                root_directory: std::env::temp_dir(),
+                root_directory: empty_root(),
             },
         },
     )
@@ -292,7 +292,7 @@ fn the_focused_client_sizes_and_leaving_releases_its_mouse_before_its_focus() {
             request_id: 1,
             command: LayoutCommand::CreateWorkspace {
                 name: None,
-                root_directory: std::env::temp_dir(),
+                root_directory: empty_root(),
             },
         },
     )

@@ -11,7 +11,7 @@ fn two_panes(handle: &ServerHandle) -> (PaneId, PaneId) {
     for _ in 0..2 {
         state
             .session
-            .create_workspace(std::env::temp_dir())
+            .create_workspace(empty_root())
             .expect("Workspace capacity");
     }
     let panes = state
@@ -285,7 +285,7 @@ fn a_set_changed_during_a_bootstrap_applies_when_it_finishes() {
     for _ in 0..2 {
         state
             .session
-            .create_workspace(std::env::temp_dir())
+            .create_workspace(empty_root())
             .expect("Workspace capacity");
     }
     let [first, second] = [0, 1].map(|index| {

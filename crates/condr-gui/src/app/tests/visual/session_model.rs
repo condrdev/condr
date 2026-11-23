@@ -9,7 +9,7 @@ fn rejects_invalid_model(as_bootstrap: bool) {
         view.update(cx, |this, cx| {
             let connection = this.connection_mut(1).unwrap();
             let mut session = connection.session().unwrap().clone();
-            session.create_workspace(std::env::temp_dir()).unwrap();
+            session.create_workspace(empty_root()).unwrap();
             connection
                 .apply_layout(session.snapshot(), Vec::new())
                 .unwrap();
@@ -105,7 +105,7 @@ fn invalid_initial_bootstrap_stops_pending_reconnects_but_transport_failure_retr
     let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
     let endpoint = Endpoint::local(&path);
     let mut session = Session::new();
-    session.create_workspace(std::env::temp_dir()).unwrap();
+    session.create_workspace(empty_root()).unwrap();
     let invalid = crate::app::tests::session_model::duplicate_workspaces(&session.snapshot());
     let peer = std::thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();

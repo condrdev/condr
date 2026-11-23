@@ -352,7 +352,7 @@ mod tests {
     #[test]
     fn a_layout_commit_cannot_overtake_its_connections_bootstrap() {
         for subscribed in [false, true] {
-            let root = std::env::temp_dir();
+            let root = crate::test_support::empty_root();
             let mut state = RuntimeState::new(&root.join("condr-layout-fence.sock"));
             let parent = state.session.create_workspace(root.clone()).unwrap();
             let child = state.session.create_workspace(root.join("child")).unwrap();

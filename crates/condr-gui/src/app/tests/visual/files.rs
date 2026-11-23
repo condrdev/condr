@@ -1051,13 +1051,8 @@ fn files_view_creates_renames_and_deletes_entries() {
 fn preview_tab_marks_changed_lines_in_its_gutter_and_on_its_scrollbar() {
     use condr_core::protocol::DiffBase;
     let _serial_guard = acquire_visual_test_lock();
-    let repository = std::env::temp_dir().join(format!(
-        "condr-gui-marks-{}-{:?}",
-        std::process::id(),
-        std::thread::current().id()
-    ));
-    let _ = std::fs::remove_dir_all(&repository);
-    std::fs::create_dir_all(&repository).unwrap();
+    let directory = TestDirectory::new("gui-marks");
+    let repository = directory.0.clone();
     run_git(&repository, ["init", "-q", "-b", "main"]);
     run_git(&repository, ["config", "user.email", "condr@example.com"]);
     run_git(&repository, ["config", "user.name", "Condr"]);
@@ -1258,6 +1253,4 @@ fn preview_tab_marks_changed_lines_in_its_gutter_and_on_its_scrollbar() {
     window.update(|window, cx| view.update(cx, |this, cx| this.rebuild_dock(window, cx)));
     window.run_until_parked();
     assert_eq!(requests(window), before);
-
-    let _ = std::fs::remove_dir_all(&repository);
 }

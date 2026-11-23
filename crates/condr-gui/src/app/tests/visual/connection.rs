@@ -19,7 +19,7 @@ fn a_new_panes_title_survives_its_first_visual_frame_and_is_pruned_on_close() {
             let sequence = connection.model.sequence;
             let original = connection.session().unwrap().snapshot();
             let mut session = connection.session().unwrap().clone();
-            session.create_workspace(std::env::temp_dir()).unwrap();
+            session.create_workspace(empty_root()).unwrap();
             let pane_id = session.workspaces()[0].tabs()[0]
                 .focused_pane()
                 .unwrap()
@@ -228,7 +228,7 @@ fn in_sequence_layout_change_applies_without_a_bootstrap_resync() {
             // has never seen, exactly like a `condr workspace create` from a Pane.
             let mut session = connection.session().unwrap().clone();
             if session.workspaces().is_empty() {
-                session.create_workspace(std::env::temp_dir()).unwrap();
+                session.create_workspace(empty_root()).unwrap();
             }
             let tab_id = session.workspaces()[0].tabs()[0].id();
             assert!(session.rename_tab(tab_id, "renamed by event"));
@@ -1235,7 +1235,7 @@ fn server_events_wake_gui_without_polling_clock() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                root_directory: std::env::temp_dir(),
+                root_directory: empty_root(),
             });
         });
     });
@@ -1267,7 +1267,7 @@ fn an_unwatched_agent_completion_posts_a_system_notification_for_its_pane() {
             let session_id = connection.model.session_id.unwrap();
             let sequence = connection.model.sequence;
             let mut session = connection.session().unwrap().clone();
-            session.create_workspace(std::env::temp_dir()).unwrap();
+            session.create_workspace(empty_root()).unwrap();
             let pane_id = session.workspaces()[0].tabs()[0]
                 .focused_pane()
                 .unwrap()
@@ -1516,7 +1516,7 @@ fn a_dropped_device_veils_its_panes_while_retrying_and_hides_them_once_it_gives_
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                root_directory: std::env::temp_dir(),
+                root_directory: empty_root(),
             });
         });
     });

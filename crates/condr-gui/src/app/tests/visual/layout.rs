@@ -44,7 +44,7 @@ fn default_window_options_create_1280_by_720_window() {
 fn cold_split_workspace_uses_the_real_dock_size_before_first_paint() {
     let _serial_guard = acquire_visual_test_lock();
     let workspace_root = TestDirectory::new("cold-split-workspace");
-    let snapshot_root = TestDirectory::new("cold-split-snapshot");
+    let snapshot_root = TestDirectory::new("cold-split");
     let mut session = Session::new();
     let workspace_id = session
         .create_workspace(workspace_root.0.clone())
@@ -280,7 +280,7 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                root_directory: std::env::temp_dir(),
+                root_directory: empty_root(),
             });
         });
     });
@@ -530,7 +530,7 @@ fn server_workspace_button_and_only_tab_close_round_trip() {
         assert!(options.directories);
         assert!(!options.multiple);
         assert_eq!(options.prompt.as_deref(), Some("New Workspace on Local"));
-        Some(vec![std::env::temp_dir()])
+        Some(vec![empty_root()])
     });
 
     let mut tab_id = None;
@@ -740,7 +740,7 @@ fn the_title_bar_open_in_button_launches_and_remembers_the_editor() {
         .expect("new workspace button should be rendered");
     window.simulate_click(button.center(), Modifiers::default());
     assert!(window.did_prompt_for_paths());
-    let workspace_root = std::env::temp_dir();
+    let workspace_root = empty_root();
     let selected_root = workspace_root.clone();
     window.simulate_path_prompt_response(move |_| Some(vec![selected_root]));
     assert!(wait_until(window, |window| {
@@ -868,7 +868,7 @@ fn a_blocked_agent_is_listed_under_needs_you_with_what_it_waits_for() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                root_directory: std::env::temp_dir(),
+                root_directory: empty_root(),
             });
         });
     });
@@ -983,7 +983,7 @@ fn a_tab_strip_wider_than_its_slot_scrolls_and_keeps_open_in_in_place() {
         .debug_bounds("open-project")
         .expect("new workspace button should be rendered");
     window.simulate_click(button.center(), Modifiers::default());
-    let selected_root = std::env::temp_dir();
+    let selected_root = empty_root();
     window.simulate_path_prompt_response(move |_| Some(vec![selected_root]));
     assert!(wait_until(window, |window| {
         window.read(|app| {
@@ -1073,7 +1073,7 @@ fn closing_a_pane_with_a_running_agent_asks_first() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                root_directory: std::env::temp_dir(),
+                root_directory: empty_root(),
             });
         });
     });
@@ -1178,7 +1178,7 @@ fn a_device_folds_its_workspaces_away_and_remembers_it() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                root_directory: std::env::temp_dir(),
+                root_directory: empty_root(),
             });
         });
     });

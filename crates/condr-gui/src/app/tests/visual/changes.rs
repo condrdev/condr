@@ -6,13 +6,8 @@ use super::*;
 #[test]
 fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
     let _serial_guard = acquire_visual_test_lock();
-    let repository = std::env::temp_dir().join(format!(
-        "condr-gui-changes-{}-{:?}",
-        std::process::id(),
-        std::thread::current().id()
-    ));
-    let _ = std::fs::remove_dir_all(&repository);
-    std::fs::create_dir_all(&repository).unwrap();
+    let directory = TestDirectory::new("gui-changes");
+    let repository = directory.0.clone();
     run_git(&repository, ["init", "-q", "-b", "main"]);
     run_git(&repository, ["config", "user.email", "condr@example.com"]);
     run_git(&repository, ["config", "user.name", "Condr"]);
@@ -276,8 +271,6 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
     window.run_until_parked();
     window.update(|window, cx| _ = window.draw(cx));
     assert!(window.debug_bounds("condr-right-sidebar").is_none());
-
-    let _ = std::fs::remove_dir_all(&repository);
 }
 
 /// The Changes header switches a Workspace between `HEAD` and its base, and the Diff Tab
@@ -285,13 +278,8 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
 #[test]
 fn the_changes_comparison_switches_between_head_and_the_base_branch() {
     let _serial_guard = acquire_visual_test_lock();
-    let repository = std::env::temp_dir().join(format!(
-        "condr-gui-changes-base-{}-{:?}",
-        std::process::id(),
-        std::thread::current().id()
-    ));
-    let _ = std::fs::remove_dir_all(&repository);
-    std::fs::create_dir_all(&repository).unwrap();
+    let directory = TestDirectory::new("gui-changes-base");
+    let repository = directory.0.clone();
     run_git(&repository, ["init", "-q", "-b", "main"]);
     run_git(&repository, ["config", "user.email", "condr@example.com"]);
     run_git(&repository, ["config", "user.name", "Condr"]);
@@ -399,8 +387,6 @@ fn the_changes_comparison_switches_between_head_and_the_base_branch() {
         }),
         "against HEAD the committed file is unchanged"
     );
-
-    let _ = std::fs::remove_dir_all(&repository);
 }
 
 /// A directory with a tracked change and an untracked file is a row in two sections.
@@ -408,12 +394,8 @@ fn the_changes_comparison_switches_between_head_and_the_base_branch() {
 #[test]
 fn a_directory_listed_in_two_sections_folds_from_either_row() {
     let _serial_guard = acquire_visual_test_lock();
-    let repository = std::env::temp_dir().join(format!(
-        "condr-gui-changes-dup-{}-{:?}",
-        std::process::id(),
-        std::thread::current().id()
-    ));
-    let _ = std::fs::remove_dir_all(&repository);
+    let directory = TestDirectory::new("gui-changes-dup");
+    let repository = directory.0.clone();
     std::fs::create_dir_all(repository.join("src/app")).unwrap();
     run_git(&repository, ["init", "-q", "-b", "main"]);
     run_git(&repository, ["config", "user.email", "condr@example.com"]);
@@ -464,8 +446,6 @@ fn a_directory_listed_in_two_sections_folds_from_either_row() {
         window.debug_bounds("change-src/app/a.txt").is_some(),
         "the Tracked src/app row stays open"
     );
-
-    let _ = std::fs::remove_dir_all(&repository);
 }
 
 /// History lists the real Server's commits, a commit unfolds into its files, a file opens
@@ -473,13 +453,8 @@ fn a_directory_listed_in_two_sections_folds_from_either_row() {
 #[test]
 fn history_lists_commits_and_shows_one_commits_file_in_the_diff_tab() {
     let _serial_guard = acquire_visual_test_lock();
-    let repository = std::env::temp_dir().join(format!(
-        "condr-gui-history-{}-{:?}",
-        std::process::id(),
-        std::thread::current().id()
-    ));
-    let _ = std::fs::remove_dir_all(&repository);
-    std::fs::create_dir_all(&repository).unwrap();
+    let directory = TestDirectory::new("gui-history");
+    let repository = directory.0.clone();
     run_git(&repository, ["init", "-q", "-b", "main"]);
     run_git(&repository, ["config", "user.email", "condr@example.com"]);
     run_git(&repository, ["config", "user.name", "Condr"]);
@@ -634,8 +609,6 @@ fn history_lists_commits_and_shows_one_commits_file_in_the_diff_tab() {
         }),
         "a new commit should appear above the others"
     );
-
-    let _ = std::fs::remove_dir_all(&repository);
 }
 
 /// A Workspace above several repositories lists each one's changes under a node of its own,
@@ -643,12 +616,8 @@ fn history_lists_commits_and_shows_one_commits_file_in_the_diff_tab() {
 #[test]
 fn a_workspace_above_several_repositories_shows_each_one() {
     let _serial_guard = acquire_visual_test_lock();
-    let root = std::env::temp_dir().join(format!(
-        "condr-gui-several-{}-{:?}",
-        std::process::id(),
-        std::thread::current().id()
-    ));
-    let _ = std::fs::remove_dir_all(&root);
+    let directory = TestDirectory::new("gui-several");
+    let root = directory.0.clone();
     let mut heads = Vec::new();
     for name in ["api", "web"] {
         let repository = root.join(name);
@@ -772,6 +741,4 @@ fn a_workspace_above_several_repositories_shows_each_one() {
     window.run_until_parked();
     window.update(|window, cx| _ = window.draw(cx));
     assert!(window.debug_bounds("history-repository").is_some());
-
-    let _ = std::fs::remove_dir_all(&root);
 }

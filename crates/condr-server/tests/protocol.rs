@@ -13,6 +13,16 @@ use std::{io, sync::Arc, thread, time::Duration};
 mod common;
 use common::unique_suffix;
 
+/// An empty directory every test may make a Workspace's Root. The system's temp directory
+/// itself would do, but a Server looks for a repository in every directory right under a
+/// Root (ADR 0073), and one full of other programs' leftovers made that slow. Nothing
+/// writes into it, so every test and every run shares it.
+fn empty_root() -> std::path::PathBuf {
+    let root = std::env::temp_dir().join("condr-empty-root");
+    std::fs::create_dir_all(&root).unwrap();
+    root
+}
+
 fn test_endpoint() -> Endpoint {
     Endpoint::local(std::env::temp_dir().join(format!(
         "condr-server-{}-{}.sock",
@@ -47,7 +57,7 @@ fn concurrent_creations_return_their_own_ids_and_keep_the_others_focus() {
     let (handle, endpoint, server_thread) = start();
     let mut owner = ClientConnection::connect_overview(&endpoint, "owner").unwrap();
     let create = |name: &str| LayoutCommand::CreateWorkspace {
-        root_directory: std::env::temp_dir(),
+        root_directory: empty_root(),
         name: Some(name.into()),
     };
     let LayoutResult::WorkspaceCreated {
@@ -79,7 +89,7 @@ fn concurrent_creations_return_their_own_ids_and_keep_the_others_focus() {
                 let name = format!("worker {index}");
                 let result = client
                     .layout(LayoutCommand::CreateWorkspace {
-                        root_directory: std::env::temp_dir(),
+                        root_directory: empty_root(),
                         name: Some(name.clone()),
                     })
                     .unwrap()

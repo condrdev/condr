@@ -5,7 +5,7 @@ fn numbered_tab_shortcuts_follow_order_and_stay_out_of_terminal_input() {
     let _serial_guard = acquire_visual_test_lock();
     let directory = TestDirectory::new("numbered-tabs");
     let mut session = Session::new();
-    session.create_workspace(std::env::temp_dir()).unwrap();
+    session.create_workspace(empty_root()).unwrap();
     let workspace_id = session.create_workspace(directory.0.clone()).unwrap();
     let first_tab = session.workspace(workspace_id).unwrap().tabs()[0].id();
     let second_tab = session.create_tab(workspace_id, None).unwrap();
@@ -178,7 +178,7 @@ fn rename_dialogs_commit_server_workspace_and_tab_names() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                root_directory: std::env::temp_dir(),
+                root_directory: empty_root(),
             });
         });
     });
@@ -248,7 +248,7 @@ fn a_rebuild_leaves_an_open_context_menu_the_keyboard() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                root_directory: std::env::temp_dir(),
+                root_directory: empty_root(),
             });
         });
     });
@@ -532,7 +532,7 @@ fn detected_agent_sidebar_item_activates_its_real_pty_pane() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                root_directory: std::env::temp_dir(),
+                root_directory: empty_root(),
             });
         });
     });
@@ -970,7 +970,7 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
         .expect("new workspace button should be rendered");
     window.simulate_click(button.center(), Modifiers::default());
     assert!(window.did_prompt_for_paths());
-    let workspace_root = std::env::temp_dir();
+    let workspace_root = empty_root();
     let selected_root = workspace_root.clone();
     window.simulate_path_prompt_response(move |_| Some(vec![selected_root]));
 

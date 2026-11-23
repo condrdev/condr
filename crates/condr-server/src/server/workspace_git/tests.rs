@@ -193,6 +193,17 @@ fn idle_watcher_shutdown_joins_even_while_callback_sender_is_alive() {
 
 #[test]
 fn dropping_watcher_requests_exit_without_waiting_for_state_lock() {
+    // An empty Root of its own, removed after the worker is gone. The system's temp
+    // directory would make the scan look for a repository in each of its directories
+    // (ADR 0073), and a busy machine's took longer than the worker is given to stop.
+    let fixture = Repository {
+        root: std::env::temp_dir().join(format!(
+            "condr-git-drop-{}-{}",
+            std::process::id(),
+            crate::test_support::unique_suffix()
+        )),
+    };
+    std::fs::create_dir_all(&fixture.root).unwrap();
     let state = Arc::new(Mutex::new(RuntimeState::new(Path::new(
         "test-watcher.sock",
     ))));
@@ -202,9 +213,9 @@ fn dropping_watcher_requests_exit_without_waiting_for_state_lock() {
     let mut locked = state.lock().unwrap();
     let workspace_id = locked
         .session
-        .create_workspace(std::env::temp_dir())
+        .create_workspace(fixture.root.clone())
         .unwrap();
-    watcher.watch(workspace_id, std::env::temp_dir(), Vec::new());
+    watcher.watch(workspace_id, fixture.root.clone(), Vec::new());
     watcher.refresh(workspace_id);
     // RuntimeState can be dropped by the worker's last Weak upgrade, so Drop only signals.
     let (dropped, drop_finished) = mpsc::channel();

@@ -428,7 +428,7 @@ fn subscribed_client_receives_future_events_in_sequence_order() {
                 request_id,
                 command: LayoutCommand::CreateWorkspace {
                     name: None,
-                    root_directory: std::env::temp_dir(),
+                    root_directory: empty_root(),
                 },
             },
         )

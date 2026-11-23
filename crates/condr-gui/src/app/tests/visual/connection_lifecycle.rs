@@ -54,7 +54,7 @@ fn failed_enqueue_does_not_register_layout_or_resource_work() {
                 this.send_layout_to(
                     1,
                     LayoutCommand::CreateWorkspace {
-                        root_directory: std::env::temp_dir(),
+                        root_directory: empty_root(),
                         name: None
                     }
                 )

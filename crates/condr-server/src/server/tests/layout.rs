@@ -32,7 +32,7 @@ fn layout_commands_keep_structure_zoom_and_terminals_in_sync() {
 
     let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
     let mut updates = Vec::new();
-    let root = std::env::temp_dir();
+    let root = empty_root();
 
     assert_eq!(
         apply_for_test(
@@ -734,7 +734,7 @@ fn pane_terminal_survives_disconnect_and_reconnects_with_live_state() {
             request_id: 1,
             command: LayoutCommand::CreateWorkspace {
                 name: None,
-                root_directory: std::env::temp_dir(),
+                root_directory: empty_root(),
             },
         },
     )
@@ -948,7 +948,7 @@ fn show_diff_keeps_one_viewer_tab_and_starts_no_terminal() {
         &mut updates,
         LayoutCommand::CreateWorkspace {
             name: None,
-            root_directory: std::env::temp_dir(),
+            root_directory: empty_root(),
         },
     );
     let workspace_id = state.session.workspaces()[0].id();
@@ -1024,7 +1024,7 @@ fn show_file_keeps_one_preview_tab_beside_the_diff_tab() {
         &mut updates,
         LayoutCommand::CreateWorkspace {
             name: None,
-            root_directory: std::env::temp_dir(),
+            root_directory: empty_root(),
         },
     );
     let workspace_id = state.session.workspaces()[0].id();

@@ -3,10 +3,7 @@ use super::*;
 #[test]
 fn an_observed_terminal_exit_cannot_be_undone_by_its_final_hook_drain() {
     let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
-    state
-        .session
-        .create_workspace(std::env::temp_dir())
-        .unwrap();
+    state.session.create_workspace(empty_root()).unwrap();
     let pane_id = state.session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
@@ -77,7 +74,7 @@ fn a_tcp_listener_does_not_change_the_server_identity_or_snapshot() {
 fn only_cwd_inheriting_layout_commands_require_process_observation() {
     let mut session = Session::new();
     let workspace_id = session
-        .create_workspace(std::env::temp_dir())
+        .create_workspace(empty_root())
         .expect("Workspace capacity");
     let tab_id = session.workspaces()[0].tabs()[0].id();
     let pane_id = session.workspaces()[0].tabs()[0]
@@ -152,7 +149,7 @@ fn bootstrap_retains_a_closing_terminal_without_inventing_an_exit() {
     let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
     state
         .session
-        .create_workspace(std::env::temp_dir())
+        .create_workspace(empty_root())
         .expect("Workspace capacity");
     let pane_id = state.session.workspaces()[0].tabs()[0]
         .focused_pane()
@@ -191,7 +188,7 @@ fn a_done_nobody_looked_at_waits_for_a_focus_from_any_client() {
     let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
     state
         .session
-        .create_workspace(std::env::temp_dir())
+        .create_workspace(empty_root())
         .expect("Workspace capacity");
     let pane_id = state.session.workspaces()[0].tabs()[0]
         .focused_pane()
@@ -302,7 +299,7 @@ fn terminal_progress_is_published_per_change_and_cleared_with_the_terminals_repo
     let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
     state
         .session
-        .create_workspace(std::env::temp_dir())
+        .create_workspace(empty_root())
         .expect("Workspace capacity");
     let pane_id = state.session.workspaces()[0].tabs()[0]
         .focused_pane()
@@ -353,7 +350,7 @@ fn program_notifications_reach_clients_unless_the_panes_agent_reports_its_state(
     let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
     state
         .session
-        .create_workspace(std::env::temp_dir())
+        .create_workspace(empty_root())
         .expect("Workspace capacity");
     let pane_id = state.session.workspaces()[0].tabs()[0]
         .focused_pane()
@@ -432,7 +429,7 @@ fn terminal_notices_publish_title_changes_once_and_collapse_bells() {
     let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
     state
         .session
-        .create_workspace(std::env::temp_dir())
+        .create_workspace(empty_root())
         .expect("Workspace capacity");
     let pane_id = state.session.workspaces()[0].tabs()[0]
         .focused_pane()
@@ -679,7 +676,7 @@ fn a_burst_of_wakeups_publishes_at_display_cadence_and_ends_with_exit() {
 fn client_terminal_baseline_advances_only_for_an_accepted_render() {
     let mut session = Session::new();
     session
-        .create_workspace(std::env::temp_dir())
+        .create_workspace(empty_root())
         .expect("Workspace capacity");
     let pane_id = session.workspaces()[0].tabs()[0]
         .focused_pane()
@@ -733,7 +730,7 @@ fn client_terminal_baseline_advances_only_for_an_accepted_render() {
 fn wire_projected_hyperlinks_are_committed_as_the_client_baseline() {
     let mut session = Session::new();
     session
-        .create_workspace(std::env::temp_dir())
+        .create_workspace(empty_root())
         .expect("Workspace capacity");
     let pane_id = session.workspaces()[0].tabs()[0]
         .focused_pane()
@@ -794,7 +791,7 @@ fn retained_terminal_hyperlinks_stay_bounded_across_deltas() {
 
     let mut session = Session::new();
     session
-        .create_workspace(std::env::temp_dir())
+        .create_workspace(empty_root())
         .expect("Workspace capacity");
     let pane_id = session.workspaces()[0].tabs()[0]
         .focused_pane()
@@ -897,7 +894,7 @@ fn bootstrap_fence_keeps_an_unsent_clipboard_copy_and_lets_newer_copies_replace_
     let mut state = RuntimeState::new(endpoint.as_local_path().unwrap());
     state
         .session
-        .create_workspace(std::env::temp_dir())
+        .create_workspace(empty_root())
         .expect("Workspace capacity");
     let pane_id = state.session.workspaces()[0].tabs()[0]
         .focused_pane()
@@ -961,7 +958,7 @@ fn bootstrap_fence_queues_concurrent_events_after_the_complete_bootstrap() {
     let mut state = RuntimeState::new(endpoint.as_local_path().unwrap());
     state
         .session
-        .create_workspace(std::env::temp_dir())
+        .create_workspace(empty_root())
         .expect("Workspace capacity");
     let pane_id = state.session.workspaces()[0].tabs()[0]
         .focused_pane()
@@ -1028,7 +1025,7 @@ fn successful_resubscribe_preserves_the_committed_terminal_baseline() {
     let mut state = RuntimeState::new(endpoint.as_local_path().unwrap());
     state
         .session
-        .create_workspace(std::env::temp_dir())
+        .create_workspace(empty_root())
         .expect("Workspace capacity");
     let pane_id = state.session.workspaces()[0].tabs()[0]
         .focused_pane()
@@ -1064,7 +1061,7 @@ fn full_render_slot_regenerates_the_latest_tail_after_drain() {
     let mut state = RuntimeState::new(endpoint.as_local_path().unwrap());
     state
         .session
-        .create_workspace(std::env::temp_dir())
+        .create_workspace(empty_root())
         .expect("Workspace capacity");
     let pane_id = state.session.workspaces()[0].tabs()[0]
         .focused_pane()
@@ -1136,7 +1133,7 @@ fn full_render_slot_regenerates_the_latest_tail_after_drain() {
 fn terminal_batches_are_split_before_the_protocol_limit() {
     let mut session = Session::new();
     session
-        .create_workspace(std::env::temp_dir())
+        .create_workspace(empty_root())
         .expect("Workspace capacity");
     let pane_id = session.workspaces()[0].tabs()[0]
         .focused_pane()
@@ -1180,7 +1177,7 @@ fn terminal_batches_are_split_before_the_protocol_limit() {
 fn oversized_terminal_frame_is_transported_as_ordered_chunks() {
     let mut session = Session::new();
     session
-        .create_workspace(std::env::temp_dir())
+        .create_workspace(empty_root())
         .expect("Workspace capacity");
     let pane_id = session.workspaces()[0].tabs()[0]
         .focused_pane()
@@ -1220,7 +1217,7 @@ fn oversized_terminal_frame_is_transported_as_ordered_chunks() {
 fn bootstrap_dynamic_records_are_split_and_reassembled() {
     let mut session = Session::new();
     session
-        .create_workspace(std::env::temp_dir())
+        .create_workspace(empty_root())
         .expect("Workspace capacity");
     let first_pane = session.workspaces()[0].tabs()[0]
         .focused_pane()
@@ -1300,7 +1297,7 @@ fn untransportable_durable_mutations_leave_the_session_unchanged() {
     let mut state = RuntimeState::new(endpoint.as_local_path().unwrap());
     let workspace_id = state
         .session
-        .create_workspace(std::env::temp_dir())
+        .create_workspace(empty_root())
         .expect("Workspace capacity");
     let pane_id = state.session.workspaces()[0].tabs()[0]
         .focused_pane()
@@ -1337,7 +1334,7 @@ fn non_utf8_terminal_cwd_does_not_poison_the_durable_snapshot() {
     let mut state = RuntimeState::new(endpoint.as_local_path().unwrap());
     state
         .session
-        .create_workspace(std::env::temp_dir())
+        .create_workspace(empty_root())
         .expect("Workspace capacity");
     let pane_id = state.session.workspaces()[0].tabs()[0]
         .focused_pane()
@@ -1361,7 +1358,7 @@ fn invalid_terminal_cwd_does_not_discard_valid_sibling_observations() {
     let mut state = RuntimeState::new(endpoint.as_local_path().unwrap());
     state
         .session
-        .create_workspace(std::env::temp_dir())
+        .create_workspace(empty_root())
         .expect("Workspace capacity");
     let first_pane = state.session.workspaces()[0].tabs()[0]
         .focused_pane()

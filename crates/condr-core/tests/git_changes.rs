@@ -16,15 +16,80 @@ use condr_core::{
 
 static NEXT_REPO: AtomicU64 = AtomicU64::new(0);
 
-fn scratch_repository(name: &str) -> PathBuf {
+/// A test's directory under the system's temp directory, removed when dropped, a failed
+/// test's too. Made first in a test, it goes last, after every repository handle on it.
+struct Scratch(PathBuf);
+
+impl std::ops::Deref for Scratch {
+    type Target = Path;
+
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl AsRef<Path> for Scratch {
+    fn as_ref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        remove_test_directory(&self.0);
+    }
+}
+
+/// Removes a test's directory, a repository's included. Windows refuses to delete a file
+/// that is open or read-only, as Git makes every object, where the file system cannot
+/// delete the POSIX way, so it clears read-only and tries again before saying what stays.
+fn remove_test_directory(path: &Path) {
+    for attempt in 1..=5 {
+        match fs::remove_dir_all(path) {
+            Ok(()) => return,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+            Err(error) if attempt == 5 => {
+                eprintln!("could not remove {}: {error}", path.display());
+            }
+            Err(_) => {
+                clear_read_only(path);
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+fn clear_read_only(directory: &Path) {
+    for entry in fs::read_dir(directory).into_iter().flatten().flatten() {
+        let path = entry.path();
+        let Ok(metadata) = fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if metadata.is_dir() {
+            clear_read_only(&path);
+        } else if metadata.is_file() && metadata.permissions().readonly() {
+            let mut permissions = metadata.permissions();
+            // Windows clears the attribute; Unix, where this would open the file to all, never runs it.
+            #[allow(clippy::permissions_set_readonly_false)]
+            permissions.set_readonly(false);
+            let _ = fs::set_permissions(&path, permissions);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn clear_read_only(_: &Path) {}
+
+fn scratch_repository(name: &str) -> Scratch {
     let root = std::env::temp_dir().join(format!(
         "condr-git-changes-{name}-{}-{}",
         std::process::id(),
         NEXT_REPO.fetch_add(1, Ordering::Relaxed)
     ));
-    let _ = fs::remove_dir_all(&root);
+    remove_test_directory(&root);
     init_repository(&root);
-    root
+    Scratch(root)
 }
 
 fn init_repository(root: &Path) {
@@ -409,8 +474,6 @@ fn mark_ignored_flags_the_listing_entries_the_ignore_rules_exclude() {
             .collect::<Vec<_>>(),
         [("build.log", true), ("main.rs", false)]
     );
-
-    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -509,7 +572,6 @@ fn a_root_in_no_repository_shows_each_one_right_under_it_with_its_paths() {
     assert_eq!(inside[0].directory().as_str(), "");
 
     git(&api, ["worktree", "remove", "--force", "../linked"]);
-    let _ = fs::remove_dir_all(&parent);
 }
 
 #[test]
@@ -546,8 +608,6 @@ fn a_root_in_a_repository_also_shows_each_one_right_under_it() {
     assert_eq!(own.to_repository(lib), None);
     assert_eq!(nested.to_repository(lib).unwrap().as_str(), "lib.rs");
     assert!(nested.file_diff(lib, None, None, false).is_ok());
-
-    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -609,8 +669,6 @@ fn a_root_below_its_work_trees_top_sees_only_what_is_under_it() {
         ],
         "a commit's files outside the Root are not listed"
     );
-
-    let _ = fs::remove_dir_all(&root);
 }
 
 /// Path and status of every entry, the way the assertions below read a list.
@@ -713,8 +771,6 @@ fn the_base_list_keeps_what_the_branch_committed_and_nothing_the_base_gained() {
             .content,
         FileDiffContent::Text { hunks: Vec::new() }
     );
-
-    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -746,16 +802,14 @@ fn the_base_follows_a_rebase_and_empties_once_the_branch_is_merged() {
         summary(&against_base.unwrap()),
         [("fresh.txt", GitChangeStatus::Untracked)]
     );
-
-    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn the_base_is_the_recorded_branch_else_the_default_branch() {
     let origin = scratch_repository("base-origin");
     commit_file(&origin, "README.md", "condr\n");
-    let clone = origin.with_extension("clone");
-    let _ = fs::remove_dir_all(&clone);
+    let clone = Scratch(origin.with_extension("clone"));
+    remove_test_directory(&clone);
     let url = origin.to_string_lossy().replace('\\', "/");
     git(
         origin.parent().unwrap(),
@@ -788,8 +842,6 @@ fn the_base_is_the_recorded_branch_else_the_default_branch() {
         Some("origin/main"),
         "a recorded branch that is gone falls back"
     );
-    let _ = fs::remove_dir_all(&clone);
-    let _ = fs::remove_dir_all(&origin);
 
     // Without a remote: a local `main`, else `master`, else nothing.
     for (default, expected) in [
@@ -816,13 +868,11 @@ fn the_base_is_the_recorded_branch_else_the_default_branch() {
         commit_file(&root, "other.txt", "other\n");
         let unrelated = discover_repository(&root).unwrap().unwrap();
         assert_eq!(unrelated.base(Some("feature")).unwrap(), None);
-        let _ = fs::remove_dir_all(&root);
     }
 
     let unborn = scratch_repository("base-unborn");
     let repository = discover_repository(&unborn).unwrap().unwrap();
     assert_eq!(repository.base(Some("main")).unwrap(), None);
-    let _ = fs::remove_dir_all(&unborn);
 }
 
 #[test]
@@ -841,8 +891,6 @@ fn the_fingerprint_moves_with_the_base_ref() {
     git(&root, ["update-ref", "refs/heads/main", "feature"]);
     assert_eq!(repository.fingerprint(None).unwrap(), without);
     assert_ne!(repository.fingerprint(Some(&base)).unwrap(), with);
-
-    let _ = fs::remove_dir_all(&root);
 }
 
 /// Commits `message` with every file staged, at `time` seconds, so commit-time order is
@@ -995,7 +1043,7 @@ fn a_commit_lists_its_files_against_its_first_parent() {
     git(&root, ["checkout", "-q", "main"]);
     let output = Command::new("git")
         .arg("-C")
-        .arg(&root)
+        .arg(root.as_os_str())
         .args(["merge", "-q", "--no-ff", "-m", "merge side", "side"])
         .env("GIT_AUTHOR_DATE", "@1003 +0000")
         .env("GIT_COMMITTER_DATE", "@1003 +0000")
@@ -1080,8 +1128,6 @@ fn old_file_is_the_compared_blob_added_or_nothing() {
     assert!("x\n".repeat(600_000).len() as u64 > MAX_DIFF_BYTES);
     assert_eq!(old("huge.txt").unwrap(), OldFile::None, "too large");
     assert!(old("../outside.txt").is_err());
-
-    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -1117,8 +1163,6 @@ fn old_file_follows_a_rename_and_the_base() {
         repository.old_file(new, None, None).unwrap(),
         OldFile::Added
     );
-
-    let _ = fs::remove_dir_all(&root);
 }
 
 /// The editor holds the file as a checkout wrote it, so the old side is converted the same
@@ -1140,8 +1184,6 @@ fn old_file_is_converted_as_a_checkout_writes_it() {
     assert_eq!(old("auto.txt"), OldFile::Text("one\ntwo\n".into()));
     git(&root, ["config", "core.autocrlf", "true"]);
     assert_eq!(old("auto.txt"), OldFile::Text("one\r\ntwo\r\n".into()));
-
-    let _ = fs::remove_dir_all(&root);
 }
 
 #[cfg(unix)]
@@ -1168,6 +1210,4 @@ fn old_file_has_nothing_for_a_symlink_on_either_side() {
             "{path}"
         );
     }
-
-    let _ = fs::remove_dir_all(&root);
 }

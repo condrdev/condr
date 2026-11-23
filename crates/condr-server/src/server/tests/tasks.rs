@@ -113,10 +113,7 @@ fn task_requests_create_edit_order_archive_restore_and_delete() {
     assert_eq!(listed(&mut state, false), [b, c, a], "restored on top");
 
     // A started Task is deleted only once archived.
-    let workspace = state
-        .session
-        .create_workspace(std::env::temp_dir())
-        .unwrap();
+    let workspace = state.session.create_workspace(empty_root()).unwrap();
     state.task_mut(c).unwrap().workspace = Some(workspace);
     for command in [
         TaskCommand::Delete { task: c },
@@ -160,7 +157,7 @@ fn task_requests_create_edit_order_archive_restore_and_delete() {
 #[test]
 fn a_closing_workspace_clears_its_tasks_link_and_records_the_last_place() {
     let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
-    let root = std::env::temp_dir();
+    let root = empty_root();
     let parent = state.session.create_workspace(root.join("parent")).unwrap();
     let workspace = state.session.create_workspace(root.join("child")).unwrap();
     assert!(state.session.associate_worktree(
@@ -304,10 +301,7 @@ fn a_second_server_on_a_held_task_store_keeps_its_tasks_in_memory() {
 #[test]
 fn undoing_a_start_never_closes_a_workspace_by_its_last_tab() {
     let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
-    let workspace = state
-        .session
-        .create_workspace(std::env::temp_dir())
-        .unwrap();
+    let workspace = state.session.create_workspace(empty_root()).unwrap();
     let only = state.session.workspace(workspace).unwrap().tabs()[0].id();
     let opened = state.session.create_tab(workspace, None).unwrap();
     let state = Arc::new(Mutex::new(state));

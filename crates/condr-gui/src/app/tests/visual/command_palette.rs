@@ -127,7 +127,7 @@ fn double_shift_opens_the_palette_and_enter_runs_the_chosen_action() {
 #[test]
 fn go_to_reaches_a_tab_and_lists_agents_most_urgent_first() {
     let _serial_guard = acquire_visual_test_lock();
-    let directory = TestDirectory::new("command-palette-go-to");
+    let directory = TestDirectory::new("palette-go-to");
     let mut session = Session::new();
     let workspace_id = session.create_workspace(directory.0.clone()).unwrap();
     let first_tab = session.workspace(workspace_id).unwrap().tabs()[0].id();

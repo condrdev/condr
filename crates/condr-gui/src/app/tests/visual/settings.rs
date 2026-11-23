@@ -1530,7 +1530,7 @@ fn closing_settings_leaves_the_terminal_taking_server_output() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                root_directory: std::env::temp_dir(),
+                root_directory: empty_root(),
             });
         });
     });

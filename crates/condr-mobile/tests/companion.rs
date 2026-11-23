@@ -23,6 +23,16 @@ impl Listener for Counter {
     }
 }
 
+/// An empty directory every test may make a Workspace's Root. The system's temp directory
+/// itself would do, but a Server looks for a repository in every directory right under a
+/// Root (ADR 0073), and one full of other programs' leftovers made that slow. Nothing
+/// writes into it, so every test and every run shares it.
+fn empty_root() -> std::path::PathBuf {
+    let root = std::env::temp_dir().join("condr-empty-root");
+    std::fs::create_dir_all(&root).unwrap();
+    root
+}
+
 fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(20);
     while !done() {
@@ -50,7 +60,7 @@ fn a_burst_of_frames_costs_one_changed_until_the_app_takes_it() {
     let mut desktop = ClientConnection::connect_overview(&endpoint, "desktop").unwrap();
     let Ok(LayoutResult::WorkspaceCreated { pane_id, .. }) = desktop
         .layout(LayoutCommand::CreateWorkspace {
-            root_directory: std::env::temp_dir(),
+            root_directory: empty_root(),
             name: None,
         })
         .unwrap()
@@ -142,7 +152,7 @@ fn outside_a_pane_the_companion_gets_events_but_no_terminal() {
     let create = |desktop: &mut ClientConnection| {
         let Ok(LayoutResult::WorkspaceCreated { pane_id, .. }) = desktop
             .layout(LayoutCommand::CreateWorkspace {
-                root_directory: std::env::temp_dir(),
+                root_directory: empty_root(),
                 name: None,
             })
             .unwrap()
@@ -298,7 +308,7 @@ fn scrolling_up_shows_in_the_screen_and_bottom_brings_it_back() {
     let mut desktop = ClientConnection::connect_overview(&endpoint, "desktop").unwrap();
     let Ok(LayoutResult::WorkspaceCreated { pane_id, .. }) = desktop
         .layout(LayoutCommand::CreateWorkspace {
-            root_directory: std::env::temp_dir(),
+            root_directory: empty_root(),
             name: None,
         })
         .unwrap()
@@ -437,7 +447,7 @@ impl Shown {
         let mut desktop = ClientConnection::connect_overview(&endpoint, "desktop").unwrap();
         let Ok(LayoutResult::WorkspaceCreated { pane_id, .. }) = desktop
             .layout(LayoutCommand::CreateWorkspace {
-                root_directory: std::env::temp_dir(),
+                root_directory: empty_root(),
                 name: None,
             })
             .unwrap()
@@ -798,7 +808,7 @@ fn an_image_in_the_shown_pane_is_placed_and_fetched() {
     let mut desktop = ClientConnection::connect_overview(&endpoint, "desktop").unwrap();
     let Ok(LayoutResult::WorkspaceCreated { pane_id, .. }) = desktop
         .layout(LayoutCommand::CreateWorkspace {
-            root_directory: std::env::temp_dir(),
+            root_directory: empty_root(),
             name: None,
         })
         .unwrap()

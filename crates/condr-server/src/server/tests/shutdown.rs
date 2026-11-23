@@ -66,7 +66,7 @@ fn stop_server_cancels_resize_queued_behind_pty_backpressure() {
             request_id: 1,
             command: LayoutCommand::CreateWorkspace {
                 name: None,
-                root_directory: std::env::temp_dir(),
+                root_directory: empty_root(),
             },
         },
     )

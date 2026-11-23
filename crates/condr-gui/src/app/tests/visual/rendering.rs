@@ -6,7 +6,7 @@ fn workspace_with_a_pane(window: &mut VisualTestContext, view: &Entity<Condr>) -
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                root_directory: std::env::temp_dir(),
+                root_directory: empty_root(),
             });
         });
     });

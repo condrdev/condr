@@ -265,7 +265,7 @@ fn a_device_watching_the_pane_is_skipped_and_nobody_left_posts_nothing() {
         for _ in 0..2 {
             state
                 .session
-                .create_workspace(std::env::temp_dir())
+                .create_workspace(empty_root())
                 .expect("Workspace capacity");
         }
         let workspaces = state.session.workspaces();

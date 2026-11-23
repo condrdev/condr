@@ -13,7 +13,7 @@ fn a_new_task_saves_with_the_shortcut_and_unsaved_changes_ask_before_they_go() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                root_directory: std::env::temp_dir(),
+                root_directory: empty_root(),
             });
         });
     });
@@ -123,7 +123,7 @@ fn a_form_closes_when_another_client_deletes_its_task_and_follows_one_that_start
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                root_directory: std::env::temp_dir(),
+                root_directory: empty_root(),
             });
         });
     });

@@ -24,7 +24,7 @@ fn terminal_shift_enter_tab_backtab_and_ctrl_c_reach_the_pty() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                root_directory: std::env::temp_dir(),
+                root_directory: empty_root(),
             });
         });
     });
@@ -123,7 +123,7 @@ fn terminal_pageup_reaches_the_pty_while_shift_pageup_scrolls_history() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                root_directory: std::env::temp_dir(),
+                root_directory: empty_root(),
             });
         });
     });
@@ -201,7 +201,7 @@ fn terminal_drag_selection_updates_locally() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                root_directory: std::env::temp_dir(),
+                root_directory: empty_root(),
             });
         });
     });
@@ -358,7 +358,7 @@ fn scrollback_selection_tracks_authoritative_view_offset_for_copy() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                root_directory: std::env::temp_dir(),
+                root_directory: empty_root(),
             });
         });
     });
@@ -476,7 +476,7 @@ fn terminal_right_click_reports_to_the_pty_and_shift_left_drag_selects_locally()
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                root_directory: std::env::temp_dir(),
+                root_directory: empty_root(),
             });
         });
     });
@@ -637,7 +637,7 @@ fn terminal_double_click_and_clipboard_shortcut_copy_a_word() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                root_directory: std::env::temp_dir(),
+                root_directory: empty_root(),
             });
         });
     });
@@ -889,7 +889,7 @@ fn terminal_clipboard_shortcuts_paste_through_tcp_server() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                root_directory: std::env::temp_dir(),
+                root_directory: empty_root(),
             });
         });
     });
@@ -1035,7 +1035,7 @@ fn terminal_clipboard_image_gesture_preserves_fallback_and_captures_the_target()
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                root_directory: std::env::temp_dir(),
+                root_directory: empty_root(),
             });
         })
     });
@@ -1181,7 +1181,7 @@ fn terminal_link_hover_and_modified_click_open_the_url() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                root_directory: std::env::temp_dir(),
+                root_directory: empty_root(),
             });
         });
     });
@@ -1401,7 +1401,7 @@ fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() 
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                root_directory: std::env::temp_dir(),
+                root_directory: empty_root(),
             });
         });
     });
@@ -1787,7 +1787,7 @@ fn focused_pane(view: &Entity<Condr>, window: &mut VisualTestContext) -> PaneId 
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                root_directory: std::env::temp_dir(),
+                root_directory: empty_root(),
             });
         });
     });
@@ -2388,7 +2388,7 @@ fn cmd_c_without_a_selection_reaches_a_kitty_program_as_itself_and_others_not_at
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                root_directory: std::env::temp_dir(),
+                root_directory: empty_root(),
             });
         });
     });
@@ -2525,7 +2525,7 @@ fn a_program_that_asks_for_key_event_types_receives_repeats_and_releases() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                root_directory: std::env::temp_dir(),
+                root_directory: empty_root(),
             });
         });
     });
@@ -2647,7 +2647,7 @@ fn closing_a_preedit_owner_discards_its_late_commit_before_accepting_new_input()
     window.update(|window, cx| {
         view.update(cx, |this, cx| {
             let mut session = Session::new();
-            session.create_workspace(std::env::temp_dir()).unwrap();
+            session.create_workspace(empty_root()).unwrap();
             let old_pane = session.workspaces()[0].tabs()[0]
                 .focused_pane()
                 .unwrap()
