@@ -446,7 +446,8 @@ fn line_with_end(line: Div, end: Option<Div>) -> AnyElement {
             .min_w_0()
             .gap_2()
             .child(line.flex_1())
-            .child(end.flex_none())
+            // A long end, such as a Workspace's name, leaves the label half the row.
+            .child(end.flex_none().max_w(relative(0.5)).truncate())
             .into_any_element(),
     }
 }
