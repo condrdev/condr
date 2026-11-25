@@ -3,12 +3,6 @@
 use super::layout::agent_changed;
 use super::*;
 
-const SECONDARY: &str = if cfg!(target_os = "macos") {
-    "cmd"
-} else {
-    "ctrl"
-};
-
 fn press_shift_twice(window: &mut VisualTestContext) {
     for _ in 0..2 {
         window.simulate_modifiers_change(Modifiers::shift());

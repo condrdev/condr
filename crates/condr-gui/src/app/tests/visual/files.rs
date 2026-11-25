@@ -58,13 +58,13 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
         })
     }));
     window.update(|window, cx| _ = window.draw(cx));
-    let toggle = window.debug_bounds("toggle-changes").unwrap();
-    window.simulate_click(toggle.center(), Modifiers::default());
+    // The shortcut opens the sidebar on the view it last showed: outside a repository
+    // that is Files, since Changes has nothing to show. The root listing arrives from the
+    // Server with directories first.
+    window.simulate_keystrokes(&format!("{SECONDARY}-alt-b"));
     window.run_until_parked();
     window.update(|window, cx| _ = window.draw(cx));
     assert!(window.debug_bounds("condr-right-sidebar").is_some());
-    // Outside a repository the sidebar opens on Files, since Changes has nothing to show;
-    // the root listing arrives from the Server with directories first.
     assert!(
         wait_until(window, |window| {
             window.update(|window, cx| _ = window.draw(cx));
@@ -73,17 +73,17 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
         }),
         "a Workspace outside a repository opens the sidebar on Files"
     );
-    // The header tabs still reach Changes, which says why it is empty, and back.
+    // The strip still reaches Changes, which says why it is empty, and back.
     let changes_tab = window
-        .debug_bounds("sidebar-view-changes")
-        .expect("the header should offer the Changes view");
+        .debug_bounds("right-sidebar-changes")
+        .expect("the strip should offer the Changes view");
     window.simulate_click(changes_tab.center(), Modifiers::default());
     window.run_until_parked();
     window.update(|window, cx| _ = window.draw(cx));
     assert!(window.debug_bounds("condr-files-list").is_none());
     let files_tab = window
-        .debug_bounds("sidebar-view-files")
-        .expect("the header should offer the Files view");
+        .debug_bounds("right-sidebar-files")
+        .expect("the strip should offer the Files view");
     window.simulate_click(files_tab.center(), Modifiers::default());
     window.run_until_parked();
     window.update(|window, cx| _ = window.draw(cx));
@@ -483,7 +483,7 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
     window.run_until_parked();
     window.update(|window, cx| _ = window.draw(cx));
     assert!(window.debug_bounds("file-src/main.rs").is_none());
-    let changes_tab = window.debug_bounds("sidebar-view-changes").unwrap();
+    let changes_tab = window.debug_bounds("right-sidebar-changes").unwrap();
     window.simulate_click(changes_tab.center(), Modifiers::default());
     window.run_until_parked();
     window.update(|window, cx| _ = window.draw(cx));
@@ -706,7 +706,7 @@ fn preview_tab_saves_edits_and_never_drops_unsaved_text() {
         })
     }));
     window.update(|window, cx| _ = window.draw(cx));
-    let toggle = window.debug_bounds("toggle-changes").unwrap();
+    let toggle = window.debug_bounds("right-sidebar-files").unwrap();
     window.simulate_click(toggle.center(), Modifiers::default());
     assert!(wait_until(window, |window| {
         window.update(|window, cx| _ = window.draw(cx));
@@ -872,7 +872,7 @@ fn files_view_creates_renames_and_deletes_entries() {
         })
     }));
     window.update(|window, cx| _ = window.draw(cx));
-    let toggle = window.debug_bounds("toggle-changes").unwrap();
+    let toggle = window.debug_bounds("right-sidebar-files").unwrap();
     window.simulate_click(toggle.center(), Modifiers::default());
     assert!(wait_until(window, |window| {
         window.update(|window, cx| _ = window.draw(cx));

@@ -779,10 +779,14 @@ const SIDEBAR_CONTENT_GUTTER: Pixels = px(12.);
 /// A small icon-only Kit button: the least the title segment must hold for its toggle.
 const TITLE_TOGGLE_SLOT: Pixels = px(24.);
 
-/// The main window's title bar continues the sidebar and the Workspace: its left segment
-/// is the sidebar's width and color, its right segment hosts the Tab strip, so the two
-/// columns read as one surface each and the Panes get the height a separate strip took.
-/// The Kit still draws the window controls and moves the window from empty space.
+/// The main window's title bar continues the sidebars and the Workspace: its left segment
+/// is the sidebar's width and color, its middle segment hosts the Tab strip, and the open
+/// right sidebar's header closes it above that sidebar (ADR 0076), so each column reads as
+/// one surface and the Panes get the height a separate strip took. The Kit still draws the
+/// window controls and moves the window from empty space.
+///
+/// `tabs_width` is the Workspace's width below while the right sidebar is open: the header
+/// then takes the rest, window controls included, and its edge meets the sidebar's.
 #[allow(clippy::too_many_arguments)]
 fn workspace_title_bar(
     title: String,
@@ -790,8 +794,9 @@ fn workspace_title_bar(
     sidebar_collapsed: bool,
     tab_strip: Option<AnyElement>,
     open_in: Option<AnyElement>,
-    changes_toggle: Option<AnyElement>,
     bring_back: Option<AnyElement>,
+    tabs_width: Option<Pixels>,
+    right_header: Option<AnyElement>,
     owner: WeakEntity<Condr>,
     cx: &App,
 ) -> TitleBar {
@@ -878,15 +883,18 @@ fn workspace_title_bar(
                     // The Tab strip yields to the "Open in" control: the control keeps
                     // its width and the strip truncates.
                     h_flex()
-                        .flex_1()
+                        .map(|this| match tabs_width {
+                            Some(width) => this.flex_none().w(width),
+                            None => this.flex_1(),
+                        })
                         .min_w_0()
                         .h_full()
                         .bg(theme.background)
                         .children(tab_strip)
                         .children(open_in)
-                        .children(changes_toggle)
                         .children(bring_back),
-                ),
+                )
+                .children(right_header),
         )
 }
 
@@ -931,12 +939,20 @@ impl Render for Condr {
             },
             None => self.render_workspace(view, cx),
         };
-        let has_workspace = view.page == ContentPage::Workspace
-            && self.presented_workspace_in(view).is_some()
-            && self.draws_workspace(view);
-        let changes_toggle = has_workspace.then(|| self.render_changes_toggle(view, cx));
-        let changes_column = (view.page == ContentPage::Workspace && self.right_sidebar_open(view))
-            .then(|| self.render_right_sidebar(view, cx));
+        let shown_sidebar = self.shown_right_sidebar(view);
+        let strip = shown_sidebar
+            .as_ref()
+            .map(|shown| self.render_right_sidebar_strip(shown, cx));
+        let open_sidebar = shown_sidebar.as_ref().filter(|shown| shown.open);
+        let right_header = open_sidebar.map(|shown| self.render_right_sidebar_header(shown, cx));
+        let right_column = open_sidebar.map(|shown| self.render_right_sidebar(view, shown, cx));
+        let tabs_width = open_sidebar.map(|_| {
+            (window.viewport_size().width
+                - view.sidebar_layout_width()
+                - view.right_sidebar_width
+                - RIGHT_SIDEBAR_STRIP_WIDTH)
+                .max(px(0.))
+        });
         // The Tasks window draws Tasks alone, as a Tab window draws its Tab (ADR 0069).
         let tab_window = matches!(view.scope, WindowScope::Tab(..) | WindowScope::Tasks);
         let title = self.window_title(view.scope);
@@ -1025,7 +1041,7 @@ impl Render for Condr {
             .on_action(cx.listener(Self::action_swap_down))
             .on_action(cx.listener(Self::action_toggle_zoom))
             .on_action(cx.listener(Self::action_toggle_sidebar))
-            .on_action(cx.listener(Self::action_toggle_changes))
+            .on_action(cx.listener(Self::action_toggle_right_sidebar))
             .on_action(cx.listener(Self::action_toggle_tasks))
             .on_action(cx.listener(Self::action_new_task))
             .on_action(cx.listener(Self::action_next_workspace))
@@ -1042,107 +1058,127 @@ impl Render for Condr {
             // alone: no Tab strip and no sidebars (ADR 0043).
             .map(|this| {
                 if tab_window {
-                    this.child(tab_window_title_bar(title, bring_back, cx))
-                        .child(workspace)
-                } else {
-                    this.child(workspace_title_bar(
-                        title,
-                        view.sidebar_width,
-                        view.sidebar_collapsed,
-                        tab_strip,
-                        open_in,
-                        changes_toggle,
-                        bring_back,
-                        sidebar_toggle_owner,
-                        cx,
-                    ))
-                    .child(
-                        // The sidebar keeps an absolute width, the way Zed sizes its docks: a
-                        // resizable group would rescale it with the window on every resize.
-                        // Dragging the handle on its right edge is the only thing that moves it.
-                        h_flex()
-                            .w_full()
-                            .flex_1()
-                            .min_h_0()
-                            .on_drag_move(cx.listener(
-                                |this, event: &DragMoveEvent<DraggedSidebar>, window, cx| {
-                                    let width = event.event.position.x - event.bounds.origin.x;
-                                    this.window_view_mut(window).sidebar_width =
-                                        width.max(MIN_SIDEBAR_WIDTH).min(MAX_SIDEBAR_WIDTH).round();
-                                    this.schedule_state_save(cx);
-                                    cx.notify();
-                                },
-                            ))
-                            // The right sidebar mirrors it: its handle is on its left edge.
-                            .on_drag_move(cx.listener(
-                                |this, event: &DragMoveEvent<DraggedRightSidebar>, window, cx| {
-                                    let right = event.bounds.origin.x + event.bounds.size.width;
-                                    let width = right - event.event.position.x;
-                                    this.window_view_mut(window).right_sidebar_width = width
-                                        .max(MIN_RIGHT_SIDEBAR_WIDTH)
-                                        .min(MAX_RIGHT_SIDEBAR_WIDTH)
-                                        .round();
-                                    this.schedule_state_save(cx);
-                                    cx.notify();
-                                },
-                            ))
-                            .child(
-                                div()
-                                    .debug_selector(|| "condr-sidebar".into())
-                                    .relative()
-                                    .w(view.sidebar_layout_width())
-                                    .flex_none()
-                                    .h_full()
-                                    .child(
-                                        AnyView::from(sidebar)
-                                            .cached(StyleRefinement::default().size_full()),
-                                    )
-                                    // Kit's handle inside its trailing edge, as Kit's Dock puts
-                                    // a left panel's: its line is the sidebar's border. It
-                                    // swallows the press so the row under it is not clicked.
-                                    .when(!view.sidebar_collapsed, |this| {
-                                        this.child(
-                                            resize_handle("condr-sidebar-resize", Axis::Horizontal)
-                                                .inside(HandleEdge::Trailing)
-                                                .debug_selector(|| "condr-sidebar-resize".into())
-                                                .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                                                    cx.stop_propagation()
-                                                })
-                                                .on_drag(DraggedSidebar, |_, _, _, cx| {
-                                                    cx.new(|_| EmptyView)
-                                                }),
-                                        )
-                                    }),
-                            )
-                            .child(workspace)
-                            .when_some(changes_column, |this, changes| {
-                                this.child(
-                                    div()
-                                        .debug_selector(|| "condr-right-sidebar-column".into())
-                                        .relative()
-                                        .w(view.right_sidebar_width)
-                                        .flex_none()
-                                        .h_full()
-                                        .child(changes)
-                                        // Inside its leading edge, as Kit's Dock puts a right
-                                        // panel's.
-                                        .child(
-                                            resize_handle(
-                                                "condr-right-sidebar-resize",
-                                                Axis::Horizontal,
-                                            )
-                                            .inside(HandleEdge::Leading)
-                                            .debug_selector(|| "condr-right-sidebar-resize".into())
+                    return this
+                        .child(tab_window_title_bar(title, bring_back, cx))
+                        .child(workspace);
+                }
+                let title_bar = workspace_title_bar(
+                    title,
+                    view.sidebar_width,
+                    view.sidebar_collapsed,
+                    tab_strip,
+                    open_in,
+                    bring_back,
+                    tabs_width,
+                    right_header,
+                    sidebar_toggle_owner,
+                    cx,
+                );
+                let columns =
+                    // The sidebar keeps an absolute width, the way Zed sizes its docks: a
+                    // resizable group would rescale it with the window on every resize.
+                    // Dragging the handle on its right edge is the only thing that moves it.
+                    h_flex()
+                        .w_full()
+                        .flex_1()
+                        .min_h_0()
+                        .on_drag_move(cx.listener(
+                            |this, event: &DragMoveEvent<DraggedSidebar>, window, cx| {
+                                let width = event.event.position.x - event.bounds.origin.x;
+                                this.window_view_mut(window).sidebar_width =
+                                    width.max(MIN_SIDEBAR_WIDTH).min(MAX_SIDEBAR_WIDTH).round();
+                                this.schedule_state_save(cx);
+                                cx.notify();
+                            },
+                        ))
+                        // The right sidebar mirrors it: its handle is on its left edge.
+                        .on_drag_move(cx.listener(
+                            |this, event: &DragMoveEvent<DraggedRightSidebar>, window, cx| {
+                                let right = event.bounds.origin.x + event.bounds.size.width;
+                                let width = right - event.event.position.x;
+                                this.window_view_mut(window).right_sidebar_width = width
+                                    .max(MIN_RIGHT_SIDEBAR_WIDTH)
+                                    .min(MAX_RIGHT_SIDEBAR_WIDTH)
+                                    .round();
+                                this.schedule_state_save(cx);
+                                cx.notify();
+                            },
+                        ))
+                        .child(
+                            div()
+                                .debug_selector(|| "condr-sidebar".into())
+                                .relative()
+                                .w(view.sidebar_layout_width())
+                                .flex_none()
+                                .h_full()
+                                .child(
+                                    AnyView::from(sidebar)
+                                        .cached(StyleRefinement::default().size_full()),
+                                )
+                                // Kit's handle inside its trailing edge, as Kit's Dock puts
+                                // a left panel's: its line is the sidebar's border. It
+                                // swallows the press so the row under it is not clicked.
+                                .when(!view.sidebar_collapsed, |this| {
+                                    this.child(
+                                        resize_handle("condr-sidebar-resize", Axis::Horizontal)
+                                            .inside(HandleEdge::Trailing)
+                                            .debug_selector(|| "condr-sidebar-resize".into())
                                             .on_mouse_down(MouseButton::Left, |_, _, cx| {
                                                 cx.stop_propagation()
                                             })
-                                            .on_drag(DraggedRightSidebar, |_, _, _, cx| {
+                                            .on_drag(DraggedSidebar, |_, _, _, cx| {
                                                 cx.new(|_| EmptyView)
                                             }),
-                                        ),
-                                )
-                            }),
+                                    )
+                                }),
+                        )
+                        .child(workspace)
+                        .when_some(right_column, |this, column| {
+                            this.child(
+                                div()
+                                    .debug_selector(|| "condr-right-sidebar-column".into())
+                                    .relative()
+                                    .w(view.right_sidebar_width)
+                                    .flex_none()
+                                    .h_full()
+                                    .child(column)
+                                    // Inside its leading edge, as Kit's Dock puts a right
+                                    // panel's.
+                                    .child(
+                                        resize_handle(
+                                            "condr-right-sidebar-resize",
+                                            Axis::Horizontal,
+                                        )
+                                        .inside(HandleEdge::Leading)
+                                        .debug_selector(|| "condr-right-sidebar-resize".into())
+                                        .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                            cx.stop_propagation()
+                                        })
+                                        .on_drag(DraggedRightSidebar, |_, _, _, cx| {
+                                            cx.new(|_| EmptyView)
+                                        }),
+                                    ),
+                            )
+                        });
+                // The strip runs the window's full height on macOS, whose title bar has no
+                // controls at that end; elsewhere they hold the corner and it starts below.
+                if cfg!(target_os = "macos") {
+                    this.child(
+                        h_flex()
+                            .size_full()
+                            .min_h_0()
+                            .child(
+                                v_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .h_full()
+                                    .child(title_bar)
+                                    .child(columns),
+                            )
+                            .children(strip),
                     )
+                } else {
+                    this.child(title_bar).child(columns.children(strip))
                 }
             })
             .when(self.fps_monitor, |this| this.child(fps_monitor(window, cx)))

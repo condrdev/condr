@@ -20,7 +20,7 @@ Condr 的快捷键分为两层逻辑：
 | 打开设置 | `Cmd + ,` | `Ctrl + ,` |
 | 关闭设置 | `Esc` | `Esc` |
 | 切换左侧栏显示状态 | `Cmd + B` | `Ctrl + Shift + B` |
-| 切换右侧栏“变更与文件”（Changes & Files） | `Cmd + Option + B` | `Ctrl + Alt + B` |
+| 切换右侧栏（打开上次显示的视图） | `Cmd + Option + B` | `Ctrl + Alt + B` |
 
 * **Tasks 模式**和 **New Task** 没有默认快捷键，可以在命令面板里找到，或者用 `toggle-tasks` 和 `new-task` [自己绑一个](#修改快捷键)。
 

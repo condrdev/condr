@@ -8,7 +8,7 @@ When an Agent modifies or refactors your code, you need to quickly confirm which
 ## Open the changes panel (Changes)
 
 - **Shortcut**: press `Cmd + Option + B` (macOS) or `Ctrl + Alt + B` (Windows/Linux).
-- **From the interface**: click the sidebar button in the title bar of the right sidebar.
+- **From the interface**: click **Changes** in the column of buttons along the window's right edge; click it again to close the sidebar.
 
 The Changes view sorts modified files into three groups by Git status:
 - **Conflicts**: files with merge conflicts.
@@ -42,7 +42,7 @@ Each Workspace remembers its own choice.
 
 ## Browse commit history (History)
 
-Switch the right sidebar to **History** to see the commits of the Workspace's current branch, newest first, as `git log` lists them:
+Click **History** in the column of buttons along the window's right edge to see the commits of the Workspace's current branch, newest first, as `git log` lists them:
 
 - **The top row** names the branch and, when it has an upstream, how many commits it is ahead (`↑2`) and behind (`↓1`) as of the last fetch.
 - **Each row** shows the commit's subject, short ID, author and age. When an Agent commits, the new commit appears at the top on its own.
@@ -65,7 +65,7 @@ Only repositories directly inside the folder count, submodules included, not dee
 
 ## Browse and preview project files (Files & Preview)
 
-- **Switch to the file tree**: switch the tab at the top of the right sidebar to **Files** to expand and browse project folders as you would in a file manager.
+- **Switch to the file tree**: click **Files** in the column of buttons along the window's right edge to expand and browse project folders as you would in a file manager.
 - **Change markers**: a folder with changes carries a dot, and files ignored by `.gitignore` are grayed out automatically.
 - **Click to preview**: click any text file to open it in the **Preview** Tab. Syntax highlighting and scroll position refresh automatically when the file changes on disk.
 - **Rendered Markdown and images**: Markdown and SVG files open rendered by default; switch between **Preview** and **Source** in the Tab header. Images (PNG, JPEG, GIF, WebP, BMP, ICO and TIFF under roughly 2 MiB) scale automatically to fit, and animated images play automatically. Images in Markdown files are loaded locally from the project; web images display their alt text instead.

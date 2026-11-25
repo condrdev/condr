@@ -26,9 +26,9 @@ keymap:
     toggle_sidebar:
       en: Toggle sidebar
       zh-CN: 切换侧边栏
-    toggle_changes:
-      en: Toggle Changes & Files
-      zh-CN: 切换变更与文件
+    toggle_right_sidebar:
+      en: Toggle right sidebar
+      zh-CN: 切换右侧栏
     toggle_tasks:
       en: Toggle Tasks
       zh-CN: 切换 Tasks

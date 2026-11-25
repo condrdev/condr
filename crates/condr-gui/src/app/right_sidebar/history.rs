@@ -11,7 +11,6 @@ use crate::app::list_row::{row_highlight, row_menu};
 use crate::app::placeholders::{empty_state, failed_state, list_note};
 use condr_core::{GitChangeEntry, HISTORY_PAGE, MAX_GIT_CHANGES};
 use gpui_kit::component::resizable::{resizable_panel, v_resizable};
-use gpui_kit::component::scroll::ScrollableElement as _;
 
 /// Which commit History opens, in which repository, and its folds.
 #[derive(Default)]
@@ -219,12 +218,7 @@ impl Condr {
             .selected_commits
             .get(&(key, workspace_id))
             .and_then(|id| log.commits.iter().find(|commit| commit.id == *id));
-        let mut list = v_flex()
-            .id("condr-history-list")
-            .size_full()
-            .px_1()
-            .py_1()
-            .overflow_y_scrollbar();
+        let mut list = v_flex().w_full().px_1().py_1();
         for commit in &log.commits {
             let is_selected = selected.is_some_and(|selected| selected.id == commit.id);
             list = list.child(self.render_commit_row(key, workspace_id, commit, is_selected, cx));
@@ -250,6 +244,7 @@ impl Condr {
                 ),
             );
         }
+        let list = sidebar_list("condr-history-list", list).size_full();
         let body = div().flex_1().min_h_0().w_full();
         match selected {
             Some(commit) => body.child(
@@ -382,14 +377,7 @@ impl Condr {
             Some(Err(error)) => return failed_state(error.clone(), cx),
             Some(Ok(details)) => details,
         };
-        let mut list = v_flex()
-            .id("condr-commit-files")
-            .flex_1()
-            .min_h_0()
-            .w_full()
-            .px_1()
-            .pb_1()
-            .overflow_y_scrollbar();
+        let mut list = v_flex().w_full().px_1().pb_1();
         if details.changes.truncated {
             list = list.child(list_note(
                 t!("history.truncated", limit = MAX_GIT_CHANGES),
@@ -427,7 +415,12 @@ impl Condr {
                         count = details.changes.entries.len()
                     )),
             )
-            .child(list)
+            .child(
+                sidebar_list("condr-commit-files", list)
+                    .flex_1()
+                    .min_h_0()
+                    .w_full(),
+            )
             .into_any_element()
     }
 

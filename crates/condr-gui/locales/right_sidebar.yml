@@ -1,0 +1,17 @@
+_version: 2
+right_sidebar:
+  files:
+    en: Files
+    zh-CN: 文件
+  changes:
+    en: Changes
+    zh-CN: 变更
+  changes_count:
+    en: 'Changes (%{count})'
+    zh-CN: '变更（%{count}）'
+  history:
+    en: History
+    zh-CN: 历史
+  refresh:
+    en: Refresh
+    zh-CN: 刷新

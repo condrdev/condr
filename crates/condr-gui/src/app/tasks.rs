@@ -243,7 +243,7 @@ pub(super) fn inert_in_tasks_mode(action: TypeId) -> bool {
         TypeId::of::<SwapUp>(),
         TypeId::of::<SwapDown>(),
         TypeId::of::<ToggleZoom>(),
-        TypeId::of::<ToggleChanges>(),
+        TypeId::of::<ToggleRightSidebar>(),
         TypeId::of::<NextWorkspace>(),
         TypeId::of::<PreviousWorkspace>(),
     ]

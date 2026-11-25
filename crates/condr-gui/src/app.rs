@@ -192,7 +192,7 @@ actions!(
         SwapDown,
         ToggleZoom,
         ToggleSidebar,
-        ToggleChanges,
+        ToggleRightSidebar,
         ToggleTasks,
         NewTask,
         NextWorkspace,

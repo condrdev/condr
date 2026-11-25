@@ -9,18 +9,21 @@ mod entries;
 mod files;
 mod history;
 
+use super::icons::CondrIconName;
 use super::placeholders::empty_state;
 use super::*;
 use condr_core::GitDiffStat;
-use gpui_kit::component::tab::{Tab, TabBar};
+use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
 use rust_i18n::t;
+use std::borrow::Cow;
 
 pub(super) use changes::*;
 pub(super) use entries::*;
 pub(super) use files::*;
 pub(super) use history::*;
 
-/// What the right sidebar shows (ADR 0018); remembered per Workspace (ADR 0023).
+/// What the right sidebar shows, one at a time, each opened by its button in the strip
+/// (ADR 0076); remembered per Workspace (ADR 0023).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum RightSidebarView {
     #[default]
@@ -36,8 +39,46 @@ pub(super) const MIN_RIGHT_SIDEBAR_WIDTH: Pixels = px(200.);
 
 pub(super) const MAX_RIGHT_SIDEBAR_WIDTH: Pixels = px(480.);
 
+impl RightSidebarView {
+    /// Its button in the strip: the id tests find it by, its icon and its name.
+    fn button(self) -> (&'static str, Icon, Cow<'static, str>) {
+        match self {
+            Self::Files => (
+                "right-sidebar-files",
+                Icon::new(Glyph::FolderTree),
+                t!("right_sidebar.files"),
+            ),
+            Self::Changes => (
+                "right-sidebar-changes",
+                Icon::new(Glyph::GitCommitHorizontal),
+                t!("right_sidebar.changes"),
+            ),
+            Self::History => (
+                "right-sidebar-history",
+                Icon::new(CondrIconName::GitBranch),
+                t!("right_sidebar.history"),
+            ),
+        }
+    }
+}
+
+/// The strip of view buttons along the window's right edge (ADR 0076): a small button and
+/// the gutter either side of it.
+pub(super) const RIGHT_SIDEBAR_STRIP_WIDTH: Pixels = px(36.);
+
 /// Dragging the right sidebar's left edge resizes it.
 pub(super) struct DraggedRightSidebar;
+
+/// What a window shows of its Workspace's right sidebar.
+pub(super) struct ShownRightSidebar {
+    pub(super) key: ConnectionKey,
+    pub(super) workspace_id: WorkspaceId,
+    /// The view the sidebar shows, or opens on while it is closed.
+    pub(super) view: RightSidebarView,
+    pub(super) open: bool,
+    /// The Server serves History for this Workspace (ADR 0046).
+    pub(super) history: bool,
+}
 
 /// This Client's right sidebar per Workspace, retained against the authoritative
 /// structure.
@@ -121,56 +162,32 @@ impl Condr {
         cx.notify();
     }
 
-    /// A window draws the right sidebar of the Workspace it draws; a Tab window has none.
-    pub(super) fn right_sidebar_open(&self, view: &WindowView) -> bool {
-        !matches!(view.scope, WindowScope::Tab(..))
-            && self.draws_workspace(view)
-            && self
-                .presented_workspace_in(view)
-                .is_some_and(|workspace| self.right_sidebar.open.contains(&workspace))
-    }
-
-    /// The title bar's toggle for the right sidebar, next to "Open in". Only a Workspace
-    /// has anything to show, so the welcome page renders none.
-    pub(super) fn render_changes_toggle(
-        &self,
-        view: &WindowView,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let owner = cx.weak_entity();
-        let open = self.right_sidebar_open(view);
-        let label = if open {
-            t!("changes.toggle.hide")
-        } else {
-            t!("changes.toggle.show")
+    /// What `view`'s window shows of the right sidebar. A window draws the right sidebar of
+    /// the Workspace page it draws; a Tab window, Tasks and the other pages have none.
+    pub(super) fn shown_right_sidebar(&self, view: &WindowView) -> Option<ShownRightSidebar> {
+        if view.page != ContentPage::Workspace
+            || matches!(view.scope, WindowScope::Tab(..) | WindowScope::Tasks)
+            || !self.draws_workspace(view)
+        {
+            return None;
+        }
+        let (key, workspace_id) = self.presented_workspace_in(view)?;
+        let git = self.connection(key)?.model.workspace_git.get(&workspace_id);
+        // A Server that sends `head` serves History (ADR 0046).
+        let history = git
+            .and_then(|git| git.repositories.first())
+            .is_some_and(|repository| repository.head.is_some());
+        let shown = match self.right_sidebar_view_for(key, workspace_id, git.is_some()) {
+            RightSidebarView::History if !history => RightSidebarView::Changes,
+            shown => shown,
         };
-        let icon = if open {
-            IconName::PanelRightClose
-        } else {
-            IconName::PanelRightOpen
-        };
-        h_flex()
-            .flex_none()
-            .h_full()
-            .items_center()
-            .pl_2()
-            // The same gutter the sidebar keeps before the window edge.
-            .pr_3()
-            // Inside the title bar an unclaimed press starts a window move on Windows.
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .child(
-                Button::new("toggle-changes")
-                    .debug_selector(|| "toggle-changes".into())
-                    .ghost()
-                    .small()
-                    .icon(Icon::new(icon))
-                    .tooltip_with_action(label.clone(), &ToggleChanges, Some(SHORTCUT_CONTEXT))
-                    .accessibility_label(label)
-                    .on_click(move |_, _, cx| {
-                        let _ = owner.update(cx, |this, cx| this.toggle_right_sidebar(cx));
-                    }),
-            )
-            .into_any_element()
+        Some(ShownRightSidebar {
+            key,
+            workspace_id,
+            view: shown,
+            open: self.right_sidebar.open.contains(&(key, workspace_id)),
+            history,
+        })
     }
 
     /// The user's pick for this Workspace; a Workspace outside any repository opens on
@@ -192,24 +209,145 @@ impl Condr {
             })
     }
 
-    fn set_right_sidebar_view(
+    /// A button of the strip: opens the sidebar on its view, or closes the sidebar when
+    /// that view is the one `selected` says it shows.
+    fn click_right_sidebar_view(
         &mut self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
         view: RightSidebarView,
+        selected: Option<RightSidebarView>,
         cx: &mut Context<Self>,
     ) {
-        if self.right_sidebar.views.insert((key, workspace_id), view) != Some(view) {
-            self.schedule_state_save(cx);
-            cx.notify();
+        let workspace = (key, workspace_id);
+        if selected == Some(view) {
+            self.right_sidebar.open.remove(&workspace);
+        } else {
+            self.right_sidebar.open.insert(workspace);
+            self.right_sidebar.views.insert(workspace, view);
         }
+        self.schedule_state_save(cx);
+        cx.notify();
     }
 
-    /// The right sidebar: the presented Workspace's changes against `HEAD`, or its files
-    /// (ADR 0018), chosen by the tabs in the header.
+    /// The strip along the window's right edge (ADR 0076): a button per view, the one shown
+    /// selected while the sidebar is open. History has a button only where the Server
+    /// serves it.
+    pub(super) fn render_right_sidebar_strip(
+        &self,
+        shown: &ShownRightSidebar,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = cx.theme();
+        let owner = cx.weak_entity();
+        let (key, workspace_id) = (shown.key, shown.workspace_id);
+        let selected = shown.open.then_some(shown.view);
+        let button = |view: RightSidebarView| {
+            let (id, icon, label) = view.button();
+            let owner = owner.clone();
+            Button::new(id)
+                .debug_selector(move || id.into())
+                .ghost()
+                .small()
+                .icon(icon)
+                .selected(selected == Some(view))
+                .tooltip(label.clone())
+                .accessibility_label(label)
+                .on_click(move |_, _, cx| {
+                    let _ = owner.update(cx, |this, cx| {
+                        this.click_right_sidebar_view(key, workspace_id, view, selected, cx);
+                    });
+                })
+        };
+        v_flex()
+            .debug_selector(|| "right-sidebar-strip".into())
+            .flex_none()
+            .w(RIGHT_SIDEBAR_STRIP_WIDTH)
+            .h_full()
+            .items_center()
+            .gap_1()
+            // The first button sits where a title bar centres its own: on macOS the strip
+            // reaches the window's top, beside the title bar.
+            .pt((WORKSPACE_TITLE_BAR_HEIGHT - px(24.)) / 2.)
+            .bg(theme.sidebar)
+            .border_l_1()
+            .border_color(theme.sidebar_border)
+            .child(button(RightSidebarView::Files))
+            .child(button(RightSidebarView::Changes))
+            .when(shown.history, |this| {
+                this.child(button(RightSidebarView::History))
+            })
+            .into_any_element()
+    }
+
+    /// The open sidebar's header, in the title bar above it (ADR 0076): the view's name,
+    /// Changes with its count, and Refresh at the far end.
+    pub(super) fn render_right_sidebar_header(
+        &self,
+        shown: &ShownRightSidebar,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let (key, workspace_id) = (shown.key, shown.workspace_id);
+        let title = match shown.view {
+            RightSidebarView::Changes => self
+                .connection(key)
+                .and_then(|connection| connection.model.workspace_git.get(&workspace_id))
+                .map_or_else(
+                    || t!("right_sidebar.changes"),
+                    |git| {
+                        let against = self.workspace_diff_base(key, workspace_id);
+                        let count = shown_entries(git, against).count();
+                        t!("right_sidebar.changes_count", count = count)
+                    },
+                ),
+            view => view.button().2,
+        };
+        let owner = cx.weak_entity();
+        let theme = cx.theme();
+        h_flex()
+            .debug_selector(|| "right-sidebar-header".into())
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .pl_3()
+            .pr_2()
+            .gap_2()
+            .items_center()
+            .bg(theme.sidebar)
+            .text_color(theme.sidebar_foreground)
+            .border_l_1()
+            .border_color(theme.sidebar_border)
+            .child(div().flex_1().min_w_0().truncate().child(title))
+            .child(
+                Button::new("right-sidebar-refresh")
+                    .debug_selector(|| "right-sidebar-refresh".into())
+                    .ghost()
+                    .small()
+                    .icon(Icon::new(IconName::RefreshCw))
+                    .tooltip(t!("right_sidebar.refresh"))
+                    .accessibility_label(t!("right_sidebar.refresh"))
+                    .loading(
+                        self.right_sidebar
+                            .refreshing
+                            .contains_key(&(key, workspace_id)),
+                    )
+                    // Inside the title bar an unclaimed press starts a window move on Windows.
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_click(move |_, _, cx| {
+                        let _ = owner.update(cx, |this, cx| {
+                            this.refresh_workspace(key, workspace_id, cx);
+                        });
+                    }),
+            )
+            .into_any_element()
+    }
+
+    /// The open sidebar's body below its header: the view `shown` names, and the transfers
+    /// in flight at its foot.
     pub(super) fn render_right_sidebar(
         &self,
         view: &WindowView,
+        shown: &ShownRightSidebar,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = cx.theme();
@@ -220,86 +358,64 @@ impl Condr {
             .text_color(theme.sidebar_foreground)
             .border_l_1()
             .border_color(theme.sidebar_border);
-
-        let presented =
-            self.presented_in(view)
-                .and_then(|(key, _, workspace_id, presented_tab)| {
-                    let connection = self.connection(key)?;
-                    let session = connection.session()?;
-                    let workspace = session.workspace(workspace_id)?;
-                    let presented_tab = Some(presented_tab);
-                    let shown_diff = session
-                        .diff_tab(workspace_id)
-                        .filter(|tab| presented_tab == Some(tab.id()))
-                        .and_then(|tab| tab.diff().map(|diff| diff.path().to_relative_path_buf()));
-                    let shown_file = session
-                        .file_tab(workspace_id)
-                        .filter(|tab| presented_tab == Some(tab.id()))
-                        .and_then(|tab| tab.file().map(|file| file.path().to_relative_path_buf()));
-                    Some((
-                        connection.key,
-                        workspace_id,
-                        workspace.name().to_owned(),
-                        connection.model.workspace_git.get(&workspace_id).cloned(),
-                        shown_diff,
-                        shown_file,
-                    ))
-                });
-        let Some((key, workspace_id, workspace_name, git, shown_diff, shown_file)) = presented
+        let (key, workspace_id) = (shown.key, shown.workspace_id);
+        let Some((session, presented_tab)) = self
+            .presented_in(view)
+            .map(|(_, session, _, presented_tab)| (session, Some(presented_tab)))
         else {
-            return column
-                .child(self.sidebar_header(None, RightSidebarView::Changes, None, false, cx))
-                .child(empty_state(t!("changes.no_workspace"), cx))
-                .into_any_element();
+            return column.into_any_element();
         };
-        // A Server that sends `head` serves History (ADR 0046).
-        let history = git
-            .as_ref()
-            .and_then(|git| git.repositories.first())
-            .is_some_and(|repository| repository.head.is_some());
-        let view = match self.right_sidebar_view_for(key, workspace_id, git.is_some()) {
-            RightSidebarView::History if !history => RightSidebarView::Changes,
-            view => view,
+        let Some(workspace) = session.workspace(workspace_id) else {
+            return column.into_any_element();
         };
-        let against = self.workspace_diff_base(key, workspace_id);
-        let count = git.as_ref().map(|git| shown_entries(git, against).count());
-        let total = git.as_ref().and_then(|git| {
-            shown_entries(git, against)
-                .filter_map(|entry| entry.stat)
-                .reduce(|sum, stat| GitDiffStat {
-                    added: sum.added + stat.added,
-                    deleted: sum.deleted + stat.deleted,
-                })
-        });
-        let header = self.sidebar_header(Some((key, workspace_id)), view, count, history, cx);
-        let body = match view {
+        let shown_diff = session
+            .diff_tab(workspace_id)
+            .filter(|tab| presented_tab == Some(tab.id()))
+            .and_then(|tab| tab.diff().map(|diff| diff.path().to_relative_path_buf()));
+        let shown_file = session
+            .file_tab(workspace_id)
+            .filter(|tab| presented_tab == Some(tab.id()))
+            .and_then(|tab| tab.file().map(|file| file.path().to_relative_path_buf()));
+        let git = self
+            .connection(key)
+            .and_then(|connection| connection.model.workspace_git.get(&workspace_id));
+        let body = match shown.view {
             RightSidebarView::Files => {
                 self.render_files_list(key, workspace_id, shown_file.as_deref(), cx)
             }
-            RightSidebarView::Changes => match &git {
-                Some(git) => v_flex()
-                    .flex_1()
-                    .min_h_0()
-                    .w_full()
-                    .child(self.render_changes_comparison(
-                        key,
-                        workspace_id,
-                        git,
-                        against,
-                        total,
-                        cx,
-                    ))
-                    .child(self.render_changes_list(
-                        key,
-                        workspace_id,
-                        git,
-                        against,
-                        shown_diff,
-                        cx,
-                    ))
-                    .into_any_element(),
+            RightSidebarView::Changes => match git {
+                Some(git) => {
+                    let against = self.workspace_diff_base(key, workspace_id);
+                    let total = shown_entries(git, against)
+                        .filter_map(|entry| entry.stat)
+                        .reduce(|sum, stat| GitDiffStat {
+                            added: sum.added + stat.added,
+                            deleted: sum.deleted + stat.deleted,
+                        });
+                    v_flex()
+                        .flex_1()
+                        .min_h_0()
+                        .w_full()
+                        .child(self.render_changes_comparison(
+                            key,
+                            workspace_id,
+                            git,
+                            against,
+                            total,
+                            cx,
+                        ))
+                        .child(self.render_changes_list(
+                            key,
+                            workspace_id,
+                            git,
+                            against,
+                            shown_diff,
+                            cx,
+                        ))
+                        .into_any_element()
+                }
                 None => empty_state(
-                    t!("changes.not_a_repository", workspace = workspace_name),
+                    t!("changes.not_a_repository", workspace = workspace.name()),
                     cx,
                 ),
             },
@@ -307,92 +423,13 @@ impl Condr {
                 .flex_1()
                 .min_h_0()
                 .w_full()
-                .children(
-                    git.as_ref()
-                        .map(|git| self.render_history_head(key, workspace_id, git, cx)),
-                )
+                .children(git.map(|git| self.render_history_head(key, workspace_id, git, cx)))
                 .child(self.render_history(key, workspace_id, shown_diff.as_deref(), cx))
                 .into_any_element(),
         };
         column
-            .child(header)
             .child(body)
             .children(self.render_transfer_strip(key, workspace_id, cx))
-            .into_any_element()
-    }
-
-    /// The Files / Changes / History tabs, sized to their labels, with the change count in
-    /// the Changes tab and Refresh at the far end whichever view is shown.
-    fn sidebar_header(
-        &self,
-        target: Option<(ConnectionKey, WorkspaceId)>,
-        view: RightSidebarView,
-        count: Option<usize>,
-        history: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        // GPUI Kit's own tab strip, as the Kit gallery shows it; the count rides in the
-        // Changes tab and Refresh takes the strip's free end.
-        let owner = cx.weak_entity();
-        let selected = match view {
-            RightSidebarView::Files => 0,
-            RightSidebarView::Changes => 1,
-            RightSidebarView::History => 2,
-        };
-        let refresh = target.map(|(key, workspace_id)| {
-            let owner = cx.weak_entity();
-            Button::new("sidebar-refresh")
-                .ghost()
-                .xsmall()
-                .icon(Icon::new(IconName::RefreshCw))
-                .debug_selector(|| "sidebar-refresh".into())
-                .tooltip(t!("changes.refresh"))
-                .accessibility_label(t!("changes.refresh"))
-                .loading(
-                    self.right_sidebar
-                        .refreshing
-                        .contains_key(&(key, workspace_id)),
-                )
-                .on_click(move |_, _, cx| {
-                    let _ = owner.update(cx, |this, cx| {
-                        this.refresh_workspace(key, workspace_id, cx);
-                    });
-                })
-        });
-        let suffix = h_flex().pr_2().items_center().children(refresh);
-        TabBar::new("condr-sidebar-view")
-            .selected_index(selected)
-            .on_click(move |index, _, cx| {
-                let view = match *index {
-                    1 => RightSidebarView::Changes,
-                    2 => RightSidebarView::History,
-                    _ => RightSidebarView::Files,
-                };
-                let _ = owner.update(cx, |this, cx| {
-                    if let Some((key, workspace_id)) = target {
-                        this.set_right_sidebar_view(key, workspace_id, view, cx);
-                    }
-                });
-            })
-            .children([
-                Tab::new()
-                    .label(t!("changes.tab.files"))
-                    .debug_selector(|| "sidebar-view-files".into()),
-                Tab::new()
-                    .label(match count {
-                        Some(count) => t!("changes.tab.changes_count", count = count),
-                        None => t!("changes.tab.changes"),
-                    })
-                    .debug_selector(|| "sidebar-view-changes".into()),
-            ])
-            .when(history, |this| {
-                this.child(
-                    Tab::new()
-                        .label(t!("changes.tab.history"))
-                        .debug_selector(|| "sidebar-view-history".into()),
-                )
-            })
-            .suffix(suffix)
             .into_any_element()
     }
 
@@ -437,6 +474,61 @@ impl Condr {
             .insert((key, workspace_id), timeout);
         self.reload_history(key, workspace_id);
         cx.notify();
+    }
+}
+
+/// A list of the right sidebar, scrolled with its scrollbar always shown: a list longer
+/// than the sidebar says so before anyone scrolls it. Kit's `overflow_y_scrollbar` follows
+/// the theme's mode, which on macOS hides the bar until a scroll. Its own styles size it
+/// in its parent; `content` is what scrolls.
+#[derive(IntoElement)]
+pub(super) struct SidebarList {
+    id: ElementId,
+    root: Stateful<Div>,
+    content: Div,
+}
+
+pub(super) fn sidebar_list(id: impl Into<ElementId>, content: Div) -> SidebarList {
+    let id = id.into();
+    SidebarList {
+        root: div().id(id.clone()),
+        id,
+        content,
+    }
+}
+
+impl Styled for SidebarList {
+    fn style(&mut self) -> &mut StyleRefinement {
+        self.root.style()
+    }
+}
+
+impl RenderOnce for SidebarList {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let handle = window
+            .use_keyed_state(self.id.clone(), cx, |_, _| ScrollHandle::default())
+            .read(cx)
+            .clone();
+        self.root
+            .relative()
+            .overflow_hidden()
+            .child(
+                div()
+                    .id((self.id, "area"))
+                    .size_full()
+                    .flex()
+                    .flex_col()
+                    .overflow_y_scroll()
+                    .track_scroll(&handle)
+                    .child(self.content.flex_none().min_h_full()),
+            )
+            .child(
+                div().absolute().inset_0().child(
+                    Scrollbar::vertical(&handle)
+                        .mode(ScrollbarMode::Always)
+                        .viewport_from_layout(),
+                ),
+            )
     }
 }
 

@@ -7,7 +7,6 @@ use crate::app::git_marks::status_color;
 use crate::app::list_row::{RowKind, row_menu, tree_indent, tree_row};
 use crate::app::placeholders::{empty_state, failed_state, list_note};
 use condr_core::{DirectoryEntry, FileKind};
-use gpui_kit::component::scroll::ScrollableElement as _;
 use std::path::{Path, PathBuf};
 
 /// The Files tree's folds.
@@ -110,29 +109,28 @@ impl Condr {
             cx,
         );
         let mut list = v_flex()
-            .id("condr-files-list")
             .debug_selector(|| "condr-files-list".into())
-            .flex_1()
-            .min_h_0()
             .w_full()
             .px_1()
-            .pb_1()
-            .overflow_y_scrollbar();
+            .pb_1();
         if listing.truncated {
             list = list.child(truncated_note(cx));
         }
         // The empty area below the tree creates in the Root Directory.
-        list.children(rows)
-            .child(
-                div()
-                    .id("condr-files-root-area")
-                    .debug_selector(|| "condr-files-root-area".into())
-                    .flex_1()
-                    .min_h(rems(2.))
-                    .drag_over::<ExternalPaths>(|style, _, _, cx| style.bg(cx.theme().accent))
-                    .on_drop(self.upload_drop(key, workspace_id, RelativePathBuf::new(), cx))
-                    .context_menu(self.root_context_menu(key, workspace_id, cx)),
-            )
+        let list = list.children(rows).child(
+            div()
+                .id("condr-files-root-area")
+                .debug_selector(|| "condr-files-root-area".into())
+                .flex_1()
+                .min_h(rems(2.))
+                .drag_over::<ExternalPaths>(|style, _, _, cx| style.bg(cx.theme().accent))
+                .on_drop(self.upload_drop(key, workspace_id, RelativePathBuf::new(), cx))
+                .context_menu(self.root_context_menu(key, workspace_id, cx)),
+        );
+        sidebar_list("condr-files-list", list)
+            .flex_1()
+            .min_h_0()
+            .w_full()
             .into_any_element()
     }
 

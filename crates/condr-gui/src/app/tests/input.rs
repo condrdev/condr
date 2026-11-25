@@ -28,7 +28,12 @@ fn terminal_shortcut_fallback_maps_only_the_default_chords() {
                 .is::<ToggleZoom>()
         );
         assert!(action("cmd-b").unwrap().as_any().is::<ToggleSidebar>());
-        assert!(action("cmd-alt-b").unwrap().as_any().is::<ToggleChanges>());
+        assert!(
+            action("cmd-alt-b")
+                .unwrap()
+                .as_any()
+                .is::<ToggleRightSidebar>()
+        );
         assert!(
             action("ctrl-shift-b").is_none(),
             "Ctrl+Shift+B reaches the PTY"
@@ -59,7 +64,12 @@ fn terminal_shortcut_fallback_maps_only_the_default_chords() {
                 .as_any()
                 .is::<ToggleSidebar>()
         );
-        assert!(action("ctrl-alt-b").unwrap().as_any().is::<ToggleChanges>());
+        assert!(
+            action("ctrl-alt-b")
+                .unwrap()
+                .as_any()
+                .is::<ToggleRightSidebar>()
+        );
         assert!(action("ctrl-b").is_none(), "Ctrl+B is the tmux prefix");
         assert!(action("cmd-t").is_none());
     }

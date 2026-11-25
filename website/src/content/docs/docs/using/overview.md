@@ -20,7 +20,7 @@ The Condr interface has four areas:
 | **Sidebar toggle** | Collapses or expands the left sidebar. Collapsed, it keeps only the Workspace initial icons. |
 | **Tab bar** | Shows every Tab in the current Workspace. Click `+` to start a new shell in the current Pane's directory. |
 | **Open in** | Opens the project root in an external editor or file manager (local Devices only; remembers each project's choice). |
-| **Right sidebar toggle** | Shows or hides the right sidebar; the state is kept per Workspace. |
+| **Right sidebar header** | Above the open right sidebar: the view's name, Changes with its count, and **Refresh**. |
 
 ---
 
@@ -62,8 +62,10 @@ Manages Devices, project Workspaces and Agent state. Drag Devices or Workspaces 
 
 ### Right sidebar
 
+* **View buttons**: a column of buttons along the window's right edge opens **Files**, **Changes** or **History**; click the highlighted one to close the sidebar. Which view is shown, and whether the sidebar is open, is kept per Workspace.
 * **Files (project tree)**: browse the project's directories. Folders with changes carry a dot, and files ignored through `.gitignore` are greyed out. Click a file to view it in the Preview Tab.
 * **Changes**: active in Git repositories only. Lists changed files with added and removed lines, grouped as `Conflicts`, `Tracked` and `Untracked`. Click a file to review it in the Diff Tab.
+* **History**: the commits of the current branch, newest first. Click one to list the files it changed, and a file to see its change in the Diff Tab.
 * **Context menu**: copy the relative or absolute path, insert the path into the terminal, open the file in a local editor or reveal it in the file manager. It also creates, renames and deletes files and folders.
 
 ---

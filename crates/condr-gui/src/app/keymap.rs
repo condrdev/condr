@@ -36,7 +36,7 @@ pub(super) enum Needs {
     /// An Agent the window's Agents section lists (ADR 0067).
     Agents,
     /// A presented Workspace whose right sidebar this window draws.
-    Changes,
+    RightSidebar,
     /// The main window, the only one Tasks mode shows in (ADR 0068).
     MainWindow,
 }
@@ -105,10 +105,10 @@ pub(super) const GROUPS: &[(&str, &[Shortcut])] = &[
                 on(&["cmd-b"], &["ctrl-shift-b"]),
             ),
             shortcut(
-                "toggle-changes",
-                "keymap.action.toggle_changes",
-                &ToggleChanges,
-                Needs::Changes,
+                "toggle-right-sidebar",
+                "keymap.action.toggle_right_sidebar",
+                &ToggleRightSidebar,
+                Needs::RightSidebar,
                 on(&["cmd-alt-b"], &["ctrl-alt-b"]),
             ),
             // No default key: the sidebar's Tasks row enters it (ADR 0068).

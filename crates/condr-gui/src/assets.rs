@@ -98,6 +98,9 @@ gpui_kit::assets::icon_assets!(
         Server,
         ServerCrash,
         FoldHorizontal,
+        // The right sidebar's strip of views (ADR 0076).
+        FolderTree,
+        GitCommitHorizontal,
     ]
 );
 

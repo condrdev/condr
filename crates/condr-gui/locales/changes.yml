@@ -1,31 +1,5 @@
 _version: 2
 changes:
-  toggle:
-    hide:
-      en: Hide Changes & Files
-      zh-CN: 隐藏变更与文件
-    show:
-      en: Show Changes & Files
-      zh-CN: 显示变更与文件
-  tab:
-    files:
-      en: Files
-      zh-CN: 文件
-    changes:
-      en: Changes
-      zh-CN: 变更
-    changes_count:
-      en: 'Changes (%{count})'
-      zh-CN: '变更（%{count}）'
-    history:
-      en: History
-      zh-CN: 历史
-  refresh:
-    en: Refresh
-    zh-CN: 刷新
-  no_workspace:
-    en: No Workspace
-    zh-CN: 没有 Workspace
   not_a_repository:
     en: '%{workspace} is not a Git repository'
     zh-CN: '%{workspace} 不是 Git 仓库'

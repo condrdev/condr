@@ -88,6 +88,13 @@ impl Drop for TestServer {
     }
 }
 
+/// The modifier window shortcuts take: Command on macOS, Control elsewhere.
+const SECONDARY: &str = if cfg!(target_os = "macos") {
+    "cmd"
+} else {
+    "ctrl"
+};
+
 fn acquire_visual_test_lock() -> MutexGuard<'static, ()> {
     VISUAL_TEST_LOCK
         .lock()

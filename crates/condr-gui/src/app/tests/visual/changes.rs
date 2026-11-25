@@ -26,8 +26,8 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
         window.debug_bounds("condr-right-sidebar").is_none(),
         "the right sidebar starts closed on a fresh config"
     );
-    // Without a Workspace there is nothing to review: the title bar has no toggle.
-    assert!(window.debug_bounds("toggle-changes").is_none());
+    // Without a Workspace there is nothing to review: no strip of views either.
+    assert!(window.debug_bounds("right-sidebar-strip").is_none());
 
     let button = window
         .debug_bounds("open-project")
@@ -43,16 +43,38 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
                 .is_some_and(|session| !session.workspaces().is_empty())
         })
     }));
-    // A Workspace alone does not open the sidebar; the user does, and the column then
-    // sits at the window's right edge.
+    // A Workspace brings the strip of views to the window's right edge but does not open
+    // the sidebar; the user does, and the column then sits beside the strip with its
+    // header in the title bar above it, edge on edge (ADR 0076).
     window.update(|window, cx| _ = window.draw(cx));
     assert!(window.debug_bounds("condr-right-sidebar").is_none());
-    let toggle = window.debug_bounds("toggle-changes").unwrap();
-    window.simulate_click(toggle.center(), Modifiers::default());
-    window.run_until_parked();
-    window.update(|window, cx| _ = window.draw(cx));
+    assert!(window.debug_bounds("right-sidebar-header").is_none());
+    let strip = window.debug_bounds("right-sidebar-strip").unwrap();
+    let window_width = window.update(|window, _| window.viewport_size().width);
+    assert_eq!(strip.right(), window_width);
+    let open_changes = |window: &mut VisualTestContext| {
+        let button = window.debug_bounds("right-sidebar-changes").unwrap();
+        window.simulate_click(button.center(), Modifiers::default());
+        window.run_until_parked();
+        window.update(|window, cx| _ = window.draw(cx));
+    };
+    open_changes(window);
     assert!(window.debug_bounds("condr-right-sidebar").is_some());
-    assert!(window.debug_bounds("condr-right-sidebar-column").is_some());
+    let column = window.debug_bounds("condr-right-sidebar-column").unwrap();
+    let header = window.debug_bounds("right-sidebar-header").unwrap();
+    assert_eq!(column.right(), strip.left());
+    assert_eq!(
+        header.left(),
+        column.left(),
+        "the header {header:?} tops the column"
+    );
+    assert!(header.bottom() <= column.top());
+    // The button of the view shown closes the sidebar, and opens it again.
+    open_changes(window);
+    assert!(window.debug_bounds("condr-right-sidebar").is_none());
+    assert!(window.debug_bounds("right-sidebar-header").is_none());
+    open_changes(window);
+    assert!(window.debug_bounds("condr-right-sidebar").is_some());
 
     // The Server scans the repository off its own lock and publishes the list.
     assert!(
@@ -69,16 +91,12 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
     // Refresh asks the Server to rescan, and spins until its `WorkspaceFilesChanged`
     // arrives (ADR 0046).
     let refresh = window
-        .debug_bounds("sidebar-refresh")
+        .debug_bounds("right-sidebar-refresh")
         .expect("the sidebar header should offer Refresh");
-    // At the default width the three tabs and Refresh share the header without running
-    // into each other; the summed `+N −N` sits on the comparison row instead.
-    let history = window
-        .debug_bounds("sidebar-view-history")
-        .expect("a repository with a commit has History");
+    assert!(header.contains(&refresh.center()));
     assert!(
-        history.right() <= refresh.left(),
-        "History {history:?} runs under Refresh {refresh:?}"
+        window.debug_bounds("right-sidebar-history").is_some(),
+        "a repository with a commit has History"
     );
     let diffs_generation = |window: &mut VisualTestContext| {
         window.read(|app| {
@@ -263,10 +281,8 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
         ));
     });
 
-    // The title bar toggle hides the sidebar.
-    let toggle = window
-        .debug_bounds("toggle-changes")
-        .expect("the title bar should expose the Changes toggle");
+    // The shown view's button hides the sidebar.
+    let toggle = window.debug_bounds("right-sidebar-changes").unwrap();
     window.simulate_click(toggle.center(), Modifiers::default());
     window.run_until_parked();
     window.update(|window, cx| _ = window.draw(cx));
@@ -308,7 +324,7 @@ fn the_changes_comparison_switches_between_head_and_the_base_branch() {
         })
     }));
     window.update(|window, cx| _ = window.draw(cx));
-    let toggle = window.debug_bounds("toggle-changes").unwrap();
+    let toggle = window.debug_bounds("right-sidebar-changes").unwrap();
     window.simulate_click(toggle.center(), Modifiers::default());
 
     // Against HEAD the commit left nothing; the base the Server found is local `main`.
@@ -421,7 +437,7 @@ fn a_directory_listed_in_two_sections_folds_from_either_row() {
         })
     }));
     window.update(|window, cx| _ = window.draw(cx));
-    let toggle = window.debug_bounds("toggle-changes").unwrap();
+    let toggle = window.debug_bounds("right-sidebar-changes").unwrap();
     window.simulate_click(toggle.center(), Modifiers::default());
     window.run_until_parked();
     assert!(wait_until(window, |window| {
@@ -501,7 +517,7 @@ fn history_lists_commits_and_shows_one_commits_file_in_the_diff_tab() {
         })
     }));
     window.update(|window, cx| _ = window.draw(cx));
-    let toggle = window.debug_bounds("toggle-changes").unwrap();
+    let toggle = window.debug_bounds("right-sidebar-changes").unwrap();
     window.simulate_click(toggle.center(), Modifiers::default());
     assert!(wait_until(window, |window| {
         window.update(|window, cx| _ = window.draw(cx));
@@ -522,15 +538,15 @@ fn history_lists_commits_and_shows_one_commits_file_in_the_diff_tab() {
         "the Diff Tab first shows the working tree"
     );
 
-    // The tab appears once the Server's Git snapshot names `HEAD`.
+    // The button appears once the Server's Git snapshot names `HEAD`.
     assert!(
         wait_until(window, |window| {
             window.update(|window, cx| _ = window.draw(cx));
-            window.debug_bounds("sidebar-view-history").is_some()
+            window.debug_bounds("right-sidebar-history").is_some()
         }),
         "a Server that sends HEAD offers History"
     );
-    let tab = window.debug_bounds("sidebar-view-history").unwrap();
+    let tab = window.debug_bounds("right-sidebar-history").unwrap();
     window.simulate_click(tab.center(), Modifiers::default());
     // `debug_bounds` takes a static name.
     let commit_row: &'static str = format!("commit-{second}").leak();
@@ -652,7 +668,7 @@ fn a_workspace_above_several_repositories_shows_each_one() {
         })
     }));
     window.update(|window, cx| _ = window.draw(cx));
-    let toggle = window.debug_bounds("toggle-changes").unwrap();
+    let toggle = window.debug_bounds("right-sidebar-changes").unwrap();
     window.simulate_click(toggle.center(), Modifiers::default());
     assert!(
         wait_until(window, |window| {
@@ -673,7 +689,7 @@ fn a_workspace_above_several_repositories_shows_each_one() {
     assert!(window.debug_bounds("change-web/notes.txt").is_some());
 
     // History opens on the first repository; its menu shows another's commits.
-    let tab = window.debug_bounds("sidebar-view-history").unwrap();
+    let tab = window.debug_bounds("right-sidebar-history").unwrap();
     window.simulate_click(tab.center(), Modifiers::default());
     assert!(
         wait_until(window, |window| {
@@ -709,10 +725,10 @@ fn a_workspace_above_several_repositories_shows_each_one() {
     // and History's menu offers each.
     run_git(&root, ["init", "-q", "-b", "main"]);
     std::fs::write(root.join("root.txt"), "root\n").unwrap();
-    let tab = window.debug_bounds("sidebar-view-changes").unwrap();
+    let tab = window.debug_bounds("right-sidebar-changes").unwrap();
     window.simulate_click(tab.center(), Modifiers::default());
     window.update(|window, cx| _ = window.draw(cx));
-    let refresh = window.debug_bounds("sidebar-refresh").unwrap();
+    let refresh = window.debug_bounds("right-sidebar-refresh").unwrap();
     window.simulate_click(refresh.center(), Modifiers::default());
     assert!(
         wait_until(window, |window| {
@@ -730,7 +746,7 @@ fn a_workspace_above_several_repositories_shows_each_one() {
     window.update(|window, cx| _ = window.draw(cx));
     assert!(window.debug_bounds("change-root.txt").is_none());
     assert!(window.debug_bounds("change-web/notes.txt").is_some());
-    let tab = window.debug_bounds("sidebar-view-history").unwrap();
+    let tab = window.debug_bounds("right-sidebar-history").unwrap();
     window.simulate_click(tab.center(), Modifiers::default());
     window.run_until_parked();
     window.update(|window, cx| _ = window.draw(cx));

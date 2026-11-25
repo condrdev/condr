@@ -20,7 +20,7 @@ Every key combination not declared on this page passes through to the child proc
 | Open Settings | `Cmd + ,` | `Ctrl + ,` |
 | Close Settings | `Esc` | `Esc` |
 | Toggle the left sidebar | `Cmd + B` | `Ctrl + Shift + B` |
-| Toggle the right sidebar (Changes & Files) | `Cmd + Option + B` | `Ctrl + Alt + B` |
+| Toggle the right sidebar, on the view it last showed | `Cmd + Option + B` | `Ctrl + Alt + B` |
 
 * **Tasks mode** and **New Task** have no default key; find them in the Command Palette or [give them one](#change-a-shortcut) as `toggle-tasks` and `new-task`.
 

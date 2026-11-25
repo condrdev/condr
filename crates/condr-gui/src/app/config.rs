@@ -83,6 +83,12 @@ pub(super) struct LoadedConfig {
 impl LoadedConfig {
     /// Read before starting the GUI event loop: the config and identity locks may wait.
     pub(super) fn read(path: Option<PathBuf>) -> Self {
+        // compat(0.2.6): goes with `rename_toggle_changes`.
+        if let Some(path) = path.as_deref()
+            && let Err(error) = rename_toggle_changes(path)
+        {
+            tracing::warn!("[client.keybindings] toggle-changes was not renamed: {error}");
+        }
         let device_key = condr_server::noise::identity_directory()
             .and_then(|directory| condr_server::noise::load_device_key(&directory));
         let client = path.as_deref().map_or(Ok(None), |path| {
@@ -520,6 +526,27 @@ fn write_values(
         tables,
         entries.into_iter().map(|(key, value)| (key, Some(value))),
     )
+}
+
+/// compat(0.2.6): Toggle Right Sidebar was `toggle-changes` in `[client.keybindings]` up to
+/// 0.2.6 (ADR 0076). Renames an entry still written that way; a `toggle-right-sidebar`
+/// already there wins. Delete this, its call in `LoadedConfig::read` and its test once
+/// 0.2.6 no longer updates in place.
+fn rename_toggle_changes(path: &Path) -> io::Result<()> {
+    const OLD: &str = "toggle-changes";
+    const NEW: &str = "toggle-right-sidebar";
+    let Some(keys) = condr_core::read_config_value(path, &KEYBINDINGS_TABLE, OLD)? else {
+        return Ok(());
+    };
+    let mut entries = vec![(OLD, None)];
+    if condr_core::read_config_value(path, &KEYBINDINGS_TABLE, NEW)?.is_none() {
+        let keys = keys
+            .to_string()
+            .parse::<toml_edit::Value>()
+            .map_err(invalid_data)?;
+        entries.push((NEW, Some(toml_edit::Item::Value(keys))));
+    }
+    condr_core::update_config_values(path, &KEYBINDINGS_TABLE, entries)
 }
 
 fn invalid_data(error: impl std::fmt::Display) -> io::Error {
@@ -1020,6 +1047,53 @@ address = 'tcp://AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA@127.0.0.1:4242'
         );
         assert!(saved.contains("# was system"), "{saved}");
         assert_eq!(load_saved_servers(&path).unwrap().len(), 1);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    /// compat(0.2.6): goes with `rename_toggle_changes`.
+    #[test]
+    fn a_toggle_changes_binding_becomes_toggle_right_sidebar() {
+        let directory = std::env::temp_dir().join(format!(
+            "condr-client-toggle-changes-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("config.toml");
+        let binding = |name| {
+            condr_core::read_config_value(&path, &KEYBINDINGS_TABLE, name)
+                .unwrap()
+                .map(|keys| keys.to_string())
+        };
+
+        fs::write(
+            &path,
+            "[client.keybindings]\ntoggle-sidebar = ['cmd-shift-b'] # mine\ntoggle-changes = ['cmd-shift-c']\n",
+        )
+        .unwrap();
+        rename_toggle_changes(&path).unwrap();
+        assert_eq!(binding("toggle-changes"), None);
+        assert_eq!(
+            binding("toggle-right-sidebar").as_deref(),
+            Some(r#"["cmd-shift-c"]"#)
+        );
+        assert!(
+            fs::read_to_string(&path)
+                .unwrap()
+                .contains("toggle-sidebar = ['cmd-shift-b'] # mine")
+        );
+
+        fs::write(
+            &path,
+            "[client.keybindings]\ntoggle-changes = ['cmd-shift-c']\ntoggle-right-sidebar = []\n",
+        )
+        .unwrap();
+        rename_toggle_changes(&path).unwrap();
+        assert_eq!(binding("toggle-changes"), None);
+        assert_eq!(binding("toggle-right-sidebar").as_deref(), Some("[]"));
+
+        rename_toggle_changes(&path).unwrap();
+        assert_eq!(binding("toggle-right-sidebar").as_deref(), Some("[]"));
         fs::remove_dir_all(directory).unwrap();
     }
 }

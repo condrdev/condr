@@ -122,7 +122,7 @@ toggle-zoom = []
 
 | 分组 | 名称 |
 | --- | --- |
-| 应用（Application） | `open-settings`、`toggle-sidebar`、`toggle-changes`、`command-palette`、`go-to` |
+| 应用（Application） | `open-settings`、`toggle-sidebar`、`toggle-right-sidebar`、`command-palette`、`go-to` |
 | 设备（Devices） | `connect-remote-device`、`reconnect-device` |
 | Workspaces | `next-workspace`、`previous-workspace`、`new-workspace`、`rename-workspace`、`close-workspace` |
 | Agents | `next-agent`、`previous-agent` |

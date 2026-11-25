@@ -10,7 +10,6 @@ use crate::app::list_row::{disclosure, row_highlight, row_menu};
 use crate::app::placeholders::list_note;
 use condr_core::protocol::DiffBase;
 use condr_core::{GitChangeEntry, GitChangeStatus, GitChanges, MAX_GIT_CHANGES};
-use gpui_kit::component::scroll::ScrollableElement as _;
 use std::borrow::Cow;
 
 /// The three sections of the list, in display order, as Zed's git panel groups them.
@@ -267,14 +266,7 @@ impl Condr {
             .filter(|directory| !directory.as_str().is_empty() || git.repositories.len() > 1)
             .collect();
 
-        let mut list = v_flex()
-            .id("condr-changes-list")
-            .flex_1()
-            .min_h_0()
-            .w_full()
-            .px_1()
-            .pb_1()
-            .overflow_y_scrollbar();
+        let mut list = v_flex().w_full().px_1().pb_1();
         if git
             .repositories
             .iter()
@@ -369,7 +361,11 @@ impl Condr {
                 ));
             }
         }
-        list.into_any_element()
+        sidebar_list("condr-changes-list", list)
+            .flex_1()
+            .min_h_0()
+            .w_full()
+            .into_any_element()
     }
 
     /// A Changes row: a directory folds, a file opens in the Diff Tab and has the file menu.
