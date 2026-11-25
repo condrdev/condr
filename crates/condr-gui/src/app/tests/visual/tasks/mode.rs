@@ -81,12 +81,12 @@ fn tasks_mode_takes_the_window_sorts_agents_into_columns_and_leaves_the_view() {
     assert!(window.debug_bounds("tasks-mode").is_some());
     assert!(window.debug_bounds("tasks-title").is_some());
     // It covers the content area as the Ports page does: the sidebar stays beside it and
-    // the Changes sidebar is under it.
+    // the right sidebar is under it.
     assert!(
         window.debug_bounds("condr-sidebar").is_some(),
         "the sidebar stays beside Tasks mode"
     );
-    assert!(window.debug_bounds("condr-changes-column").is_none());
+    assert!(window.debug_bounds("condr-right-sidebar-column").is_none());
     assert!(
         window.read(|app| view.read(app).terminal_input.target.is_none()),
         "nothing targets the keyboard without a selection"

@@ -217,7 +217,7 @@ pub(crate) fn run(directory: PathBuf) {
 
     update(&mut cx, window, &view, |this, window, cx| {
         this.close_ports(window, cx);
-        this.toggle_changes_sidebar(cx);
+        this.toggle_right_sidebar(cx);
     });
     let files = vec![
         local_path(&root, "hero.png"),

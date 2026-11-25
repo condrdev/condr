@@ -1,7 +1,7 @@
 use super::sidebar::CondrIconName;
 use super::*;
 use crate::app::dialogs::{DangerConfirm, confirm_danger};
-use crate::app::history::relative_age;
+use crate::app::format::relative_age;
 use condr_core::protocol::Uptime;
 use gpui_kit::component::setting::RenderOptions;
 use gpui_kit::component::switch::Switch;

@@ -1,6 +1,6 @@
 //! What a view shows instead of its content, so every view says it the same way.
 
-use super::preview::file_size_text;
+use super::format::file_size_text;
 use super::*;
 use rust_i18n::t;
 

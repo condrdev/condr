@@ -880,10 +880,10 @@ fn a_second_run_restores_the_sidebars_and_the_view_from_the_state_file() {
         first.update(cx, |this, cx| {
             this.toggle_sidebar(window, cx);
             this.window_view_mut(window).sidebar_width = px(300.);
-            this.toggle_changes_sidebar(cx);
-            this.files_view.sidebar_views.insert(
+            this.toggle_right_sidebar(cx);
+            this.right_sidebar.views.insert(
                 (1, second_workspace),
-                crate::app::changes::SidebarView::Files,
+                crate::app::right_sidebar::RightSidebarView::Files,
             );
             // The Workspace not shown is folded by default; unfold it.
             this.sidebar_workspace_open[&(1, first_workspace)].update(cx, |open, cx| {
@@ -920,14 +920,10 @@ fn a_second_run_restores_the_sidebars_and_the_view_from_the_state_file() {
         let this = second.read(app);
         assert!(this.main_view().sidebar_collapsed);
         assert_eq!(this.main_view().sidebar_width, px(300.));
-        assert!(
-            this.files_view
-                .changes_open
-                .contains(&(1, second_workspace))
-        );
+        assert!(this.right_sidebar.open.contains(&(1, second_workspace)));
         assert_eq!(
-            this.files_view.sidebar_views.get(&(1, second_workspace)),
-            Some(&crate::app::changes::SidebarView::Files)
+            this.right_sidebar.views.get(&(1, second_workspace)),
+            Some(&crate::app::right_sidebar::RightSidebarView::Files)
         );
         assert!(
             *this.sidebar_workspace_open[&(1, first_workspace)].read(app),

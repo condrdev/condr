@@ -1,7 +1,7 @@
 //! The bar along the top of the Diff Tab and the Preview Tab. "Show File" and "Show
 //! Changes" switch between the two, so both bars read the same way.
 
-use super::change_tree::status_glyph;
+use super::git_marks::status_glyph;
 use super::*;
 use condr_core::GitChangeStatus;
 use gpui_kit::component::button::ButtonGroup;

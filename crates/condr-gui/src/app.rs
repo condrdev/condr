@@ -1,23 +1,20 @@
 mod actions;
-mod change_marks;
-mod change_tree;
-mod changes;
 mod command_palette;
 mod config;
 mod connection;
 mod connection_status;
 mod dialogs;
+mod diff_tab;
 mod directory_browser;
 mod dock;
 mod events;
-mod file_edits;
-mod file_entries;
 pub(crate) mod file_icons;
-mod files;
+mod format;
+mod git_marks;
 mod gui_state;
-mod history;
 mod ime;
 mod keymap;
+mod list_row;
 #[cfg(unix)]
 mod login_environment;
 mod navigation;
@@ -28,7 +25,8 @@ mod placeholders;
 mod ports;
 mod power;
 mod presentation;
-mod preview;
+mod preview_tab;
+mod right_sidebar;
 // GPUI renders offscreen on macOS alone.
 #[cfg(all(feature = "test-support", target_os = "macos"))]
 pub(crate) mod screenshots;
@@ -60,7 +58,6 @@ use crate::terminal_element::{
     HoveredTerminalLink, MarkedText, PreeditLayout, TerminalElement, TerminalElementProps,
     TerminalPalette, TerminalRenderCache, link_at,
 };
-use changes::*;
 use condr_client::SessionModel;
 use condr_client::frames::ClientTerminal;
 use condr_core::agent_hooks::{HooksAction, HooksReport, HooksState};
@@ -84,11 +81,9 @@ use condr_server::{
 use connection::*;
 #[cfg(test)]
 use dialogs::accepted_text_input;
+use diff_tab::*;
 use directory_browser::{DirectoryBrowser, browser_field, render_directory_browser};
 use dock::*;
-use file_edits::*;
-use file_entries::*;
-use files::*;
 use gpui_kit::assets::IconName as Glyph;
 use gpui_kit::component::badge::Badge;
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
@@ -122,7 +117,9 @@ use keymap::SHORTCUT_CONTEXT;
 #[cfg(test)]
 use keymap::TAB_MODIFIER;
 use new_workspace::{NewWorkspaceDialog, NewWorkspaceWay};
+use preview_tab::*;
 use relative_path::{RelativePath, RelativePathBuf};
+use right_sidebar::*;
 use server_connection::*;
 use settings::{
     Appearance, SettingsWindow, TerminalFont, apply_appearance, apply_color_schemes,
@@ -322,7 +319,9 @@ pub(crate) struct Condr {
     /// Windows implements it with `SetThreadExecutionState`, which is per thread: it must
     /// be created and dropped on the GPUI main thread, never from a background task.
     _keep_awake: Option<keepawake::KeepAwake>,
-    files_view: FilesViewState,
+    right_sidebar: RightSidebarState,
+    diff_tab: DiffTabState,
+    preview_tab: PreviewTabState,
     /// What the open Root Directory dialog lists for a remote Device; replaced by the
     /// next such dialog, so a closed one is harmless.
     directory_browser: Option<DirectoryBrowser>,
@@ -418,7 +417,7 @@ impl Condr {
         window.on_window_should_close(cx, move |window, cx| {
             owner
                 .update(cx, |this, cx| {
-                    if !this.files_view.has_unsaved() && this.live_transfers() == 0 {
+                    if !this.preview_tab.has_unsaved() && this.live_transfers() == 0 {
                         return true;
                     }
                     this.confirm_quit(Box::new(|_, window, _| window.remove_window()), window, cx);
@@ -483,8 +482,10 @@ impl Condr {
             .map(|height| px(height).max(MIN_AGENTS_HEIGHT));
         main_view.agents_collapsed = restored_state.agents_collapsed;
         main_view.agents_order = restored_state.agents_order;
-        if let Some(width) = restored_state.changes_width {
-            main_view.changes_width = px(width).max(MIN_CHANGES_WIDTH).min(MAX_CHANGES_WIDTH);
+        if let Some(width) = restored_state.right_sidebar_width {
+            main_view.right_sidebar_width = px(width)
+                .max(MIN_RIGHT_SIDEBAR_WIDTH)
+                .min(MAX_RIGHT_SIDEBAR_WIDTH);
         }
         let window_appearance_subscription =
             cx.observe_window_appearance(window, |this, window, cx| {
@@ -568,10 +569,12 @@ impl Condr {
             keep_awake,
             updates: UpdateCheck::new(auto_check_updates, update_channel),
             _keep_awake: None,
-            files_view: FilesViewState {
-                diff_unified: restored_state.diff_unified,
-                ..FilesViewState::default()
+            right_sidebar: RightSidebarState::default(),
+            diff_tab: DiffTabState {
+                unified: restored_state.diff_unified,
+                ..DiffTabState::default()
             },
+            preview_tab: PreviewTabState::default(),
             directory_browser: None,
             new_workspace: None,
             ports_form: None,

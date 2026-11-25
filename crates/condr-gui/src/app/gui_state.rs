@@ -38,7 +38,7 @@ pub(super) struct GuiState {
     pub agents_collapsed: bool,
     /// How the Agents section groups and orders its rows (ADR 0074).
     pub agents_order: super::sidebar::AgentsOrder,
-    pub changes_width: Option<f32>,
+    pub right_sidebar_width: Option<f32>,
     /// Diff Tabs show one column rather than two (ADR 0046).
     pub diff_unified: bool,
     /// The Device whose Workspace the window showed.
@@ -95,8 +95,8 @@ pub(super) struct WorkspaceState {
     /// Unfolded in the left sidebar.
     pub sidebar_open: bool,
     /// The right sidebar is open, and which view it shows when the user chose one.
-    pub changes_open: bool,
-    pub sidebar_view: Option<SidebarView>,
+    pub right_sidebar_open: bool,
+    pub right_sidebar_view: Option<RightSidebarView>,
     /// Changes compare against the base rather than `HEAD` (ADR 0034).
     pub against_base: bool,
 }
@@ -266,7 +266,8 @@ mod wire {
     use super::super::sidebar::AgentsOrder;
     use super::super::tasks::{TasksDensity, TasksLayout, TasksPrefs, TasksScope};
     use super::{
-        DetachedWindowState, SavedScope, SidebarView, TasksWindowState, WindowRect, WindowState,
+        DetachedWindowState, RightSidebarView, SavedScope, TasksWindowState, WindowRect,
+        WindowState,
     };
     use condr_core::protocol::ServerId;
     use condr_core::{TabId, WorkspaceId};
@@ -281,7 +282,7 @@ mod wire {
         #[prost(bool, tag = "3")]
         sidebar_collapsed: bool,
         #[prost(float, optional, tag = "4")]
-        changes_width: Option<f32>,
+        right_sidebar_width: Option<f32>,
         #[prost(uint64, optional, tag = "5")]
         active_server: Option<u64>,
         #[prost(map = "uint64, message", tag = "6")]
@@ -408,7 +409,7 @@ mod wire {
         folded: bool,
     }
 
-    /// `sidebar_view` 1 Changes, 2 Files, 3 History.
+    /// `right_sidebar_view` 1 Changes, 2 Files, 3 History.
     #[derive(Clone, PartialEq, prost::Message)]
     struct Workspace {
         #[prost(uint64, optional, tag = "1")]
@@ -416,9 +417,9 @@ mod wire {
         #[prost(bool, tag = "2")]
         sidebar_open: bool,
         #[prost(bool, tag = "3")]
-        changes_open: bool,
+        right_sidebar_open: bool,
         #[prost(uint32, optional, tag = "4")]
-        sidebar_view: Option<u32>,
+        right_sidebar_view: Option<u32>,
         #[prost(bool, tag = "5")]
         against_base: bool,
     }
@@ -474,7 +475,7 @@ mod wire {
                     window: Some(window_to_wire(tasks.window)),
                     display: tasks.display,
                 }),
-                changes_width: state.changes_width,
+                right_sidebar_width: state.right_sidebar_width,
                 diff_unified: state.diff_unified,
                 active_server: state.active_server.map(|server| server.0),
                 servers: state
@@ -488,11 +489,13 @@ mod wire {
                                 let workspace_state = Workspace {
                                     view_tab: state.view_tab.map(TabId::as_u64),
                                     sidebar_open: state.sidebar_open,
-                                    changes_open: state.changes_open,
-                                    sidebar_view: state.sidebar_view.map(|view| match view {
-                                        SidebarView::Changes => 1,
-                                        SidebarView::Files => 2,
-                                        SidebarView::History => 3,
+                                    right_sidebar_open: state.right_sidebar_open,
+                                    right_sidebar_view: state.right_sidebar_view.map(|view| {
+                                        match view {
+                                            RightSidebarView::Changes => 1,
+                                            RightSidebarView::Files => 2,
+                                            RightSidebarView::History => 3,
+                                        }
                                     }),
                                     against_base: state.against_base,
                                 };
@@ -575,7 +578,7 @@ mod wire {
                         display: tasks.display,
                     })
                 }),
-                changes_width: state.changes_width,
+                right_sidebar_width: state.right_sidebar_width,
                 diff_unified: state.diff_unified,
                 active_server: state.active_server.map(ServerId),
                 servers: state
@@ -589,12 +592,14 @@ mod wire {
                                 let workspace_state = super::WorkspaceState {
                                     view_tab: state.view_tab.map(TabId::from_u64),
                                     sidebar_open: state.sidebar_open,
-                                    changes_open: state.changes_open,
-                                    sidebar_view: state.sidebar_view.and_then(|view| match view {
-                                        1 => Some(SidebarView::Changes),
-                                        2 => Some(SidebarView::Files),
-                                        3 => Some(SidebarView::History),
-                                        _ => None,
+                                    right_sidebar_open: state.right_sidebar_open,
+                                    right_sidebar_view: state.right_sidebar_view.and_then(|view| {
+                                        match view {
+                                            1 => Some(RightSidebarView::Changes),
+                                            2 => Some(RightSidebarView::Files),
+                                            3 => Some(RightSidebarView::History),
+                                            _ => None,
+                                        }
                                     }),
                                     against_base: state.against_base,
                                 };
@@ -697,15 +702,16 @@ impl Condr {
                             .sidebar_workspace_open
                             .get(&(key, workspace_id))
                             .is_some_and(|open| *open.read(cx)),
-                        changes_open: self.files_view.changes_open.contains(&(key, workspace_id)),
-                        sidebar_view: self
-                            .files_view
-                            .sidebar_views
+                        right_sidebar_open: self.right_sidebar.open.contains(&(key, workspace_id)),
+                        right_sidebar_view: self
+                            .right_sidebar
+                            .views
                             .get(&(key, workspace_id))
                             .copied(),
                         against_base: self
-                            .files_view
-                            .changes_against_base
+                            .right_sidebar
+                            .changes
+                            .against_base
                             .contains(&(key, workspace_id)),
                     };
                     (workspace_id, state)
@@ -737,8 +743,8 @@ impl Condr {
                     window: view.bounds,
                     display: view.display.map(u64::from),
                 }),
-            changes_width: Some(self.main_view().changes_width.into()),
-            diff_unified: self.files_view.diff_unified,
+            right_sidebar_width: Some(self.main_view().right_sidebar_width.into()),
+            diff_unified: self.diff_tab.unified,
             // Until the active connection has bootstrapped (a slow first start), the
             // file's answer stands rather than `None`.
             active_server: self
@@ -785,20 +791,19 @@ impl Condr {
                     }
                 });
             }
-            if state.changes_open {
-                self.files_view.changes_open.insert((key, workspace_id));
+            if state.right_sidebar_open {
+                self.right_sidebar.open.insert((key, workspace_id));
             } else {
-                self.files_view.changes_open.remove(&(key, workspace_id));
+                self.right_sidebar.open.remove(&(key, workspace_id));
             }
             if state.against_base {
-                self.files_view
-                    .changes_against_base
+                self.right_sidebar
+                    .changes
+                    .against_base
                     .insert((key, workspace_id));
             }
-            if let Some(view) = state.sidebar_view {
-                self.files_view
-                    .sidebar_views
-                    .insert((key, workspace_id), view);
+            if let Some(view) = state.right_sidebar_view {
+                self.right_sidebar.views.insert((key, workspace_id), view);
             }
             if let Some(tab_id) = state.view_tab
                 && workspace.tab(tab_id).is_some()
@@ -873,7 +878,7 @@ mod tests {
         DetachedWindowState, GuiState, STATE_FILE_NAME, SavedScope, ServerState, TasksWindowState,
         WindowRect, WindowState, WorkspaceState, on_a_display,
     };
-    use crate::app::changes::SidebarView;
+    use crate::app::right_sidebar::RightSidebarView;
     use condr_core::protocol::ServerId;
     use condr_core::{TabId, WorkspaceId};
     use gpui_kit::{Bounds, point, px, size};
@@ -918,7 +923,7 @@ mod tests {
                 }),
                 display: Some(2),
             }),
-            changes_width: Some(300.),
+            right_sidebar_width: Some(300.),
             diff_unified: true,
             active_server: Some(ServerId(7)),
             servers: HashMap::new(),
@@ -948,8 +953,8 @@ mod tests {
             WorkspaceState {
                 view_tab: Some(TabId::from_u64(9)),
                 sidebar_open: true,
-                changes_open: true,
-                sidebar_view: Some(SidebarView::Files),
+                right_sidebar_open: true,
+                right_sidebar_view: Some(RightSidebarView::Files),
                 against_base: true,
             },
         );

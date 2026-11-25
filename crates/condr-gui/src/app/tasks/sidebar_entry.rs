@@ -26,7 +26,7 @@ impl Condr {
             .rounded(cx.theme().radius)
             .text_sm()
             .font_semibold()
-            .map(|this| super::change_tree::row_highlight(this, active, cx))
+            .map(|this| crate::app::list_row::row_highlight(this, active, cx))
             .child(Icon::new(CondrIconName::SquareKanban).size_4())
             .child(div().flex_1().child(t!("tasks.title").into_owned()))
             .when(todo > 0, |this| {

@@ -13,9 +13,9 @@
 //! grown to 1600 by 1000, with the buttons macOS would draw painted in; the README's picture
 //! puts the Companion's `phone-agents.png` in front of it.
 
-use super::super::changes::SidebarView;
-use super::super::history::DiffCommit;
+use super::super::diff_tab::DiffCommit;
 use super::super::ports::PortsScope;
+use super::super::right_sidebar::RightSidebarView;
 use super::super::transfers::TransferState;
 use super::super::window_view::WindowScope;
 use super::*;
@@ -176,7 +176,7 @@ pub(crate) fn run(directory: PathBuf) {
     let path = RelativePathBuf::from(DEMO_FILE);
     update(&mut cx, window, &view, |this, window, cx| {
         this.toggle_sidebar(window, cx);
-        this.toggle_changes_sidebar(cx);
+        this.toggle_right_sidebar(cx);
     });
     let review = (48., 0., 1280. - 48., 800.);
     {
@@ -200,16 +200,18 @@ pub(crate) fn run(directory: PathBuf) {
     {
         let path = path.clone();
         update(&mut cx, window, &view, move |this, window, cx| {
-            this.files_view
-                .sidebar_views
-                .insert((1, condr), SidebarView::Files);
+            this.right_sidebar
+                .views
+                .insert((1, condr), RightSidebarView::Files);
             for directory in ["crates", "crates/condr-gui", "crates/condr-gui/src"] {
-                this.files_view
-                    .expanded_dirs
-                    .insert((1, condr, RelativePathBuf::from(directory)));
+                this.right_sidebar.files.expanded_dirs.insert((
+                    1,
+                    condr,
+                    RelativePathBuf::from(directory),
+                ));
             }
             // The Tab scrolls this line to its bottom, under the form's rewritten rows.
-            this.files_view.pending_file_line = Some((1, condr, path.clone(), 532));
+            this.preview_tab.pending_line = Some((1, condr, path.clone(), 532));
             this.show_file_on(1, condr, path, window, cx)
         });
     }
@@ -217,9 +219,9 @@ pub(crate) fn run(directory: PathBuf) {
     save(&image, &directory, "preview", review);
 
     update(&mut cx, window, &view, |this, _, cx| {
-        this.files_view
-            .sidebar_views
-            .insert((1, condr), SidebarView::History);
+        this.right_sidebar
+            .views
+            .insert((1, condr), RightSidebarView::History);
         cx.notify();
     });
     wait(&mut cx, "History loaded", |app| {
@@ -231,12 +233,13 @@ pub(crate) fn run(directory: PathBuf) {
     update(&mut cx, window, &view, |this, window, cx| {
         let commit = this.connection(1).unwrap().resources.logs[&condr].commits[0].clone();
         let path = RelativePathBuf::from("crates/condr-gui/src/app/sidebar.rs");
-        this.files_view
+        this.right_sidebar
+            .history
             .selected_commits
             .insert((1, condr), commit.id.clone());
         this.show_diff_on(1, condr, path.clone(), window, cx);
-        this.files_view
-            .diff_commits
+        this.diff_tab
+            .commits
             .insert((1, condr), DiffCommit { path, commit });
         this.rebuild_dock(window, cx);
         cx.notify();
@@ -284,14 +287,16 @@ pub(crate) fn run(directory: PathBuf) {
         this.select_workspace(2, dashboard, window, cx);
     });
     update(&mut cx, window, &view, move |this, window, cx| {
-        this.toggle_changes_sidebar(cx);
-        this.files_view
-            .sidebar_views
-            .insert((2, dashboard), SidebarView::Files);
+        this.toggle_right_sidebar(cx);
+        this.right_sidebar
+            .views
+            .insert((2, dashboard), RightSidebarView::Files);
         for directory in ["public", "src", "src/pages", "tests"] {
-            this.files_view
-                .expanded_dirs
-                .insert((2, dashboard, RelativePathBuf::from(directory)));
+            this.right_sidebar.files.expanded_dirs.insert((
+                2,
+                dashboard,
+                RelativePathBuf::from(directory),
+            ));
         }
         this.upload_files(
             2,
@@ -352,9 +357,9 @@ pub(crate) fn run(directory: PathBuf) {
     // window of its own, as it would sit on a second display (ADR 0043).
     update(&mut cx, window, &view, |this, window, cx| {
         this.select_workspace(1, condr, window, cx);
-        this.files_view
-            .sidebar_views
-            .insert((1, condr), SidebarView::Changes);
+        this.right_sidebar
+            .views
+            .insert((1, condr), RightSidebarView::Changes);
         this.show_diff_on(1, condr, RelativePathBuf::from(DEMO_FILE), window, cx);
     });
     // Before: the Diff Tab still in the main window, where the website's animation starts.
@@ -410,10 +415,10 @@ pub(crate) fn run(directory: PathBuf) {
     update(&mut cx, window, &view, |this, window, cx| {
         this.select_workspace(1, condr, window, cx);
         this.show_view(1, condr, Some(condr_tab));
-        this.toggle_changes_sidebar(cx);
-        this.files_view
-            .sidebar_views
-            .insert((1, condr), SidebarView::Files);
+        this.toggle_right_sidebar(cx);
+        this.right_sidebar
+            .views
+            .insert((1, condr), RightSidebarView::Files);
         this.rebuild_dock(window, cx);
     });
     settle(&mut cx);

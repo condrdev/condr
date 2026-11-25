@@ -8,7 +8,7 @@ use rust_i18n::t;
 use std::borrow::Cow;
 
 /// A create, rename or delete in flight.
-pub(super) enum EntryRequest {
+pub(in crate::app) enum EntryRequest {
     Create {
         workspace_id: WorkspaceId,
         path: RelativePathBuf,
@@ -27,7 +27,7 @@ pub(super) enum EntryRequest {
 
 /// Why `name` cannot be given to a new or renamed entry, as far as this Client can tell;
 /// the Server checks again and knows its own platform's rules.
-pub(super) fn entry_name_problem(
+pub(in crate::app) fn entry_name_problem(
     name: &str,
     taken: impl Fn(&str) -> bool,
 ) -> Option<Cow<'static, str>> {
@@ -47,7 +47,7 @@ pub(super) fn entry_name_problem(
 }
 
 /// The part of a file name before its extension, which a rename selects first.
-pub(super) fn name_stem(name: &str, kind: FileKind) -> std::ops::Range<usize> {
+pub(in crate::app) fn name_stem(name: &str, kind: FileKind) -> std::ops::Range<usize> {
     match (kind, name.rfind('.')) {
         (FileKind::File, Some(dot)) if dot > 0 => 0..dot,
         _ => 0..name.len(),
@@ -55,7 +55,7 @@ pub(super) fn name_stem(name: &str, kind: FileKind) -> std::ops::Range<usize> {
 }
 
 /// "Reveal in Finder" and its counterparts; Linux opens the folder without selecting.
-pub(super) fn reveal_label() -> Cow<'static, str> {
+pub(in crate::app) fn reveal_label() -> Cow<'static, str> {
     if cfg!(target_os = "macos") {
         t!("files.menu.reveal.macos")
     } else if cfg!(windows) {
@@ -74,13 +74,13 @@ fn parent_of(path: &RelativePath) -> RelativePathBuf {
 impl Condr {
     /// Whether a rename this Client sent may move `path`: the Tab showing it waits for the
     /// answer before it treats the new path as another file.
-    pub(super) fn rename_in_flight(
+    pub(in crate::app) fn rename_in_flight(
         &self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
         path: &RelativePath,
     ) -> bool {
-        self.files_view
+        self.right_sidebar
             .entry_requests
             .iter()
             .any(|((request_key, _), request)| {
@@ -90,8 +90,8 @@ impl Condr {
             })
     }
 
-    pub(super) fn forget_entry_requests(&mut self, key: ConnectionKey) {
-        self.files_view
+    pub(in crate::app) fn forget_entry_requests(&mut self, key: ConnectionKey) {
+        self.right_sidebar
             .entry_requests
             .retain(|(request_key, _), _| *request_key != key);
     }
@@ -115,20 +115,20 @@ impl Condr {
             EntryRequest::Delete { path } => FileMutation::Delete { path: path.clone() },
         };
         if let Some(request_id) = self.send_file_mutation(key, workspace_id, mutation, cx) {
-            self.files_view
+            self.right_sidebar
                 .entry_requests
                 .insert((key, request_id), request);
         }
     }
 
-    pub(super) fn entry_mutated(
+    pub(in crate::app) fn entry_mutated(
         &mut self,
         key: ConnectionKey,
         request_id: u64,
         result: FileMutationResult,
         cx: &mut Context<Self>,
     ) {
-        let Some(request) = self.files_view.entry_requests.remove(&(key, request_id)) else {
+        let Some(request) = self.right_sidebar.entry_requests.remove(&(key, request_id)) else {
             return;
         };
         let error = match result {
@@ -144,7 +144,7 @@ impl Condr {
                     path,
                     kind,
                 } => {
-                    self.files_view
+                    self.preview_tab
                         .deferred
                         .push(Box::new(move |this, window, cx| {
                             let name = path.file_name().unwrap_or_default().to_owned();
@@ -168,7 +168,7 @@ impl Condr {
                     to,
                     kind,
                 } => {
-                    self.files_view
+                    self.preview_tab
                         .deferred
                         .push(Box::new(move |this, window, cx| {
                             let name = to.file_name().unwrap_or_default().to_owned();
@@ -215,14 +215,15 @@ impl Condr {
             } => {
                 let parent = parent_of(&path);
                 if !parent.as_str().is_empty() {
-                    self.files_view
+                    self.right_sidebar
+                        .files
                         .expanded_dirs
                         .insert((key, workspace_id, parent));
                 }
                 if kind == FileKind::File {
                     // A new file opens in Source with the cursor in it.
-                    self.files_view.pending_file_line = Some((key, workspace_id, path.clone(), 0));
-                    self.files_view
+                    self.preview_tab.pending_line = Some((key, workspace_id, path.clone(), 0));
+                    self.preview_tab
                         .deferred
                         .push(Box::new(move |this, window, cx| {
                             this.show_file_on(key, workspace_id, path, window, cx);
@@ -245,7 +246,7 @@ impl Condr {
                     })
                 };
                 // The Server moved the Preview Tab; its text and folds follow here.
-                for ((editor_key, _), editor) in &mut self.files_view.file_editors {
+                for ((editor_key, _), editor) in &mut self.preview_tab.editors {
                     if *editor_key == key
                         && editor.workspace_id == workspace_id
                         && let Some((shown, generation)) = &mut editor.shown
@@ -256,8 +257,8 @@ impl Condr {
                         *generation = 0;
                     }
                 }
-                let expanded = std::mem::take(&mut self.files_view.expanded_dirs);
-                self.files_view.expanded_dirs = expanded
+                let expanded = std::mem::take(&mut self.right_sidebar.files.expanded_dirs);
+                self.right_sidebar.files.expanded_dirs = expanded
                     .into_iter()
                     .map(|(dir_key, id, path)| {
                         let path = (dir_key == key && id == workspace_id)
@@ -292,7 +293,7 @@ impl Condr {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn prompt_new_entry(
+    pub(in crate::app) fn prompt_new_entry(
         &mut self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
@@ -342,7 +343,7 @@ impl Condr {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn prompt_rename_entry(
+    pub(in crate::app) fn prompt_rename_entry(
         &mut self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
@@ -394,7 +395,7 @@ impl Condr {
         );
     }
 
-    pub(super) fn confirm_delete_entry(
+    pub(in crate::app) fn confirm_delete_entry(
         &mut self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
@@ -424,7 +425,7 @@ impl Condr {
     }
 
     /// New File… and New Folder…, created in `parent`.
-    pub(super) fn create_items(
+    pub(in crate::app) fn create_items(
         menu: PopupMenu,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
@@ -466,7 +467,7 @@ impl Condr {
 
     /// Rename… and Delete…, last in a row's menu; a row Changes shows as deleted cannot
     /// take them.
-    pub(super) fn rename_delete_items(
+    pub(in crate::app) fn rename_delete_items(
         menu: PopupMenu,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
@@ -513,7 +514,7 @@ impl Condr {
 
     /// Shows an entry of a local Workspace selected in this machine's file manager; a
     /// failure is a toast, as "Open in" does.
-    pub(super) fn reveal_entry(&self, path: PathBuf, cx: &mut Context<Self>) {
+    pub(in crate::app) fn reveal_entry(&self, path: PathBuf, cx: &mut Context<Self>) {
         self.spawn_launch(
             t!("files.reveal_failed", path = path.display()).into_owned(),
             move || open_in::reveal_entry(&path),

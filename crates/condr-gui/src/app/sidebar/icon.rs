@@ -39,7 +39,7 @@ pub(in crate::app) enum CondrIconName {
     /// Lucide `coffee`: the keep-awake toggle, as caffeinate and its kin draw it.
     Coffee,
     /// Lucide `square-plus` / `square-dot` / `square-minus`: a change's status in the
-    /// Changes sidebar, as Zed's git panel draws added, modified and deleted.
+    /// Changes view, as Zed's git panel draws added, modified and deleted.
     SquarePlus,
     SquareDot,
     SquareMinus,

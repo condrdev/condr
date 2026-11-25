@@ -1,73 +1,11 @@
-//! The directory tree Changes and History draw changed files in (ADR 0017, ADR 0046), and
-//! how a changed file looks wherever it is listed. Rows here only draw: what a click does
-//! is the caller's.
+//! The directory tree Changes and History draw changed files in (ADR 0017, ADR 0046).
+//! Rows here only draw: what a click does is the caller's.
 
-use super::sidebar::CondrIconName;
 use super::*;
-use condr_core::{GitChangeEntry, GitChangeStatus, GitDiffStat};
-use gpui_kit::component::menu::ContextMenu;
+use crate::app::git_marks::{diff_stat, status_glyph};
+use crate::app::list_row::{RowKind, tree_row};
+use condr_core::{GitChangeEntry, GitChangeStatus};
 use gpui_kit::component::tag::Tag;
-use rust_i18n::t;
-
-/// The glyph and colour a status shows, as Zed draws them: a square with a plus, a dot or
-/// a minus in the theme's success, warning and danger colours; a conflict warns.
-pub(super) fn status_glyph(status: GitChangeStatus, cx: &App) -> Icon {
-    let name = match status {
-        GitChangeStatus::Added | GitChangeStatus::Untracked => Icon::new(CondrIconName::SquarePlus),
-        GitChangeStatus::Modified | GitChangeStatus::Renamed => Icon::new(CondrIconName::SquareDot),
-        GitChangeStatus::Deleted => Icon::new(CondrIconName::SquareMinus),
-        GitChangeStatus::Conflicted => Icon::new(IconName::TriangleAlert),
-    };
-    name.size_4().text_color(status_color(status, cx))
-}
-
-/// The theme's version-control colour for a status: success, warning or danger.
-pub(super) fn status_color(status: GitChangeStatus, cx: &App) -> Hsla {
-    match status {
-        GitChangeStatus::Added | GitChangeStatus::Untracked => cx.theme().success,
-        GitChangeStatus::Modified | GitChangeStatus::Renamed => cx.theme().warning,
-        GitChangeStatus::Deleted | GitChangeStatus::Conflicted => cx.theme().danger,
-    }
-}
-
-/// `+N −N`, each half only when it is not zero.
-pub(super) fn diff_stat(stat: GitDiffStat, cx: &App) -> AnyElement {
-    h_flex()
-        .flex_none()
-        .gap_1()
-        .text_xs()
-        .when(stat.added > 0, |this| {
-            this.child(
-                div()
-                    .text_color(cx.theme().success)
-                    .child(format!("+{}", compact_count(stat.added))),
-            )
-        })
-        .when(stat.deleted > 0, |this| {
-            this.child(
-                div()
-                    .text_color(cx.theme().danger)
-                    .child(format!("−{}", compact_count(stat.deleted))),
-            )
-        })
-        .into_any_element()
-}
-
-/// A line count as the stat shows it: `999`, `1.2k`, `12k`, `3.4M`, rounded down so it never
-/// claims more lines than there are.
-fn compact_count(n: u32) -> String {
-    let (unit, suffix) = match n {
-        0..1_000 => return n.to_string(),
-        1_000..1_000_000 => (1_000, "k"),
-        _ => (1_000_000, "M"),
-    };
-    let (whole, tenth) = (n / unit, n % unit / (unit / 10));
-    if whole < 10 && tenth > 0 {
-        format!("{whole}.{tenth}{suffix}")
-    } else {
-        format!("{whole}{suffix}")
-    }
-}
 
 /// Changed files as a directory tree, the way Zed's git panel shows them: a
 /// directory that holds nothing but one directory folds into it (`src/app`), files sort after
@@ -182,16 +120,8 @@ fn change_tree<'a>(
     finish(root, RelativePath::new(""), repositories)
 }
 
-/// A tree row's left padding: the section gutter plus one indent per level. A file row
-/// also skips the chevron slot a directory row starts with, so names line up; both scale
-/// with the font since they frame text.
-pub(super) fn tree_indent(depth: usize, past_chevron: bool) -> Rems {
-    let chevron = if past_chevron { 1.125 } else { 0. };
-    rems(0.5 + 0.875 * depth as f32 + chevron)
-}
-
 /// One visible row of a change tree, in display order.
-pub(super) enum TreeRow<'a> {
+pub(in crate::app) enum TreeRow<'a> {
     Directory {
         label: String,
         /// The directory's Root-relative path, the key of its folded state.
@@ -208,7 +138,7 @@ pub(super) enum TreeRow<'a> {
 
 /// The rows `entries` show as a tree, `repositories` as nodes of their own, leaving out what
 /// the directories `folded` names hold.
-pub(super) fn tree_rows<'a>(
+pub(in crate::app) fn tree_rows<'a>(
     entries: &[&'a GitChangeEntry],
     repositories: &[&RelativePath],
     folded: impl Fn(&RelativePath) -> bool,
@@ -248,139 +178,8 @@ pub(super) fn tree_rows<'a>(
     rows
 }
 
-/// What a tree row starts with: a directory's chevron, open or not, or a file's place
-/// past it and whether it is the file shown.
-#[derive(Clone, Copy)]
-pub(super) enum RowKind {
-    Directory { open: bool },
-    File { selected: bool },
-}
-
-/// The shell every sidebar tree row shares, the Files tree's and the change trees': its
-/// id, height, indent, highlight and, for a directory, the chevron. The caller adds the
-/// icon, the name and what trails it.
-pub(super) fn tree_row(id: SharedString, depth: usize, kind: RowKind, cx: &App) -> Stateful<Div> {
-    let selector = id.clone();
-    let (file, selected) = match kind {
-        RowKind::Directory { .. } => (false, false),
-        RowKind::File { selected } => (true, selected),
-    };
-    let row = h_flex()
-        .id(id)
-        .debug_selector(move || selector.to_string())
-        .h_7()
-        .w_full()
-        .min_w_0()
-        .pl(tree_indent(depth, file))
-        .pr_2()
-        .map(|row| if file { row.gap_2() } else { row.gap_1() })
-        .items_center()
-        .cursor_pointer()
-        .rounded(cx.theme().radius)
-        .text_sm();
-    let row = row_highlight(row, selected, cx);
-    match kind {
-        RowKind::Directory { open } => row.child(disclosure(open, cx)),
-        RowKind::File { .. } => row,
-    }
-}
-
-/// The highlight of a sidebar row: the accent while selected, a softer one under the
-/// pointer. Hover is always registered, in the selection's own colour on a selected row,
-/// because one registered only sometimes can leave a stale hover style behind when the
-/// row turns selected, as GPUI Kit's `ListItem` warns.
-pub(super) fn row_highlight<E: Styled + InteractiveElement + FluentBuilder>(
-    row: E,
-    selected: bool,
-    cx: &App,
-) -> E {
-    let theme = cx.theme();
-    let (accent, soft, text) = (
-        theme.tokens.sidebar_accent,
-        theme.sidebar_accent.opacity(0.8),
-        theme.sidebar_accent_foreground,
-    );
-    row.when(selected, |row| row.bg(accent).text_color(text))
-        .hover(move |style| {
-            let style = if selected {
-                style.bg(accent)
-            } else {
-                style.bg(soft)
-            };
-            style.text_color(text)
-        })
-}
-
-/// The row whose context menu is open, by its element id.
-struct OpenRowMenu(Option<ElementId>);
-
-impl Global for OpenRowMenu {}
-
-/// `menu` as the row's context menu. The menu opens under the pointer and so takes the
-/// hover off the row; while it is open the row keeps that highlight and gains a ring in
-/// the focus colour, as VS Code and Zed mark the row a menu acts on.
-pub(super) fn row_menu<E: ParentElement + Styled + InteractiveElement + FluentBuilder>(
-    mut row: E,
-    selected: bool,
-    menu: impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static,
-    cx: &App,
-) -> ContextMenu<E> {
-    let id = row
-        .interactivity()
-        .element_id
-        .clone()
-        .expect("a row with a menu has an id");
-    let open = cx
-        .try_global::<OpenRowMenu>()
-        .is_some_and(|OpenRowMenu(row)| row.as_ref() == Some(&id));
-    let theme = cx.theme();
-    let (soft, text, ring, radius) = (
-        theme.sidebar_accent.opacity(0.8),
-        theme.sidebar_accent_foreground,
-        theme.ring,
-        theme.radius,
-    );
-    row.relative()
-        .when(open, |row| {
-            row.when(!selected, |row| row.bg(soft))
-                .text_color(text)
-                // Drawn over the row rather than as its border, so nothing in it moves.
-                .child(
-                    div()
-                        .debug_selector(|| "row-menu-ring".into())
-                        .absolute()
-                        .inset_0()
-                        .rounded(radius)
-                        .border_1()
-                        .border_color(ring),
-                )
-        })
-        .context_menu(move |popup, window, cx| {
-            cx.set_global(OpenRowMenu(Some(id.clone())));
-            let id = id.clone();
-            cx.subscribe_self(move |_, _: &DismissEvent, cx| {
-                let OpenRowMenu(row) = cx.global_mut::<OpenRowMenu>();
-                // Another row's menu may have opened since.
-                if row.as_ref() == Some(&id) {
-                    *row = None;
-                }
-                cx.refresh_windows();
-            })
-            .detach();
-            menu(popup, window, cx)
-        })
-}
-
-/// A directory's chevron, pointing down while it is open.
-pub(super) fn disclosure(open: bool, cx: &App) -> Icon {
-    Icon::new(IconName::ChevronRight)
-        .size_3p5()
-        .text_color(cx.theme().muted_foreground)
-        .when(open, |icon| icon.rotate(percentage(90. / 360.)))
-}
-
 /// A directory row: a chevron, a folder and the label.
-pub(super) fn directory_row(
+pub(in crate::app) fn directory_row(
     id: String,
     label: String,
     depth: usize,
@@ -398,7 +197,7 @@ pub(super) fn directory_row(
 
 /// A repository's node in Changes (ADR 0073): a directory row that also says how many files
 /// it holds there and, as IntelliJ does, its branch as a tag.
-pub(super) fn repository_row(
+pub(in crate::app) fn repository_row(
     id: String,
     label: String,
     folded: bool,
@@ -431,7 +230,7 @@ pub(super) fn repository_row(
 
 /// A file row: its status glyph, its name, cut short to fit, and `+N −N`. A deleted file's
 /// name is struck through, and muted unless it is the one shown.
-pub(super) fn file_row(
+pub(in crate::app) fn file_row(
     id: String,
     name: String,
     entry: &GitChangeEntry,
@@ -458,10 +257,9 @@ pub(super) fn file_row(
 
 #[cfg(test)]
 mod tests {
-    use super::{ChangeNode, change_tree, compact_count};
+    use super::{ChangeNode, change_tree};
     use condr_core::{GitChangeEntry, GitChangeStatus};
     use relative_path::{RelativePath, RelativePathBuf};
-
     fn entry(path: &str) -> GitChangeEntry {
         GitChangeEntry {
             path: RelativePathBuf::from(path),
@@ -469,20 +267,6 @@ mod tests {
             status: GitChangeStatus::Modified,
             stat: None,
         }
-    }
-
-    #[test]
-    fn large_line_counts_shorten_to_k_and_m() {
-        let shown = [
-            0, 999, 1_000, 1_234, 9_999, 10_500, 999_999, 1_000_000, 3_456_789,
-        ]
-        .map(compact_count);
-        assert_eq!(
-            shown,
-            [
-                "0", "999", "1k", "1.2k", "9.9k", "10k", "999k", "1M", "3.4M"
-            ]
-        );
     }
 
     #[test]

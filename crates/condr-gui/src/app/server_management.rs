@@ -539,3 +539,13 @@ impl Condr {
         }
     }
 }
+
+impl Condr {
+    pub(super) fn send_request(
+        &mut self,
+        key: ConnectionKey,
+        build: impl FnOnce(ServerId, SessionId, u64) -> ClientMessage,
+    ) -> Option<u64> {
+        self.connection_mut(key)?.send_request(build)
+    }
+}

@@ -24,6 +24,7 @@ use gpui_kit::{
     App, Context, FontWeight, Global, HighlightStyle, Hsla, Rgba, SharedString, Task,
     UnderlineStyle, Window, px,
 };
+use relative_path::RelativePath;
 use syntect::{
     easy::ScopeRangeIterator,
     highlighting::{Color, FontStyle, Highlighter, Style, Theme, ThemeSet},
@@ -543,6 +544,15 @@ fn keep_unchanged<T>(spans: &mut Vec<(Range<usize>, T)>, old: &Rope, new: &Rope)
     });
 }
 
+/// The highlighter name for a file: its extension, which `syntax::highlighter_factory` resolves
+/// (`rs` → Rust); an unknown one leaves the text plain.
+pub(super) fn language_for(path: &RelativePath) -> SharedString {
+    path.extension()
+        .map(|extension| extension.to_ascii_lowercase())
+        .unwrap_or_else(|| "text".to_owned())
+        .into()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -701,6 +711,26 @@ mod tests {
             spans,
             vec![(0..3, "a"), (4..7, "b")],
             "an unchanged text keeps all"
+        );
+    }
+
+    #[test]
+    fn the_highlighter_follows_the_extension_and_falls_back_to_plain_text() {
+        assert_eq!(
+            language_for(RelativePath::new("src/main.RS")).as_ref(),
+            "rs"
+        );
+        assert_eq!(
+            language_for(RelativePath::new("Cargo.toml")).as_ref(),
+            "toml"
+        );
+        assert_eq!(
+            language_for(RelativePath::new("Dockerfile")).as_ref(),
+            "text"
+        );
+        assert_eq!(
+            language_for(RelativePath::new(".gitignore")).as_ref(),
+            "text"
         );
     }
 }

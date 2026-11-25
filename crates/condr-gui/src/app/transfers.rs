@@ -444,7 +444,7 @@ impl Condr {
                         let destination = destination.clone();
                         Button::new("reveal-download")
                             .icon(IconName::FolderOpen)
-                            .tooltip(super::file_entries::reveal_label())
+                            .tooltip(super::right_sidebar::reveal_label())
                             .small()
                             .ghost()
                             .on_click(move |_, _, _| {

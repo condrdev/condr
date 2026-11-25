@@ -31,7 +31,7 @@ fn a_detached_tab_moves_to_its_own_window_and_comes_back() {
 
     window.update(|window, cx| {
         view.update(cx, |this, cx| {
-            this.files_view.changes_open.insert((1, workspace_id));
+            this.right_sidebar.open.insert((1, workspace_id));
             this.open_in_new_window(scope, window, cx);
         })
     });
@@ -59,7 +59,7 @@ fn a_detached_tab_moves_to_its_own_window_and_comes_back() {
         "the Tab strip keeps listing the Tab"
     );
     assert!(
-        window.debug_bounds("condr-changes-column").is_some(),
+        window.debug_bounds("condr-right-sidebar-column").is_some(),
         "the Workspace, and its right sidebar, stay in the main window"
     );
 
@@ -88,7 +88,7 @@ fn a_detached_workspace_keeps_its_right_sidebar_and_lists_only_itself() {
 
     window.update(|window, cx| {
         view.update(cx, |this, cx| {
-            this.files_view.changes_open.insert((1, first));
+            this.right_sidebar.open.insert((1, first));
             this.open_in_new_window(scope, window, cx);
         })
     });
@@ -105,7 +105,11 @@ fn a_detached_workspace_keeps_its_right_sidebar_and_lists_only_itself() {
             .debug_bounds(terminal_selector(first_pane))
             .is_some()
     );
-    assert!(detached.debug_bounds("condr-changes-column").is_some());
+    assert!(
+        detached
+            .debug_bounds("condr-right-sidebar-column")
+            .is_some()
+    );
     assert!(
         detached
             .debug_bounds(sidebar_workspace_selector(first))
@@ -120,7 +124,7 @@ fn a_detached_workspace_keeps_its_right_sidebar_and_lists_only_itself() {
     // The main window keeps it selected, shows where it went, and leaves its right
     // sidebar to the window that draws it; it still lists every Workspace.
     assert!(window.debug_bounds("shown-elsewhere").is_some());
-    assert!(window.debug_bounds("condr-changes-column").is_none());
+    assert!(window.debug_bounds("condr-right-sidebar-column").is_none());
     assert!(
         window
             .debug_bounds(sidebar_workspace_selector(first))
@@ -336,8 +340,8 @@ fn a_changes_click_retargets_a_detached_diff_tab_without_moving_either_window() 
         wait_until(window, |window| {
             window.read(|app| {
                 view.read(app)
-                    .files_view
-                    .diff_viewers
+                    .diff_tab
+                    .viewers
                     .get(&(1, diff_tab))
                     .is_some_and(|viewer| viewer.patch.contains("BETA"))
             })

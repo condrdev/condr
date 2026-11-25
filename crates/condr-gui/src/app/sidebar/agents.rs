@@ -4,7 +4,7 @@
 //! height its top-edge handle sets.
 
 use super::*;
-use crate::app::change_tree::row_highlight;
+use crate::app::list_row::row_highlight;
 use crate::app::slide::SlideColumn;
 use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::resizable::resize_handle;

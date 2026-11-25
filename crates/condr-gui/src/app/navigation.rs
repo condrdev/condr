@@ -44,7 +44,7 @@ impl Condr {
             .flat_map(|tab| tab.panes())
             .map(|pane| pane.id())
             .collect::<HashSet<_>>();
-        self.prune_files_state(key, cx);
+        self.prune_workspace_views(key, cx);
 
         self.retain_dock_cache(key, &tab_ids, &pane_ids);
         self.close_windows_without_units(key, cx);

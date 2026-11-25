@@ -2,9 +2,9 @@
 //! included, against the side its Workspace's Changes compare with, drawn in the gutter
 //! and on the scrollbar track through Kit's decoration collections.
 
-use super::change_tree::status_color;
-use super::workspace_resources::OldFilePath;
 use super::*;
+use crate::app::git_marks::status_color;
+use crate::app::workspace_resources::OldFilePath;
 use condr_core::GitChangeStatus;
 use gpui_kit::component::input::{
     GutterDecoration, GutterDecorationCollection, OverviewRulerDecoration,
@@ -22,7 +22,7 @@ const RULER_OPACITY: f32 = 0.6;
 
 /// One changed run of the new text, in the UTF-8 byte offsets Kit's decorations take.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) enum LineChange {
+pub(in crate::app) enum LineChange {
     /// Lines with nothing on the old side.
     Added(Range<usize>),
     /// Lines that replace old ones.
@@ -35,7 +35,7 @@ pub(super) enum LineChange {
 /// A Preview Tab's marks: Kit's two collections while its file has a side to compare
 /// with, and the throttled diff that fills them.
 #[derive(Default)]
-pub(super) struct ChangeMarks {
+pub(in crate::app) struct ChangeMarks {
     collections: Option<(
         GutterDecorationCollection,
         OverviewRulerDecorationCollection,
@@ -50,7 +50,7 @@ pub(super) struct ChangeMarks {
     task: Option<Task<()>>,
     /// Diffs started, for the throttle's test.
     #[cfg(test)]
-    pub(super) runs: u32,
+    pub(in crate::app) runs: u32,
 }
 
 impl ChangeMarks {
@@ -85,7 +85,7 @@ impl ChangeMarks {
 
     /// The gutter's and the scrollbar's ranges, while the strip is reserved.
     #[cfg(test)]
-    pub(super) fn ranges(&self, cx: &App) -> Option<[Vec<Range<usize>>; 2]> {
+    pub(in crate::app) fn ranges(&self, cx: &App) -> Option<[Vec<Range<usize>>; 2]> {
         let (gutter, ruler) = self.collections.as_ref()?;
         Some([gutter.get_ranges(cx), ruler.get_ranges(cx)])
     }
@@ -106,7 +106,7 @@ impl Condr {
     /// (ADR 0050): asks for that side whenever none is cached, which a Git change or a
     /// comparison switch causes, and diffs again when a new answer lands. Only text in a
     /// Workspace with Git is marked.
-    pub(super) fn sync_change_marks(
+    pub(in crate::app) fn sync_change_marks(
         &mut self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
@@ -116,7 +116,7 @@ impl Condr {
         let against = self.workspace_diff_base(key, workspace_id);
         let (Some(connection), Some(editor)) = (
             self.connection(key),
-            self.files_view.file_editors.get(&(key, tab_id)),
+            self.preview_tab.editors.get(&(key, tab_id)),
         ) else {
             return;
         };
@@ -137,7 +137,7 @@ impl Condr {
         if let Some(slot) = ask {
             self.request_old_file(key, slot);
         }
-        let Some(editor) = self.files_view.file_editors.get_mut(&(key, tab_id)) else {
+        let Some(editor) = self.preview_tab.editors.get_mut(&(key, tab_id)) else {
             return;
         };
         let marks = &mut editor.marks;
@@ -199,13 +199,13 @@ impl Condr {
     /// The text or the old side moved: diffs again, at most once per [`THROTTLE`], on the
     /// background executor. A burst of edits waits for the pass in flight, which then runs
     /// once more on the latest text.
-    pub(super) fn schedule_change_marks(
+    pub(in crate::app) fn schedule_change_marks(
         &mut self,
         key: ConnectionKey,
         tab_id: TabId,
         cx: &mut Context<Self>,
     ) {
-        let Some(editor) = self.files_view.file_editors.get_mut(&(key, tab_id)) else {
+        let Some(editor) = self.preview_tab.editors.get_mut(&(key, tab_id)) else {
             return;
         };
         let marks = &mut editor.marks;
@@ -223,7 +223,7 @@ impl Condr {
         marks.task = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(wait).await;
             let Ok(Some((revision, old, new))) = this.update(cx, |this, cx| {
-                let editor = this.files_view.file_editors.get_mut(&(key, tab_id))?;
+                let editor = this.preview_tab.editors.get_mut(&(key, tab_id))?;
                 let marks = &mut editor.marks;
                 marks.last_run = Some(cx.background_executor().now());
                 #[cfg(test)]
@@ -259,7 +259,7 @@ impl Condr {
         changes: Option<Vec<LineChange>>,
         cx: &mut Context<Self>,
     ) {
-        let Some(editor) = self.files_view.file_editors.get_mut(&(key, tab_id)) else {
+        let Some(editor) = self.preview_tab.editors.get_mut(&(key, tab_id)) else {
             return;
         };
         let marks = &mut editor.marks;
@@ -277,8 +277,8 @@ impl Condr {
     }
 
     /// The GUI theme changed: the marks take its status colours.
-    pub(super) fn recolor_change_marks(&mut self, cx: &mut Context<Self>) {
-        let tabs: Vec<_> = self.files_view.file_editors.keys().copied().collect();
+    pub(in crate::app) fn recolor_change_marks(&mut self, cx: &mut Context<Self>) {
+        let tabs: Vec<_> = self.preview_tab.editors.keys().copied().collect();
         for (key, tab_id) in tabs {
             self.schedule_change_marks(key, tab_id, cx);
         }
@@ -287,7 +287,11 @@ impl Condr {
 
 /// The changed runs of `new` against `old`, line by line, or `None` past `deadline`.
 /// Line breaks are not compared, so a CRLF side matches an LF one line for line.
-pub(super) fn line_changes(old: &str, new: &str, deadline: Instant) -> Option<Vec<LineChange>> {
+pub(in crate::app) fn line_changes(
+    old: &str,
+    new: &str,
+    deadline: Instant,
+) -> Option<Vec<LineChange>> {
     let old_lines: Vec<&str> = old.lines().collect();
     let new_lines: Vec<&str> = new.lines().collect();
     let ops = similar::capture_diff_slices_deadline(

@@ -2,7 +2,7 @@
 //! facts they share (ADR 0068).
 
 use super::*;
-use crate::app::change_tree::diff_stat;
+use crate::app::git_marks::diff_stat;
 use crate::app::sidebar::{UpstreamCount, upstream_counts, upstream_label};
 use condr_core::GitDiffStat;
 

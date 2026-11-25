@@ -327,8 +327,8 @@ impl Condr {
             // A Preview Tab with unsaved text marks it where the close button appears, as
             // VS Code does, on the Tab's resting colour; hovering swaps in the close button.
             let unsaved = self
-                .files_view
-                .file_editors
+                .preview_tab
+                .editors
                 .get(&(key, tab_id))
                 .is_some_and(|editor| editor.dirty);
             let rest_chip = if tab_id == active_tab {
@@ -918,7 +918,7 @@ impl Render for Condr {
             body,
         } = match tasks_board {
             // Tasks mode covers the content area as the Ports page does, the sidebar
-            // beside it and the Changes sidebar under it (ADR 0068).
+            // beside it and the right sidebar under it (ADR 0068).
             Some(board) => WorkspaceChrome {
                 tab_strip: Some(self.render_tasks_title(view.scope == WindowScope::Main, cx)),
                 open_in: None,
@@ -934,9 +934,8 @@ impl Render for Condr {
             && self.presented_workspace_in(view).is_some()
             && self.draws_workspace(view);
         let changes_toggle = has_workspace.then(|| self.render_changes_toggle(view, cx));
-        let changes_column = (view.page == ContentPage::Workspace
-            && self.changes_sidebar_open(view))
-        .then(|| self.render_right_sidebar(view, cx));
+        let changes_column = (view.page == ContentPage::Workspace && self.right_sidebar_open(view))
+            .then(|| self.render_right_sidebar(view, cx));
         // The Tasks window draws Tasks alone, as a Tab window draws its Tab (ADR 0069).
         let tab_window = matches!(view.scope, WindowScope::Tab(..) | WindowScope::Tasks);
         let title = self.window_title(view.scope);
@@ -1073,13 +1072,15 @@ impl Render for Condr {
                                     cx.notify();
                                 },
                             ))
-                            // The Changes sidebar mirrors it: its handle is on its left edge.
+                            // The right sidebar mirrors it: its handle is on its left edge.
                             .on_drag_move(cx.listener(
-                                |this, event: &DragMoveEvent<DraggedChanges>, window, cx| {
+                                |this, event: &DragMoveEvent<DraggedRightSidebar>, window, cx| {
                                     let right = event.bounds.origin.x + event.bounds.size.width;
                                     let width = right - event.event.position.x;
-                                    this.window_view_mut(window).changes_width =
-                                        width.max(MIN_CHANGES_WIDTH).min(MAX_CHANGES_WIDTH).round();
+                                    this.window_view_mut(window).right_sidebar_width = width
+                                        .max(MIN_RIGHT_SIDEBAR_WIDTH)
+                                        .min(MAX_RIGHT_SIDEBAR_WIDTH)
+                                        .round();
                                     this.schedule_state_save(cx);
                                     cx.notify();
                                 },
@@ -1116,24 +1117,27 @@ impl Render for Condr {
                             .when_some(changes_column, |this, changes| {
                                 this.child(
                                     div()
-                                        .debug_selector(|| "condr-changes-column".into())
+                                        .debug_selector(|| "condr-right-sidebar-column".into())
                                         .relative()
-                                        .w(view.changes_width)
+                                        .w(view.right_sidebar_width)
                                         .flex_none()
                                         .h_full()
                                         .child(changes)
                                         // Inside its leading edge, as Kit's Dock puts a right
                                         // panel's.
                                         .child(
-                                            resize_handle("condr-changes-resize", Axis::Horizontal)
-                                                .inside(HandleEdge::Leading)
-                                                .debug_selector(|| "condr-changes-resize".into())
-                                                .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                                                    cx.stop_propagation()
-                                                })
-                                                .on_drag(DraggedChanges, |_, _, _, cx| {
-                                                    cx.new(|_| EmptyView)
-                                                }),
+                                            resize_handle(
+                                                "condr-right-sidebar-resize",
+                                                Axis::Horizontal,
+                                            )
+                                            .inside(HandleEdge::Leading)
+                                            .debug_selector(|| "condr-right-sidebar-resize".into())
+                                            .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                                cx.stop_propagation()
+                                            })
+                                            .on_drag(DraggedRightSidebar, |_, _, _, cx| {
+                                                cx.new(|_| EmptyView)
+                                            }),
                                         ),
                                 )
                             }),

@@ -18,7 +18,7 @@ impl ListFit {
     pub(super) const ALWAYS: f32 = 2. + 1.25 + 10. + 12. + 1.;
 
     pub(super) fn of(view: &WindowView, form_open: bool, window: &Window) -> Self {
-        // The card area spans the window beside the left sidebar (the Changes sidebar is
+        // The card area spans the window beside the left sidebar (the right sidebar is
         // under it); beside the interaction area the List takes its share of the split.
         let mut width =
             (window.viewport_size().width - view.sidebar_layout_width()) / window.rem_size();

@@ -328,7 +328,7 @@ impl Condr {
                         // A refresh the user asked for has landed; it refetches the shown
                         // diff too, which a scan that found no change would leave (ADR 0046).
                         if self
-                            .files_view
+                            .right_sidebar
                             .refreshing
                             .remove(&(key, workspace_id))
                             .is_some()

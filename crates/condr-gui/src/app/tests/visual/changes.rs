@@ -1,6 +1,6 @@
 use super::*;
 
-/// The Changes sidebar lists the real Server's status for a repository Workspace, a click
+/// The Changes view lists the real Server's status for a repository Workspace, a click
 /// opens the Diff Tab through the Server, and the Diff Tab shows the file's hunks once the
 /// Server answers (ADR 0017).
 #[test]
@@ -24,7 +24,7 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
     window.update(|window, cx| _ = window.draw(cx));
     assert!(
         window.debug_bounds("condr-right-sidebar").is_none(),
-        "the Changes sidebar starts closed on a fresh config"
+        "the right sidebar starts closed on a fresh config"
     );
     // Without a Workspace there is nothing to review: the title bar has no toggle.
     assert!(window.debug_bounds("toggle-changes").is_none());
@@ -52,7 +52,7 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
     window.run_until_parked();
     window.update(|window, cx| _ = window.draw(cx));
     assert!(window.debug_bounds("condr-right-sidebar").is_some());
-    assert!(window.debug_bounds("condr-changes-column").is_some());
+    assert!(window.debug_bounds("condr-right-sidebar-column").is_some());
 
     // The Server scans the repository off its own lock and publishes the list.
     assert!(
@@ -96,13 +96,13 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
     // the refresh and drop the shown diffs; the five-second timeout drops nothing.
     assert!(
         wait_until(window, |window| {
-            window.read(|app| view.read(app).files_view.refreshing.is_empty())
+            window.read(|app| view.read(app).right_sidebar.refreshing.is_empty())
                 && diffs_generation(window) > before
         }),
         "the click should start a refresh that the Server's rescan ends"
     );
 
-    let changes = window.debug_bounds("condr-changes-column").unwrap();
+    let changes = window.debug_bounds("condr-right-sidebar-column").unwrap();
     let row = window.debug_bounds("change-notes.txt").unwrap();
     assert!(
         row.left() >= changes.left() && row.right() <= changes.right() + px(1.),
@@ -159,13 +159,13 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
     window.update(|_, cx| {
         view.update(cx, |view, _| {
             let viewer = view
-                .files_view
-                .diff_viewers
+                .diff_tab
+                .viewers
                 .values_mut()
                 .next()
                 .expect("one Diff Tab viewer");
             viewer.clicked = Some(gpui_kit::component::diff::DiffLinePosition::new(
-                crate::app::changes::PATCH_PATH,
+                crate::app::diff_tab::PATCH_PATH,
                 gpui_kit::component::diff::DiffSide::Original,
                 2,
             ));
@@ -184,7 +184,7 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
                     session.tab(tab_id).unwrap().file().is_some_and(|file| {
                         file.path() == relative_path::RelativePath::new("notes.txt")
                     })
-                }) && view.files_view.file_editors.values().any(|editor| {
+                }) && view.preview_tab.editors.values().any(|editor| {
                     let state = editor.state.read(cx);
                     state.value().contains("BETA") && state.cursor_position().line == 1
                 })
@@ -237,8 +237,8 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
             window.update(|window, cx| _ = window.draw(cx));
             window.update(|_, cx| {
                 view.read(cx)
-                    .files_view
-                    .diff_viewers
+                    .diff_tab
+                    .viewers
                     .values()
                     .any(|viewer| viewer.patch.contains("+new") && !viewer.patch.contains("BETA"))
             })
@@ -248,14 +248,14 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
     // It is coloured by the file's language, and by the code theme Settings picks.
     let painted = window.update(|_, cx| {
         let view = view.read(cx);
-        let viewer = view.files_view.diff_viewers.values().next().unwrap();
+        let viewer = view.diff_tab.viewers.values().next().unwrap();
         assert_eq!(viewer.state.read(cx).files()[0].language().as_ref(), "txt");
         viewer.highlighter.clone()
     });
     window.update(|_, cx| crate::app::syntax::set_code_theme("Solarized Light".into(), cx));
     window.update(|_, cx| {
         let view = view.read(cx);
-        let viewer = view.files_view.diff_viewers.values().next().unwrap();
+        let viewer = view.diff_tab.viewers.values().next().unwrap();
         assert!(!std::sync::Arc::ptr_eq(&viewer.highlighter, &painted));
         assert!(std::sync::Arc::ptr_eq(
             &viewer.highlighter,
@@ -361,8 +361,8 @@ fn the_changes_comparison_switches_between_head_and_the_base_branch() {
             window.update(|window, cx| _ = window.draw(cx));
             window.update(|_, cx| {
                 view.read(cx)
-                    .files_view
-                    .diff_viewers
+                    .diff_tab
+                    .viewers
                     .values()
                     .any(|viewer| viewer.patch.contains("+agent"))
             })
@@ -378,11 +378,9 @@ fn the_changes_comparison_switches_between_head_and_the_base_branch() {
             window.update(|window, cx| _ = window.draw(cx));
             window.debug_bounds("change-committed.txt").is_none()
                 && window.read(|app| {
-                    view.read(app)
-                        .files_view
-                        .diff_viewers
-                        .values()
-                        .all(|viewer| viewer.content == crate::app::changes::DiffContent::Unchanged)
+                    view.read(app).diff_tab.viewers.values().all(|viewer| {
+                        viewer.content == crate::app::diff_tab::DiffContent::Unchanged
+                    })
                 })
         }),
         "against HEAD the committed file is unchanged"
@@ -515,8 +513,8 @@ fn history_lists_commits_and_shows_one_commits_file_in_the_diff_tab() {
         wait_until(window, |window| {
             window.read(|app| {
                 view.read(app)
-                    .files_view
-                    .diff_viewers
+                    .diff_tab
+                    .viewers
                     .values()
                     .any(|viewer| viewer.patch.contains("+gamma"))
             })
@@ -566,21 +564,17 @@ fn history_lists_commits_and_shows_one_commits_file_in_the_diff_tab() {
             window.update(|window, cx| _ = window.draw(cx));
             window.debug_bounds("diff-commit-header").is_some()
                 && window.read(|app| {
-                    view.read(app)
-                        .files_view
-                        .diff_viewers
-                        .values()
-                        .any(|viewer| {
-                            viewer.patch.contains("-beta") && viewer.patch.contains("+BETA")
-                        })
+                    view.read(app).diff_tab.viewers.values().any(|viewer| {
+                        viewer.patch.contains("-beta") && viewer.patch.contains("+BETA")
+                    })
                 })
         }),
         "the same path's Diff Tab switches to the file as the commit changed it"
     );
     assert!(window.read(|app| {
         view.read(app)
-            .files_view
-            .diff_viewers
+            .diff_tab
+            .viewers
             .values()
             .all(|viewer| !viewer.patch.contains("gamma"))
     }));

@@ -344,7 +344,7 @@ impl Condr {
             .map(PaneLayout::Pane)
             .unwrap_or(tab_layout);
         // Where "Insert Path into Terminal" goes once a viewer Tab takes the active slot.
-        self.files_view
+        self.right_sidebar
             .last_terminal_tabs
             .insert((key, _workspace_id), tab_id);
         let surface_key = DockSurfaceKey {

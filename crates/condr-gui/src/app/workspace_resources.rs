@@ -358,6 +358,112 @@ impl WorkspaceResources {
     }
 }
 
+impl Condr {
+    /// The working tree moved: asks again for every cached listing of the Workspace and
+    /// for the file its Preview Tab shows, keeping the old answers on screen until the new
+    /// ones land. Every other cached file is dropped rather than refetched; a Tab that
+    /// comes back to one asks for it again.
+    pub(super) fn refresh_workspace_files(
+        &mut self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+    ) {
+        let Some(connection) = self.connection_mut(key) else {
+            return;
+        };
+        let shown = connection.session().and_then(|session| {
+            Some(
+                session
+                    .file_tab(workspace_id)?
+                    .file()?
+                    .path()
+                    .to_relative_path_buf(),
+            )
+        });
+        let directories = connection
+            .resources
+            .refresh_files(workspace_id, shown.as_deref());
+        self.preview_tab
+            .images
+            .refresh(key, workspace_id, shown.as_deref());
+        for path in directories {
+            self.request_directory(key, workspace_id, path);
+        }
+        if let Some(path) = shown {
+            self.request_file(key, workspace_id, path);
+        }
+    }
+
+    /// Forgets the requests in flight on `key`: their answers will never come once the
+    /// connection they were sent on is gone, and a Bootstrap has just replaced every
+    /// cache they would have filled. Without this a listing or file stays "pending" and
+    /// is never asked for again.
+    pub(super) fn clear_pending_requests(&mut self, key: ConnectionKey) {
+        if let Some(connection) = self.connection_mut(key) {
+            connection.resources.clear_pending();
+        }
+    }
+
+    /// What this Client keeps of `key`'s Workspaces and Tabs follows its Session: the
+    /// same retention rules handle a closed Workspace and a replaced connection.
+    pub(super) fn prune_workspace_views(&mut self, key: ConnectionKey, cx: &mut App) {
+        let session = self
+            .connection(key)
+            .and_then(|connection| connection.session());
+        let closing: Vec<TabId> = self
+            .preview_tab
+            .editors
+            .keys()
+            .filter(|(editor_key, tab_id)| {
+                *editor_key == key
+                    && !session.is_some_and(|session| {
+                        session.tab(*tab_id).is_some_and(|tab| tab.file().is_some())
+                    })
+            })
+            .map(|(_, tab_id)| *tab_id)
+            .collect();
+        for tab_id in closing {
+            self.keep_unsaved(key, tab_id, cx);
+        }
+        let Some(connection) = self
+            .connections
+            .iter_mut()
+            .find(|connection| connection.key == key)
+        else {
+            return;
+        };
+        let session = connection.session();
+        self.right_sidebar.retain_session(key, session);
+        self.diff_tab.retain_session(key, session);
+        release_images(self.preview_tab.retain_session(key, session), cx);
+        let live = connection
+            .session()
+            .into_iter()
+            .flat_map(Session::workspaces)
+            .map(Workspace::id)
+            .collect();
+        connection.resources.retain_workspaces(&live);
+    }
+
+    /// `key` is gone: nothing this Client kept of its Workspaces and Tabs stays.
+    pub(super) fn clear_workspace_views(&mut self, key: ConnectionKey, cx: &mut App) {
+        let closing: Vec<TabId> = self
+            .preview_tab
+            .editors
+            .keys()
+            .filter(|(editor_key, _)| *editor_key == key)
+            .map(|(_, tab_id)| *tab_id)
+            .collect();
+        for tab_id in closing {
+            self.keep_unsaved(key, tab_id, cx);
+        }
+        self.right_sidebar.retain_session(key, None);
+        self.diff_tab.retain_session(key, None);
+        release_images(self.preview_tab.retain_session(key, None), cx);
+        self.clear_pending_requests(key);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

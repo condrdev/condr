@@ -5,6 +5,7 @@
 
 use super::placeholders::{Oversized, too_large};
 use super::*;
+use crate::app::format::file_size_text;
 use gpui_kit::base::text::{
     MarkdownExtensions, MarkdownNode, MarkdownParseContext, MarkdownPlugin, TextView,
     TextViewState, TextViewStyle, markdown_ast,
@@ -26,12 +27,12 @@ const MARKDOWN_MAX_WIDTH: f32 = 48.;
 
 /// A file the Preview Tab can render instead of showing its text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Rendering {
+pub(in crate::app) enum Rendering {
     Markdown,
     Svg,
 }
 
-pub(super) fn rendering_for(path: &RelativePath) -> Option<Rendering> {
+pub(in crate::app) fn rendering_for(path: &RelativePath) -> Option<Rendering> {
     match path.extension()?.to_ascii_lowercase().as_str() {
         "md" | "markdown" => Some(Rendering::Markdown),
         "svg" => Some(Rendering::Svg),
@@ -56,7 +57,7 @@ fn image_format(path: &RelativePath) -> Option<ImageFormat> {
 }
 
 /// A decoded image, one `RenderImage` per frame.
-pub(super) struct DecodedImage {
+pub(in crate::app) struct DecodedImage {
     frames: Vec<(Arc<RenderImage>, Duration)>,
     /// The sum of the frame delays: one loop of the animation.
     period: Duration,
@@ -65,8 +66,8 @@ pub(super) struct DecodedImage {
     /// does not schedule another one.
     wake: Mutex<Option<Instant>>,
     /// In image pixels, for the Preview Tab's header.
-    pub(super) size: Size<u32>,
-    pub(super) file_bytes: usize,
+    pub(in crate::app) size: Size<u32>,
+    pub(in crate::app) file_bytes: usize,
 }
 
 impl DecodedImage {
@@ -74,7 +75,7 @@ impl DecodedImage {
     /// one, at the animation's own pace rather than every display frame, and keeps going
     /// whatever the system's reduce-motion setting says: GPUI's `img` stops there, but
     /// this is a picture the user opened to watch.
-    pub(super) fn frame(&self, window: &mut Window, cx: &mut App) -> Arc<RenderImage> {
+    pub(in crate::app) fn frame(&self, window: &mut Window, cx: &mut App) -> Arc<RenderImage> {
         let [(first, _), ..] = self.frames.as_slice() else {
             unreachable!("a decoded image has a frame");
         };
@@ -198,18 +199,18 @@ fn animation(frames: image::Frames<'_>) -> Result<Vec<(Arc<RenderImage>, Duratio
 }
 
 /// One file of one Workspace on one connection.
-pub(super) type ImageKey = (ConnectionKey, WorkspaceId, RelativePathBuf);
+pub(in crate::app) type ImageKey = (ConnectionKey, WorkspaceId, RelativePathBuf);
 
 /// The Preview Tab's images: the file it shows when that is one, and the ones its
 /// Markdown draws. Shared with the image loader Kit's TextView calls during layout,
 /// which cannot reach `Condr`.
 #[derive(Clone, Default)]
-pub(super) struct PreviewImages(Arc<Mutex<HashMap<ImageKey, ImageSlot>>>);
+pub(in crate::app) struct PreviewImages(Arc<Mutex<HashMap<ImageKey, ImageSlot>>>);
 
 /// Why the Preview Tab draws no picture: what the file is, which is no fault, or what went
 /// wrong reading or decoding it.
 #[derive(Clone, Debug, PartialEq)]
-pub(super) enum NoImage {
+pub(in crate::app) enum NoImage {
     Note(SharedString),
     Failed(SharedString),
 }
@@ -240,18 +241,18 @@ impl PreviewImages {
     }
 
     /// What to draw for one file, `None` while it loads.
-    pub(super) fn get(&self, key: &ImageKey) -> Option<Result<Arc<DecodedImage>, NoImage>> {
+    pub(in crate::app) fn get(&self, key: &ImageKey) -> Option<Result<Arc<DecodedImage>, NoImage>> {
         self.slots().get(key).and_then(|slot| slot.shown.clone())
     }
 
     /// Marks the file as drawn; `true` when it was not, so it still has to be asked for.
-    pub(super) fn want(&self, key: ImageKey) -> bool {
+    pub(in crate::app) fn want(&self, key: ImageKey) -> bool {
         !std::mem::replace(&mut self.slots().entry(key).or_default().wanted, true)
     }
 
     /// Every image of the Workspace but `shown` is asked for again the next time it is
     /// drawn, as the Server's watcher wants; what it shows stays until the answer lands.
-    pub(super) fn refresh(
+    pub(in crate::app) fn refresh(
         &self,
         connection: ConnectionKey,
         workspace_id: WorkspaceId,
@@ -265,7 +266,10 @@ impl PreviewImages {
     }
 
     /// Keeps the slots `keep` accepts and hands back the images of the others.
-    pub(super) fn retain(&self, keep: impl Fn(&ImageKey) -> bool) -> Vec<Arc<DecodedImage>> {
+    pub(in crate::app) fn retain(
+        &self,
+        keep: impl Fn(&ImageKey) -> bool,
+    ) -> Vec<Arc<DecodedImage>> {
         let mut dropped = Vec::new();
         self.slots().retain(|key, slot| {
             let kept = keep(key);
@@ -279,7 +283,7 @@ impl PreviewImages {
 
     /// Keeps, of `shown`'s Workspace, only `shown` itself: a Preview Tab that shows
     /// another file lets the last one's images go.
-    pub(super) fn retain_shown(&self, shown: &ImageKey) -> Vec<Arc<DecodedImage>> {
+    pub(in crate::app) fn retain_shown(&self, shown: &ImageKey) -> Vec<Arc<DecodedImage>> {
         self.retain(|image| image.0 != shown.0 || image.1 != shown.1 || image == shown)
     }
 
@@ -324,7 +328,7 @@ impl PreviewImages {
 }
 
 /// Frees the frames of images nothing draws any more from every window's atlas.
-pub(super) fn release_images(images: Vec<Arc<DecodedImage>>, cx: &mut App) {
+pub(in crate::app) fn release_images(images: Vec<Arc<DecodedImage>>, cx: &mut App) {
     if images.is_empty() {
         return;
     }
@@ -341,13 +345,13 @@ pub(super) fn release_images(images: Vec<Arc<DecodedImage>>, cx: &mut App) {
 impl Condr {
     /// Gives every image of the Workspace that something draws its file's answer: decodes
     /// what changed and asks the Server for what is missing.
-    pub(super) fn feed_images(
+    pub(in crate::app) fn feed_images(
         &mut self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
         cx: &mut Context<Self>,
     ) {
-        for path in self.files_view.images.wanted(key, workspace_id) {
+        for path in self.preview_tab.images.wanted(key, workspace_id) {
             let Some(connection) = self.connection(key) else {
                 return;
             };
@@ -359,7 +363,7 @@ impl Condr {
                 continue;
             };
             // Rendered draws unsaved text from the Editor instead (ADR 0045).
-            if self.files_view.file_editors.values().any(|editor| {
+            if self.preview_tab.editors.values().any(|editor| {
                 editor.dirty
                     && editor.workspace_id == workspace_id
                     && editor
@@ -370,7 +374,7 @@ impl Condr {
                 continue;
             }
             let image_key = (key, workspace_id, path);
-            if !self.files_view.images.feed(&image_key, generation) {
+            if !self.preview_tab.images.feed(&image_key, generation) {
                 continue;
             }
             let decodable = match (answer, image_format(&image_key.2)) {
@@ -388,7 +392,7 @@ impl Condr {
                 Ok(decodable) => decodable,
                 Err(reason) => {
                     let replaced =
-                        self.files_view
+                        self.preview_tab
                             .images
                             .land(&image_key, generation, None, Err(reason));
                     release_images(replaced.into_iter().collect(), cx);
@@ -401,7 +405,7 @@ impl Condr {
 
     /// Rendered draws the Editor's text, saved or not (ADR 0045): an unsaved SVG is
     /// decoded from it rather than from the file's answer.
-    pub(super) fn feed_unsaved_svg(
+    pub(in crate::app) fn feed_unsaved_svg(
         &mut self,
         image_key: ImageKey,
         text: String,
@@ -409,7 +413,7 @@ impl Condr {
     ) {
         // No answer has this generation, so the file's next answer replaces the drawing.
         const UNSAVED: u64 = u64::MAX;
-        self.files_view.images.feed(&image_key, UNSAVED);
+        self.preview_tab.images.feed(&image_key, UNSAVED);
         self.decode_image(image_key, UNSAVED, text.into_bytes(), ImageFormat::Svg, cx);
     }
 
@@ -425,7 +429,7 @@ impl Condr {
         let mut hasher = DefaultHasher::new();
         bytes.hash(&mut hasher);
         let digest = hasher.finish();
-        if self.files_view.images.digest(&image_key) == Some(digest) {
+        if self.preview_tab.images.digest(&image_key) == Some(digest) {
             return;
         }
         let svg = cx.svg_renderer();
@@ -438,12 +442,12 @@ impl Condr {
                     .map(Arc::new)
                     .map_err(|error| NoImage::Failed(error.into()));
                 let replaced =
-                    this.files_view
+                    this.preview_tab
                         .images
                         .land(&image_key, generation, Some(digest), shown);
                 release_images(replaced.into_iter().collect(), cx);
                 // Kit keeps the size a Markdown image was first laid out at.
-                for editor in this.files_view.file_editors.values() {
+                for editor in this.preview_tab.editors.values() {
                     if let Some(markdown) = &editor.markdown {
                         markdown.update(cx, |state, cx| state.invalidate_inline_layout(cx));
                     }
@@ -458,7 +462,7 @@ impl Condr {
     /// A rendered Markdown file: GPUI Kit's TextView over the Tab's state, its text centred
     /// at a readable width, its images and links resolved in the Workspace.
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn render_markdown(
+    pub(in crate::app) fn render_markdown(
         &self,
         view: &WindowView,
         key: ConnectionKey,
@@ -478,7 +482,7 @@ impl Condr {
             .parent()
             .unwrap_or(RelativePath::new(""))
             .to_relative_path_buf();
-        let images = self.files_view.images.clone();
+        let images = self.preview_tab.images.clone();
         let owner = cx.weak_entity();
         let image_base = base.clone();
         let link_owner = cx.weak_entity();
@@ -617,7 +621,7 @@ impl Condr {
 }
 
 /// An image file, scaled down to fit the Tab and never up.
-pub(super) fn render_image(image: Arc<DecodedImage>) -> AnyElement {
+pub(in crate::app) fn render_image(image: Arc<DecodedImage>) -> AnyElement {
     div()
         .debug_selector(|| "file-image".into())
         .flex_1()
@@ -640,22 +644,13 @@ pub(super) fn render_image(image: Arc<DecodedImage>) -> AnyElement {
 }
 
 /// An image's pixel size and file size, as the Preview Tab's header shows them.
-pub(super) fn image_summary(image: &DecodedImage) -> String {
+pub(in crate::app) fn image_summary(image: &DecodedImage) -> String {
     format!(
         "{}×{} · {}",
         image.size.width,
         image.size.height,
         file_size_text(image.file_bytes)
     )
-}
-
-pub(super) fn file_size_text(bytes: usize) -> String {
-    const KIB: f64 = 1024.;
-    match bytes as f64 {
-        size if size < KIB => format!("{bytes} B"),
-        size if size < KIB * KIB => format!("{:.1} KiB", size / KIB),
-        size => format!("{:.1} MiB", size / (KIB * KIB)),
-    }
 }
 
 /// GPUI Kit's text colours, as Kit derives them for its own TextViews, with code blocks
@@ -806,7 +801,7 @@ mod tests {
     // Not `super::*`: GPUI's own `test` attribute would shadow the standard one.
     use super::{
         Arc, Cursor, Duration, LinkTarget, RelativePath, RenderImage, SHORT_FRAME_DELAY, animation,
-        file_size_text, frame_at, link_target, workspace_path,
+        frame_at, link_target, workspace_path,
     };
     use image::AnimationDecoder as _;
 
@@ -946,12 +941,5 @@ mod tests {
         // Drawing again before then does not pile up another redraw.
         window.update(|window, cx| _ = window.draw(cx));
         assert_eq!(*image.wake.lock().unwrap(), Some(due));
-    }
-
-    #[test]
-    fn sizes_read_in_the_largest_whole_unit() {
-        assert_eq!(file_size_text(512), "512 B");
-        assert_eq!(file_size_text(1536), "1.5 KiB");
-        assert_eq!(file_size_text(3 << 20), "3.0 MiB");
     }
 }

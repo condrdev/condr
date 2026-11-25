@@ -77,7 +77,7 @@ fn files_upload_and_download_through_the_gui_and_collect_in_the_strip() {
     // The strip shows while the Workspace's right sidebar is open; Clear empties it.
     window.update(|window, cx| {
         let _ = window;
-        view.update(cx, |this, cx| this.toggle_changes_sidebar(cx))
+        view.update(cx, |this, cx| this.toggle_right_sidebar(cx))
     });
     window.update(|window, cx| _ = window.draw(cx));
     assert!(window.debug_bounds("transfer-strip").is_some());

@@ -83,7 +83,7 @@ pub(super) struct WindowView {
     pub(super) agents_height: Option<Pixels>,
     pub(super) agents_collapsed: bool,
     pub(super) agents_order: sidebar::AgentsOrder,
-    pub(super) changes_width: Pixels,
+    pub(super) right_sidebar_width: Pixels,
     /// The title bar's Tab strip scrolls when the Tabs outgrow it; a newly active Tab
     /// is scrolled into view once, which `last_scrolled_tab` remembers across renders.
     pub(super) tab_strip_scroll: ScrollHandle,
@@ -158,7 +158,7 @@ impl WindowView {
             agents_height: None,
             agents_collapsed: false,
             agents_order: sidebar::AgentsOrder::default(),
-            changes_width: INITIAL_CHANGES_WIDTH,
+            right_sidebar_width: INITIAL_RIGHT_SIDEBAR_WIDTH,
             tab_strip_scroll: ScrollHandle::new(),
             last_scrolled_tab: Cell::new(None),
             bounds: window.window_bounds().into(),
@@ -601,10 +601,10 @@ impl Condr {
     ) {
         let owner = cx.entity();
         let main = self.main_view();
-        let (sidebar_width, sidebar_collapsed, changes_width) = (
+        let (sidebar_width, sidebar_collapsed, right_sidebar_width) = (
             main.sidebar_width,
             main.sidebar_collapsed,
-            main.changes_width,
+            main.right_sidebar_width,
         );
         let (agents_height, agents_collapsed, agents_order) =
             (main.agents_height, main.agents_collapsed, main.agents_order);
@@ -622,7 +622,7 @@ impl Condr {
                     view.agents_height = agents_height;
                     view.agents_collapsed = agents_collapsed;
                     view.agents_order = agents_order;
-                    view.changes_width = changes_width;
+                    view.right_sidebar_width = right_sidebar_width;
                     if scope == WindowScope::Tasks {
                         // Tasks keeps one set of preferences, and its selection, wherever
                         // it shows (ADR 0069).
@@ -809,4 +809,21 @@ pub(super) fn workspace_of_tab(session: &Session, tab_id: TabId) -> Option<Works
         .iter()
         .find(|workspace| workspace.tab(tab_id).is_some())
         .map(Workspace::id)
+}
+
+impl Condr {
+    /// The Workspace the active window presents, for its actions to review.
+    pub(super) fn presented_workspace(&self) -> Option<(ConnectionKey, WorkspaceId)> {
+        self.presented_workspace_in(self.active_view())
+    }
+
+    /// The Workspace presented for the sidebar to review. Without one the column stays
+    /// hidden and its toggle disabled.
+    pub(super) fn presented_workspace_in(
+        &self,
+        view: &WindowView,
+    ) -> Option<(ConnectionKey, WorkspaceId)> {
+        self.presented_in(view)
+            .map(|(key, _, workspace_id, _)| (key, workspace_id))
+    }
 }

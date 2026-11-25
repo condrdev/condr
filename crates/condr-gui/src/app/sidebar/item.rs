@@ -1,5 +1,5 @@
 use super::*;
-use crate::app::change_tree::{row_highlight, row_menu};
+use crate::app::list_row::{row_highlight, row_menu};
 use rust_i18n::t;
 
 pub(super) type SidebarClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;

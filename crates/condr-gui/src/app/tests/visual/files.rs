@@ -145,8 +145,8 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
             window.debug_bounds("file-body").is_some()
                 && window.update(|_, cx| {
                     view.read(cx)
-                        .files_view
-                        .file_editors
+                        .preview_tab
+                        .editors
                         .values()
                         .any(|editor| editor.state.read(cx).value().contains("fn main()"))
                 })
@@ -219,14 +219,10 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
         wait_until(window, |window| {
             window.update(|window, cx| _ = window.draw(cx));
             window.update(|_, cx| {
-                view.read(cx)
-                    .files_view
-                    .file_editors
-                    .values()
-                    .any(|editor| {
-                        let text = editor.state.read(cx).value();
-                        text.contains("# Files") && !text.contains("fn main()")
-                    })
+                view.read(cx).preview_tab.editors.values().any(|editor| {
+                    let text = editor.state.read(cx).value();
+                    text.contains("# Files") && !text.contains("fn main()")
+                })
             })
         }),
         "the retargeted Preview Tab should show the second file"
@@ -275,8 +271,8 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
             window.update(|window, cx| _ = window.draw(cx));
             window.update(|_, cx| {
                 view.read(cx)
-                    .files_view
-                    .file_editors
+                    .preview_tab
+                    .editors
                     .values()
                     .any(|editor| editor.state.read(cx).value().contains("More."))
             })
@@ -310,14 +306,10 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
             window.update(|window, cx| _ = window.draw(cx));
             cached_files(window) == ["README.md"]
                 && window.update(|_, cx| {
-                    view.read(cx)
-                        .files_view
-                        .file_editors
-                        .values()
-                        .any(|editor| {
-                            let text = editor.state.read(cx).value();
-                            text.contains("# Files") && !text.contains("More.")
-                        })
+                    view.read(cx).preview_tab.editors.values().any(|editor| {
+                        let text = editor.state.read(cx).value();
+                        text.contains("# Files") && !text.contains("More.")
+                    })
                 })
         }),
         "a working-tree change should refetch the shown file and drop the other cached one"
@@ -346,8 +338,8 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
     feed(window, long_readme(300));
     let editor = window.read(|app| {
         view.read(app)
-            .files_view
-            .file_editors
+            .preview_tab
+            .editors
             .values()
             .next()
             .expect("the Preview Tab has an Editor")
@@ -393,8 +385,8 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
     feed(window, paragraphs(200));
     let markdown = window.read(|app| {
         view.read(app)
-            .files_view
-            .file_editors
+            .preview_tab
+            .editors
             .values()
             .next()
             .unwrap()
@@ -585,7 +577,7 @@ fn preview_tab_renders_images_and_the_images_markdown_draws() {
     let image = |window: &mut VisualTestContext, path: &str| {
         window.read(|app| {
             view.read(app)
-                .files_view
+                .preview_tab
                 .images
                 .get(&(1, workspace_id, path.into()))
         })
@@ -726,24 +718,18 @@ fn preview_tab_saves_edits_and_never_drops_unsaved_text() {
         window.update(|window, cx| _ = window.draw(cx));
         window.update(|_, cx| {
             view.read(cx)
-                .files_view
-                .file_editors
+                .preview_tab
+                .editors
                 .values()
                 .any(|editor| editor.version.is_some())
         })
     }));
     let (tab_id, editor) = window.read(|app| {
-        let (&(_, tab_id), editor) = view
-            .read(app)
-            .files_view
-            .file_editors
-            .iter()
-            .next()
-            .unwrap();
+        let (&(_, tab_id), editor) = view.read(app).preview_tab.editors.iter().next().unwrap();
         (tab_id, editor.state.clone())
     });
     let dirty = |window: &mut VisualTestContext| {
-        window.read(|app| view.read(app).files_view.file_editors[&(1, tab_id)].dirty)
+        window.read(|app| view.read(app).preview_tab.editors[&(1, tab_id)].dirty)
     };
     let type_at_end = |window: &mut VisualTestContext, text: &str| {
         window.update(|window, cx| {
@@ -781,7 +767,7 @@ fn preview_tab_saves_edits_and_never_drops_unsaved_text() {
     assert!(
         wait_until(window, |window| {
             window.update(|window, cx| _ = window.draw(cx));
-            window.read(|app| view.read(app).files_view.file_editors[&(1, tab_id)].disk_changed)
+            window.read(|app| view.read(app).preview_tab.editors[&(1, tab_id)].disk_changed)
         }),
         "a newer file under unsaved text should be noticed, not applied"
     );
@@ -822,7 +808,7 @@ fn preview_tab_saves_edits_and_never_drops_unsaved_text() {
 
     // Something else retargets the Tab: the text is asked about, and Copy keeps it.
     let workspace_id =
-        window.read(|app| view.read(app).files_view.file_editors[&(1, tab_id)].workspace_id);
+        window.read(|app| view.read(app).preview_tab.editors[&(1, tab_id)].workspace_id);
     window.update(|_, cx| {
         view.update(cx, |this, _| {
             this.send_layout_to(
@@ -850,7 +836,7 @@ fn preview_tab_saves_edits_and_never_drops_unsaved_text() {
             .and_then(|item| item.text())
             .is_some_and(|text| text.contains("kept"))
     );
-    assert!(!window.read(|app| view.read(app).files_view.has_unsaved()));
+    assert!(!window.read(|app| view.read(app).preview_tab.has_unsaved()));
 
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -954,8 +940,8 @@ fn files_view_creates_renames_and_deletes_entries() {
         window.update(|window, cx| _ = window.draw(cx));
         window.read(|app| {
             view.read(app)
-                .files_view
-                .file_editors
+                .preview_tab
+                .editors
                 .values()
                 .any(|editor| editor.version.is_some())
         })
@@ -963,13 +949,7 @@ fn files_view_creates_renames_and_deletes_entries() {
 
     // Unsaved text follows its directory's rename.
     let (tab_id, editor) = window.read(|app| {
-        let (&(_, tab_id), editor) = view
-            .read(app)
-            .files_view
-            .file_editors
-            .iter()
-            .next()
-            .unwrap();
+        let (&(_, tab_id), editor) = view.read(app).preview_tab.editors.iter().next().unwrap();
         (tab_id, editor.state.clone())
     });
     window.update(|window, cx| {
@@ -999,7 +979,7 @@ fn files_view_creates_renames_and_deletes_entries() {
             root.join("notes/plan.md").is_file()
                 && window.read(|app| {
                     let this = view.read(app);
-                    let editor = &this.files_view.file_editors[&(1, tab_id)];
+                    let editor = &this.preview_tab.editors[&(1, tab_id)];
                     editor.dirty
                         && editor
                             .shown
@@ -1103,7 +1083,7 @@ fn preview_tab_marks_changed_lines_in_its_gutter_and_on_its_scrollbar() {
     let marks = |window: &mut VisualTestContext| {
         window.read(|app| {
             let view = view.read(app);
-            let editor = view.files_view.file_editors.values().next()?;
+            let editor = view.preview_tab.editors.values().next()?;
             editor.marks.ranges(app)
         })
     };
@@ -1177,13 +1157,7 @@ fn preview_tab_marks_changed_lines_in_its_gutter_and_on_its_scrollbar() {
     // Typing moves the marks with the text at once, and a burst of edits diffs once more,
     // on the latest text.
     let (tab_id, editor) = window.read(|app| {
-        let (&(_, tab_id), editor) = view
-            .read(app)
-            .files_view
-            .file_editors
-            .iter()
-            .next()
-            .unwrap();
+        let (&(_, tab_id), editor) = view.read(app).preview_tab.editors.iter().next().unwrap();
         (tab_id, editor.state.clone())
     });
     let type_at = |window: &mut VisualTestContext, at: usize, text: &str| {
@@ -1195,11 +1169,7 @@ fn preview_tab_marks_changed_lines_in_its_gutter_and_on_its_scrollbar() {
         });
     };
     let runs = |window: &mut VisualTestContext| {
-        window.read(|app| {
-            view.read(app).files_view.file_editors[&(1, tab_id)]
-                .marks
-                .runs
-        })
+        window.read(|app| view.read(app).preview_tab.editors[&(1, tab_id)].marks.runs)
     };
     type_at(window, 0, "zero\n");
     assert_eq!(
