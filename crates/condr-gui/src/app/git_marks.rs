@@ -1,7 +1,7 @@
 //! How Git's facts look wherever a row shows them: a change's status glyph and colour,
 //! a `+N −N` line count, and a commit's short id.
 
-use super::sidebar::CondrIconName;
+use super::icons::CondrIconName;
 use super::*;
 use condr_core::{GitChangeStatus, GitDiffStat};
 

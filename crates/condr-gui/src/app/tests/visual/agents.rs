@@ -207,7 +207,7 @@ fn the_agents_section_lists_every_workspaces_agents_most_urgent_first() {
     let set_order = |window: &mut VisualTestContext, by_state| {
         window.update(|_, cx| {
             view.update(cx, |this, cx| {
-                this.main_view_mut().agents_order = crate::app::sidebar::AgentsOrder {
+                this.main_view_mut().agents_order = crate::app::left_sidebar::AgentsOrder {
                     by_state,
                     tree_order: false,
                 };

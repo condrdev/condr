@@ -2,9 +2,9 @@
 //! as a Board or a Table, in the main window or the Tasks window (ADR 0069). This root holds what its parts share and
 //! entering and leaving it; each part is a submodule.
 
-use super::sidebar::{
-    CondrIconName, CondrSidebarIcon, SidebarIconTone, SidebarStatusVisual, pane_sidebar_status,
-    urgency,
+use super::icons::CondrIconName;
+use super::left_sidebar::{
+    CondrSidebarIcon, SidebarIconTone, SidebarStatusVisual, pane_sidebar_status, urgency,
 };
 use super::slide::SlideColumn;
 use super::*;
@@ -302,7 +302,7 @@ impl Condr {
         let owner = cx.entity();
         for index in 0..self.windows.len() {
             if self.windows[index].sidebar.is_none() {
-                let sidebar = cx.new(|cx| super::sidebar::LeftSidebar::new(&owner, cx));
+                let sidebar = cx.new(|cx| super::left_sidebar::LeftSidebar::new(&owner, cx));
                 self.windows[index].sidebar = Some(sidebar);
             }
             if matches!(
@@ -433,7 +433,7 @@ pub(in crate::app) fn workspace_has_agent(
 #[cfg(test)]
 mod tests {
     // Not `use super::*`: it would glob in `gpui_kit::test` and shadow the built-in attribute.
-    use super::super::sidebar::{SidebarGlyph, SidebarIconTone};
+    use super::super::left_sidebar::{SidebarGlyph, SidebarIconTone};
     use super::super::{
         ClosePane, NextAgent, OpenSettings, SplitRight, ToggleSidebar, ToggleTasks,
     };

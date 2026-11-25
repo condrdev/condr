@@ -6,7 +6,7 @@
 //! machine. Built-in presets are probed at startup; `[[client.editors]]` entries are
 //! taken as written; the file manager is always last and always present.
 
-use super::sidebar::CondrIconName;
+use super::icons::CondrIconName;
 use super::*;
 use gpui_kit::component::Side;
 use gpui_kit::component::button::DropdownButton;

@@ -450,7 +450,7 @@ impl Condr {
                     key,
                     workspace_id: held.as_ref()?.2,
                     pane_id: pane,
-                    status: super::sidebar::agent_sidebar_status(AgentDisplayState::Idle),
+                    status: super::left_sidebar::agent_sidebar_status(AgentDisplayState::Idle),
                     task: Some(task),
                 },
                 task,

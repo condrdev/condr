@@ -27,10 +27,13 @@
 | `crates/condr-gui/src/app/workspace_resources.rs` | 连接持有的 `WorkspaceResources`；集中管理 Diff、目录、文件缓存及当前请求编号，处理响应匹配、刷新、折叠、Workspace 移除与连接重置 |
 | `crates/condr-gui/src/app/dock.rs` | Dock 布局投影；`terminal_panel.rs` 负责终端 Pane 的呈现、焦点和光标闪烁 |
 | `crates/condr-gui/src/app/terminal_input.rs` | 键盘输入与终端几何；`TerminalInputState` 管理目标、选择、链接、鼠标捕获、焦点、已转发按键和 IME 状态，统一按存活 Pane 清理；子模块处理鼠标、选择、剪贴板，`app/ime.rs` 处理输入法组合文本 |
-| `crates/condr-gui/src/app/files.rs` | Files 侧栏与 Preview Tab；`FilesViewState` 管理 Files/Changes 的本地展示选择、目录展开、Editor 和跳转位置，并按 Session 统一保留或清理；`changes.rs` 负责 Changes 侧栏与 Diff Tab |
+| `crates/condr-gui/src/app/right_sidebar.rs` | 右侧栏：开关、视图选择、宽度、标题与 Refresh；`changes`、`files`、`history` 各是一个视图，`change_tree` 是 Changes 与 History 共用的变更树，`entries` 新建、改名、删除条目；`RightSidebarState` 与各视图自己的状态按 Session 统一保留或清理 |
+| `crates/condr-gui/src/app/diff_tab.rs` | Diff Tab；`DiffTabState` 持有各 Tab 的 `Diff`、单栏选择和 History 选中的提交 |
+| `crates/condr-gui/src/app/preview_tab.rs` | Preview Tab；`PreviewTabState` 持有 Editor、跳转位置、图片、保存与待问的问题；`rendering` 渲染图片和 Markdown，`edits` 处理保存与冲突，`change_marks` 绘制改动标记 |
+| `crates/condr-gui/src/app/list_row.rs` | 左右侧栏和 Tasks 共用的行：缩进、高亮、单行右键菜单；`git_marks` 画 Git 状态与行数，`format` 写时间和大小，`icons` 是 Condr 自己的图标 |
 | `crates/condr-gui/src/app/updates.rs` | `UpdateCheck` 管理更新渠道、结果、已读状态及自动检查任务；设置窗口和侧栏读取同一个状态 |
 | `crates/condr-gui/src/app/settings.rs` | 设置窗口；`appearance`、`server`、`shortcuts` 按页面功能组织 |
-| `crates/condr-gui/src/app/sidebar.rs` | Sidebar 树；`drag_drop` 管理拖放，`icon` 定义状态图标，`item` 呈现树节点 |
+| `crates/condr-gui/src/app/left_sidebar.rs` | 左侧栏树；`drag_drop` 管理拖放，`icon` 定义状态图标，`item` 呈现树节点 |
 | `crates/condr-gui/src/terminal_element.rs` | GPUI Element 及完整的 `prepaint`/`paint` 实现；`cache` 缓存 shaping，`colors` 计算颜色，`geometry` 计算绘制区域，`input` 映射输入 |
 
 模块文件开头集中声明 `mod`、导入和重导出，之后是类型和实现。公共路径通过入口文件显式重导出；内部协作只开放到需要访问的共同父模块。共享状态仍由原来的所有者管理，相关实现可以放在子模块中。

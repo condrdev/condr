@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::app::git_marks::diff_stat;
-use crate::app::sidebar::{UpstreamCount, upstream_counts, upstream_label};
+use crate::app::left_sidebar::{UpstreamCount, upstream_counts, upstream_label};
 use condr_core::GitDiffStat;
 
 /// What a card shows of its Agent.

@@ -99,7 +99,7 @@ impl Condr {
         let primary = cx.theme().primary;
         element
             .on_drag(DraggedTodo { key, task: id }, move |_, offset, _, cx| {
-                cx.new(|_| super::sidebar::DragPreview {
+                cx.new(|_| super::left_sidebar::DragPreview {
                     icon: None,
                     name: name.clone(),
                     offset,

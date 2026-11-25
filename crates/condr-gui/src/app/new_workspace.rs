@@ -2,7 +2,7 @@
 //! in place (ADR 0059).
 
 use super::dialogs::field_error;
-use super::sidebar::CondrIconName;
+use super::icons::CondrIconName;
 use super::*;
 use gpui_kit::component::kbd::Kbd;
 use rust_i18n::t;

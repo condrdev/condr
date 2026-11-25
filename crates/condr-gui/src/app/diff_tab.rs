@@ -4,8 +4,8 @@
 
 use super::format::age;
 use super::git_marks::{diff_stat, short_id};
+use super::icons::CondrIconName;
 use super::placeholders::{Oversized, empty_state, failed_state, too_large};
-use super::sidebar::CondrIconName;
 use super::syntax::language_for;
 use super::viewer_header::{header_meta, mode_toggle, viewer_header};
 use super::*;

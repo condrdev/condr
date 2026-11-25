@@ -1,4 +1,4 @@
-use super::sidebar::CondrIconName;
+use super::icons::CondrIconName;
 use super::*;
 use rust_i18n::t;
 

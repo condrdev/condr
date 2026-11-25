@@ -82,7 +82,7 @@ pub(super) struct WindowView {
     /// window (ADR 0067).
     pub(super) agents_height: Option<Pixels>,
     pub(super) agents_collapsed: bool,
-    pub(super) agents_order: sidebar::AgentsOrder,
+    pub(super) agents_order: left_sidebar::AgentsOrder,
     pub(super) right_sidebar_width: Pixels,
     /// The title bar's Tab strip scrolls when the Tabs outgrow it; a newly active Tab
     /// is scrolled into view once, which `last_scrolled_tab` remembers across renders.
@@ -94,7 +94,7 @@ pub(super) struct WindowView {
     /// What the content area shows: the Workspace, or the one page covering it.
     pub(super) page: ContentPage,
     /// The left sidebar's cached view, made at the window's first render.
-    pub(super) sidebar: Option<Entity<super::sidebar::LeftSidebar>>,
+    pub(super) sidebar: Option<Entity<super::left_sidebar::LeftSidebar>>,
     /// How Tasks shows, kept by the window that shows it, the main window or the Tasks
     /// window, and moved with it (ADR 0068, ADR 0069).
     pub(super) tasks: super::tasks::TasksPrefs,
@@ -157,7 +157,7 @@ impl WindowView {
             sidebar_collapsed: false,
             agents_height: None,
             agents_collapsed: false,
-            agents_order: sidebar::AgentsOrder::default(),
+            agents_order: left_sidebar::AgentsOrder::default(),
             right_sidebar_width: INITIAL_RIGHT_SIDEBAR_WIDTH,
             tab_strip_scroll: ScrollHandle::new(),
             last_scrolled_tab: Cell::new(None),

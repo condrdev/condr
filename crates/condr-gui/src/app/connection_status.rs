@@ -96,7 +96,7 @@ impl Condr {
                             .child(if busy {
                                 Spinner::new().small().into_any_element()
                             } else if deliberate {
-                                Icon::new(super::sidebar::CondrIconName::Circle)
+                                Icon::new(super::icons::CondrIconName::Circle)
                                     .size_5()
                                     .text_color(muted)
                                     .into_any_element()

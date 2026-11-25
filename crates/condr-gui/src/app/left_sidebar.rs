@@ -3,6 +3,7 @@ mod drag_drop;
 mod icon;
 mod item;
 
+use super::icons::CondrIconName;
 use super::*;
 use gpui_kit::component::kbd::Kbd;
 use item::*;

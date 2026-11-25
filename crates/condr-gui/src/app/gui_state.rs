@@ -37,7 +37,7 @@ pub(super) struct GuiState {
     pub agents_height: Option<f32>,
     pub agents_collapsed: bool,
     /// How the Agents section groups and orders its rows (ADR 0074).
-    pub agents_order: super::sidebar::AgentsOrder,
+    pub agents_order: super::left_sidebar::AgentsOrder,
     pub right_sidebar_width: Option<f32>,
     /// Diff Tabs show one column rather than two (ADR 0046).
     pub diff_unified: bool,
@@ -263,7 +263,7 @@ impl GuiState {
 /// `proto/`: nothing else reads it. A value this build does not know is dropped, which
 /// costs a window position or a sidebar choice at most.
 mod wire {
-    use super::super::sidebar::AgentsOrder;
+    use super::super::left_sidebar::AgentsOrder;
     use super::super::tasks::{TasksDensity, TasksLayout, TasksPrefs, TasksScope};
     use super::{
         DetachedWindowState, RightSidebarView, SavedScope, TasksWindowState, WindowRect,
@@ -873,7 +873,7 @@ impl Condr {
 #[cfg(test)]
 mod tests {
     // Not `super::*`: the app module's glob brings in GPUI's `#[test]` macro.
-    use super::super::sidebar::AgentsOrder;
+    use super::super::left_sidebar::AgentsOrder;
     use super::{
         DetachedWindowState, GuiState, STATE_FILE_NAME, SavedScope, ServerState, TasksWindowState,
         WindowRect, WindowState, WorkspaceState, on_a_display,

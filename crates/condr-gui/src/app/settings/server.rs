@@ -1,4 +1,4 @@
-use super::sidebar::CondrIconName;
+use super::icons::CondrIconName;
 use super::*;
 use crate::app::dialogs::{DangerConfirm, confirm_danger};
 use crate::app::format::relative_age;
@@ -562,7 +562,7 @@ pub(super) fn server_header(
                 .text_sm()
                 .text_color(cx.theme().muted_foreground)
                 .child(
-                    Icon::new(super::sidebar::CondrIconName::CircleFilled)
+                    Icon::new(super::icons::CondrIconName::CircleFilled)
                         .size_2()
                         .text_color(color),
                 )
@@ -1390,7 +1390,7 @@ fn server_devices_group(
                         .gap_1()
                         .items_center()
                         .child(
-                            Icon::new(super::sidebar::CondrIconName::CircleFilled)
+                            Icon::new(super::icons::CondrIconName::CircleFilled)
                                 .size_2()
                                 .text_color(cx.theme().success),
                         )
@@ -1604,7 +1604,7 @@ pub(super) fn agents_page(
                             .min_w_0()
                             .gap_2()
                             .items_center()
-                            .child(super::sidebar::agent_mark(agent, cx.theme().foreground).small())
+                            .child(super::icons::agent_mark(agent, cx.theme().foreground).small())
                             .child(agent.label()),
                     )
                     .child(agent_hooks_field(&settings, agent, report.as_ref(), cx))

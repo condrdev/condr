@@ -491,7 +491,7 @@ impl Condr {
 #[cfg(test)]
 mod tests {
     use super::{AgentRow, AgentsOrder, rank_agents};
-    use crate::app::sidebar::{BELL_SIDEBAR_STATUS, agent_sidebar_status, urgency_status};
+    use crate::app::left_sidebar::{BELL_SIDEBAR_STATUS, agent_sidebar_status, urgency_status};
     use condr_core::{AgentDisplayState, PaneId, WorkspaceId};
 
     fn row(pane: u64, state: AgentDisplayState) -> AgentRow {

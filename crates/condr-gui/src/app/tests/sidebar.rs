@@ -73,7 +73,7 @@ fn reordering_connections_moves_the_dragged_server_into_the_target_slot() {
 
 #[test]
 fn drop_index_inserts_before_or_after_the_target_in_the_list_without_the_source() {
-    use crate::app::sidebar::drop_index;
+    use crate::app::left_sidebar::drop_index;
     // Moving right: the removal shifts the target left by one.
     assert_eq!(drop_index(0, 2, false), Some(1));
     assert_eq!(drop_index(0, 2, true), Some(2));

@@ -175,7 +175,7 @@ impl Render for TerminalPanel {
                         .map(|agent| agent.kind),
                     connection
                         .and_then(|connection| connection.model.agent_display_state(self.pane_id))
-                        .map(super::sidebar::agent_sidebar_status),
+                        .map(super::left_sidebar::agent_sidebar_status),
                     connection.is_some_and(|connection| {
                         connection.model.attention.contains(&self.pane_id)
                     }),
@@ -406,9 +406,9 @@ impl Render for TerminalPanel {
         };
         let pane_zoom = Button::new(format!("terminal-pane-zoom-{key}-{}", pane_id.as_u64()))
             .icon(Icon::new(if zoomed {
-                super::sidebar::CondrIconName::Minimize2
+                super::icons::CondrIconName::Minimize2
             } else {
-                super::sidebar::CondrIconName::Maximize2
+                super::icons::CondrIconName::Maximize2
             }))
             .xsmall()
             .ghost()
@@ -476,7 +476,7 @@ impl Render for TerminalPanel {
                             move |_, offset, _, cx| {
                                 cx.stop_propagation();
                                 let name = name.clone();
-                                cx.new(|_| super::sidebar::DragPreview {
+                                cx.new(|_| super::left_sidebar::DragPreview {
                                     icon: None,
                                     name,
                                     offset,
@@ -494,7 +494,7 @@ impl Render for TerminalPanel {
                             // The Agent's state leads the header, as it leads the Tab; the
                             // bell says it instead while it rings.
                             .when_some(agent_status.filter(|_| !attention), |header, status| {
-                                header.children(super::sidebar::status_badge(status, cx).map(
+                                header.children(super::left_sidebar::status_badge(status, cx).map(
                                     |badge| {
                                         div()
                                             .id(format!(
@@ -533,7 +533,7 @@ impl Render for TerminalPanel {
                                                 .build(window, cx)
                                         })
                                         .child(
-                                            super::sidebar::SidebarGlyph::Bell
+                                            super::left_sidebar::SidebarGlyph::Bell
                                                 .icon()
                                                 .xsmall()
                                                 .text_color(cx.theme().warning),
@@ -544,7 +544,7 @@ impl Render for TerminalPanel {
                             // Panes reads by agent before it reads by text.
                             .when_some(agent_kind, |this, kind| {
                                 this.child(
-                                    super::sidebar::agent_mark(kind, cx.theme().muted_foreground)
+                                    super::icons::agent_mark(kind, cx.theme().muted_foreground)
                                         .xsmall(),
                                 )
                             })

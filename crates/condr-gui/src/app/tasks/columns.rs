@@ -129,7 +129,7 @@ impl Condr {
                         key: connection.key,
                         workspace_id: workspace.id(),
                         pane_id,
-                        status: super::sidebar::agent_sidebar_status(state),
+                        status: super::left_sidebar::agent_sidebar_status(state),
                         task: Some(task.id),
                     });
                 }

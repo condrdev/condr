@@ -4,7 +4,7 @@
 //! of the window's content area, not a Session Tab: forwards live here and belong to no
 //! Workspace.
 
-use super::sidebar::CondrIconName;
+use super::icons::CondrIconName;
 use super::*;
 use condr_client::{Forward, LinkStatus, LocalPort, StreamLink, StreamOpener};
 use rust_i18n::t;

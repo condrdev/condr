@@ -12,8 +12,10 @@ pub(crate) mod file_icons;
 mod format;
 mod git_marks;
 mod gui_state;
+mod icons;
 mod ime;
 mod keymap;
+mod left_sidebar;
 mod list_row;
 #[cfg(unix)]
 mod login_environment;
@@ -33,7 +35,6 @@ pub(crate) mod screenshots;
 mod server_connection;
 mod server_management;
 mod settings;
-mod sidebar;
 mod slide;
 mod startup;
 mod syntax;
@@ -116,6 +117,8 @@ use ime::TerminalComposition;
 use keymap::SHORTCUT_CONTEXT;
 #[cfg(test)]
 use keymap::TAB_MODIFIER;
+#[cfg(test)]
+use left_sidebar::*;
 use new_workspace::{NewWorkspaceDialog, NewWorkspaceWay};
 use preview_tab::*;
 use relative_path::{RelativePath, RelativePathBuf};
@@ -134,8 +137,6 @@ use settings::{
     server_shell, set_proxy_mode, set_proxy_url, set_server_listen, step_code_font_size,
     step_terminal_font_size, terminal_font_family, terminal_font_size,
 };
-#[cfg(test)]
-use sidebar::*;
 use startup::connect_to_server;
 #[cfg(test)]
 use startup::{connect_to_server_with, lock_exclusively, single_instance_lock_path};
@@ -371,7 +372,7 @@ pub(crate) struct Condr {
     /// The same for the Preview and Diff font size.
     _code_font_save: Option<Task<()>>,
     /// Where the Tab, Workspace or Server being dragged would land; drawn as a line.
-    drop_target: Option<sidebar::DropTarget>,
+    drop_target: Option<left_sidebar::DropTarget>,
     /// What the drag in flight would open in a window of its own if released outside its
     /// window; cleared by the next press in case the release never came.
     drag_out: Option<WindowScope>,

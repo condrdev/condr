@@ -2,7 +2,9 @@
 //! one dialog over the window it opened in.
 
 use super::keymap::{self, Needs};
-use super::sidebar::{CondrSidebarIcon, SidebarStatusVisual, device_status, pane_sidebar_status};
+use super::left_sidebar::{
+    CondrSidebarIcon, SidebarStatusVisual, device_status, pane_sidebar_status,
+};
 use super::workspace::tab_label;
 use super::*;
 use gpui_kit::component::command::{Command, CommandGroup, CommandItem, CommandState};
@@ -371,7 +373,7 @@ impl Condr {
                             .cloned()
                             .unwrap_or_else(|| kind.to_owned());
                         agents.push((
-                            sidebar::urgency(status),
+                            left_sidebar::urgency(status),
                             Entry {
                                 target: Target::Agent(key, pane_id),
                                 also: format!("{title} {kind} {name} {tab_text}"),

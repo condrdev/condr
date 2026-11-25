@@ -1,4 +1,5 @@
-use super::sidebar::{CondrIconName, DragPreview, DropTarget, attach_drop_target, drop_index};
+use super::icons::CondrIconName;
+use super::left_sidebar::{DragPreview, DropTarget, attach_drop_target, drop_index};
 use super::*;
 use gpui_fps::fps_monitor;
 use gpui_kit::component::InteractiveElementExt as _;
@@ -273,11 +274,11 @@ impl Condr {
                 let statuses = tab
                     .panes()
                     .iter()
-                    .filter_map(|pane| super::sidebar::pane_sidebar_status(model, pane.id()))
+                    .filter_map(|pane| super::left_sidebar::pane_sidebar_status(model, pane.id()))
                     // Unknown says nothing, here as on the Pane; the sidebar counts it idle.
                     .filter(|status| status.key != "unknown");
-                let (status, _) = *super::sidebar::agent_status_summary(statuses).first()?;
-                let badge = super::sidebar::status_badge(status, cx)?;
+                let (status, _) = *super::left_sidebar::agent_status_summary(statuses).first()?;
+                let badge = super::left_sidebar::status_badge(status, cx)?;
                 let tab_id = tab.id();
                 Some(
                     div()
@@ -900,7 +901,7 @@ impl Render for Condr {
         let sidebar = self
             .window_view_mut(window)
             .sidebar
-            .get_or_insert_with(|| cx.new(|cx| super::sidebar::LeftSidebar::new(&owner, cx)))
+            .get_or_insert_with(|| cx.new(|cx| super::left_sidebar::LeftSidebar::new(&owner, cx)))
             .clone();
         let tasks_board = self.in_tasks_mode(self.window_view(window)).then(|| {
             let owner = cx.entity();
@@ -968,7 +969,7 @@ impl Render for Condr {
                 }),
             )
             .on_drag_move(cx.listener(
-                |this, event: &DragMoveEvent<sidebar::DraggedWorkspace>, _, cx| {
+                |this, event: &DragMoveEvent<left_sidebar::DraggedWorkspace>, _, cx| {
                     let workspace = event.drag(cx);
                     this.track_drag_out(WindowScope::Workspace(
                         workspace.key,
@@ -977,7 +978,7 @@ impl Render for Condr {
                 },
             ))
             .on_drag_move(cx.listener(
-                |this, event: &DragMoveEvent<sidebar::DraggedServer>, _, cx| {
+                |this, event: &DragMoveEvent<left_sidebar::DraggedServer>, _, cx| {
                     this.track_drag_out(WindowScope::Device(event.drag(cx).key));
                 },
             ))

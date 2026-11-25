@@ -487,7 +487,7 @@ fn agents(
         ("12c-agents-tree-order", false, true),
     ] {
         update(cx, window, view, move |this, _, cx| {
-            this.main_view_mut().agents_order = super::sidebar::AgentsOrder {
+            this.main_view_mut().agents_order = super::left_sidebar::AgentsOrder {
                 by_state,
                 tree_order,
             };
