@@ -196,3 +196,5 @@ Delivery, each step merged on its own:
 7. **Finishing**: CONTEXT.md's Task, Tasks mode, To do and Archive entries and the changed Workspace entry; AGENTS.md's persistence line and the store's feature; the website's pages on Tasks mode and Tasks and the CLI reference, in English and `zh-cn`; and the roadmap's section removed.
 
 > ADR 0069 opens Tasks in a window of its own beside the main window, with no sidebar; there the interaction area yields to a window that draws the selected Pane's Tab right now.
+
+> ADR 0075 drops the selected card's kept column: it moves with its Agent's state at once, and cards slide to their new places.

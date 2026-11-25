@@ -258,7 +258,6 @@ impl Condr {
             if let Some(selection) = self.tasks_view_mut().tasks_selection.as_mut() {
                 *selection = super::tasks::TasksSelection {
                     task: Some(task),
-                    column: None,
                     ..selected
                 };
             }

@@ -1,5 +1,6 @@
-//! The Agents section (ADR 0067, ADR 0074): its Workspace and state groups and their
-//! order, the keys that step through it, and folding it to its heading.
+//! The Agents section (ADR 0067, ADR 0074, ADR 0075): its Workspace and state groups and
+//! their order, a row sliding where its state moves it, the keys that step through it,
+//! and folding it to its heading.
 
 use super::layout::agent_changed;
 use super::*;
@@ -14,6 +15,17 @@ const PREVIOUS_AGENT: &str = if cfg!(target_os = "macos") {
 } else {
     "alt-["
 };
+
+/// Draws the frame an animation in the cached sidebar asked for, `millis` later.
+fn frame_after(window: &mut VisualTestContext, millis: u64) {
+    window
+        .executor()
+        .advance_clock(Duration::from_millis(millis));
+    window.update(|window, cx| {
+        window.simulate_next_frame(cx);
+        _ = window.draw(cx);
+    });
+}
 
 #[test]
 fn the_agents_section_lists_every_workspaces_agents_most_urgent_first() {
@@ -95,8 +107,10 @@ fn the_agents_section_lists_every_workspaces_agents_most_urgent_first() {
     });
     let row_selector =
         |pane_id: PaneId| leaked_selector(format!("agents-row-1-{}", pane_id.as_u64()));
+    // Once the rows have slid to their places.
     let order = |window: &mut VisualTestContext| {
         window.update(|window, cx| _ = window.draw(cx));
+        frame_after(window, 500);
         let mut rows = [working, done, blocked]
             .into_iter()
             .map(|pane_id| {
@@ -200,7 +214,9 @@ fn the_agents_section_lists_every_workspaces_agents_most_urgent_first() {
                 cx.notify();
             });
         });
+        // Regrouped, the rows slide too; this waits for their places.
         window.update(|window, cx| _ = window.draw(cx));
+        frame_after(window, 500);
     };
     set_order(window, true);
     let state = |window: &mut VisualTestContext, key: &str| {
@@ -220,7 +236,42 @@ fn the_agents_section_lists_every_workspaces_agents_most_urgent_first() {
             && state(window, "working").bottom() <= row(window, working).top()
             && row(window, working).bottom() <= state(window, "idle").top()
             && state(window, "idle").bottom() <= row(window, done).top(),
-        "each Agent under its state, the Done seen before it was clicked under Idle"
+        "each Agent under its state, the Done seen under Idle"
+    );
+
+    // The selected Agent moves with its state at once, sliding there (ADR 0075).
+    let working_row = row(window, working);
+    window.simulate_click(working_row.center(), Modifiers::default());
+    window.run_until_parked();
+    assert_eq!(target(window), Some((1, working)));
+    agent_changed(
+        window,
+        &view,
+        working,
+        Some(AgentSnapshot {
+            session_id: None,
+            kind: AgentKind::Codex,
+            state: AgentState::Blocked,
+            detail: None,
+        }),
+    );
+    window.update(|window, cx| _ = window.draw(cx));
+    assert_eq!(
+        row(window, working).top(),
+        working_row.top(),
+        "it is drawn where it was first"
+    );
+    frame_after(window, 60);
+    let sliding = row(window, working).top();
+    assert_eq!(
+        order(window),
+        [working, blocked, done],
+        "then it is under Blocked, ahead of the one later in the Session"
+    );
+    let placed = row(window, working).top();
+    assert!(
+        placed < sliding && sliding < working_row.top(),
+        "having slid up there"
     );
     set_order(window, false);
 
@@ -228,15 +279,9 @@ fn the_agents_section_lists_every_workspaces_agents_most_urgent_first() {
     let heading = window.debug_bounds("agents-heading").unwrap();
     window.simulate_click(heading.center(), Modifiers::default());
     window.run_until_parked();
-    let draw_after = |window: &mut VisualTestContext, millis| {
-        window
-            .executor()
-            .advance_clock(Duration::from_millis(millis));
-        window.update(|window, cx| _ = window.draw(cx));
-    };
     // The frame the click asks for turns the spring; time then moves it.
-    draw_after(window, 0);
-    draw_after(window, 60);
+    frame_after(window, 0);
+    frame_after(window, 60);
     let sliding = window.debug_bounds("agents-section").unwrap();
     assert!(
         sliding.size.height < open.size.height && sliding.size.height > heading.size.height,
@@ -246,7 +291,7 @@ fn the_agents_section_lists_every_workspaces_agents_most_urgent_first() {
         window.debug_bounds(row_selector(blocked)).is_some(),
         "the rows stay while the section closes over them"
     );
-    draw_after(window, 500);
+    frame_after(window, 500);
     assert!(window.debug_bounds(row_selector(blocked)).is_none());
     assert_eq!(
         window.debug_bounds("agents-section").unwrap().size.height,

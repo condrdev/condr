@@ -6,6 +6,7 @@ use super::sidebar::{
     CondrIconName, CondrSidebarIcon, SidebarIconTone, SidebarStatusVisual, pane_sidebar_status,
     urgency,
 };
+use super::slide::SlideColumn;
 use super::*;
 use condr_core::TaskId;
 use rust_i18n::t;
@@ -88,9 +89,8 @@ pub(super) struct TasksPrefs {
     pub(super) split_list: Option<u16>,
 }
 
-/// The card whose Agent the interaction area shows: its Pane, the column it had when it
-/// was selected, which it keeps until another is selected or the area closes, and
-/// whether the keyboard is in its terminal or in the card area (ADR 0068).
+/// The card whose Agent the interaction area shows: its Pane, and whether the keyboard
+/// is in its terminal or in the card area (ADR 0068).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct TasksSelection {
     pub(super) key: ConnectionKey,
@@ -98,7 +98,6 @@ pub(super) struct TasksSelection {
     /// A started Task's own card, shown while its Workspace has no Agent, on that
     /// Workspace's focused Pane; `None` for an Agent's card.
     pub(super) task: Option<TaskId>,
-    pub(super) column: Option<TasksColumn>,
     pub(super) keyboard: bool,
 }
 
@@ -204,6 +203,14 @@ pub(super) struct TaskCard {
     pub(super) status: SidebarStatusVisual,
     /// The Task whose card this is, which no Agent's card is.
     pub(super) task: Option<TaskId>,
+}
+
+impl TaskCard {
+    /// The card's key in its `SlideColumn`: its Pane's, so a started Task's own card and
+    /// the Agent that takes its place are one card moving.
+    pub(super) fn slide_key(&self) -> ElementId {
+        SharedString::from(format!("{}-{}", self.key, self.pane_id.as_u64())).into()
+    }
 }
 
 /// Sorts a column by urgency; ties keep Session order, the cards coming in it.

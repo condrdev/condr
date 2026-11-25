@@ -62,3 +62,5 @@ A blocked Agent now shows three times while the section is expanded: in "Needs y
 > ADR 0068 adds a Tasks row above "Needs you", makes the sidebar a cached view no terminal frame rebuilds, and reuses this section's order and sticky selection in Tasks mode. In normal mode a row's click and a notification's click still run `select_pane`.
 
 > ADR 0074 lets the section group by state or keep the tree's order from a button on its heading, puts `Blocked` and `Error` first whatever its order, and moves a bell after them in the urgency order.
+
+> ADR 0075 drops the sticky selection: the selected row moves with its Agent's state at once, and every row slides to its new place.

@@ -293,7 +293,7 @@ impl Condr {
     ) -> AnyElement {
         let scope = self.effective_tasks_scope(scope);
         let count = |scope| -> usize {
-            self.task_cards(scope, None)
+            self.task_cards(scope)
                 .iter()
                 .map(|(_, cards)| cards.len())
                 .sum()

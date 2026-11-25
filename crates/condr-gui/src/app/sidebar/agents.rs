@@ -1,9 +1,11 @@
 //! The Agents section at the bottom of the left sidebar (ADR 0067): every Agent the
 //! window's tree lists, grouped by Workspace or by state and most urgent first or in the
-//! tree's order (ADR 0074), in a height its top-edge handle sets.
+//! tree's order (ADR 0074), each row sliding to where its state moves it (ADR 0075), in a
+//! height its top-edge handle sets.
 
 use super::*;
 use crate::app::change_tree::row_highlight;
+use crate::app::slide::SlideColumn;
 use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::resizable::resize_handle;
 use rust_i18n::t;
@@ -37,26 +39,18 @@ pub(in crate::app) struct AgentRow {
     pub(in crate::app) workspace_id: WorkspaceId,
     pub(in crate::app) pane_id: PaneId,
     pub(in crate::app) status: SidebarStatusVisual,
-    /// Its place in `URGENCY`, or the one it had when it was selected; `rank_agents`
-    /// sets it, and by state it is the row's group.
+    /// Its place in `URGENCY`; `rank_agents` sets it, and by state it is the row's group.
     pub(in crate::app) rank: usize,
 }
 
 /// By state, the rows sort by rank. By Workspace, each Workspace's Agents form a group,
 /// the group with the most urgent Agent first and the most urgent first within it; in
 /// the tree's order only `Blocked` and `Error` rank ahead of the rest. Ties keep Session
-/// order, the rows coming in it. The anchored Agent keeps the rank it had when it was
-/// selected, and so does its group.
-pub(in crate::app) fn rank_agents(
-    rows: &mut [AgentRow],
-    anchor: Option<((ConnectionKey, PaneId), usize)>,
-    order: AgentsOrder,
-) {
+/// order, the rows coming in it. The selected Agent ranks as what it is now, as every
+/// other does (ADR 0075).
+pub(in crate::app) fn rank_agents(rows: &mut [AgentRow], order: AgentsOrder) {
     for row in rows.iter_mut() {
-        row.rank = match anchor {
-            Some((pane, rank)) if pane == (row.key, row.pane_id) => rank,
-            _ => urgency(row.status),
-        };
+        row.rank = urgency(row.status);
     }
     if order.by_state {
         rows.sort_by_key(|row| row.rank);
@@ -174,7 +168,7 @@ impl Condr {
                 }
             }
         }
-        rank_agents(&mut rows, self.agents_anchor, view.agents_order);
+        rank_agents(&mut rows, view.agents_order);
         rows
     }
 
@@ -355,7 +349,8 @@ impl Condr {
                     let selector = format!("agents-group-{key}-{}", workspace_id.as_u64());
                     (selector, workspace_name.clone())
                 };
-                items.push(
+                items.push((
+                    ElementId::from(SharedString::from(selector.clone())),
                     div()
                         .debug_selector(move || selector.clone())
                         .px_1()
@@ -365,7 +360,7 @@ impl Condr {
                         .text_color(cx.theme().muted_foreground)
                         .child(name)
                         .into_any_element(),
-                );
+                ));
             }
             let kind = agent.kind.label();
             let title = connection
@@ -376,7 +371,8 @@ impl Condr {
                 .unwrap_or_else(|| kind.to_owned());
             let pane = pane_id.as_u64();
             let row_owner = owner.clone();
-            items.push(
+            items.push((
+                ElementId::from(SharedString::from(format!("agents-{key}-{pane}"))),
                 CondrSidebarTreeItem::new(
                     format!("agents-{key}-{pane}"),
                     format!("agents-row-{key}-{pane}"),
@@ -410,7 +406,7 @@ impl Condr {
                         row_owner.update(cx, |this, cx| this.select_pane(key, pane_id, window, cx));
                 })
                 .render(window, cx),
-            );
+            ));
         }
         let list = if items.is_empty() {
             div()
@@ -421,7 +417,10 @@ impl Condr {
                 .child(t!("sidebar.no_agents"))
                 .into_any_element()
         } else {
-            v_flex().gap_1().children(items).into_any_element()
+            SlideColumn::new("agents-rows")
+                .gap_1()
+                .rows(items)
+                .into_any_element()
         };
         // Folded, the section is its heading.
         let folded_height = HEADING_HEIGHT.to_pixels(window.rem_size());
@@ -518,7 +517,7 @@ mod tests {
             in_workspace(2, 4, AgentDisplayState::Blocked),
             in_workspace(3, 5, AgentDisplayState::Working),
         ];
-        rank_agents(&mut rows, None, AgentsOrder::default());
+        rank_agents(&mut rows, AgentsOrder::default());
         // Workspace 2 holds the Blocked one; 1 and 3 tie on Working and keep Session order.
         assert_eq!(panes(&rows), [4, 3, 2, 1, 5]);
     }
@@ -542,35 +541,9 @@ mod tests {
                 ..row(8, AgentDisplayState::Idle)
             },
         ];
-        rank_agents(&mut rows, None, AgentsOrder::default());
+        rank_agents(&mut rows, AgentsOrder::default());
         // Blocked and Error ahead of a bell (ADR 0074).
         assert_eq!(panes(&rows), [5, 7, 8, 3, 6, 2, 1, 4]);
-    }
-
-    #[test]
-    fn the_selected_agent_keeps_its_place_once_its_done_is_seen() {
-        // Pane 3 was Done when selected; seeing it made it Idle.
-        let done_rank = super::urgency(agent_sidebar_status(AgentDisplayState::Done));
-        let session = || {
-            vec![
-                row(1, AgentDisplayState::Idle),
-                row(2, AgentDisplayState::Working),
-                row(3, AgentDisplayState::Idle),
-                row(4, AgentDisplayState::Done),
-            ]
-        };
-        let mut rows = session();
-        rank_agents(
-            &mut rows,
-            Some(((1, PaneId::from_u64(3)), done_rank)),
-            AgentsOrder::default(),
-        );
-        // Still among the Done, so the next one after it is pane 4.
-        assert_eq!(panes(&rows), [3, 4, 2, 1]);
-        // Once another is selected, it ranks as what it is now.
-        let mut rows = session();
-        rank_agents(&mut rows, None, AgentsOrder::default());
-        assert_eq!(panes(&rows), [4, 2, 1, 3]);
     }
 
     #[test]
@@ -591,17 +564,16 @@ mod tests {
             tree_order: true,
         };
         let mut rows = session();
-        rank_agents(&mut rows, None, tree_order);
+        rank_agents(&mut rows, tree_order);
         // Workspace 3 leads with its Blocked and Error; the rest keep Session order.
         assert_eq!(panes(&rows), [7, 6, 5, 1, 2, 3, 4]);
         let mut rows = session();
-        rank_agents(&mut rows, None, AgentsOrder::default());
+        rank_agents(&mut rows, AgentsOrder::default());
         assert_eq!(panes(&rows), [7, 6, 5, 3, 4, 2, 1]);
     }
 
     #[test]
-    fn by_state_the_rows_fall_under_their_states_the_anchored_one_under_its_old_one() {
-        let done_rank = super::urgency(agent_sidebar_status(AgentDisplayState::Done));
+    fn by_state_the_rows_fall_under_their_states() {
         let session = || {
             vec![
                 in_workspace(1, 1, AgentDisplayState::Idle),
@@ -609,7 +581,6 @@ mod tests {
                 in_workspace(2, 3, AgentDisplayState::Unknown),
                 in_workspace(2, 4, AgentDisplayState::Working),
                 in_workspace(1, 5, AgentDisplayState::Blocked),
-                // Pane 6 was Done when selected; seeing it made it Idle.
                 in_workspace(2, 6, AgentDisplayState::Idle),
             ]
         };
@@ -619,20 +590,16 @@ mod tests {
                 by_state: true,
                 tree_order,
             };
-            rank_agents(
-                &mut rows,
-                Some(((1, PaneId::from_u64(6)), done_rank)),
-                order,
-            );
+            rank_agents(&mut rows, order);
             // Within a state every order is Session order.
-            assert_eq!(panes(&rows), [5, 2, 6, 4, 1, 3]);
+            assert_eq!(panes(&rows), [5, 2, 4, 1, 3, 6]);
             let headings = rows
                 .iter()
                 .map(|row| urgency_status(row.rank).key)
                 .collect::<Vec<_>>();
             assert_eq!(
                 headings,
-                ["blocked", "done", "done", "working", "idle", "idle"],
+                ["blocked", "done", "working", "idle", "idle", "idle"],
                 "an Unknown Agent sits with the Idle ones"
             );
         }

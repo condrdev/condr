@@ -41,9 +41,6 @@ impl Condr {
         let Some(connection) = self.connection(key) else {
             return;
         };
-        let column = pane_sidebar_status(&connection.model, pane_id)
-            .filter(|_| task.is_none())
-            .map(TasksColumn::of);
         let shown = connection
             .presented_session()
             .and_then(|session| session.workspace_for_pane(pane_id))
@@ -59,17 +56,10 @@ impl Condr {
         if !shown {
             view.tasks.scope = TasksScope::All;
         }
-        let kept = view
-            .tasks_selection
-            .filter(|selected| {
-                (selected.key, selected.pane_id) == (key, pane_id) && selected.task == task
-            })
-            .and_then(|selected| selected.column);
         view.tasks_selection = Some(TasksSelection {
             key,
             pane_id,
             task,
-            column: kept.or(column),
             keyboard,
         });
         self.rebuild_window_dock(window, cx);
@@ -160,15 +150,12 @@ impl Condr {
     /// by column, each by urgency.
     pub(super) fn task_card_order(&self) -> Vec<(ConnectionKey, PaneId)> {
         let view = self.tasks_view();
-        self.task_cards(
-            self.effective_tasks_scope(view.tasks.scope),
-            view.tasks_selection,
-        )
-        .into_iter()
-        .flat_map(|(_, cards)| cards)
-        .filter(|card| card.task.is_none())
-        .map(|card| (card.key, card.pane_id))
-        .collect()
+        self.task_cards(self.effective_tasks_scope(view.tasks.scope))
+            .into_iter()
+            .flat_map(|(_, cards)| cards)
+            .filter(|card| card.task.is_none())
+            .map(|card| (card.key, card.pane_id))
+            .collect()
     }
 
     /// Steps the selection through the cards, wrapping at both ends; from no selection,

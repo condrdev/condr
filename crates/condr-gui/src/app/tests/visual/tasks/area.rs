@@ -70,6 +70,22 @@ fn a_card_opens_its_terminal_beside_the_cards_without_changing_the_view_or_the_l
         "a click in the terminal changes no View"
     );
 
+    // Selected, the card still moves with its Agent's state, at once (ADR 0075).
+    assert!(inside(window, card, "tasks-column-working"));
+    agent_changed(
+        window,
+        &view,
+        pane_id,
+        Some(AgentSnapshot {
+            session_id: None,
+            kind: AgentKind::Codex,
+            state: AgentState::Blocked,
+            detail: None,
+        }),
+    );
+    assert!(inside(window, card, "tasks-column-needs-you"));
+    assert!(window.debug_bounds("tasks-area").is_some());
+
     // The same card closes the area, and nothing keeps the keyboard.
     let bounds = window.debug_bounds(card).unwrap();
     window.simulate_click(bounds.center(), Modifiers::default());

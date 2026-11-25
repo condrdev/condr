@@ -52,14 +52,8 @@ impl Condr {
 
     /// The user selected this Pane: a Done it shows is seen.
     pub(super) fn mark_pane_seen(&mut self, key: ConnectionKey, pane_id: PaneId) {
-        let Some(connection) = self.connection_mut(key) else {
-            return;
-        };
-        // Taken before the Done turns Idle, so the row stays where it was clicked.
-        let rank = sidebar::pane_sidebar_status(&connection.model, pane_id).map(sidebar::urgency);
-        connection.model.mark_seen(pane_id);
-        if self.agents_anchor.map(|(pane, _)| pane) != Some((key, pane_id)) {
-            self.agents_anchor = rank.map(|rank| ((key, pane_id), rank));
+        if let Some(connection) = self.connection_mut(key) {
+            connection.model.mark_seen(pane_id);
         }
     }
 

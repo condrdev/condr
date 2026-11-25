@@ -105,10 +105,12 @@ impl Condr {
         )
         .text_xs()
         .text_color(theme.muted_foreground);
-        let mut rows = vec![header.into_any_element()];
+        let key = |key: String| ElementId::from(SharedString::from(key));
+        let mut rows = vec![(key("header".into()), header.into_any_element())];
         if let Some(todo) = todo {
             let folded = prefs.is_folded(TasksColumn::ToDo);
-            rows.push(
+            rows.push((
+                key(TasksColumn::ToDo.selector().into()),
                 self.column_heading(TasksColumn::ToDo, todo.len(), &theme, cx)
                     .pt_2()
                     .child(
@@ -117,19 +119,22 @@ impl Condr {
                             .when(!folded, |icon| icon.rotate(percentage(90. / 360.))),
                     )
                     .into_any_element(),
-            );
+            ));
             if !folded {
-                rows.push(self.render_new_task_row(fit, cx));
-                rows.extend(
-                    todo.iter()
-                        .map(|(key, task)| self.render_todo_row(*key, task, fit, cx)),
-                );
-                rows.push(self.render_archived(scope, cx));
+                rows.push((key("new-task".into()), self.render_new_task_row(fit, cx)));
+                rows.extend(todo.iter().map(|(device, task)| {
+                    (
+                        key(format!("todo-{device}-{}", task.id)),
+                        self.render_todo_row(*device, task, fit, cx),
+                    )
+                }));
+                rows.push((key("archived".into()), self.render_archived(scope, cx)));
             }
         }
         for (column, cards) in columns {
             let folded = prefs.is_folded(*column);
-            rows.push(
+            rows.push((
+                key(column.selector().into()),
                 self.column_heading(*column, cards.len(), &theme, cx)
                     .pt_2()
                     .child(
@@ -138,11 +143,14 @@ impl Condr {
                             .when(!folded, |icon| icon.rotate(percentage(90. / 360.))),
                     )
                     .into_any_element(),
-            );
+            ));
             if !folded {
-                rows.extend(cards.iter().map(|card| match card.task {
-                    Some(task) => self.render_task_row(card, task, fit, cx),
-                    None => self.render_list_row(card, fit, cx),
+                rows.extend(cards.iter().map(|card| {
+                    let row = match card.task {
+                        Some(task) => self.render_task_row(card, task, fit, cx),
+                        None => self.render_list_row(card, fit, cx),
+                    };
+                    (card.slide_key(), row)
                 }));
             }
         }
@@ -151,9 +159,8 @@ impl Condr {
             .debug_selector(|| "tasks-list".into())
             .size_full()
             .p_3()
-            .gap_1()
             .overflow_y_scrollbar()
-            .children(rows)
+            .child(SlideColumn::new("tasks-list-rows").gap_1().rows(rows))
             .into_any_element()
     }
 }

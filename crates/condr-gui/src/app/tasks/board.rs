@@ -112,7 +112,7 @@ impl Condr {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let scope = self.effective_tasks_scope(view.tasks.scope);
-        let columns = self.task_cards(scope, view.tasks_selection);
+        let columns = self.task_cards(scope);
         let todo = self.offers_todo(scope).then(|| self.todo_cards(scope));
         let cards = match view.tasks.layout {
             TasksLayout::Board => self.render_tasks_board(
@@ -224,22 +224,25 @@ impl Condr {
                                 if cards.is_empty() {
                                     this.child(nothing_here(&theme))
                                 } else {
-                                    this.children(cards.iter().map(|card| {
-                                        match (card.task, density) {
-                                            (Some(task), _) => self.render_task_card(
-                                                card,
-                                                task,
-                                                density == TasksDensity::Compact,
-                                                cx,
-                                            ),
-                                            (None, TasksDensity::Cards) => {
-                                                self.render_card(card, cx)
-                                            }
-                                            (None, TasksDensity::Compact) => {
-                                                self.render_compact_card(card, cx)
-                                            }
-                                        }
-                                    }))
+                                    this.child(SlideColumn::new(column.selector()).gap_2().rows(
+                                        cards.iter().map(|card| {
+                                            let row = match (card.task, density) {
+                                                (Some(task), _) => self.render_task_card(
+                                                    card,
+                                                    task,
+                                                    density == TasksDensity::Compact,
+                                                    cx,
+                                                ),
+                                                (None, TasksDensity::Cards) => {
+                                                    self.render_card(card, cx)
+                                                }
+                                                (None, TasksDensity::Compact) => {
+                                                    self.render_compact_card(card, cx)
+                                                }
+                                            };
+                                            (card.slide_key(), row)
+                                        }),
+                                    ))
                                 }
                             }),
                     )

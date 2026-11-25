@@ -82,12 +82,11 @@ impl Condr {
         }
     }
 
-    /// Every Agent on a connected Device in `scope`, by column, each column by urgency.
-    /// The selected card keeps the column it had when it was selected.
+    /// Every Agent on a connected Device in `scope`, by column, each column by urgency;
+    /// the selected card's too, so it moves with its state (ADR 0075).
     pub(in crate::app) fn task_cards(
         &self,
         scope: TasksScope,
-        selection: Option<TasksSelection>,
     ) -> Vec<(TasksColumn, Vec<TaskCard>)> {
         let mut columns: Vec<(TasksColumn, Vec<TaskCard>)> = TasksColumn::ALL
             .iter()
@@ -135,13 +134,7 @@ impl Condr {
                     });
                 }
                 for card in cards {
-                    let column = selection
-                        .filter(|selected| match card.task {
-                            Some(task) => selected.key == card.key && selected.task == Some(task),
-                            None => (selected.key, selected.pane_id) == (card.key, card.pane_id),
-                        })
-                        .and_then(|selected| selected.column)
-                        .unwrap_or_else(|| TasksColumn::of(card.status));
+                    let column = TasksColumn::of(card.status);
                     columns
                         .iter_mut()
                         .find(|(each, _)| *each == column)

@@ -36,6 +36,7 @@ mod server_connection;
 mod server_management;
 mod settings;
 mod sidebar;
+mod slide;
 mod startup;
 mod syntax;
 mod tasks;
@@ -339,10 +340,6 @@ pub(crate) struct Condr {
     sidebar_workspace_open: HashMap<(ConnectionKey, WorkspaceId), Entity<bool>>,
     /// Devices folded in the left sidebar, their Workspaces hidden under the heading.
     sidebar_folded_devices: HashSet<ConnectionKey>,
-    /// The Agent last selected and how urgent it was then: the Agents section keeps its
-    /// row at that rank until another is selected, so a Done seen does not drop away
-    /// under the pointer (ADR 0067).
-    agents_anchor: Option<((ConnectionKey, PaneId), usize)>,
     terminal_font: TerminalFont,
     /// `[client.keybindings]` as last read or written; `keymap` is what it comes to.
     keybindings: toml::Table,
@@ -584,7 +581,6 @@ impl Condr {
             transfer_strip_open: false,
             sidebar_workspace_open: HashMap::new(),
             sidebar_folded_devices: HashSet::new(),
-            agents_anchor: None,
             terminal_font,
             keybindings,
             keymap: keymap::Keymap::default(),

@@ -35,3 +35,5 @@ Both choices are each window's own and kept with the section's height and fold i
 ## Tests
 
 The section's order: Workspace and State grouping under both orders, `Blocked` and `Error` first under Sidebar order with their group, `Unknown` among the Idle, the anchored Agent keeping its State heading, and the new urgency order putting a bell after `Error`. The GUI state round-trip carries both choices.
+
+> ADR 0075 drops the sticky selection this decision kept; `next-agent` and `previous-agent` still step through the order shown.
