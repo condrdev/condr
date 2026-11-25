@@ -62,9 +62,9 @@ impl RightSidebarView {
     }
 }
 
-/// The strip of view buttons along the window's right edge (ADR 0076): a small button and
+/// The strip of view buttons along the window's right edge (ADR 0076): a medium button and
 /// the gutter either side of it.
-pub(super) const RIGHT_SIDEBAR_STRIP_WIDTH: Pixels = px(36.);
+pub(super) const RIGHT_SIDEBAR_STRIP_WIDTH: Pixels = px(40.);
 
 /// Dragging the right sidebar's left edge resizes it.
 pub(super) struct DraggedRightSidebar;
@@ -248,7 +248,6 @@ impl Condr {
             Button::new(id)
                 .debug_selector(move || id.into())
                 .ghost()
-                .small()
                 .icon(icon)
                 .selected(selected == Some(view))
                 .tooltip(label.clone())
@@ -268,7 +267,7 @@ impl Condr {
             .gap_1()
             // The first button sits where a title bar centres its own: on macOS the strip
             // reaches the window's top, beside the title bar.
-            .pt((WORKSPACE_TITLE_BAR_HEIGHT - px(24.)) / 2.)
+            .pt((WORKSPACE_TITLE_BAR_HEIGHT - px(32.)) / 2.)
             .bg(theme.sidebar)
             .border_l_1()
             .border_color(theme.sidebar_border)

@@ -19,7 +19,7 @@ One view shows at a time. The strip holds only the presented Workspace's views; 
 ## Considered
 
 - **Labels written down the strip**, as JetBrains' classic UI has them. Declined: GPUI does not rotate text, and a letter per line reads badly in English.
-- **Changes' count as a badge on its icon.** Declined: a number in a 24 px button is cramped, and the header already shows it.
+- **Changes' count as a badge on its icon.** Declined: a number in a 32 px button is cramped, and the header already shows it.
 - **Two groups and split mode**, two tool windows open at once, and dragging buttons to reorder or hide them. Declined until there are more views than fit.
 - **The strip below the title bar on macOS too.** Declined: an empty cell would sit above it.
 - **Keeping the title bar's toggle beside the strip.** Declined: two controls for one thing.
