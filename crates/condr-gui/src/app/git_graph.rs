@@ -863,7 +863,7 @@ impl Condr {
     }
 }
 
-#[cfg(any(test, feature = "test-support"))]
+#[cfg(any(test, all(feature = "test-support", target_os = "macos")))]
 impl Condr {
     /// The subjects a Git Graph Pane's table lists, in order.
     pub(in crate::app) fn git_graph_subjects(
