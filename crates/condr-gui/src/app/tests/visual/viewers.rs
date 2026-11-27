@@ -96,3 +96,78 @@ fn a_viewer_tab_merges_beside_a_terminal_and_its_header_leaves_for_a_tab() {
         "the Preview left for a Tab of its own"
     );
 }
+
+/// Two terminal Tabs: the second dragged from the strip onto the first's right edge
+/// becomes the right half of the first, and its Tab closes (ADR 0078).
+#[test]
+fn a_terminal_tab_dragged_onto_another_tabs_pane_merges_beside_it() {
+    let _serial_guard = acquire_visual_test_lock();
+    let root = TestDirectory::new("tab-merge");
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    let (workspace_id, first_tab, terminal) = create_workspace(window, &view, &root);
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.send_layout(LayoutCommand::CreateTab {
+                name: None,
+                cwd_from: None,
+                workspace_id,
+            });
+        });
+    });
+    let tabs = |window: &mut VisualTestContext| {
+        window.read(|app| {
+            let session = view.read(app).active_session()?;
+            let workspace = session.workspace(workspace_id)?;
+            Some(
+                workspace
+                    .tabs()
+                    .iter()
+                    .map(|tab| (tab.id(), tab.panes().len()))
+                    .collect::<Vec<_>>(),
+            )
+        })
+    };
+    assert!(wait_until(window, |window| tabs(window)
+        .is_some_and(|tabs| tabs.len() == 2)));
+    let second_tab = tabs(window).unwrap()[1].0;
+
+    window.update(|window, cx| _ = window.draw(cx));
+    let first_button = window
+        .debug_bounds(leaked_selector(format!("tab-{}", first_tab.as_u64())))
+        .unwrap();
+    window.simulate_click(first_button.center(), Modifiers::default());
+    assert!(wait_until(window, |window| window.read(|app| {
+        view.read(app)
+            .main_view()
+            .dock_surface
+            .map(|surface| surface.tab_id)
+            == Some(first_tab)
+    })));
+    window.update(|window, cx| _ = window.draw(cx));
+    let body = window
+        .debug_bounds(leaked_selector(format!(
+            "terminal-pane-{}",
+            terminal.as_u64()
+        )))
+        .expect("the terminal renders");
+    let to = point(body.right() - px(10.), body.center().y);
+    let from = window
+        .debug_bounds(leaked_selector(format!("tab-{}", second_tab.as_u64())))
+        .unwrap();
+    window.simulate_mouse_down(from.center(), MouseButton::Left, Modifiers::default());
+    window.simulate_mouse_move(to, MouseButton::Left, Modifiers::default());
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
+    window.simulate_mouse_move(to, MouseButton::Left, Modifiers::default());
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
+    window.simulate_mouse_up(to, MouseButton::Left, Modifiers::default());
+    assert!(
+        wait_until(window, |window| tabs(window)
+            .is_some_and(|tabs| tabs == [(first_tab, 2)])),
+        "the second Tab merged into the first: {:?}",
+        tabs(window)
+    );
+}
