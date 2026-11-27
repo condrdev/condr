@@ -83,7 +83,7 @@ pub enum ClientMessage {
         path: RelativePathBuf,
         against: DiffBase,
     },
-    /// A page of a Workspace's History (ADR 0046): up to `limit` commits after skipping
+    /// A page of a Workspace's Git History (ADR 0046): up to `limit` commits after skipping
     /// `skip`, walking from `from`, or from `HEAD` when `from` is `None`. Answered with
     /// [`ServerMessage::GitLog`]. Only a Server that reports [`WorkspaceGitSnapshot::head`]
     /// knows it.
@@ -714,7 +714,7 @@ pub struct RepositoryGitSnapshot {
     /// The working tree against the base (ADR 0034), from the same pass; `None` when the
     /// Workspace has no base or the Server predates it.
     pub base: Option<GitBaseChanges>,
-    /// Where `HEAD` points (ADR 0046); `None` only from a Server without History.
+    /// Where `HEAD` points (ADR 0046); `None` only from a Server without Git History.
     pub head: Option<GitHead>,
 }
 

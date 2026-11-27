@@ -111,7 +111,7 @@ pub enum OldFile {
     None,
 }
 
-/// One commit as History lists it (ADR 0046).
+/// One commit as Git History lists it (ADR 0046).
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CommitSummary {
     /// The full id, as hex.
@@ -123,7 +123,7 @@ pub struct CommitSummary {
     pub time: i64,
 }
 
-/// One page of a Workspace's History: the commits reachable from `from`, newest commit time
+/// One page of a Workspace's Git History: the commits reachable from `from`, newest commit time
 /// first, as `git log` lists them.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct GitLog {
@@ -135,7 +135,7 @@ pub struct GitLog {
     pub more: bool,
 }
 
-/// One commit unfolded in History: its whole message and the files it changed against its
+/// One commit unfolded in Git History: its whole message and the files it changed against its
 /// first parent, or against nothing for a root commit.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CommitDetails {
@@ -147,5 +147,5 @@ pub struct CommitDetails {
     pub changes: GitChanges,
 }
 
-/// How many commits a History page holds.
-pub const HISTORY_PAGE: u32 = 100;
+/// How many commits a Git History page holds.
+pub const GIT_LOG_PAGE: u32 = 100;

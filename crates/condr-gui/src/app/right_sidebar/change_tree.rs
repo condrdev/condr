@@ -1,4 +1,4 @@
-//! The directory tree Changes and History draw changed files in (ADR 0017, ADR 0046).
+//! The directory tree Changes and Git History draw changed files in (ADR 0017, ADR 0046).
 //! Rows here only draw: what a click does is the caller's.
 
 use super::*;

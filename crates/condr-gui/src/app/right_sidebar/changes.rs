@@ -223,7 +223,7 @@ impl Condr {
             .into_any_element()
     }
 
-    /// What a repository goes by in Changes and History: its directory under the Root, or
+    /// What a repository goes by in Changes and Git History: its directory under the Root, or
     /// the Workspace's name for the Root's own (ADR 0073).
     pub(in crate::app) fn repository_name(
         &self,

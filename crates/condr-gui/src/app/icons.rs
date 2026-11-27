@@ -14,7 +14,7 @@ pub(super) enum CondrIconName {
     FolderPlus,
     /// Lucide `arrow-left-right`: forwarded ports (ADR 0061).
     ArrowLeftRight,
-    /// Lucide `git-branch`: clone a repository, and History in the right sidebar's strip.
+    /// Lucide `git-branch`: clone a repository, and Git History in the right sidebar's strip.
     GitBranch,
     /// Lucide `maximize-2` / `minimize-2`: a Pane's zoom toggle.
     Maximize2,

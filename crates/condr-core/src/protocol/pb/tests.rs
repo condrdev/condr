@@ -774,7 +774,7 @@ fn repositories_under_the_root_ride_beside_the_fields_an_older_peer_reads() {
 
     let several = workspace_git(vec![repository("api", "main"), repository("web", "login")]);
     let git = wire(&several);
-    // A 0.2 peer reads these: no branch, no History, and the `changes` it requires, empty.
+    // A 0.2 peer reads these: no branch, no Git History, and the `changes` it requires, empty.
     assert_eq!(git.branch, None);
     assert_eq!(git.head, None);
     assert_eq!(git.changes, Some(Default::default()));
@@ -805,7 +805,7 @@ fn repositories_under_the_root_ride_beside_the_fields_an_older_peer_reads() {
 }
 
 #[test]
-fn history_replies_round_trip() {
+fn git_log_replies_round_trip() {
     let changes = crate::GitChanges {
         entries: vec![crate::GitChangeEntry {
             path: "src/new.rs".into(),

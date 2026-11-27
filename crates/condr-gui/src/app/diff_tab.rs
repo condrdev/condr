@@ -1,5 +1,5 @@
 //! The Diff Tab (ADR 0017, ADR 0046): one file's diff in GPUI Kit's `Diff`, against the
-//! side the Workspace's Changes compare with, or as a commit History chose changed it.
+//! side the Workspace's Changes compare with, or as a commit Git History chose changed it.
 //! Everything shown here is Server data; the Client only asks and draws.
 
 use super::format::age;
@@ -19,7 +19,7 @@ use rust_i18n::t;
 /// The Diff Tab's Kit `Diff` and what it currently shows (ADR 0046).
 pub(super) struct DiffViewer {
     pub(super) state: Entity<DiffState>,
-    /// The path, the commit when History chose one, and the connection's diff generation
+    /// The path, the commit when Git History chose one, and the connection's diff generation
     /// the state was built from.
     shown: Option<((RelativePathBuf, Option<String>), u64)>,
     /// The patch last handed to the state. A refetch that writes the same one leaves the
@@ -49,7 +49,7 @@ pub(super) enum DiffContent {
     Failed(String),
 }
 
-/// The commit this Client's Diff Tab shows for one path, chosen in History. Any other path
+/// The commit this Client's Diff Tab shows for one path, chosen in Git History. Any other path
 /// in the Tab, whoever put it there, is the working tree's.
 pub(super) struct DiffCommit {
     pub(super) path: RelativePathBuf,
@@ -64,7 +64,7 @@ pub(super) struct DiffTabState {
     /// Every Diff Tab shows one column rather than two (ADR 0046): how this person reads
     /// diffs, remembered in the state file.
     pub(super) unified: bool,
-    /// The commit each Workspace's Diff Tab shows, chosen in History (ADR 0046); this
+    /// The commit each Workspace's Diff Tab shows, chosen in Git History (ADR 0046); this
     /// Client's view, never remembered.
     pub(super) commits: HashMap<(ConnectionKey, WorkspaceId), DiffCommit>,
     /// The Diff Tab shows a commit's whole message, not only its subject.
@@ -97,7 +97,7 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // The working tree's, unless History puts its commit back right after (ADR 0046).
+        // The working tree's, unless Git History puts its commit back right after (ADR 0046).
         let left_commit = self.diff_tab.commits.remove(&(key, workspace_id)).is_some();
         self.send_presenting_layout_to(
             key,
@@ -111,7 +111,7 @@ impl Condr {
         }
     }
 
-    /// The change a Diff Tab of `path` shows: its commit's own entry once History has the
+    /// The change a Diff Tab of `path` shows: its commit's own entry once Git History has the
     /// commit, otherwise the Workspace's against its comparison.
     fn diff_entry(
         &self,
@@ -327,8 +327,8 @@ impl Condr {
                     .xsmall()
                     .icon(Icon::new(IconName::Copy))
                     .debug_selector(|| "diff-copy-commit".into())
-                    .tooltip(t!("history.copy_commit_id"))
-                    .accessibility_label(t!("history.copy_commit_id"))
+                    .tooltip(t!("git_history.copy_commit_id"))
+                    .accessibility_label(t!("git_history.copy_commit_id"))
                     .on_click(move |_, _, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(copy_id.clone()));
                     }),
@@ -345,9 +345,9 @@ impl Condr {
                         }))
                         .debug_selector(|| "diff-commit-message".into())
                         .tooltip(if open {
-                            t!("history.hide_message")
+                            t!("git_history.hide_message")
                         } else {
-                            t!("history.show_message")
+                            t!("git_history.show_message")
                         })
                         .on_click(move |_, _, cx| {
                             let _ = owner.update(cx, |this, cx| {
@@ -622,7 +622,7 @@ impl Condr {
         }
     }
 
-    /// The commit the Diff Tab shows for `path`, when this Client chose one in History.
+    /// The commit the Diff Tab shows for `path`, when this Client chose one in Git History.
     pub(super) fn diff_commit(
         &self,
         key: ConnectionKey,

@@ -409,7 +409,7 @@ mod wire {
         folded: bool,
     }
 
-    /// `right_sidebar_view` 1 Changes, 2 Files, 3 History.
+    /// `right_sidebar_view` 1 Changes, 2 Files, 3 Git History.
     #[derive(Clone, PartialEq, prost::Message)]
     struct Workspace {
         #[prost(uint64, optional, tag = "1")]
@@ -494,7 +494,7 @@ mod wire {
                                         match view {
                                             RightSidebarView::Changes => 1,
                                             RightSidebarView::Files => 2,
-                                            RightSidebarView::History => 3,
+                                            RightSidebarView::GitHistory => 3,
                                         }
                                     }),
                                     against_base: state.against_base,
@@ -597,7 +597,7 @@ mod wire {
                                         match view {
                                             1 => Some(RightSidebarView::Changes),
                                             2 => Some(RightSidebarView::Files),
-                                            3 => Some(RightSidebarView::History),
+                                            3 => Some(RightSidebarView::GitHistory),
                                             _ => None,
                                         }
                                     }),

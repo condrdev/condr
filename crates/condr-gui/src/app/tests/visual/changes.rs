@@ -95,8 +95,8 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
         .expect("the sidebar header should offer Refresh");
     assert!(header.contains(&refresh.center()));
     assert!(
-        window.debug_bounds("right-sidebar-history").is_some(),
-        "a repository with a commit has History"
+        window.debug_bounds("right-sidebar-git-history").is_some(),
+        "a repository with a commit has Git History"
     );
     let diffs_generation = |window: &mut VisualTestContext| {
         window.read(|app| {
@@ -462,12 +462,12 @@ fn a_directory_listed_in_two_sections_folds_from_either_row() {
     );
 }
 
-/// History lists the real Server's commits, a commit unfolds into its files, a file opens
+/// Git History lists the real Server's commits, a commit unfolds into its files, a file opens
 /// in the Diff Tab as that commit changed it, and a new commit appears on its own (ADR 0046).
 #[test]
-fn history_lists_commits_and_shows_one_commits_file_in_the_diff_tab() {
+fn git_history_lists_commits_and_shows_one_commits_file_in_the_diff_tab() {
     let _serial_guard = acquire_visual_test_lock();
-    let directory = TestDirectory::new("gui-history");
+    let directory = TestDirectory::new("gui-git-history");
     let repository = directory.0.clone();
     run_git(&repository, ["init", "-q", "-b", "main"]);
     run_git(&repository, ["config", "user.email", "condr@example.com"]);
@@ -491,7 +491,7 @@ fn history_lists_commits_and_shows_one_commits_file_in_the_diff_tab() {
         String::from_utf8(output.stdout).unwrap().trim().to_owned()
     };
     let second = short_head(&repository);
-    // `main` tracks an `origin/main` one commit behind it, so History shows `↑1`.
+    // `main` tracks an `origin/main` one commit behind it, so Git History shows `↑1`.
     run_git(&repository, ["remote", "add", "origin", "."]);
     run_git(
         &repository,
@@ -542,11 +542,11 @@ fn history_lists_commits_and_shows_one_commits_file_in_the_diff_tab() {
     assert!(
         wait_until(window, |window| {
             window.update(|window, cx| _ = window.draw(cx));
-            window.debug_bounds("right-sidebar-history").is_some()
+            window.debug_bounds("right-sidebar-git-history").is_some()
         }),
-        "a Server that sends HEAD offers History"
+        "a Server that sends HEAD offers Git History"
     );
-    let tab = window.debug_bounds("right-sidebar-history").unwrap();
+    let tab = window.debug_bounds("right-sidebar-git-history").unwrap();
     window.simulate_click(tab.center(), Modifiers::default());
     // `debug_bounds` takes a static name.
     let commit_row: &'static str = format!("commit-{second}").leak();
@@ -555,11 +555,11 @@ fn history_lists_commits_and_shows_one_commits_file_in_the_diff_tab() {
             window.update(|window, cx| _ = window.draw(cx));
             window.debug_bounds(commit_row).is_some()
         }),
-        "History lists the latest commit"
+        "Git History lists the latest commit"
     );
     assert!(
-        window.debug_bounds("history-upstream").is_some(),
-        "History shows how far the branch is ahead of its upstream"
+        window.debug_bounds("git-history-upstream").is_some(),
+        "Git History shows how far the branch is ahead of its upstream"
     );
 
     // Selecting asks for the commit's files, listed below; one of them opens in the Diff Tab.
@@ -609,7 +609,7 @@ fn history_lists_commits_and_shows_one_commits_file_in_the_diff_tab() {
         "a second click hides the commit's files"
     );
 
-    // A commit made elsewhere moves HEAD, and History lists it without a refresh.
+    // A commit made elsewhere moves HEAD, and Git History lists it without a refresh.
     run_git(&repository, ["commit", "-q", "-am", "third"]);
     let third: &'static str = format!("commit-{}", short_head(&repository)).leak();
     assert!(
@@ -622,7 +622,7 @@ fn history_lists_commits_and_shows_one_commits_file_in_the_diff_tab() {
 }
 
 /// A Workspace above several repositories lists each one's changes under a node of its own,
-/// and History shows the repository its menu picks (ADR 0073).
+/// and Git History shows the repository its menu picks (ADR 0073).
 #[test]
 fn a_workspace_above_several_repositories_shows_each_one() {
     let _serial_guard = acquire_visual_test_lock();
@@ -688,17 +688,17 @@ fn a_workspace_above_several_repositories_shows_each_one() {
     assert!(window.debug_bounds("change-api/notes.txt").is_none());
     assert!(window.debug_bounds("change-web/notes.txt").is_some());
 
-    // History opens on the first repository; its menu shows another's commits.
-    let tab = window.debug_bounds("right-sidebar-history").unwrap();
+    // Git History opens on the first repository; its menu shows another's commits.
+    let tab = window.debug_bounds("right-sidebar-git-history").unwrap();
     window.simulate_click(tab.center(), Modifiers::default());
     assert!(
         wait_until(window, |window| {
             window.update(|window, cx| _ = window.draw(cx));
             window.debug_bounds(heads[0]).is_some()
         }),
-        "History lists api's commit"
+        "Git History lists api's commit"
     );
-    assert!(window.debug_bounds("history-repository").is_some());
+    assert!(window.debug_bounds("git-history-repository").is_some());
     let (key, workspace_id) = window.read(|app| {
         let view = view.read(app);
         let session = view.active_session().unwrap();
@@ -710,7 +710,7 @@ fn a_workspace_above_several_repositories_shows_each_one() {
     // The menu item calls this; GPUI's test window cannot address a popup menu's rows.
     window.update(|_, cx| {
         view.update(cx, |view, cx| {
-            view.choose_history_repository(key, workspace_id, "web".into(), cx);
+            view.choose_git_history_repository(key, workspace_id, "web".into(), cx);
         });
     });
     assert!(
@@ -718,11 +718,11 @@ fn a_workspace_above_several_repositories_shows_each_one() {
             window.update(|window, cx| _ = window.draw(cx));
             window.debug_bounds(heads[1]).is_some() && window.debug_bounds(heads[0]).is_none()
         }),
-        "History lists web's commit instead"
+        "Git History lists web's commit instead"
     );
 
     // A Root that is a repository itself shows its own changes beside the ones under it,
-    // and History's menu offers each.
+    // and Git History's menu offers each.
     run_git(&root, ["init", "-q", "-b", "main"]);
     std::fs::write(root.join("root.txt"), "root\n").unwrap();
     let tab = window.debug_bounds("right-sidebar-changes").unwrap();
@@ -746,9 +746,9 @@ fn a_workspace_above_several_repositories_shows_each_one() {
     window.update(|window, cx| _ = window.draw(cx));
     assert!(window.debug_bounds("change-root.txt").is_none());
     assert!(window.debug_bounds("change-web/notes.txt").is_some());
-    let tab = window.debug_bounds("right-sidebar-history").unwrap();
+    let tab = window.debug_bounds("right-sidebar-git-history").unwrap();
     window.simulate_click(tab.center(), Modifiers::default());
     window.run_until_parked();
     window.update(|window, cx| _ = window.draw(cx));
-    assert!(window.debug_bounds("history-repository").is_some());
+    assert!(window.debug_bounds("git-history-repository").is_some());
 }

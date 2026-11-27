@@ -161,7 +161,7 @@ message TerminalColors {
   repeated uint32 ansi = 4;
 }
 
-// A page of a Workspace's History (ADR 0046), walking from `from` or from HEAD.
+// A page of a Workspace's Git History (ADR 0046), walking from `from` or from HEAD.
 message GitLogRequest {
   uint64 server_id = 1;
   uint64 session_id = 2;

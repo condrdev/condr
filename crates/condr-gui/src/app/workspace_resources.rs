@@ -94,7 +94,7 @@ pub(super) struct WorkspaceResources {
     /// An unchanged answer keeps its generation and therefore its Editor and viewport.
     pub(super) files: Fetched<ResourcePath, (u64, Result<FileContent, String>)>,
     pub(super) files_generation: u64,
-    /// Each Workspace's History as far as it was loaded (ADR 0046).
+    /// Each Workspace's Git History as far as it was loaded (ADR 0046).
     pub(super) logs: HashMap<WorkspaceId, GitLog>,
     /// The page each Workspace waits for: its request and how many commits it skips.
     pub(super) pending_logs: HashMap<WorkspaceId, (u64, u32)>,
@@ -296,7 +296,7 @@ impl WorkspaceResources {
         self.commits.land(slot, request_id, result)
     }
 
-    /// A History page: the first replaces what is shown, a later one extends it when it
+    /// A Git History page: the first replaces what is shown, a later one extends it when it
     /// walked from the same commit.
     pub(super) fn accept_log(
         &mut self,
@@ -311,7 +311,7 @@ impl WorkspaceResources {
             return false;
         }
         self.pending_logs.remove(&workspace_id);
-        // ponytail: a failed page shows as the end of History; the next refresh asks again.
+        // ponytail: a failed page shows as the end of Git History; the next refresh asks again.
         let page = result.unwrap_or_default();
         match self.logs.get_mut(&workspace_id) {
             Some(log) if skip > 0 && log.from == page.from => {

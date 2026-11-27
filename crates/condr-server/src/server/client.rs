@@ -1160,7 +1160,7 @@ pub(super) fn handle_client(
 
 /// The Root Directory a Files request reads under, or why it cannot; takes and releases
 /// the state lock so the disk is read outside it.
-/// The largest History page a Client may ask for; the wire refuses more (ADR 0046).
+/// The largest Git History page a Client may ask for; the wire refuses more (ADR 0046).
 const MAX_LOG_PAGE: u32 = 1000;
 
 /// Answers one `AgentCommand`. A start first waits, up to its own timeout, for a fresh
@@ -1297,7 +1297,7 @@ fn compared_side(
     Ok((git.repository.clone(), old_path, base))
 }
 
-/// The repository whose directory under the Root is `directory`, for History's requests.
+/// The repository whose directory under the Root is `directory`, for Git History's requests.
 fn workspace_repository(
     state: &Arc<Mutex<RuntimeState>>,
     server_id: ServerId,

@@ -204,13 +204,13 @@ message GitChanges {
   bool truncated = 2;
 }
 
-// Where a Workspace's HEAD points (ADR 0046). A Server that sends it serves History.
+// Where a Workspace's HEAD points (ADR 0046). A Server that sends it serves Git History.
 message GitHead {
   // The commit as hex; absent while HEAD is unborn.
   optional string commit = 1;
 }
 
-// One commit as History lists it (ADR 0046).
+// One commit as Git History lists it (ADR 0046).
 message CommitSummary {
   string id = 1;
   string subject = 2;

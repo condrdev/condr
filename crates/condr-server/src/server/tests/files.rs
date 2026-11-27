@@ -194,9 +194,9 @@ fn the_old_side_is_heads_text_and_refuses_an_unknown_workspace_or_a_missing_base
 }
 
 /// ADR 0073: above several repositories, a diff's path picks the repository it lies in,
-/// History names its repository, and Files dims by the right one's rules.
+/// Git History names its repository, and Files dims by the right one's rules.
 #[test]
-fn the_repository_a_path_or_a_history_request_names_answers() {
+fn the_repository_a_path_or_a_git_history_request_names_answers() {
     let root = std::env::temp_dir().join(format!(
         "condr-server-several-{}-{}",
         std::process::id(),

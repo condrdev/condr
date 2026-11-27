@@ -1,5 +1,5 @@
 //! The right sidebar (ADR 0017, ADR 0018, ADR 0046): the presented Workspace's Files,
-//! Changes and History, one view at a time, remembered per Workspace (ADR 0023). Each view
+//! Changes and Git History, one view at a time, remembered per Workspace (ADR 0023). Each view
 //! is its own module; this one holds what they share: whether the sidebar is open, which
 //! view it shows, its width, header and Refresh.
 
@@ -7,7 +7,7 @@ mod change_tree;
 mod changes;
 mod entries;
 mod files;
-mod history;
+mod git_history;
 
 use super::icons::CondrIconName;
 use super::placeholders::empty_state;
@@ -20,7 +20,7 @@ use std::borrow::Cow;
 pub(super) use changes::*;
 pub(super) use entries::*;
 pub(super) use files::*;
-pub(super) use history::*;
+pub(super) use git_history::*;
 
 /// What the right sidebar shows, one at a time, each opened by its button in the strip
 /// (ADR 0076); remembered per Workspace (ADR 0023).
@@ -30,7 +30,7 @@ pub(super) enum RightSidebarView {
     Changes,
     Files,
     /// The commits reachable from `HEAD` (ADR 0046).
-    History,
+    GitHistory,
 }
 
 pub(super) const INITIAL_RIGHT_SIDEBAR_WIDTH: Pixels = px(320.);
@@ -53,10 +53,10 @@ impl RightSidebarView {
                 Icon::new(Glyph::GitCommitHorizontal),
                 t!("right_sidebar.changes"),
             ),
-            Self::History => (
-                "right-sidebar-history",
+            Self::GitHistory => (
+                "right-sidebar-git-history",
                 Icon::new(CondrIconName::GitBranch),
-                t!("right_sidebar.history"),
+                t!("right_sidebar.git_history"),
             ),
         }
     }
@@ -76,8 +76,8 @@ pub(super) struct ShownRightSidebar {
     /// The view the sidebar shows, or opens on while it is closed.
     pub(super) view: RightSidebarView,
     pub(super) open: bool,
-    /// The Server serves History for this Workspace (ADR 0046).
-    pub(super) history: bool,
+    /// The Server serves Git History for this Workspace (ADR 0046).
+    pub(super) git_history: bool,
 }
 
 /// This Client's right sidebar per Workspace, retained against the authoritative
@@ -100,7 +100,7 @@ pub(super) struct RightSidebarState {
     pub(super) entry_requests: HashMap<(ConnectionKey, u64), EntryRequest>,
     pub(super) changes: ChangesState,
     pub(super) files: FilesTreeState,
-    pub(super) history: HistoryState,
+    pub(super) git_history: GitHistoryState,
 }
 
 impl RightSidebarState {
@@ -133,13 +133,13 @@ impl RightSidebarState {
         self.files
             .expanded_dirs
             .retain(|(connection, id, _)| workspace_live(*connection, *id));
-        self.history
+        self.git_history
             .selected_commits
             .retain(|(connection, id), _| workspace_live(*connection, *id));
-        self.history
+        self.git_history
             .repositories
             .retain(|(connection, id), _| workspace_live(*connection, *id));
-        self.history
+        self.git_history
             .collapsed_dirs
             .retain(|(connection, id, _)| workspace_live(*connection, *id));
     }
@@ -173,12 +173,12 @@ impl Condr {
         }
         let (key, workspace_id) = self.presented_workspace_in(view)?;
         let git = self.connection(key)?.model.workspace_git.get(&workspace_id);
-        // A Server that sends `head` serves History (ADR 0046).
-        let history = git
+        // A Server that sends `head` serves Git History (ADR 0046).
+        let git_history = git
             .and_then(|git| git.repositories.first())
             .is_some_and(|repository| repository.head.is_some());
         let shown = match self.right_sidebar_view_for(key, workspace_id, git.is_some()) {
-            RightSidebarView::History if !history => RightSidebarView::Changes,
+            RightSidebarView::GitHistory if !git_history => RightSidebarView::Changes,
             shown => shown,
         };
         Some(ShownRightSidebar {
@@ -186,7 +186,7 @@ impl Condr {
             workspace_id,
             view: shown,
             open: self.right_sidebar.open.contains(&(key, workspace_id)),
-            history,
+            git_history,
         })
     }
 
@@ -231,7 +231,7 @@ impl Condr {
     }
 
     /// The strip along the window's right edge (ADR 0076): a button per view, the one shown
-    /// selected while the sidebar is open. History has a button only where the Server
+    /// selected while the sidebar is open. Git History has a button only where the Server
     /// serves it.
     pub(super) fn render_right_sidebar_strip(
         &self,
@@ -273,8 +273,8 @@ impl Condr {
             .border_color(theme.sidebar_border)
             .child(button(RightSidebarView::Files))
             .child(button(RightSidebarView::Changes))
-            .when(shown.history, |this| {
-                this.child(button(RightSidebarView::History))
+            .when(shown.git_history, |this| {
+                this.child(button(RightSidebarView::GitHistory))
             })
             .into_any_element()
     }
@@ -418,12 +418,12 @@ impl Condr {
                     cx,
                 ),
             },
-            RightSidebarView::History => v_flex()
+            RightSidebarView::GitHistory => v_flex()
                 .flex_1()
                 .min_h_0()
                 .w_full()
-                .children(git.map(|git| self.render_history_head(key, workspace_id, git, cx)))
-                .child(self.render_history(key, workspace_id, shown_diff.as_deref(), cx))
+                .children(git.map(|git| self.render_git_history_head(key, workspace_id, git, cx)))
+                .child(self.render_git_history(key, workspace_id, shown_diff.as_deref(), cx))
                 .into_any_element(),
         };
         column
@@ -471,7 +471,7 @@ impl Condr {
         self.right_sidebar
             .refreshing
             .insert((key, workspace_id), timeout);
-        self.reload_history(key, workspace_id);
+        self.reload_git_history(key, workspace_id);
         cx.notify();
     }
 }

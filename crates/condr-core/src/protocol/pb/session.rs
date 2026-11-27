@@ -767,7 +767,7 @@ impl TryFrom<super::FileContent> for FileContent {
     }
 }
 
-/// More commits than this in one History page are a broken peer, not a long history.
+/// More commits than this in one Git History page are a broken peer, not a long history.
 const MAX_LOG_COMMITS: usize = 1000;
 
 impl From<&GitLog> for super::GitLog {
@@ -793,7 +793,7 @@ impl TryFrom<super::GitLog> for GitLog {
     type Error = WireError;
 
     fn try_from(log: super::GitLog) -> WireResult<Self> {
-        bounded(log.commits.len(), MAX_LOG_COMMITS, "History commits")?;
+        bounded(log.commits.len(), MAX_LOG_COMMITS, "Git History commits")?;
         Ok(Self {
             from: log.from,
             commits: log

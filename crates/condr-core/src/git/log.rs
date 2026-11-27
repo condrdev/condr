@@ -1,4 +1,4 @@
-//! A Workspace's History (ADR 0046): the commits reachable from `HEAD`, newest commit time
+//! A Workspace's Git History (ADR 0046): the commits reachable from `HEAD`, newest commit time
 //! first as `git log` lists them, and one commit's files and diffs against its first parent.
 
 use std::collections::BTreeMap;
@@ -19,7 +19,7 @@ impl GitRepository {
             Some(id) => commit_id(id)?,
             None => match repo.head_id() {
                 Ok(id) => id.detach(),
-                // An unborn `HEAD` has no History yet.
+                // An unborn `HEAD` has no Git History yet.
                 Err(_) => return Ok(GitLog::default()),
             },
         };

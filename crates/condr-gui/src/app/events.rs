@@ -297,11 +297,11 @@ impl Condr {
                         notify = true;
                     }
                     SessionEvent::WorkspaceGitChanged { workspace_id, git } => {
-                        // `HEAD` moved in the repository History shows: it shows the new
+                        // `HEAD` moved in the repository Git History shows: it shows the new
                         // commits (ADR 0046, ADR 0073).
                         let head = git
                             .as_ref()
-                            .and_then(|git| self.history_repository(key, workspace_id, git))
+                            .and_then(|git| self.git_history_repository(key, workspace_id, git))
                             .and_then(|repository| repository.head.clone());
                         let connection = &mut self.connections[index];
                         let head_moved = connection
@@ -317,7 +317,7 @@ impl Condr {
                         // The working tree moved: every diff of it is stale.
                         self.forget_workspace_diffs(key, workspace_id);
                         if head_moved {
-                            self.reload_history(key, workspace_id);
+                            self.reload_git_history(key, workspace_id);
                         }
                         git_changed = true;
                         notify = true;

@@ -5,7 +5,7 @@
 //! ```
 //!
 //! What they show is real wherever it can be. A worktree of this repository holds
-//! [`DEMO`]'s change uncommitted, for Changes, the Diff and Preview Tabs and History, and
+//! [`DEMO`]'s change uncommitted, for Changes, the Diff and Preview Tabs and Git History, and
 //! Claude Code, Codex and lazygit run in its Panes, so all three must be installed and the
 //! first two must trust this repository. Two more Servers on loopback stand in for remote
 //! Devices; the Agents listed on them and the transfers in flight are staged. Each picture
@@ -172,7 +172,7 @@ pub(crate) fn run(directory: PathBuf) {
     );
 
     // Review, with the left sidebar folded for the code's room: the Diff, Preview and
-    // History of the worktree's change.
+    // Git History of the worktree's change.
     let path = RelativePathBuf::from(DEMO_FILE);
     update(&mut cx, window, &view, |this, window, cx| {
         this.toggle_sidebar(window, cx);
@@ -221,10 +221,10 @@ pub(crate) fn run(directory: PathBuf) {
     update(&mut cx, window, &view, |this, _, cx| {
         this.right_sidebar
             .views
-            .insert((1, condr), RightSidebarView::History);
+            .insert((1, condr), RightSidebarView::GitHistory);
         cx.notify();
     });
-    wait(&mut cx, "History loaded", |app| {
+    wait(&mut cx, "Git History loaded", |app| {
         view.read(app)
             .connection(1)
             .is_some_and(|connection| connection.resources.logs.contains_key(&condr))
@@ -234,7 +234,7 @@ pub(crate) fn run(directory: PathBuf) {
         let commit = this.connection(1).unwrap().resources.logs[&condr].commits[0].clone();
         let path = RelativePathBuf::from("crates/condr-gui/src/app/sidebar.rs");
         this.right_sidebar
-            .history
+            .git_history
             .selected_commits
             .insert((1, condr), commit.id.clone());
         this.show_diff_on(1, condr, path.clone(), window, cx);

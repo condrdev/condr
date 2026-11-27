@@ -9,7 +9,7 @@ right_sidebar:
   changes_count:
     en: 'Changes (%{count})'
     zh-CN: '变更（%{count}）'
-  history:
+  git_history:
     en: History
     zh-CN: 历史
   refresh:

@@ -914,8 +914,8 @@ fn commit_all_at(root: &Path, message: &str, time: u64) {
 }
 
 #[test]
-fn history_pages_from_a_fixed_commit_while_head_moves() {
-    let root = scratch_repository("history");
+fn git_log_pages_from_a_fixed_commit_while_head_moves() {
+    let root = scratch_repository("git-log");
     let repository = discover_repository(&root).unwrap().unwrap();
     assert_eq!(repository.head(), None, "an unborn HEAD names no commit");
     assert_eq!(
