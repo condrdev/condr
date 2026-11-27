@@ -11,8 +11,8 @@
 //! per state: the Workspace, a Pane's find bar, the Command Palette's pages, Tasks mode with Tasks and with an
 //! Agent in every column and with columns folded, the same Agents in the sidebar's Agents
 //! section by Workspace, by state and in the tree's order, the Ports page empty, with forwards, for one Device, the right
-//! sidebar's transfer strip, the left sidebar with its Device folded, and a finished
-//! download's toast. The website's screenshots come from the same window, in `website`.
+//! sidebar's transfer strip, Git Graph on a repository with branches in dark and light, the
+//! left sidebar with its Device folded, and a finished download's toast. The website's screenshots come from the same window, in `website`.
 
 mod website;
 
@@ -341,6 +341,8 @@ pub(crate) fn run(directory: PathBuf) {
     });
     shot(&mut cx, window, &directory, "07-transfer-strip-folded");
 
+    git_graph(&mut cx, window, &view, &mut admin, &root, &directory);
+
     // Before the Device drops, which leaves nothing to add Workspaces to.
     agents(
         &mut cx, window, &view, &mut admin, pane_id, &root, &directory,
@@ -548,6 +550,163 @@ fn agents(
     update(cx, window, view, |this, _, cx| {
         this.main_view_mut().agents_order = Default::default();
         cx.notify();
+    });
+}
+
+/// Git Graph (ADR 0079) on a repository with a merged branch, one left open, a tag and an
+/// origin a commit behind: every branch with a commit selected, in dark and light. The
+/// Workspace closes again, so the shots after it are as before.
+fn git_graph(
+    cx: &mut VisualTestAppContext,
+    window: AnyWindowHandle,
+    view: &Entity<Condr>,
+    admin: &mut ClientConnection,
+    root: &std::path::Path,
+    directory: &std::path::Path,
+) {
+    let repository = root.join("condr-graph");
+    std::fs::create_dir_all(&repository).unwrap();
+    let time = std::cell::Cell::new(1_795_000_000u64);
+    let git = |args: &[&str], author: &str, time: u64| {
+        let date = format!("@{time} +0800");
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repository)
+            .args(args)
+            .env("GIT_AUTHOR_NAME", author)
+            .env(
+                "GIT_AUTHOR_EMAIL",
+                format!("{}@example.com", author.to_lowercase()),
+            )
+            .env("GIT_COMMITTER_NAME", author)
+            .env(
+                "GIT_COMMITTER_EMAIL",
+                format!("{}@example.com", author.to_lowercase()),
+            )
+            .env("GIT_AUTHOR_DATE", &date)
+            .env("GIT_COMMITTER_DATE", &date)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "git {args:?}: {output:?}");
+    };
+    let commit = |file: &str, message: &str, author: &str| {
+        time.set(time.get() + 3_000);
+        let path = repository.join(file);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, format!("{message}\n")).unwrap();
+        git(&["add", "-A"], author, time.get());
+        git(&["commit", "-q", "-m", message], author, time.get());
+    };
+    git(&["init", "-q", "-b", "main"], "Ada", 0);
+    git(&["config", "user.email", "ada@example.com"], "Ada", 0);
+    commit("README.md", "Initial commit", "Ada");
+    commit("src/parser.rs", "Add the parser", "Ada");
+    git(&["checkout", "-q", "-b", "feat/search"], "Ada", time.get());
+    commit(
+        "src/search/index.rs",
+        "Search: index the documents",
+        "Grace",
+    );
+    commit(
+        "src/search/rank.rs",
+        "Search: rank results by recency",
+        "Grace",
+    );
+    git(&["checkout", "-q", "main"], "Ada", time.get());
+    commit("build.rs", "Fix the build on Windows", "Linus");
+    time.set(time.get() + 3_000);
+    git(
+        &[
+            "merge",
+            "-q",
+            "--no-ff",
+            "-m",
+            "Merge branch 'feat/search'",
+            "feat/search",
+        ],
+        "Ada",
+        time.get(),
+    );
+    git(&["checkout", "-q", "-b", "fix/login"], "Ada", time.get());
+    commit(
+        "src/login.rs",
+        "Login: keep the session across restarts",
+        "Grace",
+    );
+    git(&["checkout", "-q", "main"], "Ada", time.get());
+    commit("CHANGELOG.md", "Release 1.2", "Ada");
+    git(&["tag", "-a", "v1.2", "-m", "1.2"], "Ada", time.get());
+    commit("src/parser.rs", "Parser: accept trailing commas", "Ada");
+    git(
+        &["update-ref", "refs/remotes/origin/main", "main~1"],
+        "Ada",
+        time.get(),
+    );
+    git(
+        &["update-ref", "refs/remotes/origin/fix/login", "fix/login"],
+        "Ada",
+        time.get(),
+    );
+
+    let LayoutResult::WorkspaceCreated { workspace_id, .. } = admin
+        .layout(LayoutCommand::CreateWorkspace {
+            root_directory: repository.clone(),
+            name: None,
+        })
+        .unwrap()
+        .unwrap()
+    else {
+        panic!("expected a Workspace");
+    };
+    wait(cx, "the repository's Git snapshot", |app| {
+        view.read(app).serves_git_history(1, workspace_id)
+    });
+    update(cx, window, view, move |this, window, cx| {
+        this.open_git_graph(1, workspace_id, window, cx);
+    });
+    let tab = |app: &App| {
+        view.read(app)
+            .connection(1)
+            .and_then(ServerConnection::session)
+            .and_then(|session| session.workspace(workspace_id))
+            .and_then(|workspace| {
+                workspace
+                    .tabs()
+                    .iter()
+                    .find(|tab| matches!(tab.content(), TabContent::GitGraph))
+                    .map(Tab::id)
+            })
+    };
+    wait(cx, "the Git Graph Tab", |app| tab(app).is_some());
+    let tab_id = cx.read(|app| tab(app)).unwrap();
+    wait(cx, "the commits loaded", |app| {
+        view.read(app).git_graph_subjects(1, tab_id, app).len() == 9
+    });
+    // The merge, selected, with its details and the branches it is on.
+    update(cx, window, view, move |this, _, cx| {
+        if let Some(table) = this.git_graph_table(1, tab_id) {
+            table.update(cx, |table, cx| table.set_selected_row(3, cx));
+        }
+    });
+    wait(cx, "the commit's details", |app| {
+        view.read(app)
+            .connection(1)
+            .is_some_and(|connection| connection.resources.commit_branches.keys().count() > 0)
+    });
+    shot(cx, window, directory, "05g-git-graph");
+    let appearance = cx.read(|app| view.read(app).appearance);
+    cx.update(|cx| apply_appearance(Appearance::Light, None, cx));
+    shot(cx, window, directory, "05h-git-graph-light");
+    cx.update(|cx| apply_appearance(appearance, None, cx));
+    admin
+        .layout(LayoutCommand::CloseWorkspace { workspace_id })
+        .unwrap()
+        .unwrap();
+    wait(cx, "the repository's Workspace closed", |app| {
+        view.read(app)
+            .connection(1)
+            .and_then(ServerConnection::session)
+            .is_some_and(|session| session.workspace(workspace_id).is_none())
     });
 }
 

@@ -709,9 +709,43 @@ fn a_refresh_and_a_full_context_diff_round_trip() {
             session_id: crate::protocol::SessionId(2),
             request_id: 5,
             workspace_id: crate::WorkspaceId::from_u64(3),
-            from: Some("8f3c".into()),
+            from: vec!["8f3c".into(), "77aa".into()],
+            start: crate::LogStart::All,
+            text: Some("parser 8f3c1d2".into()),
             skip: 100,
             limit: 100,
+            repository: "api".into(),
+        },
+        ClientMessage::GitLog {
+            server_id: crate::protocol::ServerId(1),
+            session_id: crate::protocol::SessionId(2),
+            request_id: 5,
+            workspace_id: crate::WorkspaceId::from_u64(3),
+            from: Vec::new(),
+            start: crate::LogStart::Ref("refs/remotes/origin/main".into()),
+            text: None,
+            skip: 0,
+            limit: 100,
+            repository: "".into(),
+        },
+        ClientMessage::GitLog {
+            server_id: crate::protocol::ServerId(1),
+            session_id: crate::protocol::SessionId(2),
+            request_id: 5,
+            workspace_id: crate::WorkspaceId::from_u64(3),
+            from: Vec::new(),
+            start: crate::LogStart::Head,
+            text: None,
+            skip: 0,
+            limit: 100,
+            repository: "".into(),
+        },
+        ClientMessage::GitCommitBranches {
+            server_id: crate::protocol::ServerId(1),
+            session_id: crate::protocol::SessionId(2),
+            request_id: 9,
+            workspace_id: crate::WorkspaceId::from_u64(3),
+            commit: "8f3c".into(),
             repository: "api".into(),
         },
         ClientMessage::GitCommit {
@@ -823,15 +857,33 @@ fn git_log_replies_round_trip() {
             request_id: 5,
             workspace_id: crate::WorkspaceId::from_u64(3),
             result: Ok(crate::GitLog {
-                from: Some("8f3c".into()),
+                from: vec!["8f3c".into()],
                 commits: vec![crate::CommitSummary {
                     id: "8f3c".into(),
                     subject: "Fix the parser".into(),
                     author: "Ada".into(),
                     time: 1_700_000_000,
+                    parents: vec!["1a2b".into(), "3c4d".into()],
+                    author_email: "ada@example.com".into(),
+                    committer_differs: true,
+                    on_head: true,
                 }],
                 more: true,
+                refs: vec![crate::GitRef {
+                    name: "refs/heads/main".into(),
+                    commit: "8f3c".into(),
+                }],
+                user_email: Some("ada@example.com".into()),
             }),
+        },
+        crate::protocol::ServerMessage::GitCommitBranches {
+            request_id: 9,
+            workspace_id: crate::WorkspaceId::from_u64(3),
+            commit: "8f3c".into(),
+            result: Ok(vec![
+                "refs/heads/main".into(),
+                "refs/remotes/origin/main".into(),
+            ]),
         },
         crate::protocol::ServerMessage::GitCommit {
             request_id: 6,
@@ -844,6 +896,12 @@ fn git_log_replies_round_trip() {
                 time: 1_700_000_000,
                 message: "Fix the parser\n\nIt dropped the last token.\n".into(),
                 changes,
+                author_email: "ada@example.com".into(),
+                committer: Some(crate::CommitPerson {
+                    name: "Grace".into(),
+                    email: "grace@example.com".into(),
+                    time: 1_700_000_100,
+                }),
             }),
         },
         crate::protocol::ServerMessage::GitCommit {
@@ -1114,6 +1172,129 @@ mod streams {
                 super::super::ClientHandshake::decode(empty.as_slice()).unwrap()
             ),
             Err(super::WireError::Unknown)
+        );
+    }
+}
+
+/// A Tab of a kind this build does not know is an Unsupported Tab, and the Git Graph Tab
+/// rides beside `tabs` where a 0.2.6 peer, which has neither rule, skips it (ADR 0078).
+#[test]
+fn a_newer_tab_kind_is_unsupported_and_git_graph_rides_beside_the_tabs() {
+    use prost::Message as _;
+    let mut session = crate::Session::new();
+    let workspace_id = session.create_workspace(std::env::temp_dir()).unwrap();
+    session
+        .show_viewer(
+            workspace_id,
+            crate::Viewer::Diff {
+                path: "src/lib.rs".into(),
+            },
+        )
+        .unwrap();
+    let git_graph = session
+        .show_viewer(workspace_id, crate::Viewer::GitGraph)
+        .unwrap();
+    assert_eq!(
+        session.show_viewer(workspace_id, crate::Viewer::GitGraph),
+        Some(git_graph),
+        "one Git Graph Tab per Workspace"
+    );
+    let encoded = super::SessionSnapshot::try_from(&session.snapshot()).unwrap();
+    let workspace = &encoded.workspaces[0];
+    assert_eq!(workspace.tabs.len(), 2);
+    let beside = workspace.git_graph.as_ref().unwrap();
+    assert_eq!((beside.id, beside.index), (git_graph.as_u64(), 2));
+
+    // 0.2.6 decodes the same bytes without the field, and every Tab it sees it knows.
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct OldWorkspace {
+        #[prost(message, repeated, tag = "5")]
+        tabs: Vec<super::TabSnapshot>,
+    }
+    let old = OldWorkspace::decode(workspace.encode_to_vec().as_slice()).unwrap();
+    assert!(old.tabs.iter().all(|tab| tab.content.is_some()));
+
+    // This build puts it back in its place, and reads it from `tabs` too.
+    let restored = crate::Session::restore(encoded.clone().try_into().unwrap()).unwrap();
+    let tabs = restored.workspaces()[0].tabs();
+    assert_eq!(tabs[2].id(), git_graph);
+    assert!(matches!(tabs[2].content(), crate::TabContent::GitGraph));
+    let mut inline = encoded.clone();
+    let tab = inline.workspaces[0].git_graph.take().unwrap();
+    inline.workspaces[0].tabs.push(super::TabSnapshot {
+        id: tab.id,
+        name: tab.name,
+        content: Some(tab_snapshot::Content::GitGraph(super::Empty {})),
+    });
+    let restored = crate::Session::restore(inline.try_into().unwrap()).unwrap();
+    assert!(matches!(
+        restored.workspaces()[0].tabs()[2].content(),
+        crate::TabContent::GitGraph
+    ));
+
+    // A kind added after this build: kept by id and name, and dropped by a Server.
+    let mut newer = encoded;
+    newer.workspaces[0].tabs[1].content = None;
+    let mut restored = crate::Session::restore(newer.try_into().unwrap()).unwrap();
+    let unsupported = &restored.workspaces()[0].tabs()[1];
+    assert!(matches!(
+        unsupported.content(),
+        crate::TabContent::Unsupported
+    ));
+    assert_eq!(unsupported.name(), crate::DIFF_TAB_NAME);
+    let again = super::SessionSnapshot::try_from(&restored.snapshot()).unwrap();
+    assert_eq!(again.workspaces[0].tabs[1].content, None);
+    assert_eq!(restored.drop_unsupported_tabs(), 1);
+    assert_eq!(restored.workspaces()[0].tabs().len(), 2);
+}
+
+/// A Diff or Preview Tab's `ShowViewer` goes as the command a 0.2.6 Server knows, and the
+/// Git Graph's as the new one (ADR 0078).
+#[test]
+fn show_viewer_reaches_a_0_2_6_server_for_the_viewers_it_knows() {
+    use crate::protocol::{LayoutCommand, LayoutResult};
+    let workspace_id = crate::WorkspaceId::from_u64(3);
+    for (viewer, member) in [
+        (
+            crate::Viewer::Diff {
+                path: "src/lib.rs".into(),
+            },
+            "show_diff",
+        ),
+        (
+            crate::Viewer::File {
+                path: "README.md".into(),
+            },
+            "show_file",
+        ),
+        (crate::Viewer::GitGraph, "show_viewer"),
+    ] {
+        let command = LayoutCommand::ShowViewer {
+            workspace_id,
+            viewer,
+        };
+        let encoded = super::LayoutCommand::try_from(&command).unwrap();
+        let sent = match encoded.command.as_ref().unwrap() {
+            layout_command::Command::ShowDiff(_) => "show_diff",
+            layout_command::Command::ShowFile(_) => "show_file",
+            layout_command::Command::ShowViewer(_) => "show_viewer",
+            _ => "another",
+        };
+        assert_eq!(sent, member);
+        assert_eq!(LayoutCommand::try_from(encoded).unwrap(), command);
+    }
+    // A 0.2.6 Server's answer to `show_file` is the Tab shown, as is this build's.
+    let tab = crate::TabId::from_u64(9);
+    for result in [
+        layout_result::Result::FileShown(super::TabTarget { tab_id: 9 }),
+        layout_result::Result::ViewerShown(super::TabTarget { tab_id: 9 }),
+    ] {
+        assert_eq!(
+            LayoutResult::try_from(super::LayoutResult {
+                result: Some(result),
+            })
+            .unwrap(),
+            LayoutResult::ViewerShown { tab_id: tab }
         );
     }
 }

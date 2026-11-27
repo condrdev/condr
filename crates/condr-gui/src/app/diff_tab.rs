@@ -101,7 +101,10 @@ impl Condr {
         let left_commit = self.diff_tab.commits.remove(&(key, workspace_id)).is_some();
         self.send_presenting_layout_to(
             key,
-            LayoutCommand::ShowDiff { workspace_id, path },
+            LayoutCommand::ShowViewer {
+                workspace_id,
+                viewer: Viewer::Diff { path },
+            },
             window,
             cx,
         );
@@ -780,7 +783,7 @@ fn message_body(message: &str) -> String {
 
 /// `text` as Markdown that renders it as written: every punctuation character escaped and
 /// every line break kept, since a commit message is plain text (ADR 0046).
-fn escaped_markdown(text: &str) -> String {
+pub(super) fn escaped_markdown(text: &str) -> String {
     let mut escaped = String::with_capacity(text.len() * 2);
     for (index, line) in text.lines().enumerate() {
         if index > 0 {

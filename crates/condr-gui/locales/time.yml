@@ -24,6 +24,21 @@ time:
     other:
       en: '%{count} days ago'
       zh-CN: '%{count} 天前'
+  moments_ago:
+    en: Moments ago
+    zh-CN: 刚刚
+  a_minute_ago:
+    en: A minute ago
+    zh-CN: 1 分钟前
+  an_hour_ago:
+    en: 1 hour ago
+    zh-CN: 1 小时前
+  today_at:
+    en: 'Today %{time}'
+    zh-CN: '今天 %{time}'
+  yesterday_at:
+    en: 'Yesterday %{time}'
+    zh-CN: '昨天 %{time}'
   uptime:
     seconds:
       en: '%{seconds}s'

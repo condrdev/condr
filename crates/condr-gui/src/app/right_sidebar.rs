@@ -17,6 +17,7 @@ use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
 use rust_i18n::t;
 use std::borrow::Cow;
 
+pub(super) use change_tree::{TreeRow, directory_row, file_row, tree_rows};
 pub(super) use changes::*;
 pub(super) use entries::*;
 pub(super) use files::*;
@@ -317,6 +318,25 @@ impl Condr {
             .border_l_1()
             .border_color(theme.sidebar_border)
             .child(div().flex_1().min_w_0().truncate().child(title))
+            .when(shown.view == RightSidebarView::GitHistory, |this| {
+                let owner = owner.clone();
+                this.child(
+                    Button::new("right-sidebar-git-graph")
+                        .debug_selector(|| "right-sidebar-git-graph".into())
+                        .ghost()
+                        .small()
+                        .icon(Icon::new(Glyph::GitGraph))
+                        .tooltip(t!("right_sidebar.open_git_graph"))
+                        .accessibility_label(t!("right_sidebar.open_git_graph"))
+                        // Inside the title bar an unclaimed press starts a window move.
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_click(move |_, window, cx| {
+                            let _ = owner.update(cx, |this, cx| {
+                                this.open_git_graph(key, workspace_id, window, cx);
+                            });
+                        }),
+                )
+            })
             .child(
                 Button::new("right-sidebar-refresh")
                     .debug_selector(|| "right-sidebar-refresh".into())
@@ -472,6 +492,7 @@ impl Condr {
             .refreshing
             .insert((key, workspace_id), timeout);
         self.reload_git_history(key, workspace_id);
+        self.reload_git_graph(key, workspace_id);
         cx.notify();
     }
 }

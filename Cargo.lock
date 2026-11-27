@@ -1450,6 +1450,7 @@ name = "condr-gui"
 version = "0.2.6"
 dependencies = [
  "async-channel",
+ "chrono",
  "condr-client",
  "condr-core",
  "condr-server",

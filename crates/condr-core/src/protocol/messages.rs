@@ -83,18 +83,32 @@ pub enum ClientMessage {
         path: RelativePathBuf,
         against: DiffBase,
     },
-    /// A page of a Workspace's Git History (ADR 0046): up to `limit` commits after skipping
-    /// `skip`, walking from `from`, or from `HEAD` when `from` is `None`. Answered with
-    /// [`ServerMessage::GitLog`]. Only a Server that reports [`WorkspaceGitSnapshot::head`]
-    /// knows it.
+    /// A page of a Workspace's log (ADR 0046, ADR 0079): up to `limit` commits after skipping
+    /// `skip`, walking from `from` once a first page named it, else from `start`, only those
+    /// `text` matches. Answered with [`ServerMessage::GitLog`]. Only a Server that reports
+    /// [`WorkspaceGitSnapshot::head`] knows it, and one older than ADR 0079 walks from
+    /// `HEAD` whatever `start` and `text` say.
     GitLog {
         server_id: ServerId,
         session_id: SessionId,
         request_id: u64,
         workspace_id: WorkspaceId,
-        from: Option<String>,
+        from: Vec<String>,
+        start: crate::LogStart,
+        text: Option<String>,
         skip: u32,
         limit: u32,
+        /// [`RepositoryGitSnapshot::directory`]: which repository (ADR 0073).
+        repository: RelativePathBuf,
+    },
+    /// The local and remote branches whose tips reach `commit` (ADR 0079), answered with
+    /// [`ServerMessage::GitCommitBranches`].
+    GitCommitBranches {
+        server_id: ServerId,
+        session_id: SessionId,
+        request_id: u64,
+        workspace_id: WorkspaceId,
+        commit: String,
         /// [`RepositoryGitSnapshot::directory`]: which repository (ADR 0073).
         repository: RelativePathBuf,
     },
@@ -499,20 +513,12 @@ pub enum LayoutCommand {
     CloseWorkspace {
         workspace_id: WorkspaceId,
     },
-    /// Shows `path`'s working-tree diff in the Workspace's single Diff Tab, creating the
-    /// Tab the first time and retargeting it afterwards (ADR 0017). The requester learns
-    /// the Tab from `DiffShown` and shows it; other viewers are left where they are.
-    ShowDiff {
+    /// Shows `viewer` in the Workspace's single Tab of its kind, creating the Tab the first
+    /// time and retargeting it afterwards (ADR 0078). The requester learns the Tab from
+    /// `ViewerShown` and shows it; other viewers are left where they are.
+    ShowViewer {
         workspace_id: WorkspaceId,
-        /// Relative to the Workspace root.
-        path: RelativePathBuf,
-    },
-    /// Shows `path`'s content in the Workspace's single Preview Tab the same way
-    /// (ADR 0018).
-    ShowFile {
-        workspace_id: WorkspaceId,
-        /// Relative to the Workspace root.
-        path: RelativePathBuf,
+        viewer: Viewer,
     },
 }
 
@@ -536,10 +542,7 @@ pub enum LayoutResult {
     WorkspaceOpened {
         workspace_id: WorkspaceId,
     },
-    DiffShown {
-        tab_id: TabId,
-    },
-    FileShown {
+    ViewerShown {
         tab_id: TabId,
     },
 }
@@ -982,6 +985,13 @@ pub enum ServerMessage {
         workspace_id: WorkspaceId,
         commit: String,
         result: Result<crate::CommitDetails, String>,
+    },
+    /// The reply to [`ClientMessage::GitCommitBranches`]: full ref names.
+    GitCommitBranches {
+        request_id: u64,
+        workspace_id: WorkspaceId,
+        commit: String,
+        result: Result<Vec<String>, String>,
     },
     /// The reply to [`ClientMessage::ListDirectory`].
     Directory {

@@ -39,6 +39,8 @@ impl Session {
                                 TabContent::File(file) => TabContentSnapshot::File {
                                     path: file.path.clone(),
                                 },
+                                TabContent::GitGraph => TabContentSnapshot::GitGraph,
+                                TabContent::Unsupported => TabContentSnapshot::Unsupported,
                             },
                         })
                         .collect(),
@@ -76,6 +78,8 @@ impl Session {
                     }),
                     TabContentSnapshot::Diff { path } => TabContent::Diff(DiffView { path }),
                     TabContentSnapshot::File { path } => TabContent::File(FileView { path }),
+                    TabContentSnapshot::GitGraph => TabContent::GitGraph,
+                    TabContentSnapshot::Unsupported => TabContent::Unsupported,
                 };
                 tabs.push(Tab {
                     id: tab.id,
@@ -121,7 +125,7 @@ impl Session {
                     return Err(SnapshotError::Invalid("invalid Worktree association"));
                 }
             }
-            let (mut diff_tabs, mut file_tabs) = (0, 0);
+            let (mut diff_tabs, mut file_tabs, mut git_graph_tabs) = (0, 0, 0);
             for tab in &workspace.tabs {
                 validate_id(tab.id.0, &mut max_id)?;
                 if !tab_ids.insert(tab.id) {
@@ -153,6 +157,16 @@ impl Session {
                         }
                         continue;
                     }
+                    TabContent::GitGraph => {
+                        git_graph_tabs += 1;
+                        if git_graph_tabs > 1 {
+                            return Err(SnapshotError::Invalid(
+                                "a Workspace has at most one Git Graph Tab",
+                            ));
+                        }
+                        continue;
+                    }
+                    TabContent::Unsupported => continue,
                 };
                 if terminals.panes.is_empty() {
                     return Err(SnapshotError::Invalid("invalid Tab"));

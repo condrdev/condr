@@ -957,14 +957,16 @@ fn show_diff_keeps_one_viewer_tab_and_starts_no_terminal() {
 
     let effect = apply_layout_command(
         &mut state,
-        LayoutCommand::ShowDiff {
+        LayoutCommand::ShowViewer {
             workspace_id,
-            path: RelativePathBuf::from("src/lib.rs"),
+            viewer: condr_core::Viewer::Diff {
+                path: RelativePathBuf::from("src/lib.rs"),
+            },
         },
     )
     .unwrap();
-    let LayoutResult::DiffShown { tab_id } = effect.result else {
-        panic!("ShowDiff reports the Diff Tab: {:?}", effect.result);
+    let LayoutResult::ViewerShown { tab_id } = effect.result else {
+        panic!("ShowViewer reports the Diff Tab: {:?}", effect.result);
     };
     assert!(effect.started_terminals.is_empty());
     assert_eq!(state.terminals.len(), terminals_before);
@@ -978,21 +980,25 @@ fn show_diff_keeps_one_viewer_tab_and_starts_no_terminal() {
 
     let again = apply_layout_command(
         &mut state,
-        LayoutCommand::ShowDiff {
+        LayoutCommand::ShowViewer {
             workspace_id,
-            path: RelativePathBuf::from("README.md"),
+            viewer: condr_core::Viewer::Diff {
+                path: RelativePathBuf::from("README.md"),
+            },
         },
     )
     .unwrap();
-    assert_eq!(again.result, LayoutResult::DiffShown { tab_id });
+    assert_eq!(again.result, LayoutResult::ViewerShown { tab_id });
     assert_eq!(state.session.workspaces().first().unwrap().tabs().len(), 2);
 
     assert!(
         apply_layout_command(
             &mut state,
-            LayoutCommand::ShowDiff {
+            LayoutCommand::ShowViewer {
                 workspace_id,
-                path: RelativePathBuf::from("../outside"),
+                viewer: condr_core::Viewer::Diff {
+                    path: RelativePathBuf::from("../outside"),
+                },
             },
         )
         .is_err()
@@ -1031,25 +1037,29 @@ fn show_file_keeps_one_preview_tab_beside_the_diff_tab() {
     let terminals_before = state.terminals.len();
     let diff = apply_layout_command(
         &mut state,
-        LayoutCommand::ShowDiff {
+        LayoutCommand::ShowViewer {
             workspace_id,
-            path: RelativePathBuf::from("src/lib.rs"),
+            viewer: condr_core::Viewer::Diff {
+                path: RelativePathBuf::from("src/lib.rs"),
+            },
         },
     )
     .unwrap();
 
     let effect = apply_layout_command(
         &mut state,
-        LayoutCommand::ShowFile {
+        LayoutCommand::ShowViewer {
             workspace_id,
-            path: RelativePathBuf::from("src/main.rs"),
+            viewer: condr_core::Viewer::File {
+                path: RelativePathBuf::from("src/main.rs"),
+            },
         },
     )
     .unwrap();
-    let LayoutResult::FileShown { tab_id } = effect.result else {
-        panic!("ShowFile reports the Preview Tab: {:?}", effect.result);
+    let LayoutResult::ViewerShown { tab_id } = effect.result else {
+        panic!("ShowViewer reports the Preview Tab: {:?}", effect.result);
     };
-    assert_ne!(diff.result, LayoutResult::DiffShown { tab_id });
+    assert_ne!(diff.result, LayoutResult::ViewerShown { tab_id });
     assert!(effect.started_terminals.is_empty());
     assert_eq!(state.terminals.len(), terminals_before);
     let workspace = state.session.workspaces().first().unwrap();
@@ -1062,20 +1072,24 @@ fn show_file_keeps_one_preview_tab_beside_the_diff_tab() {
 
     let again = apply_layout_command(
         &mut state,
-        LayoutCommand::ShowFile {
+        LayoutCommand::ShowViewer {
             workspace_id,
-            path: RelativePathBuf::from("README.md"),
+            viewer: condr_core::Viewer::File {
+                path: RelativePathBuf::from("README.md"),
+            },
         },
     )
     .unwrap();
-    assert_eq!(again.result, LayoutResult::FileShown { tab_id });
+    assert_eq!(again.result, LayoutResult::ViewerShown { tab_id });
     assert_eq!(state.session.workspaces().first().unwrap().tabs().len(), 3);
     assert!(
         apply_layout_command(
             &mut state,
-            LayoutCommand::ShowFile {
+            LayoutCommand::ShowViewer {
                 workspace_id,
-                path: RelativePathBuf::from("../outside"),
+                viewer: condr_core::Viewer::File {
+                    path: RelativePathBuf::from("../outside"),
+                },
             },
         )
         .is_err()

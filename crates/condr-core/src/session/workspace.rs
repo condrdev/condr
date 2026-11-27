@@ -5,6 +5,8 @@ use super::*;
 pub const DIFF_TAB_NAME: &str = "Diff";
 /// The same for the Preview Tab (ADR 0018).
 pub const FILE_TAB_NAME: &str = "Preview";
+/// The same for the Git Graph Tab (ADR 0079).
+pub const GIT_GRAPH_TAB_NAME: &str = "Git Graph";
 
 impl Session {
     /// Keeps every existing Tab's Pane focus, history and zoom when a split does not
@@ -99,40 +101,20 @@ impl Session {
         Some(tab_id)
     }
 
-    /// Shows `path`'s diff in the Workspace's Diff Tab, creating the Tab the first time and
-    /// retargeting it afterwards (ADR 0017). `None` for an unknown Workspace, an invalid
-    /// path, or when the Tab limit is reached.
-    pub fn show_diff(&mut self, workspace_id: WorkspaceId, path: RelativePathBuf) -> Option<TabId> {
-        self.show_viewer(
-            workspace_id,
-            TabContent::Diff(DiffView { path }),
-            DIFF_TAB_NAME,
-        )
-    }
-
-    /// Shows `path`'s content in the Workspace's Preview Tab, the same way (ADR 0018).
-    pub fn show_file(&mut self, workspace_id: WorkspaceId, path: RelativePathBuf) -> Option<TabId> {
-        self.show_viewer(
-            workspace_id,
-            TabContent::File(FileView { path }),
-            FILE_TAB_NAME,
-        )
-    }
-
-    fn show_viewer(
-        &mut self,
-        workspace_id: WorkspaceId,
-        content: TabContent,
-        name: &str,
-    ) -> Option<TabId> {
-        let path = match &content {
-            TabContent::Diff(diff) => &diff.path,
-            TabContent::File(file) => &file.path,
-            TabContent::Terminals(_) => return None,
+    /// Shows `viewer` in the Workspace's Tab of its kind, creating the Tab the first time and
+    /// retargeting it afterwards (ADR 0017, ADR 0018, ADR 0078). `None` for an unknown
+    /// Workspace, an invalid path, or when the Tab limit is reached.
+    pub fn show_viewer(&mut self, workspace_id: WorkspaceId, viewer: Viewer) -> Option<TabId> {
+        let (content, name) = match viewer {
+            Viewer::Diff { path } if valid_diff_path(&path) => {
+                (TabContent::Diff(DiffView { path }), DIFF_TAB_NAME)
+            }
+            Viewer::File { path } if valid_diff_path(&path) => {
+                (TabContent::File(FileView { path }), FILE_TAB_NAME)
+            }
+            Viewer::GitGraph => (TabContent::GitGraph, GIT_GRAPH_TAB_NAME),
+            Viewer::Diff { .. } | Viewer::File { .. } => return None,
         };
-        if !valid_diff_path(path) {
-            return None;
-        }
         let workspace_ix = self
             .workspaces
             .iter()
@@ -162,6 +144,22 @@ impl Session {
             }
         };
         Some(tab_id)
+    }
+
+    /// Drops the Tabs of kinds this build does not know, and a Workspace left with none, as a
+    /// Server does with a Snapshot a newer one wrote (ADR 0078); how many Tabs went.
+    pub fn drop_unsupported_tabs(&mut self) -> usize {
+        let mut dropped = 0;
+        for workspace in &mut self.workspaces {
+            let before = workspace.tabs.len();
+            workspace
+                .tabs
+                .retain(|tab| !matches!(tab.content, TabContent::Unsupported));
+            dropped += before - workspace.tabs.len();
+        }
+        self.workspaces
+            .retain(|workspace| !workspace.tabs.is_empty());
+        dropped
     }
 
     /// Points the Workspace's Preview Tab at `to` when it shows `from` or a path under it,

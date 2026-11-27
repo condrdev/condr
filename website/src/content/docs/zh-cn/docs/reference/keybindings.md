@@ -22,7 +22,7 @@ Condr 的快捷键分为两层逻辑：
 | 切换左侧栏显示状态 | `Cmd + B` | `Ctrl + Shift + B` |
 | 切换右侧栏（打开上次显示的视图） | `Cmd + Option + B` | `Ctrl + Alt + B` |
 
-* **Tasks 模式**和 **New Task** 没有默认快捷键，可以在命令面板里找到，或者用 `toggle-tasks` 和 `new-task` [自己绑一个](#修改快捷键)。
+* **Tasks 模式**、**New Task** 和 **打开 Git Graph** 没有默认快捷键，可以在命令面板里找到，或者用 `toggle-tasks`、`new-task` 和 `open-git-graph` [自己绑一个](#修改快捷键)。
 
 ---
 
@@ -80,6 +80,21 @@ Condr 的快捷键分为两层逻辑：
 
 * **物理按键**：`Cmd + }` / `Cmd + {` 对应 `Cmd + Shift + ]` / `Cmd + Shift + [`。
 * **轮转逻辑**：Tab 切换到达边界后自动循环。
+
+---
+
+## Git Graph
+
+[Git Graph](/zh-cn/docs/using/changes/#一次看全部分支-git-graph) 标签页获得键盘焦点时可用，和 IntelliJ IDEA 的 Git 日志一致。
+
+| 操作 | macOS | Windows / Linux |
+| :--- | :--- | :--- |
+| 在提交间移动 | `↑` / `↓` | `↑` / `↓` |
+| 跳到父提交 / 子提交 | `→` / `←` | `→` / `←` |
+| 跳到文本过滤框 | `Cmd + L` | `Ctrl + L` |
+| 打开选中文件的 diff | `Cmd + D` | `Ctrl + D` |
+
+* **双击**分支只看它的提交，双击文件打开它的 diff。
 
 ---
 

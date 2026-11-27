@@ -461,6 +461,7 @@ impl Condr {
                 let viewer = match tab.content() {
                     TabContent::Diff(diff) => Some(diff.path().to_relative_path_buf()),
                     TabContent::File(file) => Some(file.path().to_relative_path_buf()),
+                    TabContent::GitGraph | TabContent::Unsupported => Some(RelativePathBuf::new()),
                     TabContent::Terminals(_) => None,
                 };
                 Some((tab_id, layout, viewer))

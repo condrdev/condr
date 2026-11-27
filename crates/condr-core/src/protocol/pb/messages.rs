@@ -1,7 +1,7 @@
 //! `ClientMessage`, `ServerMessage` and what only they carry.
 
 use super::session::{
-    agent_state, command_agent_kind, hooks_action, pane_direction, split_direction,
+    MAX_LOG_REFS, agent_state, command_agent_kind, hooks_action, pane_direction, split_direction,
 };
 use super::task::{
     decode_task, decode_task_reply, decode_tasks, encode_task, encode_task_reply, encode_tasks,
@@ -21,9 +21,9 @@ use crate::protocol::{
 use crate::snapshot::MAX_SNAPSHOT_PANES;
 use crate::{
     AgentKind, AgentSnapshot, BrowsedDirectory, CommitDetails, DirectoryListing, FileContent,
-    FileDiff, FileKind, FileMutation, FileMutationResult, GitLog, OldFile, PaneId, ProxyMode,
-    ProxySetting, SessionSnapshot, TabId, TerminalColors, TerminalCommand, TerminalProgress,
-    TerminalProgressState, TerminalView, TerminalViewFrame, WorkspaceId,
+    FileDiff, FileKind, FileMutation, FileMutationResult, GitLog, LogStart, OldFile, PaneId,
+    ProxyMode, ProxySetting, SessionSnapshot, TabId, TerminalColors, TerminalCommand,
+    TerminalProgress, TerminalProgressState, TerminalView, TerminalViewFrame, Viewer, WorkspaceId,
 };
 
 fn pane(id: u64) -> PaneId {
@@ -473,6 +473,8 @@ impl TryFrom<&ClientMessage> for super::ClientMessage {
                 request_id,
                 workspace_id,
                 from,
+                start,
+                text,
                 skip,
                 limit,
                 repository,
@@ -484,6 +486,27 @@ impl TryFrom<&ClientMessage> for super::ClientMessage {
                 from: from.clone(),
                 skip: *skip,
                 limit: *limit,
+                repository: repository.to_string(),
+                all_refs: *start == LogStart::All,
+                r#ref: match start {
+                    LogStart::Ref(name) => Some(name.clone()),
+                    LogStart::Head | LogStart::All => None,
+                },
+                text: text.clone(),
+            }),
+            ClientMessage::GitCommitBranches {
+                server_id,
+                session_id,
+                request_id,
+                workspace_id,
+                commit,
+                repository,
+            } => Message::GitCommitBranches(super::GitCommitBranchesRequest {
+                server_id: server_id.0,
+                session_id: session_id.0,
+                request_id: *request_id,
+                workspace_id: workspace_id.as_u64(),
+                commit: commit.clone(),
                 repository: repository.to_string(),
             }),
             ClientMessage::GitCommit {
@@ -713,14 +736,31 @@ fn decode_client_message(message: super::ClientMessage) -> WireResult<ClientMess
                     super::DiffBase::MergeBase => DiffBase::MergeBase,
                 },
             },
-            Message::GitLog(request) => ClientMessage::GitLog {
+            Message::GitLog(request) => {
+                bounded(request.from.len(), MAX_LOG_REFS, "log starts")?;
+                ClientMessage::GitLog {
+                    server_id: ServerId(request.server_id),
+                    session_id: SessionId(request.session_id),
+                    request_id: request.request_id,
+                    workspace_id: workspace(request.workspace_id),
+                    from: request.from,
+                    start: match (request.r#ref, request.all_refs) {
+                        (Some(name), _) => LogStart::Ref(name),
+                        (None, true) => LogStart::All,
+                        (None, false) => LogStart::Head,
+                    },
+                    text: request.text,
+                    skip: request.skip,
+                    limit: request.limit,
+                    repository: relative_path(request.repository)?,
+                }
+            }
+            Message::GitCommitBranches(request) => ClientMessage::GitCommitBranches {
                 server_id: ServerId(request.server_id),
                 session_id: SessionId(request.session_id),
                 request_id: request.request_id,
                 workspace_id: workspace(request.workspace_id),
-                from: request.from,
-                skip: request.skip,
-                limit: request.limit,
+                commit: request.commit,
                 repository: relative_path(request.repository)?,
             },
             Message::GitCommit(request) => ClientMessage::GitCommit {
@@ -1107,12 +1147,23 @@ impl TryFrom<&LayoutCommand> for super::LayoutCommand {
             LayoutCommand::CloseWorkspace { workspace_id } => {
                 Command::CloseWorkspace(workspace_target(workspace_id))
             }
-            LayoutCommand::ShowDiff { workspace_id, path } => {
-                Command::ShowDiff(workspace_path(workspace_id, path))
-            }
-            LayoutCommand::ShowFile { workspace_id, path } => {
-                Command::ShowFile(workspace_path(workspace_id, path))
-            }
+            // compat(0.2.6): a Diff or Preview Tab goes as the command a 0.2.6 Server knows,
+            // so a newer GUI still opens them there (ADR 0078); delete with those members.
+            LayoutCommand::ShowViewer {
+                workspace_id,
+                viewer: Viewer::Diff { path },
+            } => Command::ShowDiff(workspace_path(workspace_id, path)),
+            LayoutCommand::ShowViewer {
+                workspace_id,
+                viewer: Viewer::File { path },
+            } => Command::ShowFile(workspace_path(workspace_id, path)),
+            LayoutCommand::ShowViewer {
+                workspace_id,
+                viewer: Viewer::GitGraph,
+            } => Command::ShowViewer(super::ShowViewer {
+                workspace_id: workspace_id.as_u64(),
+                viewer: Some(show_viewer::Viewer::GitGraph(super::Empty {})),
+            }),
         };
         Ok(Self {
             command: Some(command),
@@ -1220,13 +1271,30 @@ impl TryFrom<super::LayoutCommand> for LayoutCommand {
             Command::CloseWorkspace(target) => Self::CloseWorkspace {
                 workspace_id: workspace(target.workspace_id),
             },
-            Command::ShowDiff(target) => Self::ShowDiff {
+            // compat(0.2.6): a 0.2.6 GUI's two commands, and how this build sends them.
+            Command::ShowDiff(target) => Self::ShowViewer {
                 workspace_id: workspace(target.workspace_id),
-                path: relative_path(target.path)?,
+                viewer: Viewer::Diff {
+                    path: relative_path(target.path)?,
+                },
             },
-            Command::ShowFile(target) => Self::ShowFile {
+            Command::ShowFile(target) => Self::ShowViewer {
                 workspace_id: workspace(target.workspace_id),
-                path: relative_path(target.path)?,
+                viewer: Viewer::File {
+                    path: relative_path(target.path)?,
+                },
+            },
+            Command::ShowViewer(show) => Self::ShowViewer {
+                workspace_id: workspace(show.workspace_id),
+                viewer: match member(show.viewer)? {
+                    show_viewer::Viewer::Diff(diff) => Viewer::Diff {
+                        path: relative_path(diff.path)?,
+                    },
+                    show_viewer::Viewer::File(file) => Viewer::File {
+                        path: relative_path(file.path)?,
+                    },
+                    show_viewer::Viewer::GitGraph(_) => Viewer::GitGraph,
+                },
             },
         })
     }
@@ -1261,10 +1329,7 @@ impl From<&LayoutResult> for super::LayoutResult {
                         workspace_id: workspace_id.as_u64(),
                     })
                 }
-                LayoutResult::DiffShown { tab_id } => Wire::DiffShown(TabTarget {
-                    tab_id: tab_id.as_u64(),
-                }),
-                LayoutResult::FileShown { tab_id } => Wire::FileShown(TabTarget {
+                LayoutResult::ViewerShown { tab_id } => Wire::ViewerShown(TabTarget {
                     tab_id: tab_id.as_u64(),
                 }),
             }),
@@ -1294,10 +1359,7 @@ impl TryFrom<super::LayoutResult> for LayoutResult {
             Wire::WorkspaceOpened(target) => Self::WorkspaceOpened {
                 workspace_id: workspace(target.workspace_id),
             },
-            Wire::DiffShown(target) => Self::DiffShown {
-                tab_id: tab(target.tab_id),
-            },
-            Wire::FileShown(target) => Self::FileShown {
+            Wire::ViewerShown(target) | Wire::FileShown(target) => Self::ViewerShown {
                 tab_id: tab(target.tab_id),
             },
         })
@@ -2005,6 +2067,22 @@ impl TryFrom<&ServerMessage> for super::ServerMessage {
                     Err(error) => git_commit_reply::Result::Err(error.clone()),
                 }),
             }),
+            ServerMessage::GitCommitBranches {
+                request_id,
+                workspace_id,
+                commit,
+                result,
+            } => Message::GitCommitBranches(super::GitCommitBranchesReply {
+                request_id: *request_id,
+                workspace_id: workspace_id.as_u64(),
+                commit: commit.clone(),
+                result: Some(match result {
+                    Ok(names) => git_commit_branches_reply::Result::Ok(super::BranchNames {
+                        names: names.clone(),
+                    }),
+                    Err(error) => git_commit_branches_reply::Result::Err(error.clone()),
+                }),
+            }),
             ServerMessage::Directory {
                 request_id,
                 workspace_id,
@@ -2238,6 +2316,18 @@ fn decode_server_message(message: server_message::Message) -> WireResult<ServerM
             result: match member(reply.result)? {
                 git_commit_reply::Result::Ok(details) => Ok(CommitDetails::try_from(details)?),
                 git_commit_reply::Result::Err(error) => Err(error),
+            },
+        },
+        Message::GitCommitBranches(reply) => ServerMessage::GitCommitBranches {
+            request_id: reply.request_id,
+            workspace_id: workspace(reply.workspace_id),
+            commit: reply.commit,
+            result: match member(reply.result)? {
+                git_commit_branches_reply::Result::Ok(branches) => {
+                    bounded(branches.names.len(), MAX_LOG_REFS, "branches")?;
+                    Ok(branches.names)
+                }
+                git_commit_branches_reply::Result::Err(error) => Err(error),
             },
         },
         Message::Directory(reply) => ServerMessage::Directory {

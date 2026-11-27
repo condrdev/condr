@@ -200,7 +200,10 @@ impl Condr {
         let show: Continuation = Box::new(move |this, window, cx| {
             this.send_presenting_layout_to(
                 key,
-                LayoutCommand::ShowFile { workspace_id, path },
+                LayoutCommand::ShowViewer {
+                    workspace_id,
+                    viewer: Viewer::File { path },
+                },
                 window,
                 cx,
             );
@@ -731,7 +734,14 @@ mod tests {
         let mut session = Session::new();
         session.create_workspace(std::env::temp_dir()).unwrap();
         let id = session.workspaces()[0].id();
-        let preview = session.show_file(id, "logo.png".into()).unwrap();
+        let preview = session
+            .show_viewer(
+                id,
+                condr_core::Viewer::File {
+                    path: "logo.png".into(),
+                },
+            )
+            .unwrap();
         let mut view = PreviewTabState::default();
         assert!(view.images.want((1, id, "logo.png".into())));
         view.retain_session(1, Some(&session));

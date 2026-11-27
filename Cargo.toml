@@ -51,6 +51,9 @@ rust-i18n = "4.2"
 # The system's preferred languages, for the GUI's default (ADR 0066); Kit already builds it
 # for GPUI's Linux text system. Keep it on Kit's version.
 sys-locale = "0.3.2"
+# Git Graph's dates in local time (ADR 0079); Kit already builds it, with its clock, for its
+# date picker. Keep it on Kit's version.
+chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 # The Command Palette's fuzzy matching and its highlights (ADR 0064).
 nucleo-matcher = { version = "0.3", default-features = false, features = ["unicode-normalization", "unicode-casefold"] }
 # Which Option key is held, for Option as Meta on one side only (ADR 0063): GPUI's

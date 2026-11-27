@@ -7,11 +7,11 @@ use crate::snapshot::{
     WorkspaceSnapshot,
 };
 use crate::{
-    AgentKind, AgentResume, AgentSnapshot, AgentState, CommitDetails, CommitSummary, DiffHunk,
-    DiffLine, DiffLineKind, DirectoryEntry, DirectoryListing, FileContent, FileDiff,
+    AgentKind, AgentResume, AgentSnapshot, AgentState, CommitDetails, CommitPerson, CommitSummary,
+    DiffHunk, DiffLine, DiffLineKind, DirectoryEntry, DirectoryListing, FileContent, FileDiff,
     FileDiffContent, FileKind, GitChangeEntry, GitChangeStatus, GitChanges, GitDiffStat, GitLog,
-    GitUpstream, PaneDirection, PaneId, SessionSnapshot, SplitDirection, TabId, WorkspaceId,
-    WorktreeAssociation,
+    GitRef, GitUpstream, PaneDirection, PaneId, SessionSnapshot, SplitDirection, TabId,
+    WorkspaceId, WorktreeAssociation,
     agent_discovery::AgentInstallation,
     agent_hooks::{HooksAction, HooksReport, HooksState},
 };
@@ -69,9 +69,21 @@ impl TryFrom<&WorkspaceSnapshot> for super::WorkspaceSnapshot {
                     }))
                 })
                 .transpose()?,
+            // compat(0.2.6): a Git Graph Tab goes beside `tabs`, which a 0.2.6 peer skips
+            // (ADR 0078); delete this and let it go in `tabs`.
+            git_graph: workspace.tabs.iter().enumerate().find_map(|(index, tab)| {
+                matches!(tab.content, TabContentSnapshot::GitGraph).then(|| {
+                    Box::new(super::GitGraphTabSnapshot {
+                        id: tab.id.as_u64(),
+                        name: tab.name.clone(),
+                        index: index as u32,
+                    })
+                })
+            }),
             tabs: workspace
                 .tabs
                 .iter()
+                .filter(|tab| !matches!(tab.content, TabContentSnapshot::GitGraph))
                 .map(super::TabSnapshot::try_from)
                 .collect::<Result<_, _>>()?,
         })
@@ -96,11 +108,25 @@ impl TryFrom<super::WorkspaceSnapshot> for WorkspaceSnapshot {
                     base_branch: worktree.base_branch,
                 }
             }),
-            tabs: workspace
-                .tabs
-                .into_iter()
-                .map(TabSnapshot::try_from)
-                .collect::<WireResult<_>>()?,
+            tabs: {
+                let mut tabs = workspace
+                    .tabs
+                    .into_iter()
+                    .map(TabSnapshot::try_from)
+                    .collect::<WireResult<Vec<_>>>()?;
+                if let Some(git_graph) = workspace.git_graph.map(|tab| *tab) {
+                    let index = (git_graph.index as usize).min(tabs.len());
+                    tabs.insert(
+                        index,
+                        TabSnapshot {
+                            id: TabId::from_u64(git_graph.id),
+                            name: git_graph.name,
+                            content: TabContentSnapshot::GitGraph,
+                        },
+                    );
+                }
+                tabs
+            },
         })
     }
 }
@@ -116,7 +142,7 @@ impl TryFrom<&TabSnapshot> for super::TabSnapshot {
                 focused_pane,
                 focus_history,
                 layout,
-            } => Content::Terminals(TerminalsTabSnapshot {
+            } => Some(Content::Terminals(TerminalsTabSnapshot {
                 panes: panes
                     .iter()
                     .map(|pane| {
@@ -130,18 +156,21 @@ impl TryFrom<&TabSnapshot> for super::TabSnapshot {
                 focused_pane: focused_pane.as_u64(),
                 focus_history: focus_history.iter().map(|pane| pane.as_u64()).collect(),
                 layout: Some(layout.into()),
-            }),
-            TabContentSnapshot::Diff { path } => Content::Diff(PathTabSnapshot {
+            })),
+            TabContentSnapshot::Diff { path } => Some(Content::Diff(PathTabSnapshot {
                 path: path.to_string(),
-            }),
-            TabContentSnapshot::File { path } => Content::File(PathTabSnapshot {
+            })),
+            TabContentSnapshot::File { path } => Some(Content::File(PathTabSnapshot {
                 path: path.to_string(),
-            }),
+            })),
+            TabContentSnapshot::GitGraph => Some(Content::GitGraph(super::Empty {})),
+            // Unset, as it arrived.
+            TabContentSnapshot::Unsupported => None,
         };
         Ok(Self {
             id: tab.id.as_u64(),
             name: tab.name.clone(),
-            content: Some(content),
+            content,
         })
     }
 }
@@ -151,7 +180,16 @@ impl TryFrom<super::TabSnapshot> for TabSnapshot {
 
     fn try_from(tab: super::TabSnapshot) -> WireResult<Self> {
         use tab_snapshot::Content;
-        let content = match member(tab.content)? {
+        // A kind a newer peer added is an Unsupported Tab, not an unknown Snapshot
+        // (ADR 0078).
+        let Some(content) = tab.content else {
+            return Ok(Self {
+                id: TabId::from_u64(tab.id),
+                name: tab.name,
+                content: TabContentSnapshot::Unsupported,
+            });
+        };
+        let content = match content {
             Content::Terminals(terminals) => {
                 bounded(terminals.panes.len(), MAX_SNAPSHOT_PANES, "Panes")?;
                 bounded(
@@ -190,6 +228,7 @@ impl TryFrom<super::TabSnapshot> for TabSnapshot {
             Content::File(file) => TabContentSnapshot::File {
                 path: relative_path(file.path)?,
             },
+            Content::GitGraph(_) => TabContentSnapshot::GitGraph,
         };
         Ok(Self {
             id: TabId::from_u64(tab.id),
@@ -770,6 +809,11 @@ impl TryFrom<super::FileContent> for FileContent {
 /// More commits than this in one Git History page are a broken peer, not a long history.
 const MAX_LOG_COMMITS: usize = 1000;
 
+/// More refs than this in one log page are a broken peer, not a busy repository.
+pub(crate) const MAX_LOG_REFS: usize = 1 << 16;
+/// More parents than this are a broken peer, not an octopus merge.
+const MAX_COMMIT_PARENTS: usize = 256;
+
 impl From<&GitLog> for super::GitLog {
     fn from(log: &GitLog) -> Self {
         Self {
@@ -782,9 +826,22 @@ impl From<&GitLog> for super::GitLog {
                     subject: commit.subject.clone(),
                     author: commit.author.clone(),
                     time: commit.time,
+                    parents: commit.parents.clone(),
+                    author_email: commit.author_email.clone(),
+                    committer_differs: commit.committer_differs,
+                    on_head: commit.on_head,
                 })
                 .collect(),
             more: log.more,
+            refs: log
+                .refs
+                .iter()
+                .map(|reference| super::GitRef {
+                    name: reference.name.clone(),
+                    commit: reference.commit.clone(),
+                })
+                .collect(),
+            user_email: log.user_email.clone(),
         }
     }
 }
@@ -793,20 +850,38 @@ impl TryFrom<super::GitLog> for GitLog {
     type Error = WireError;
 
     fn try_from(log: super::GitLog) -> WireResult<Self> {
-        bounded(log.commits.len(), MAX_LOG_COMMITS, "Git History commits")?;
+        bounded(log.commits.len(), MAX_LOG_COMMITS, "log commits")?;
+        bounded(log.from.len(), MAX_LOG_REFS, "log starts")?;
+        bounded(log.refs.len(), MAX_LOG_REFS, "log refs")?;
         Ok(Self {
             from: log.from,
             commits: log
                 .commits
                 .into_iter()
-                .map(|commit| CommitSummary {
-                    id: commit.id,
-                    subject: commit.subject,
-                    author: commit.author,
-                    time: commit.time,
+                .map(|commit| {
+                    bounded(commit.parents.len(), MAX_COMMIT_PARENTS, "commit parents")?;
+                    Ok(CommitSummary {
+                        id: commit.id,
+                        subject: commit.subject,
+                        author: commit.author,
+                        time: commit.time,
+                        parents: commit.parents,
+                        author_email: commit.author_email,
+                        committer_differs: commit.committer_differs,
+                        on_head: commit.on_head,
+                    })
+                })
+                .collect::<WireResult<_>>()?,
+            more: log.more,
+            refs: log
+                .refs
+                .into_iter()
+                .map(|reference| GitRef {
+                    name: reference.name,
+                    commit: reference.commit,
                 })
                 .collect(),
-            more: log.more,
+            user_email: log.user_email,
         })
     }
 }
@@ -820,6 +895,15 @@ impl From<&CommitDetails> for super::CommitDetails {
             time: details.time,
             message: details.message.clone(),
             changes: Some((&details.changes).into()),
+            author_email: details.author_email.clone(),
+            committer: details
+                .committer
+                .as_ref()
+                .map(|committer| super::CommitPerson {
+                    name: committer.name.clone(),
+                    email: committer.email.clone(),
+                    time: committer.time,
+                }),
         }
     }
 }
@@ -835,6 +919,12 @@ impl TryFrom<super::CommitDetails> for CommitDetails {
             time: details.time,
             message: details.message,
             changes: required(details.changes, "commit changes")?.try_into()?,
+            author_email: details.author_email,
+            committer: details.committer.map(|committer| CommitPerson {
+                name: committer.name,
+                email: committer.email,
+                time: committer.time,
+            }),
         })
     }
 }

@@ -805,6 +805,8 @@ pub(super) fn handle_client(
                 request_id,
                 workspace_id,
                 from,
+                start,
+                text,
                 skip,
                 limit,
                 repository,
@@ -827,7 +829,7 @@ pub(super) fn handle_client(
                             );
                             repository.and_then(|repository| {
                                 repository
-                                    .log(from.as_deref(), skip, limit)
+                                    .log(&from, &start, text.as_deref(), skip, limit)
                                     .map_err(|error| error.to_string())
                             })
                         },
@@ -870,6 +872,41 @@ pub(super) fn handle_client(
                     queue_message(
                         &outbound,
                         ServerMessage::GitCommit {
+                            request_id,
+                            workspace_id,
+                            commit,
+                            result,
+                        },
+                    )
+                });
+                false
+            }
+            ClientMessage::GitCommitBranches {
+                server_id,
+                session_id,
+                request_id,
+                workspace_id,
+                commit,
+                repository,
+            } => {
+                // One merge base per branch: off this loop (ADR 0079).
+                let repository =
+                    workspace_repository(&state, server_id, session_id, workspace_id, &repository);
+                let outbound = outbound.clone();
+                thread::spawn(move || {
+                    let result = answer_or_fail(
+                        || {
+                            repository.and_then(|repository| {
+                                repository
+                                    .commit_branches(&commit)
+                                    .map_err(|error| error.to_string())
+                            })
+                        },
+                        Err,
+                    );
+                    queue_message(
+                        &outbound,
+                        ServerMessage::GitCommitBranches {
                             request_id,
                             workspace_id,
                             commit,

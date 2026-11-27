@@ -37,6 +37,8 @@ pub(super) enum Needs {
     Agents,
     /// A presented Workspace whose right sidebar this window draws.
     RightSidebar,
+    /// A presented Workspace whose Server serves Git History (ADR 0079).
+    GitHistory,
     /// The main window, the only one Tasks mode shows in (ADR 0068).
     MainWindow,
 }
@@ -110,6 +112,14 @@ pub(super) const GROUPS: &[(&str, &[Shortcut])] = &[
                 &ToggleRightSidebar,
                 Needs::RightSidebar,
                 on(&["cmd-alt-b"], &["ctrl-alt-b"]),
+            ),
+            // No default key: Git History's header opens it (ADR 0079).
+            shortcut(
+                "open-git-graph",
+                "keymap.action.open_git_graph",
+                &OpenGitGraph,
+                Needs::GitHistory,
+                &[],
             ),
             // No default key: the sidebar's Tasks row enters it (ADR 0068).
             shortcut(

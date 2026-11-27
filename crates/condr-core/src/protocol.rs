@@ -15,7 +15,7 @@ mod stream;
 
 use crate::{
     AgentSnapshot, PaneDirection, PaneId, SessionSnapshot, SplitDirection, TabId, TerminalColors,
-    TerminalCommand, TerminalProgress, TerminalView, TerminalViewFrame, WorkspaceId,
+    TerminalCommand, TerminalProgress, TerminalView, TerminalViewFrame, Viewer, WorkspaceId,
 };
 use std::collections::HashSet;
 use std::fmt;

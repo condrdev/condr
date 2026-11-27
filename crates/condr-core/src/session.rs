@@ -16,7 +16,7 @@ use std::{
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
-pub use workspace::{DIFF_TAB_NAME, FILE_TAB_NAME};
+pub use workspace::{DIFF_TAB_NAME, FILE_TAB_NAME, GIT_GRAPH_TAB_NAME};
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 const MAX_STABLE_ID: u64 = u64::MAX / 2;
@@ -130,16 +130,36 @@ pub enum TabContent {
     Terminals(TerminalLayout),
     Diff(DiffView),
     File(FileView),
+    /// The Workspace's commits on every branch (ADR 0079); what it shows is each Client's
+    /// own view, so the Session holds only that the Tab exists.
+    GitGraph,
+    /// A kind a newer peer added that this build does not know (ADR 0078): the Tab keeps
+    /// its id and name and shows nothing.
+    Unsupported,
 }
 
 impl TabContent {
-    /// Whether two contents are the same viewer kind; terminal layouts never are.
+    /// Whether two contents are the same viewer kind; terminal layouts never are, and
+    /// neither are two Tabs this build cannot tell apart.
     fn same_viewer_kind(&self, other: &Self) -> bool {
         matches!(
             (self, other),
-            (Self::Diff(_), Self::Diff(_)) | (Self::File(_), Self::File(_))
+            (Self::Diff(_), Self::Diff(_))
+                | (Self::File(_), Self::File(_))
+                | (Self::GitGraph, Self::GitGraph)
         )
     }
+}
+
+/// The viewer Tab `ShowViewer` creates or retargets (ADR 0078).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Viewer {
+    /// `path`'s diff (ADR 0017).
+    Diff { path: RelativePathBuf },
+    /// `path`'s content (ADR 0018).
+    File { path: RelativePathBuf },
+    /// The commit graph (ADR 0079).
+    GitGraph,
 }
 
 #[derive(Clone, Debug)]
@@ -352,28 +372,28 @@ impl Tab {
     pub fn terminals(&self) -> Option<&TerminalLayout> {
         match &self.content {
             TabContent::Terminals(terminals) => Some(terminals),
-            TabContent::Diff(_) | TabContent::File(_) => None,
+            _ => None,
         }
     }
 
     fn terminals_mut(&mut self) -> Option<&mut TerminalLayout> {
         match &mut self.content {
             TabContent::Terminals(terminals) => Some(terminals),
-            TabContent::Diff(_) | TabContent::File(_) => None,
+            _ => None,
         }
     }
 
     pub fn diff(&self) -> Option<&DiffView> {
         match &self.content {
             TabContent::Diff(diff) => Some(diff),
-            TabContent::Terminals(_) | TabContent::File(_) => None,
+            _ => None,
         }
     }
 
     pub fn file(&self) -> Option<&FileView> {
         match &self.content {
             TabContent::File(file) => Some(file),
-            TabContent::Terminals(_) | TabContent::Diff(_) => None,
+            _ => None,
         }
     }
 

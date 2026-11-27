@@ -1,0 +1,92 @@
+_version: 2
+git_graph:
+  not_a_repository:
+    en: This Workspace is in no repository
+    zh-CN: 这个 Workspace 不在任何仓库中
+  text_placeholder:
+    en: Text or hash
+    zh-CN: 文本或哈希
+  branch_placeholder:
+    en: Branch or tag
+    zh-CN: 分支或标签
+  branch_any:
+    en: Branch
+    zh-CN: 分支
+  branch_filter:
+    en: 'Branch: %{branch}'
+    zh-CN: '分支：%{branch}'
+  clear_branch:
+    en: Show every branch
+    zh-CN: 显示全部分支
+  no_matches:
+    en: No commits match
+    zh-CN: 没有匹配的提交
+  select_commit:
+    en: Select a commit to see its files and details
+    zh-CN: 选中一个提交以查看它的文件和详情
+  go_to_parent:
+    en: Go to Parent Commit
+    zh-CN: 转到父提交
+  go_to_child:
+    en: Go to Child Commit
+    zh-CN: 转到子提交
+  column:
+    subject:
+      en: Subject
+      zh-CN: 主题
+    author:
+      en: Author
+      zh-CN: 作者
+    date:
+      en: Date
+      zh-CN: 日期
+    hash:
+      en: Hash
+      zh-CN: 哈希
+  branches:
+    head:
+      en: HEAD (Current Branch)
+      zh-CN: HEAD（当前分支）
+    local:
+      en: Local
+      zh-CN: 本地
+    remote:
+      en: Remote
+      zh-CN: 远程
+    tags:
+      en: Tags
+      zh-CN: 标签
+  files:
+    one:
+      en: '%{count} file'
+      zh-CN: '%{count} 个文件'
+    other:
+      en: '%{count} files'
+      zh-CN: '%{count} 个文件'
+  details:
+    authored:
+      en: '%{id} %{author} <%{email}> on %{date} at %{time}'
+      zh-CN: '%{id} %{author} <%{email}> 于 %{date} %{time}'
+    committed:
+      en: 'committed by %{name} on %{date} at %{time}'
+      zh-CN: '由 %{name} 于 %{date} %{time} 提交'
+    branches_loading:
+      en: In branches…
+      zh-CN: 所在分支…
+    in_branches:
+      one:
+        en: 'In 1 branch: %{branches}'
+        zh-CN: '在 1 个分支中：%{branches}'
+      other:
+        en: 'In %{count} branches: %{branches}'
+        zh-CN: '在 %{count} 个分支中：%{branches}'
+    show_all:
+      en: Show all
+      zh-CN: 显示全部
+unsupported_tab:
+  title:
+    en: This Tab needs a newer version of Condr.
+    zh-CN: 这个 Tab 需要更新版本的 Condr 才能显示。
+  builds:
+    en: 'This Condr: %{this} · Server: %{server}'
+    zh-CN: '本机 Condr：%{this} · Server：%{server}'

@@ -111,8 +111,8 @@ pub enum OldFile {
     None,
 }
 
-/// One commit as Git History lists it (ADR 0046).
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+/// One commit as Git History and Git Graph list it (ADR 0046, ADR 0079).
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CommitSummary {
     /// The full id, as hex.
     pub id: String,
@@ -121,18 +121,59 @@ pub struct CommitSummary {
     pub author: String,
     /// The author's time, in seconds since the Unix epoch.
     pub time: i64,
+    /// The parents' full ids, first parent first.
+    pub parents: Vec<String>,
+    pub author_email: String,
+    /// Someone other than the author committed it.
+    pub committer_differs: bool,
+    /// `HEAD` reaches it: it is on the current branch.
+    pub on_head: bool,
 }
 
-/// One page of a Workspace's Git History: the commits reachable from `from`, newest commit time
-/// first, as `git log` lists them.
+/// Where a log walk starts (ADR 0079).
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub enum LogStart {
+    /// `HEAD`, as Git History walks.
+    #[default]
+    Head,
+    /// Every branch and tag, and `HEAD`, as Git Graph opens.
+    All,
+    /// One ref by its full name, such as `refs/heads/main`, as Git Graph's branch filter asks.
+    Ref(String),
+}
+
+/// A branch, tag or `HEAD`, and the commit it names (ADR 0079).
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct GitRef {
+    /// `HEAD`, or the full name: `refs/heads/…`, `refs/remotes/…` or `refs/tags/…`.
+    pub name: String,
+    /// The commit, an annotated tag peeled to it.
+    pub commit: String,
+}
+
+/// One page of a log: the commits reachable from `from`, in `git rev-list --date-order`'s
+/// order: no parent before all its children, otherwise newest commit time first.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct GitLog {
-    /// The commit the walk started from, which later pages name to stay put while `HEAD`
-    /// moves; `None` for an unborn `HEAD`.
-    pub from: Option<String>,
+    /// The commits the walk started from, which later pages name to stay put while refs
+    /// move; empty for an unborn `HEAD`.
+    pub from: Vec<String>,
     pub commits: Vec<CommitSummary>,
     /// Further commits follow this page.
     pub more: bool,
+    /// The refs, on a first page that walked from every ref or one (ADR 0079).
+    pub refs: Vec<GitRef>,
+    /// The repository's `user.email`, on such a page.
+    pub user_email: Option<String>,
+}
+
+/// Who committed a commit and when, where that is not its author (ADR 0079).
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct CommitPerson {
+    pub name: String,
+    pub email: String,
+    /// Seconds since the Unix epoch.
+    pub time: i64,
 }
 
 /// One commit unfolded in Git History: its whole message and the files it changed against its
@@ -145,6 +186,9 @@ pub struct CommitDetails {
     pub time: i64,
     pub message: String,
     pub changes: GitChanges,
+    pub author_email: String,
+    /// The committer, when someone other than the author.
+    pub committer: Option<CommitPerson>,
 }
 
 /// How many commits a Git History page holds.

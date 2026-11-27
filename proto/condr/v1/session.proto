@@ -17,6 +17,17 @@ message WorkspaceSnapshot {
   string root_directory = 3;
   WorktreeAssociation worktree = 4;
   repeated TabSnapshot tabs = 5;
+  // compat(0.2.6): the Git Graph Tab, out of `tabs` so a 0.2.6 peer skips it rather than
+  // failing the whole Snapshot (ADR 0078). Delete once 0.2.6 no longer updates in place,
+  // and send it in `tabs` as `TabSnapshot.git_graph`, which this build already reads.
+  GitGraphTabSnapshot git_graph = 6;
+}
+
+// A Git Graph Tab and where it sits among `tabs`.
+message GitGraphTabSnapshot {
+  uint64 id = 1;
+  string name = 2;
+  uint32 index = 3;
 }
 
 message WorktreeAssociation {
@@ -26,6 +37,8 @@ message WorktreeAssociation {
   optional string base_branch = 4;
 }
 
+// A `content` this build does not know is a Tab of a newer kind: it decodes as an
+// Unsupported Tab rather than making the Snapshot unknown (ADR 0078).
 message TabSnapshot {
   uint64 id = 1;
   string name = 2;
@@ -33,6 +46,8 @@ message TabSnapshot {
     TerminalsTabSnapshot terminals = 3;
     PathTabSnapshot diff = 4;
     PathTabSnapshot file = 5;
+    // ADR 0079; written to `WorkspaceSnapshot.git_graph` until compat(0.2.6) goes.
+    Empty git_graph = 6;
   }
 }
 
@@ -217,13 +232,34 @@ message CommitSummary {
   string author = 3;
   // The author's time, in seconds since the Unix epoch.
   int64 time = 4;
+  // ADR 0079; a Server older than it sends none of these.
+  repeated string parents = 5;
+  string author_email = 6;
+  bool committer_differs = 7;
+  bool on_head = 8;
 }
 
 message GitLog {
-  // The commit the walk started from; absent for an unborn HEAD.
-  optional string from = 1;
+  // The commits the walk started from; none for an unborn HEAD. One from a Server older
+  // than ADR 0079, which wrote it as an `optional string`.
+  repeated string from = 1;
   repeated CommitSummary commits = 2;
   bool more = 3;
+  // On a first page that walked from every ref or one (ADR 0079).
+  repeated GitRef refs = 4;
+  optional string user_email = 5;
+}
+
+// `HEAD` or a full ref name, and the commit it names (ADR 0079).
+message GitRef {
+  string name = 1;
+  string commit = 2;
+}
+
+message CommitPerson {
+  string name = 1;
+  string email = 2;
+  int64 time = 3;
 }
 
 // One commit against its first parent (ADR 0046).
@@ -234,6 +270,10 @@ message CommitDetails {
   int64 time = 4;
   string message = 5;
   GitChanges changes = 6;
+  // ADR 0079.
+  string author_email = 7;
+  // Only when someone other than the author committed it.
+  CommitPerson committer = 8;
 }
 
 // Unknown decodes to CONTEXT.

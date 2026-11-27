@@ -10,7 +10,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use condr_core::{
-    DiffLineKind, FileDiffContent, GitChangeStatus, GitDiffStat, MAX_DIFF_BYTES, OldFile,
+    DiffLineKind, FileDiffContent, GitChangeStatus, GitDiffStat, LogStart, MAX_DIFF_BYTES, OldFile,
     discover_repository, workspace_repositories,
 };
 
@@ -919,7 +919,7 @@ fn git_log_pages_from_a_fixed_commit_while_head_moves() {
     let repository = discover_repository(&root).unwrap().unwrap();
     assert_eq!(repository.head(), None, "an unborn HEAD names no commit");
     assert_eq!(
-        repository.log(None, 0, 10).unwrap(),
+        repository.log(&[], &LogStart::Head, None, 0, 10).unwrap(),
         condr_core::GitLog::default()
     );
 
@@ -943,8 +943,8 @@ fn git_log_pages_from_a_fixed_commit_while_head_moves() {
             .collect::<Vec<_>>()
     };
 
-    let first = repository.log(None, 0, 2).unwrap();
-    assert_eq!(first.from.as_deref(), Some(head.as_str()));
+    let first = repository.log(&[], &LogStart::Head, None, 0, 2).unwrap();
+    assert_eq!(first.from, std::slice::from_ref(&head));
     assert_eq!(subjects(&first), ["fifth", "fourth"]);
     assert!(first.more);
     assert_eq!(first.commits[0].author, "Condr");
@@ -953,9 +953,13 @@ fn git_log_pages_from_a_fixed_commit_while_head_moves() {
     // A new commit moves HEAD; the next page still walks from where the first began.
     fs::write(root.join("log.txt"), "sixth\n").unwrap();
     commit_all_at(&root, "sixth", 1_010);
-    let second = repository.log(first.from.as_deref(), 2, 2).unwrap();
+    let second = repository
+        .log(&first.from, &LogStart::Head, None, 2, 2)
+        .unwrap();
     assert_eq!(subjects(&second), ["third", "second"]);
-    let last = repository.log(first.from.as_deref(), 4, 2).unwrap();
+    let last = repository
+        .log(&first.from, &LogStart::Head, None, 4, 2)
+        .unwrap();
     assert_eq!(subjects(&last), ["first"]);
     assert!(!last.more);
     assert_eq!(
@@ -963,10 +967,157 @@ fn git_log_pages_from_a_fixed_commit_while_head_moves() {
             &discover_repository(&root)
                 .unwrap()
                 .unwrap()
-                .log(None, 0, 1)
+                .log(&[], &LogStart::Head, None, 0, 1)
                 .unwrap()
         ),
         ["sixth"]
+    );
+}
+
+/// Commits `message` as Grace at `time`, so the committer is not the author.
+fn commit_as_grace_at(root: &Path, message: &str, time: u64) {
+    let date = format!("@{time} +0000");
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["commit", "-q", "--allow-empty", "-m", message])
+        .env("GIT_AUTHOR_DATE", &date)
+        .env("GIT_COMMITTER_DATE", &date)
+        .env("GIT_COMMITTER_NAME", "Grace")
+        .env("GIT_COMMITTER_EMAIL", "grace@example.com")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+}
+
+#[test]
+fn git_graph_walks_every_ref_in_date_order_and_marks_what_head_reaches() {
+    let root = scratch_repository("git-graph");
+    commit_all_at(&root, "root", 1_000);
+    git(&root, ["checkout", "-q", "-b", "feature"]);
+    // A clock running behind: the child is older than its parent, and still comes first.
+    commit_all_at(&root, "feature work", 900);
+    git(&root, ["checkout", "-q", "main"]);
+    commit_as_grace_at(&root, "main work\n\nTouches the Parser.", 1_100);
+    git(&root, ["tag", "-a", "v1", "-m", "release"]);
+    git(
+        &root,
+        ["update-ref", "refs/remotes/origin/feature", "feature"],
+    );
+    git(
+        &root,
+        [
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            "refs/remotes/origin/feature",
+        ],
+    );
+    let repository = discover_repository(&root).unwrap().unwrap();
+    let subjects = |log: &condr_core::GitLog| {
+        log.commits
+            .iter()
+            .map(|commit| commit.subject.clone())
+            .collect::<Vec<_>>()
+    };
+
+    let all = repository.log(&[], &LogStart::All, None, 0, 10).unwrap();
+    assert_eq!(subjects(&all), ["main work", "feature work", "root"]);
+    let on_head: Vec<bool> = all.commits.iter().map(|commit| commit.on_head).collect();
+    assert_eq!(on_head, [true, false, true]);
+    assert_eq!(all.commits[0].parents, [all.commits[2].id.clone()]);
+    assert!(all.commits[0].committer_differs);
+    assert!(!all.commits[1].committer_differs);
+    assert_eq!(all.commits[0].author_email, "condr@example.com");
+    assert_eq!(all.user_email.as_deref(), Some("condr@example.com"));
+    let mut names: Vec<&str> = all
+        .refs
+        .iter()
+        .map(|reference| reference.name.as_str())
+        .collect();
+    names.sort_unstable();
+    assert_eq!(
+        names,
+        [
+            "HEAD",
+            "refs/heads/feature",
+            "refs/heads/main",
+            "refs/remotes/origin/feature",
+            "refs/tags/v1"
+        ],
+        "a remote's symbolic HEAD is left out"
+    );
+    let tag = all
+        .refs
+        .iter()
+        .find(|reference| reference.name == "refs/tags/v1");
+    assert_eq!(
+        tag.unwrap().commit,
+        all.commits[0].id,
+        "an annotated tag peels to its commit"
+    );
+
+    let head = repository
+        .log(&[], &LogStart::Ref("HEAD".into()), None, 0, 10)
+        .unwrap();
+    assert_eq!(subjects(&head), ["main work", "root"]);
+    assert!(
+        !head.refs.is_empty(),
+        "Git Graph's HEAD filter still lists the refs"
+    );
+    let feature = repository
+        .log(
+            &[],
+            &LogStart::Ref("refs/heads/feature".into()),
+            None,
+            0,
+            10,
+        )
+        .unwrap();
+    assert_eq!(subjects(&feature), ["feature work", "root"]);
+    assert_eq!(feature.from, [all.commits[1].id.clone()]);
+
+    // The text matches the whole message, ignoring case, or an id by its prefix.
+    let parser = repository
+        .log(&[], &LogStart::All, Some("parser"), 0, 10)
+        .unwrap();
+    assert_eq!(subjects(&parser), ["main work"]);
+    let prefix = all.commits[2].id[..7].to_owned();
+    let by_id = repository
+        .log(&[], &LogStart::All, Some(&prefix), 0, 10)
+        .unwrap();
+    assert_eq!(subjects(&by_id), ["root"]);
+    let short = repository
+        .log(&[], &LogStart::All, Some(&all.commits[2].id[..6]), 0, 10)
+        .unwrap();
+    assert!(short.commits.is_empty(), "six digits are not an id");
+
+    let mut branches = repository.commit_branches(&all.commits[2].id).unwrap();
+    branches.sort_unstable();
+    assert_eq!(
+        branches,
+        [
+            "refs/heads/feature",
+            "refs/heads/main",
+            "refs/remotes/origin/feature"
+        ]
+    );
+    assert_eq!(
+        repository
+            .commit_branches(&all.commits[1].id)
+            .unwrap()
+            .len(),
+        2,
+        "feature and its remote"
+    );
+    let details = repository.commit(&all.commits[0].id).unwrap();
+    assert_eq!(details.author_email, "condr@example.com");
+    assert_eq!(details.committer.unwrap().name, "Grace");
+    assert!(
+        repository
+            .commit(&all.commits[2].id)
+            .unwrap()
+            .committer
+            .is_none()
     );
 }
 

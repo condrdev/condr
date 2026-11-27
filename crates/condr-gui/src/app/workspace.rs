@@ -168,6 +168,10 @@ impl Condr {
                 TabContent::File(file) => {
                     Some(self.render_file_tab(view, key, workspace_id, active_tab, file.path(), cx))
                 }
+                TabContent::GitGraph => {
+                    Some(self.render_git_graph(key, workspace_id, active_tab, cx))
+                }
+                TabContent::Unsupported => Some(self.render_unsupported_tab(key, cx)),
                 TabContent::Terminals(_) => None,
             });
         let strip = self.render_tab_strip(
@@ -1043,6 +1047,7 @@ impl Render for Condr {
             .on_action(cx.listener(Self::action_find))
             .on_action(cx.listener(Self::action_toggle_sidebar))
             .on_action(cx.listener(Self::action_toggle_right_sidebar))
+            .on_action(cx.listener(Self::action_open_git_graph))
             .on_action(cx.listener(Self::action_toggle_tasks))
             .on_action(cx.listener(Self::action_new_task))
             .on_action(cx.listener(Self::action_next_workspace))

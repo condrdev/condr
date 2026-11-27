@@ -122,7 +122,7 @@ Each entry replaces one action's default keys on this platform; `[]` leaves it n
 
 | Group | Names |
 | --- | --- |
-| Application | `open-settings`, `toggle-sidebar`, `toggle-right-sidebar`, `command-palette`, `go-to` |
+| Application | `open-settings`, `toggle-sidebar`, `toggle-right-sidebar`, `open-git-graph`, `command-palette`, `go-to` |
 | Devices | `connect-remote-device`, `reconnect-device` |
 | Workspaces | `next-workspace`, `previous-workspace`, `new-workspace`, `rename-workspace`, `close-workspace` |
 | Agents | `next-agent`, `previous-agent` |

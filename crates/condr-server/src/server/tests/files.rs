@@ -15,7 +15,12 @@ fn a_rename_moves_the_preview_tab_and_refreshes_files_without_notify() {
     let workspace_id = state.session.create_workspace(root.clone()).unwrap();
     let tab_id = state
         .session
-        .show_file(workspace_id, RelativePathBuf::from("dir/a.md"))
+        .show_viewer(
+            workspace_id,
+            condr_core::Viewer::File {
+                path: RelativePathBuf::from("dir/a.md"),
+            },
+        )
         .unwrap();
     let state = Arc::new(Mutex::new(state));
     {
@@ -250,6 +255,7 @@ fn the_repository_a_path_or_a_git_history_request_names_answers() {
                     | ServerMessage::GitLog { request_id: 2, .. }
                     | ServerMessage::GitCommit { request_id: 3, .. }
                     | ServerMessage::Directory { request_id: 4, .. }
+                    | ServerMessage::GitCommitBranches { request_id: 5, .. }
             )
         })
     };
@@ -282,7 +288,9 @@ fn the_repository_a_path_or_a_git_history_request_names_answers() {
             session_id,
             request_id: 2,
             workspace_id,
-            from: None,
+            from: Vec::new(),
+            start: condr_core::LogStart::All,
+            text: None,
             skip: 0,
             limit: 10,
             repository: repository.into(),
@@ -296,6 +304,18 @@ fn the_repository_a_path_or_a_git_history_request_names_answers() {
         "web notes"
     );
     assert!(log(&mut ask, "").is_err(), "the Root is in no repository");
+
+    let ServerMessage::GitCommitBranches { result, .. } = ask(ClientMessage::GitCommitBranches {
+        server_id,
+        session_id,
+        request_id: 5,
+        workspace_id,
+        commit: api_head.clone(),
+        repository: "api".into(),
+    }) else {
+        unreachable!("the predicate only accepts replies");
+    };
+    assert_eq!(result.unwrap(), ["refs/heads/main"]);
 
     let ServerMessage::GitCommit { result, .. } = ask(ClientMessage::GitCommit {
         server_id,

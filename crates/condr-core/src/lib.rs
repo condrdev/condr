@@ -46,9 +46,9 @@ pub use files::{
     open_download, read_file,
 };
 pub use git::{
-    CommitDetails, CommitSummary, DiffHunk, DiffLine, DiffLineKind, FileDiff, FileDiffContent,
-    GIT_LOG_PAGE, GitChangeEntry, GitChangeStatus, GitChanges, GitDiffStat, GitLog, GitUpstream,
-    MAX_DIFF_BYTES, MAX_GIT_CHANGES, OldFile,
+    CommitDetails, CommitPerson, CommitSummary, DiffHunk, DiffLine, DiffLineKind, FileDiff,
+    FileDiffContent, GIT_LOG_PAGE, GitChangeEntry, GitChangeStatus, GitChanges, GitDiffStat,
+    GitLog, GitRef, GitUpstream, LogStart, MAX_DIFF_BYTES, MAX_GIT_CHANGES, OldFile,
 };
 #[cfg(feature = "runtime")]
 pub use git::{
@@ -62,9 +62,9 @@ pub use paths::{
     config_directory, data_directory, log_directory, runtime_directory, state_directory,
 };
 pub use session::{
-    CloseOutcome, DIFF_TAB_NAME, DiffView, FILE_TAB_NAME, FileView, Pane, PaneDirection, PaneId,
-    PaneLayout, PaneRect, Session, SplitDirection, Tab, TabContent, TabId, TerminalLayout,
-    Workspace, WorkspaceId, WorktreeAssociation, valid_diff_path,
+    CloseOutcome, DIFF_TAB_NAME, DiffView, FILE_TAB_NAME, FileView, GIT_GRAPH_TAB_NAME, Pane,
+    PaneDirection, PaneId, PaneLayout, PaneRect, Session, SplitDirection, Tab, TabContent, TabId,
+    TerminalLayout, Viewer, Workspace, WorkspaceId, WorktreeAssociation, valid_diff_path,
 };
 pub use snapshot::{SessionSnapshot, SnapshotError};
 #[cfg(feature = "runtime")]

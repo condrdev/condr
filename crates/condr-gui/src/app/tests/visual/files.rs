@@ -813,9 +813,11 @@ fn preview_tab_saves_edits_and_never_drops_unsaved_text() {
         view.update(cx, |this, _| {
             this.send_layout_to(
                 1,
-                LayoutCommand::ShowFile {
+                LayoutCommand::ShowViewer {
                     workspace_id,
-                    path: "notes.txt".into(),
+                    viewer: condr_core::Viewer::File {
+                        path: "notes.txt".into(),
+                    },
                 },
             );
         });
@@ -1073,9 +1075,11 @@ fn preview_tab_marks_changed_lines_in_its_gutter_and_on_its_scrollbar() {
         view.update(cx, |this, _| {
             this.send_layout_to(
                 1,
-                LayoutCommand::ShowFile {
+                LayoutCommand::ShowViewer {
                     workspace_id,
-                    path: "notes.txt".into(),
+                    viewer: condr_core::Viewer::File {
+                        path: "notes.txt".into(),
+                    },
                 },
             );
         });

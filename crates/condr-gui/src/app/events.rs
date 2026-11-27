@@ -303,12 +303,29 @@ impl Condr {
                             .as_ref()
                             .and_then(|git| self.git_history_repository(key, workspace_id, git))
                             .and_then(|repository| repository.head.clone());
+                        // Git Graph walks every ref: `HEAD` or its upstream moving asks again
+                        // (ADR 0079).
+                        let tips = |git: Option<&WorkspaceGitSnapshot>| {
+                            git.and_then(|git| self.git_history_repository(key, workspace_id, git))
+                                .map(|repository| (repository.head.clone(), repository.upstream))
+                        };
+                        let graph_moved = tips(
+                            self.connections[index]
+                                .model
+                                .workspace_git
+                                .get(&workspace_id),
+                        ) != tips(git.as_ref());
                         let connection = &mut self.connections[index];
-                        let head_moved = connection
-                            .resources
-                            .logs
-                            .get(&workspace_id)
-                            .is_some_and(|log| head.is_some_and(|head| head.commit != log.from));
+                        let head_moved =
+                            connection
+                                .resources
+                                .logs
+                                .get(&workspace_id)
+                                .is_some_and(|log| {
+                                    head.is_some_and(|head| {
+                                        log.from.first() != head.commit.as_ref()
+                                    })
+                                });
                         if let Some(git) = git {
                             connection.model.workspace_git.insert(workspace_id, git);
                         } else {
@@ -318,6 +335,9 @@ impl Condr {
                         self.forget_workspace_diffs(key, workspace_id);
                         if head_moved {
                             self.reload_git_history(key, workspace_id);
+                        }
+                        if graph_moved {
+                            self.reload_git_graph(key, workspace_id);
                         }
                         git_changed = true;
                         notify = true;
@@ -550,8 +570,7 @@ impl Condr {
                     } => Some((workspace_id, Some(tab_id))),
                     LayoutResult::WorkspaceOpened { workspace_id } => Some((workspace_id, None)),
                     LayoutResult::TabCreated { tab_id, .. }
-                    | LayoutResult::DiffShown { tab_id }
-                    | LayoutResult::FileShown { tab_id } => session.and_then(|session| {
+                    | LayoutResult::ViewerShown { tab_id } => session.and_then(|session| {
                         session
                             .workspaces()
                             .iter()
@@ -788,9 +807,31 @@ impl Condr {
                 request_id,
                 workspace_id,
                 result,
+            } => {
+                let resources = &mut self.connections[index].resources;
+                // Git History's page, or else a Git Graph Tab's (ADR 0079).
+                let notify = if resources
+                    .pending_logs
+                    .get(&workspace_id)
+                    .is_some_and(|(pending, _)| *pending == request_id)
+                {
+                    resources.accept_log(workspace_id, request_id, result)
+                } else {
+                    resources.accept_graph_log(request_id, result).is_some()
+                };
+                IncomingEffect {
+                    notify,
+                    ..IncomingEffect::default()
+                }
+            }
+            ServerMessage::GitCommitBranches {
+                request_id,
+                workspace_id,
+                commit,
+                result,
             } => IncomingEffect {
-                notify: self.connections[index].resources.accept_log(
-                    workspace_id,
+                notify: self.connections[index].resources.commit_branches.land(
+                    (workspace_id, commit),
                     request_id,
                     result,
                 ),

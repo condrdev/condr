@@ -5,6 +5,7 @@ mod connection;
 mod connection_lifecycle;
 mod dock;
 mod files;
+mod git_graph;
 mod layout;
 mod ports;
 mod rendering;

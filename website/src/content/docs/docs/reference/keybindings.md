@@ -22,7 +22,7 @@ Every key combination not declared on this page passes through to the child proc
 | Toggle the left sidebar | `Cmd + B` | `Ctrl + Shift + B` |
 | Toggle the right sidebar, on the view it last showed | `Cmd + Option + B` | `Ctrl + Alt + B` |
 
-* **Tasks mode** and **New Task** have no default key; find them in the Command Palette or [give them one](#change-a-shortcut) as `toggle-tasks` and `new-task`.
+* **Tasks mode**, **New Task** and **Open Git Graph** have no default key; find them in the Command Palette or [give them one](#change-a-shortcut) as `toggle-tasks`, `new-task` and `open-git-graph`.
 
 ---
 
@@ -78,6 +78,21 @@ Every key combination not declared on this page passes through to the child proc
 
 * **Physical keys**: `Cmd + }` / `Cmd + {` are pressed as `Cmd + Shift + ]` / `Cmd + Shift + [`.
 * **Cycling**: switching Tabs wraps around at either end.
+
+---
+
+## Git Graph
+
+These work while the [Git Graph](/docs/using/changes/#every-branch-at-once-git-graph) Tab has the keyboard, as in IntelliJ IDEA's Git log.
+
+| Action | macOS | Windows / Linux |
+| :--- | :--- | :--- |
+| Move through the commits | `↑` / `↓` | `↑` / `↓` |
+| Go to the parent / child commit | `→` / `←` | `→` / `←` |
+| Jump to the text filter | `Cmd + L` | `Ctrl + L` |
+| Show the selected file's diff | `Cmd + D` | `Ctrl + D` |
+
+* **Double-click** a branch to show only its commits, and a file to open its diff.
 
 ---
 

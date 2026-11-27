@@ -90,7 +90,7 @@ Which Workspace and which Tab one Client shows. It is that Client's own state, n
 _Avoid_: Active Workspace, active Tab, selection
 
 **Tab**:
-A Workspace's view, optionally named by the user: either a terminal layout that owns an arrangement of Panes and its current focus, or a viewer with no Panes at all (the Diff Tab, ADR 0017, and the Preview Tab, ADR 0018; at most one of each per Workspace). The GUI numbers open Tabs from 1 in their current Workspace order, recalculating after reordering or closing. An unnamed Tab displays only its centered number; a named Tab displays the number followed by its user-provided name. The number is derived presentation, not a stable identity or a persisted name.
+A Workspace's view, optionally named by the user: either a terminal layout that owns an arrangement of Panes and its current focus, or a viewer with no Panes at all (the Diff Tab, ADR 0017, the Preview Tab, ADR 0018, and Git Graph, ADR 0079; at most one of each per Workspace). A Tab of a kind a newer Condr added shows as an Unsupported Tab (ADR 0078). The GUI numbers open Tabs from 1 in their current Workspace order, recalculating after reordering or closing. An unnamed Tab displays only its centered number; a named Tab displays the number followed by its user-provided name. The number is derived presentation, not a stable identity or a persisted name.
 
 `Alt+1` through `Alt+9` (`Cmd+1` through `Cmd+9` on macOS) activate the corresponding displayed Tab number in the current Workspace, unless `[client.keybindings]` gives `go-to-tab-1` through `go-to-tab-9` other keys (ADR 0063). A missing number does nothing, and 9 means the ninth Tab, not the last. These GUI shortcuts are consumed before terminal input and do not switch Tabs while a modal dialog is open.
 
@@ -99,7 +99,7 @@ A terminal location and layout leaf within a terminal Tab. It may show a shell o
 _Avoid_: Agent
 
 **Diff Tab**:
-The one viewer Tab a Workspace may have, showing one file's working-tree changes as the Server computes them (ADR 0017), against whatever the Workspace's Changes view compares with: `HEAD` or its Base Branch (ADR 0034). Its header names which. It shows the old and new file side by side or in one column, one choice for every Diff Tab this Client shows (ADR 0046). A file clicked in History shows instead as that commit changed it against its first parent; which commit is this Client's own view, kept until it shows another path's diff. Clicking a file in the Changes sidebar creates it or retargets it; it is Session state like every Tab and has no Panes, so Pane commands do not apply to it. Its header's "Show File" opens the same file in the Preview Tab at the line last clicked in the diff. Its name starts as "Diff" and is display only.
+The one viewer Tab a Workspace may have, showing one file's working-tree changes as the Server computes them (ADR 0017), against whatever the Workspace's Changes view compares with: `HEAD` or its Base Branch (ADR 0034). Its header names which. It shows the old and new file side by side or in one column, one choice for every Diff Tab this Client shows (ADR 0046). A file clicked in Git History or Git Graph shows instead as that commit changed it against its first parent; which commit is this Client's own view, kept until it shows another path's diff. Clicking a file in the Changes sidebar creates it or retargets it; it is Session state like every Tab and has no Panes, so Pane commands do not apply to it. Its header's "Show File" opens the same file in the Preview Tab at the line last clicked in the diff. Its name starts as "Diff" and is display only.
 
 **Preview Tab**:
 The one viewer Tab a Workspace may have for a file's content, read by the Server under the Root Directory (ADR 0018). Clicking a file in the Files view creates it or retargets it; it sits beside the Diff Tab and behaves like it. Markdown and SVG open rendered, with Source a click away, and image files show as pictures (ADR 0037); Rendered draws the Source's text, saved or not. Source edits a text file the Server can give back byte for byte and saves it with the shortcut Save (ADR 0045): a save names the version it started from, so a file that changed on disk meanwhile asks before it is overwritten. Unsaved text is this Client's own: it is asked about before this Client's action takes it away, and at once when another Client's does. Source marks the lines its text, saved or not, changed against what the Workspace's Changes compare with, in the gutter and on the scrollbar; it only shows them (ADR 0050). Its name starts as "Preview" and is display only.
@@ -114,9 +114,16 @@ _Avoid_: target branch, parent branch
 **Files**:
 Another view of the right sidebar: the presented Workspace's directory tree under its Root Directory, one level per Server answer, unfolded by the user (ADR 0018). `.git` is hidden, dotfiles are shown, ignored entries are dimmed but listed, rows carry JetBrains file-type icons, a changed file's name takes its status colour, and a directory holding a change carries a dot. The default view for a Workspace with no repository in or right under its Root. The Server's watcher refreshes it through `WorkspaceFilesChanged`, and the sidebar's Refresh asks the Server to rescan the Workspace when the watcher missed something (ADR 0046). A file row's context menu copies its path, opens it in the "Open in" editor, or inserts its path into the Workspace's terminal. Rows and the empty area below them also create a file or folder, and rows rename within their directory and delete, permanently and after asking (ADR 0045); on a local Server they reveal the entry in the platform's file manager.
 
-**History**:
-The third view of the right sidebar, for a Workspace inside a repository or above several; with more than one its first row picks one (ADR 0073): the commits reachable from its `HEAD`, newest commit time first and without a graph, a page at a time (ADR 0046). Clicking a commit lists the files it changed against its first parent in a resizable pane below the commits, and clicking it again hides them; clicking a file shows it in the Diff Tab. It reads only; a commit's menu copies its id. It follows `HEAD` on its own when an agent commits.
-_Avoid_: Log, commit list
+**Git History**:
+The third view of the right sidebar, for a Workspace inside a repository or above several; with more than one its first row picks one (ADR 0073): the commits reachable from its `HEAD`, children before parents and otherwise newest first, without a graph, a page at a time (ADR 0046, ADR 0079). Clicking a commit lists the files it changed against its first parent in a resizable pane below the commits, and clicking it again hides them; clicking a file shows it in the Diff Tab. It reads only; a commit's menu copies its id. It follows `HEAD` on its own when an agent commits. Its header opens Git Graph.
+_Avoid_: History, Log, commit list
+
+**Git Graph**:
+The viewer Tab that shows a Workspace's commits on every branch and tag as IntelliJ's log does (ADR 0079): the branch tree, the commits with their graph, ref labels, author, date and id under a text and a branch filter, and the selected commit's files above its details. Opened from Git History's header or the Command Palette; at most one per Workspace. The Session holds only that it exists; its filters and selection are each Client's own. It only reads.
+_Avoid_: Log, History Tab
+
+**Unsupported Tab**:
+How a Client shows a Tab of a kind a newer Condr added (ADR 0078): under its name in the strip, saying it needs a newer Condr. It closes and moves like any Tab; nothing else applies to it.
 
 **Terminal**:
 The interactive command-line environment presented by a Pane. A Terminal remains useful whether or not it currently contains an Agent. Closing a Terminal, or its shell exiting, ends every process started in it except one that detached on purpose: its own session on Unix, a breakaway from the Terminal's Job on Windows (ADR 0030).
@@ -178,7 +185,7 @@ The GUI's Simplified Chinese keeps Condr's own concepts in English, as condr.dev
 
 | English | zh-CN |
 |---|---|
-| Workspace, Tab, Pane, Session, Server, Agent, Worktree, Managed Worktree, Diff Tab, Preview Tab, Needs you, Peer-to-peer, Task, Tasks, To do | unchanged |
+| Workspace, Tab, Pane, Session, Server, Agent, Worktree, Managed Worktree, Diff Tab, Preview Tab, Git Graph, Needs you, Peer-to-peer, Task, Tasks, To do | unchanged |
 | Unknown, Idle, Working, Blocked, Done, Error (Agent states), Bell | unchanged |
 | Condr, Condr Cloud, Companion, Shell, agent CLI and editor names, `Local` (this machine's Device name) | unchanged |
 | Device | 设备 |
@@ -198,7 +205,7 @@ The GUI's Simplified Chinese keeps Condr's own concepts in English, as condr.dev
 | Shell Integration | Shell 集成 |
 | Root Directory | 根目录 |
 | Base Branch | 基准分支 |
-| Changes, Files, History | 变更、文件、历史 |
+| Changes, Files, Git History | 变更、文件、Git 历史 |
 | Start Condr at login (Autostart) | 登录时启动 Condr |
 | Update Channel | 更新通道 |
 | View | 视图 |

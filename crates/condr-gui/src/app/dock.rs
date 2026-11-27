@@ -311,7 +311,11 @@ impl Condr {
             let viewer = match tab.content() {
                 TabContent::Diff(diff) => Some((true, diff.path().to_relative_path_buf())),
                 TabContent::File(file) => Some((false, file.path().to_relative_path_buf())),
-                TabContent::Terminals(_) => None,
+                TabContent::GitGraph => {
+                    self.sync_git_graph_view(key, _workspace_id, tab_id, window, cx);
+                    None
+                }
+                TabContent::Unsupported | TabContent::Terminals(_) => None,
             };
             if input_window {
                 self.terminal_input.target = None;

@@ -417,6 +417,8 @@ impl ServerConnection {
         let path = match tab.content() {
             TabContent::Diff(diff) => diff.path(),
             TabContent::File(file) => file.path(),
+            // Nothing a Session change retargets.
+            TabContent::GitGraph | TabContent::Unsupported => RelativePath::new(""),
             TabContent::Terminals(_) => return None,
         };
         Some((tab.id(), path.to_relative_path_buf()))

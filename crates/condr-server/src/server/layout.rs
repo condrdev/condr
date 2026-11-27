@@ -737,17 +737,14 @@ pub(super) fn apply_layout_command(
                     .ok_or_else(|| "unknown Workspace".to_string())?,
             );
         }
-        LayoutCommand::ShowDiff { workspace_id, path } => {
-            let tab_id = candidate.show_diff(workspace_id, path).ok_or_else(|| {
+        LayoutCommand::ShowViewer {
+            workspace_id,
+            viewer,
+        } => {
+            let tab_id = candidate.show_viewer(workspace_id, viewer).ok_or_else(|| {
                 "unknown Workspace, invalid path, or Session Tab limit reached".to_string()
             })?;
-            result = LayoutResult::DiffShown { tab_id };
-        }
-        LayoutCommand::ShowFile { workspace_id, path } => {
-            let tab_id = candidate.show_file(workspace_id, path).ok_or_else(|| {
-                "unknown Workspace, invalid path, or Session Tab limit reached".to_string()
-            })?;
-            result = LayoutResult::FileShown { tab_id };
+            result = LayoutResult::ViewerShown { tab_id };
         }
     }
 

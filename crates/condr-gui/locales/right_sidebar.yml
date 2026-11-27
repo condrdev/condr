@@ -10,8 +10,11 @@ right_sidebar:
     en: 'Changes (%{count})'
     zh-CN: '变更（%{count}）'
   git_history:
-    en: History
-    zh-CN: 历史
+    en: Git History
+    zh-CN: Git 历史
+  open_git_graph:
+    en: Open Git Graph
+    zh-CN: 打开 Git Graph
   refresh:
     en: Refresh
     zh-CN: 刷新

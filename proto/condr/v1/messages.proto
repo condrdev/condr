@@ -40,6 +40,7 @@ message ClientMessage {
     TerminalColors terminal_colors = 27;
     GitOldFileRequest git_old_file = 28;
     TaskRequest task = 29;
+    GitCommitBranchesRequest git_commit_branches = 30;
   }
 }
 
@@ -161,17 +162,34 @@ message TerminalColors {
   repeated uint32 ansi = 4;
 }
 
-// A page of a Workspace's Git History (ADR 0046), walking from `from` or from HEAD.
+// A page of a Workspace's log (ADR 0046, ADR 0079): walking from `from` once a first page
+// named it, else from HEAD, every ref when `all_refs`, or the one ref `ref` names.
 message GitLogRequest {
   uint64 server_id = 1;
   uint64 session_id = 2;
   uint64 request_id = 3;
   uint64 workspace_id = 4;
-  optional string from = 5;
+  // A Server older than ADR 0079 reads one as its `optional string`.
+  repeated string from = 5;
   uint32 skip = 6;
   uint32 limit = 7;
   // The repository's directory under the Root; empty for the one the Root is in (ADR 0073).
   string repository = 8;
+  bool all_refs = 9;
+  optional string ref = 10;
+  // Only commits whose message holds it, or whose id a word of it starts.
+  optional string text = 11;
+}
+
+// The local and remote branches that reach a commit (ADR 0079).
+message GitCommitBranchesRequest {
+  uint64 server_id = 1;
+  uint64 session_id = 2;
+  uint64 request_id = 3;
+  uint64 workspace_id = 4;
+  string commit = 5;
+  // As `GitLogRequest.repository`.
+  string repository = 6;
 }
 
 // One commit's message and files (ADR 0046).
@@ -440,9 +458,22 @@ message LayoutCommand {
     PaneTarget close_pane = 21;
     TabTarget close_tab = 22;
     WorkspaceTarget close_workspace = 23;
+    // compat(0.2.6): a Diff or Preview Tab's `ShowViewer` goes as these two, which a
+    // 0.2.6 Server knows (ADR 0078). Delete them once 0.2.6 no longer updates in place.
     WorkspacePath show_diff = 24;
     WorkspacePath show_file = 25;
     CreateWorkspaceDirectory create_workspace_directory = 26;
+    ShowViewer show_viewer = 27;
+  }
+}
+
+// Creates or retargets the Workspace's one Tab of the viewer's kind (ADR 0078).
+message ShowViewer {
+  uint64 workspace_id = 1;
+  oneof viewer {
+    PathTabSnapshot diff = 2;
+    PathTabSnapshot file = 3;
+    Empty git_graph = 4;
   }
 }
 
@@ -581,6 +612,7 @@ message ServerMessage {
     GitCommitReply git_commit = 32;
     GitOldFileReply git_old_file = 33;
     TaskReply task = 34;
+    GitCommitBranchesReply git_commit_branches = 35;
   }
 }
 
@@ -914,7 +946,9 @@ message LayoutResult {
     TabCreated tab_created = 3;
     PaneTarget pane_created = 4;
     WorkspaceTarget workspace_opened = 5;
-    TabTarget diff_shown = 6;
+    // The Tab `ShowViewer` showed; a 0.2.6 GUI reads it as its `diff_shown` (ADR 0078).
+    TabTarget viewer_shown = 6;
+    // compat(0.2.6): a 0.2.6 Server's answer to `show_file`. Delete with it.
     TabTarget file_shown = 7;
   }
 }
@@ -981,6 +1015,21 @@ message GitCommitReply {
     CommitDetails ok = 4;
     string err = 5;
   }
+}
+
+message GitCommitBranchesReply {
+  uint64 request_id = 1;
+  uint64 workspace_id = 2;
+  string commit = 3;
+  oneof result {
+    BranchNames ok = 4;
+    string err = 5;
+  }
+}
+
+// Full ref names.
+message BranchNames {
+  repeated string names = 1;
 }
 
 message DirectoryReply {

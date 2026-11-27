@@ -1,55 +1,178 @@
-//! A Workspace's Git History (ADR 0046): the commits reachable from `HEAD`, newest commit time
-//! first as `git log` lists them, and one commit's files and diffs against its first parent.
+//! A Workspace's log (ADR 0046, ADR 0079): the commits reachable from `HEAD`, every ref or
+//! one, in date order, and one commit's files and diffs against its first parent.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use relative_path::{RelativePath, RelativePathBuf};
 
 use super::changes::*;
 use super::repository::{GitError, GitRepository, git_error};
 use super::status::{DIFF_CONTEXT_LINES, Differ, git_path, hunks_content};
+use gix::bstr::ByteSlice as _;
 
 impl GitRepository {
-    /// Up to `limit` commits after skipping `skip`, walking from `from`, or from `HEAD` when
-    /// `from` is `None`. Each page walks again from the start; that stays cheap into the tens
-    /// of thousands of commits.
-    pub fn log(&self, from: Option<&str>, skip: u32, limit: u32) -> Result<GitLog, GitError> {
+    /// Up to `limit` commits after skipping `skip`. From `HEAD`, as Git History walks, newest
+    /// commit time first, which stops at the page (ADR 0046); from every ref or one, as Git
+    /// Graph walks, in `git rev-list --date-order`'s order, no parent before all its
+    /// children, which first visits everything the tips reach (ADR 0079). A first page walks
+    /// from `start` and returns where it started; a later one names those commits in `from`,
+    /// so it stays put while refs move. With `text`, only the commits whose message holds
+    /// it, ignoring case, or whose id starts with one of its words of 7 to 64 hex digits, as
+    /// IntelliJ's log filters. Each page walks again from the start.
+    pub fn log(
+        &self,
+        from: &[String],
+        start: &LogStart,
+        text: Option<&str>,
+        skip: u32,
+        limit: u32,
+    ) -> Result<GitLog, GitError> {
         let repo = self.open()?;
-        let start = match from {
-            Some(id) => commit_id(id)?,
-            None => match repo.head_id() {
-                Ok(id) => id.detach(),
-                // An unborn `HEAD` has no Git History yet.
-                Err(_) => return Ok(GitLog::default()),
-            },
+        let head = repo.head_id().ok().map(|id| id.detach());
+        let first_page = from.is_empty();
+        let refs = if first_page && *start != LogStart::Head {
+            refs(&repo)?
+        } else {
+            Vec::new()
         };
-        let walk = repo
-            .rev_walk([start])
-            .sorting(gix::revision::walk::Sorting::ByCommitTime(
-                gix::traverse::commit::simple::CommitTimeOrder::NewestFirst,
-            ))
-            .all()
-            .map_err(git_error)?;
+        let mut tips = Vec::new();
+        if first_page {
+            match start {
+                LogStart::Head => tips.extend(head),
+                LogStart::All => {
+                    for reference in &refs {
+                        tips.push(commit_id(&reference.commit)?);
+                    }
+                }
+                LogStart::Ref(name) => tips.push(
+                    repo.find_reference(name.as_str())
+                        .map_err(git_error)?
+                        .peel_to_commit()
+                        .map_err(git_error)?
+                        .id,
+                ),
+            }
+        } else {
+            for id in from {
+                tips.push(commit_id(id)?);
+            }
+        }
+        let mut seen = HashSet::new();
+        tips.retain(|id| seen.insert(*id));
         let mut log = GitLog {
-            from: Some(start.to_string()),
+            from: tips.iter().map(ToString::to_string).collect(),
+            user_email: (first_page && *start != LogStart::Head)
+                .then(|| repo.config_snapshot().string("user.email"))
+                .flatten()
+                .map(|email| email.to_string()),
+            refs,
             ..GitLog::default()
         };
-        for info in walk.skip(skip as usize) {
-            let info = info.map_err(git_error)?;
+        // An unborn `HEAD` has no log yet.
+        if tips.is_empty() {
+            return Ok(log);
+        }
+        let walk: Box<dyn Iterator<Item = Result<Walked, GitError>>> = if *start == LogStart::Head {
+            Box::new(
+                repo.rev_walk(tips)
+                    .sorting(gix::revision::walk::Sorting::ByCommitTime(
+                        gix::traverse::commit::simple::CommitTimeOrder::NewestFirst,
+                    ))
+                    .all()
+                    .map_err(git_error)?
+                    .map(|info| {
+                        info.map(|info| (info.id, info.parent_ids.to_vec()))
+                            .map_err(git_error)
+                    }),
+            )
+        } else {
+            Box::new(date_order(&repo, tips)?)
+        };
+        let filter = text.map(TextFilter::new);
+        // Children come before parents, so `HEAD`'s reach passes down as the walk goes.
+        let mut on_head: HashSet<gix::ObjectId> = head.into_iter().collect();
+        let mut skipped = 0;
+        for walked in walk {
+            let (id, parents) = walked?;
+            let reached = on_head.remove(&id);
+            if reached {
+                on_head.extend(parents.iter().copied());
+            }
+            let commit = repo.find_commit(id).map_err(git_error)?;
+            if let Some(filter) = &filter
+                && !filter.matches(&id, &commit)
+            {
+                continue;
+            }
+            if skipped < skip {
+                skipped += 1;
+                continue;
+            }
             if log.commits.len() == limit as usize {
                 log.more = true;
                 break;
             }
-            let commit = info.object().map_err(git_error)?;
-            let (author, time) = author(&commit)?;
+            let author = commit.author().map_err(git_error)?;
+            let committer = commit.committer().map_err(git_error)?;
             log.commits.push(CommitSummary {
-                id: info.id.to_string(),
+                id: id.to_string(),
                 subject: commit.message().map_err(git_error)?.summary().to_string(),
-                author,
-                time,
+                author: author.name.to_string(),
+                time: author.time().map_err(git_error)?.seconds,
+                parents: parents.iter().map(ToString::to_string).collect(),
+                author_email: author.email.to_string(),
+                committer_differs: author.name != committer.name || author.email != committer.email,
+                on_head: reached,
             });
         }
         Ok(log)
+    }
+
+    /// The local and remote branches whose tips reach commit `id` (ADR 0079), by full name:
+    /// one walk from every tip, each commit carrying the set of tips that reach it down to
+    /// its parents, until `id` comes up; children come first, so its set is whole by then.
+    pub fn commit_branches(&self, id: &str) -> Result<Vec<String>, GitError> {
+        let repo = self.open()?;
+        let target = commit_id(id)?;
+        let branches: Vec<GitRef> = refs(&repo)?
+            .into_iter()
+            .filter(|reference| {
+                reference.name.starts_with("refs/heads/")
+                    || reference.name.starts_with("refs/remotes/")
+            })
+            .collect();
+        let words = branches.len().div_ceil(64);
+        let mut reach: HashMap<gix::ObjectId, Vec<u64>> = HashMap::new();
+        for (index, branch) in branches.iter().enumerate() {
+            reach
+                .entry(commit_id(&branch.commit)?)
+                .or_insert_with(|| vec![0; words])[index / 64] |= 1 << (index % 64);
+        }
+        let tips: Vec<gix::ObjectId> = reach.keys().copied().collect();
+        if tips.is_empty() {
+            return Ok(Vec::new());
+        }
+        for walked in date_order(&repo, tips)? {
+            let (id, parents) = walked?;
+            let Some(bits) = reach.remove(&id) else {
+                continue;
+            };
+            if id == target {
+                return Ok(branches
+                    .into_iter()
+                    .enumerate()
+                    .filter(|(index, _)| bits[index / 64] & (1 << (index % 64)) != 0)
+                    .map(|(_, branch)| branch.name)
+                    .collect());
+            }
+            for parent in parents {
+                let set = reach.entry(parent).or_insert_with(|| vec![0; words]);
+                for (word, bit) in set.iter_mut().zip(&bits) {
+                    *word |= bit;
+                }
+            }
+        }
+        Ok(Vec::new())
     }
 
     /// `id`'s message and the files under the Root it changed against its first parent,
@@ -69,14 +192,25 @@ impl GitRepository {
                 entry.stat = differ.stat(entry).ok().flatten();
             }
         }
-        let (author, time) = author(&commit)?;
+        let author = commit.author().map_err(git_error)?;
+        let committer = commit.committer().map_err(git_error)?;
         Ok(CommitDetails {
             id: commit.id.to_string(),
             parents: commit.parent_ids().map(|id| id.to_string()).collect(),
-            author,
-            time,
+            author: author.name.to_string(),
+            time: author.time().map_err(git_error)?.seconds,
             message: commit.message_raw_sloppy().to_string(),
             changes: self.workspace_changes(GitChanges { entries, truncated }),
+            author_email: author.email.to_string(),
+            committer: (author.name != committer.name || author.email != committer.email)
+                .then(|| {
+                    Ok::<_, GitError>(CommitPerson {
+                        name: committer.name.to_string(),
+                        email: committer.email.to_string(),
+                        time: committer.time().map_err(git_error)?.seconds,
+                    })
+                })
+                .transpose()?,
         })
     }
 
@@ -110,6 +244,31 @@ impl GitRepository {
             content,
         })
     }
+}
+
+/// A commit the walk reached, and its parents.
+type Walked = (gix::ObjectId, Vec<gix::ObjectId>);
+
+/// `git rev-list --date-order` from `tips`: no parent before all its children, otherwise
+/// newest commit time first. It first visits everything the tips reach, faster with a
+/// commit-graph file.
+fn date_order(
+    repo: &gix::Repository,
+    tips: Vec<gix::ObjectId>,
+) -> Result<impl Iterator<Item = Result<Walked, GitError>> + '_, GitError> {
+    Ok(gix::traverse::commit::topo::Builder::from_iters(
+        &repo.objects,
+        tips,
+        None::<Vec<gix::ObjectId>>,
+    )
+    .sorting(gix::traverse::commit::topo::Sorting::DateOrder)
+    .with_commit_graph(repo.commit_graph_if_enabled().ok().flatten())
+    .build()
+    .map_err(git_error)?
+    .map(|info| {
+        info.map(|info| (info.id, info.parent_ids.to_vec()))
+            .map_err(git_error)
+    }))
 }
 
 /// The files `commit` changed against its first parent, without line counts.
@@ -187,8 +346,66 @@ fn commit_id(id: &str) -> Result<gix::ObjectId, GitError> {
     gix::ObjectId::from_hex(id.as_bytes()).map_err(git_error)
 }
 
-fn author(commit: &gix::Commit<'_>) -> Result<(String, i64), GitError> {
-    let author = commit.author().map_err(git_error)?;
-    let time = author.time().map_err(git_error)?;
-    Ok((author.name.to_string(), time.seconds))
+/// `HEAD` and every branch and tag, each peeled to its commit; a remote's symbolic `HEAD`
+/// and refs that name no commit are left out.
+fn refs(repo: &gix::Repository) -> Result<Vec<GitRef>, GitError> {
+    let mut refs = Vec::new();
+    if let Ok(id) = repo.head_id() {
+        refs.push(GitRef {
+            name: "HEAD".into(),
+            commit: id.to_string(),
+        });
+    }
+    let platform = repo.references().map_err(git_error)?;
+    for reference in platform.all().map_err(git_error)? {
+        let mut reference = reference.map_err(git_error)?;
+        let name = reference.name().as_bstr().to_string();
+        let kept = ["refs/heads/", "refs/remotes/", "refs/tags/"]
+            .iter()
+            .any(|prefix| name.starts_with(prefix));
+        if !kept || (name.starts_with("refs/remotes/") && name.ends_with("/HEAD")) {
+            continue;
+        }
+        if let Ok(commit) = reference.peel_to_commit() {
+            refs.push(GitRef {
+                name,
+                commit: commit.id.to_string(),
+            });
+        }
+    }
+    Ok(refs)
+}
+
+/// The text filter IntelliJ's log has (ADR 0079): the full message holding the text, ignoring
+/// case, or the id starting with one of its words of 7 to 64 hex digits.
+struct TextFilter {
+    text: String,
+    ids: Vec<String>,
+}
+
+impl TextFilter {
+    fn new(text: &str) -> Self {
+        Self {
+            text: text.to_lowercase(),
+            ids: text
+                .split_whitespace()
+                .filter(|word| {
+                    (7..=64).contains(&word.len()) && word.chars().all(|c| c.is_ascii_hexdigit())
+                })
+                .map(str::to_ascii_lowercase)
+                .collect(),
+        }
+    }
+
+    fn matches(&self, id: &gix::oid, commit: &gix::Commit<'_>) -> bool {
+        let hex = id.to_string();
+        self.ids
+            .iter()
+            .any(|prefix| hex.starts_with(prefix.as_str()))
+            || commit
+                .message_raw_sloppy()
+                .to_str_lossy()
+                .to_lowercase()
+                .contains(&self.text)
+    }
 }

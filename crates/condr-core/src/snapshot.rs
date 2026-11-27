@@ -51,6 +51,10 @@ pub(crate) enum TabContentSnapshot {
     File {
         path: relative_path::RelativePathBuf,
     },
+    /// A Git Graph Tab (ADR 0079), which holds nothing more.
+    GitGraph,
+    /// A kind this build does not know (ADR 0078).
+    Unsupported,
 }
 
 #[derive(Clone, Debug, PartialEq)]

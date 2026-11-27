@@ -98,6 +98,15 @@ pub(super) struct WorkspaceResources {
     pub(super) logs: HashMap<WorkspaceId, GitLog>,
     /// The page each Workspace waits for: its request and how many commits it skips.
     pub(super) pending_logs: HashMap<WorkspaceId, (u64, u32)>,
+    /// Each Git Graph Tab's log as far as it was loaded (ADR 0079), or why its first page
+    /// failed.
+    pub(super) graph_logs: HashMap<TabId, Result<GitLog, String>>,
+    /// The page each Git Graph Tab waits for: its request and how many commits it skips.
+    pub(super) pending_graph_logs: HashMap<TabId, (u64, u32)>,
+    /// Moves on with every page that lands, so a table knows to take its rows again.
+    pub(super) graph_generation: u64,
+    /// The branches that reach a commit, which Git Graph's details list (ADR 0079).
+    pub(super) commit_branches: Fetched<(WorkspaceId, String), Result<Vec<String>, String>>,
     /// Unfolded commits; a commit never changes, so only a reset drops them.
     pub(super) commits: Fetched<(WorkspaceId, String), Result<CommitDetails, String>>,
     /// One file of one commit, as its Diff Tab shows it.
@@ -129,6 +138,8 @@ impl WorkspaceResources {
         self.directories.clear_pending();
         self.files.clear_pending();
         self.pending_logs.clear();
+        self.pending_graph_logs.clear();
+        self.commit_branches.clear_pending();
         self.commits.clear_pending();
         self.pending_commit_diffs.clear();
         self.old_files.clear_pending();
@@ -148,6 +159,9 @@ impl WorkspaceResources {
         self.files.clear();
         self.files_generation += 1;
         self.logs.clear();
+        self.graph_logs.clear();
+        self.graph_generation += 1;
+        self.commit_branches.clear();
         self.commits.clear();
         self.commit_diffs.clear();
         self.old_files.clear();
@@ -161,6 +175,7 @@ impl WorkspaceResources {
         self.logs.retain(|id, _| live.contains(id));
         self.pending_logs.retain(|id, _| live.contains(id));
         self.commits.retain(|(id, _)| live.contains(id));
+        self.commit_branches.retain(|(id, _)| live.contains(id));
         self.commit_diffs.retain(|(id, _, _), _| live.contains(id));
         self.pending_commit_diffs
             .retain(|_, (id, _, _)| live.contains(id));
@@ -326,6 +341,45 @@ impl WorkspaceResources {
         true
     }
 
+    /// A Git Graph page, by the request it answers: the first replaces what is shown, a
+    /// later one extends it when it walked from the same commits. Which Tab it was for.
+    pub(super) fn accept_graph_log(
+        &mut self,
+        request_id: u64,
+        result: Result<GitLog, String>,
+    ) -> Option<TabId> {
+        let (tab_id, skip) = self
+            .pending_graph_logs
+            .iter()
+            .find(|(_, (pending, _))| *pending == request_id)
+            .map(|(tab_id, (_, skip))| (*tab_id, *skip))?;
+        self.pending_graph_logs.remove(&tab_id);
+        self.graph_generation += 1;
+        match (self.graph_logs.get_mut(&tab_id), result) {
+            (Some(Ok(log)), Ok(page)) if skip > 0 && log.from == page.from => {
+                log.commits.extend(page.commits);
+                log.more = page.more;
+            }
+            // shortcut: a failed later page ends the list; Refresh asks again.
+            (Some(Ok(log)), Err(_)) if skip > 0 => log.more = false,
+            _ if skip > 0 => {}
+            (shown, Ok(mut page)) => {
+                // A walk from `HEAD` alone sends no refs; the tree keeps the last ones.
+                if let Some(Ok(shown)) = shown
+                    && page.refs.is_empty()
+                {
+                    page.refs = std::mem::take(&mut shown.refs);
+                    page.user_email = shown.user_email.take();
+                }
+                self.graph_logs.insert(tab_id, Ok(page));
+            }
+            (_, Err(error)) => {
+                self.graph_logs.insert(tab_id, Err(error));
+            }
+        }
+        Some(tab_id)
+    }
+
     pub(super) fn accept_directory(
         &mut self,
         slot: ResourcePath,
@@ -435,7 +489,18 @@ impl Condr {
         let session = connection.session();
         self.right_sidebar.retain_session(key, session);
         self.diff_tab.retain_session(key, session);
+        self.git_graph.retain_session(key, session);
         release_images(self.preview_tab.retain_session(key, session), cx);
+        let tabs: HashSet<TabId> = session
+            .into_iter()
+            .flat_map(Session::workspaces)
+            .flat_map(Workspace::tabs)
+            .map(Tab::id)
+            .collect();
+        connection
+            .resources
+            .graph_logs
+            .retain(|tab_id, _| tabs.contains(tab_id));
         let live = connection
             .session()
             .into_iter()
@@ -459,6 +524,7 @@ impl Condr {
         }
         self.right_sidebar.retain_session(key, None);
         self.diff_tab.retain_session(key, None);
+        self.git_graph.retain_session(key, None);
         release_images(self.preview_tab.retain_session(key, None), cx);
         self.clear_pending_requests(key);
     }

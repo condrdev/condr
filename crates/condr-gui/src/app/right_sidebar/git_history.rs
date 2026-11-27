@@ -24,6 +24,14 @@ pub(in crate::app) struct GitHistoryState {
     pub(in crate::app) collapsed_dirs: HashSet<(ConnectionKey, WorkspaceId, RelativePathBuf)>,
 }
 
+/// The branch a repository is on, or that its `HEAD` is detached.
+fn repository_branch(repository: &RepositoryGitSnapshot) -> String {
+    repository
+        .branch
+        .clone()
+        .unwrap_or_else(|| t!("git_history.detached").into_owned())
+}
+
 impl Condr {
     /// Git History's first row, level with Changes' comparison row: the branch the commits are
     /// on and `↑N ↓N` against its upstream, as the Workspace's row in the left sidebar shows.
@@ -38,13 +46,9 @@ impl Condr {
         let Some(shown) = self.git_history_repository(key, workspace_id, git) else {
             return div().into_any_element();
         };
-        let branch = |repository: &RepositoryGitSnapshot| {
-            repository
-                .branch
-                .clone()
-                .unwrap_or_else(|| t!("git_history.detached").into_owned())
-        };
-        let control = if git.repositories.len() == 1 && git.root_repository().is_some() {
+        let menu =
+            self.git_history_repository_menu("git-history-repository", key, workspace_id, git, cx);
+        let control = menu.unwrap_or_else(|| {
             // `px_1`, `h_5` and the colour are an xsmall ghost Button's, so the name reads
             // like "Against HEAD" and sits where it does. Without a base that Button is
             // disabled, and Kit dims a disabled one's label so.
@@ -60,22 +64,57 @@ impl Condr {
                 } else {
                     cx.theme().muted_foreground.opacity(0.5)
                 })
-                .child(branch(shown))
+                .child(repository_branch(shown))
                 .into_any_element()
-        } else {
-            let label = |repository: &RepositoryGitSnapshot| {
-                let name = self.repository_name(key, workspace_id, &repository.directory);
-                format!("{name} · {}", branch(repository))
-            };
-            let choices: Vec<(RelativePathBuf, String)> = git
-                .repositories
-                .iter()
-                .map(|repository| (repository.directory.clone(), label(repository)))
-                .collect();
-            let current = shown.directory.clone();
-            let owner = cx.weak_entity();
-            Button::new("git-history-repository")
-                .debug_selector(|| "git-history-repository".into())
+        });
+        h_flex()
+            .flex_none()
+            .w_full()
+            .px_1()
+            .py_1()
+            .gap_2()
+            .justify_between()
+            .items_center()
+            .text_xs()
+            .child(control)
+            .children(shown.upstream.and_then(upstream_counts).map(|counts| {
+                div()
+                    .debug_selector(|| "git-history-upstream".into())
+                    .flex_none()
+                    .pr_2()
+                    .child(upstream_label(&counts, cx))
+            }))
+            .into_any_element()
+    }
+
+    /// The menu of a Workspace's repositories, each with its branch, that Git History and
+    /// Git Graph show one of (ADR 0073); none for a Workspace in one repository.
+    pub(in crate::app) fn git_history_repository_menu(
+        &self,
+        id: &'static str,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        git: &WorkspaceGitSnapshot,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if git.repositories.len() == 1 && git.root_repository().is_some() {
+            return None;
+        }
+        let shown = self.git_history_repository(key, workspace_id, git)?;
+        let label = |repository: &RepositoryGitSnapshot| {
+            let name = self.repository_name(key, workspace_id, &repository.directory);
+            format!("{name} · {}", repository_branch(repository))
+        };
+        let choices: Vec<(RelativePathBuf, String)> = git
+            .repositories
+            .iter()
+            .map(|repository| (repository.directory.clone(), label(repository)))
+            .collect();
+        let current = shown.directory.clone();
+        let owner = cx.weak_entity();
+        Some(
+            Button::new(id)
+                .debug_selector(move || id.into())
                 .ghost()
                 .xsmall()
                 .label(label(shown))
@@ -100,26 +139,8 @@ impl Condr {
                         )
                     })
                 })
-                .into_any_element()
-        };
-        h_flex()
-            .flex_none()
-            .w_full()
-            .px_1()
-            .py_1()
-            .gap_2()
-            .justify_between()
-            .items_center()
-            .text_xs()
-            .child(control)
-            .children(shown.upstream.and_then(upstream_counts).map(|counts| {
-                div()
-                    .debug_selector(|| "git-history-upstream".into())
-                    .flex_none()
-                    .pr_2()
-                    .child(upstream_label(&counts, cx))
-            }))
-            .into_any_element()
+                .into_any_element(),
+        )
     }
 
     /// The repository Git History shows: this Client's pick for the Workspace, which it does
@@ -143,7 +164,7 @@ impl Condr {
     }
 
     /// The directory of the repository Git History shows, empty for the Root's own.
-    fn git_history_directory(
+    pub(in crate::app) fn git_history_directory(
         &self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
@@ -179,6 +200,7 @@ impl Condr {
             connection.resources.logs.remove(&workspace_id);
             connection.resources.pending_logs.remove(&workspace_id);
         }
+        self.forget_git_graph(key, workspace_id);
         cx.notify();
     }
 
@@ -482,7 +504,7 @@ impl Condr {
 
     /// Shows `path` as `commit` changed it in the Workspace's Diff Tab: the ordinary
     /// `ShowDiff`, with the commit as this Client's own choice (ADR 0046).
-    fn show_commit_diff(
+    pub(in crate::app) fn show_commit_diff(
         &mut self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
@@ -518,9 +540,10 @@ impl Condr {
         {
             return;
         }
-        let from = (skip > 0)
-            .then(|| connection.resources.logs.get(&workspace_id)?.from.clone())
-            .flatten();
+        let from = match connection.resources.logs.get(&workspace_id) {
+            Some(log) if skip > 0 => log.from.clone(),
+            _ => Vec::new(),
+        };
         let repository = self.git_history_directory(key, workspace_id);
         if let Some(request_id) = self.send_request(key, |server_id, session_id, request_id| {
             ClientMessage::GitLog {
@@ -529,6 +552,8 @@ impl Condr {
                 request_id,
                 workspace_id,
                 from,
+                start: condr_core::LogStart::Head,
+                text: None,
                 skip,
                 limit: GIT_LOG_PAGE,
                 repository,

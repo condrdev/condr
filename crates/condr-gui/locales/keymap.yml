@@ -29,6 +29,9 @@ keymap:
     toggle_right_sidebar:
       en: Toggle right sidebar
       zh-CN: 切换右侧栏
+    open_git_graph:
+      en: Open Git Graph
+      zh-CN: 打开 Git Graph
     toggle_tasks:
       en: Toggle Tasks
       zh-CN: 切换 Tasks

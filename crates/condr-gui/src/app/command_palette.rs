@@ -236,6 +236,9 @@ impl Condr {
             Needs::RightSidebar => {
                 self.presented_workspace().is_some() && self.draws_workspace(self.active_view())
             }
+            Needs::GitHistory => self
+                .presented_workspace()
+                .is_some_and(|(key, workspace_id)| self.serves_git_history(key, workspace_id)),
             Needs::MainWindow => self.active_view().scope == WindowScope::Main,
         }
     }

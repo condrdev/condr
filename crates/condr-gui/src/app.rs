@@ -10,6 +10,7 @@ mod dock;
 mod events;
 pub(crate) mod file_icons;
 mod format;
+mod git_graph;
 mod git_marks;
 mod gui_state;
 mod icons;
@@ -74,7 +75,7 @@ use condr_core::{
     PaneLayout, ProxyMode, ProxySetting, Session, SessionSnapshot, SplitDirection, Tab, TabContent,
     TabId, TerminalCommand, TerminalKey, TerminalKeyEventKind, TerminalModifiers,
     TerminalMouseButton, TerminalMouseEvent, TerminalMouseTracking, TerminalPosition,
-    TerminalSelection, TerminalSelectionUnit, TerminalSize, Workspace, WorkspaceId,
+    TerminalSelection, TerminalSelectionUnit, TerminalSize, Viewer, Workspace, WorkspaceId,
 };
 use condr_server::{
     ClientConnection, ConnectionCancellation, DeviceKey, Endpoint, ServerConfig, TcpEndpoint,
@@ -85,6 +86,7 @@ use dialogs::accepted_text_input;
 use diff_tab::*;
 use directory_browser::{DirectoryBrowser, browser_field, render_directory_browser};
 use dock::*;
+use git_graph::*;
 use gpui_kit::assets::IconName as Glyph;
 use gpui_kit::component::badge::Badge;
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
@@ -194,6 +196,7 @@ actions!(
         Find,
         ToggleSidebar,
         ToggleRightSidebar,
+        OpenGitGraph,
         ToggleTasks,
         NewTask,
         NextWorkspace,
@@ -323,6 +326,7 @@ pub(crate) struct Condr {
     _keep_awake: Option<keepawake::KeepAwake>,
     right_sidebar: RightSidebarState,
     diff_tab: DiffTabState,
+    git_graph: GitGraphState,
     preview_tab: PreviewTabState,
     /// What the open Root Directory dialog lists for a remote Device; replaced by the
     /// next such dialog, so a closed one is harmless.
@@ -577,6 +581,7 @@ impl Condr {
                 ..DiffTabState::default()
             },
             preview_tab: PreviewTabState::default(),
+            git_graph: GitGraphState::default(),
             directory_browser: None,
             new_workspace: None,
             ports_form: None,
