@@ -13,7 +13,7 @@
 //! grown to 1600 by 1000, with the buttons macOS would draw painted in; the README's picture
 //! puts the Companion's `phone-agents.png` in front of it.
 
-use super::super::diff_tab::DiffCommit;
+use super::super::diff_pane::DiffCommit;
 use super::super::ports::PortsScope;
 use super::super::right_sidebar::RightSidebarView;
 use super::super::transfers::TransferState;
@@ -211,7 +211,7 @@ pub(crate) fn run(directory: PathBuf) {
                 ));
             }
             // The Tab scrolls this line to its bottom, under the form's rewritten rows.
-            this.preview_tab.pending_line = Some((1, condr, path.clone(), 532));
+            this.preview_pane.pending_line = Some((1, condr, path.clone(), 532));
             this.show_file_on(1, condr, path, window, cx)
         });
     }
@@ -238,7 +238,7 @@ pub(crate) fn run(directory: PathBuf) {
             .selected_commits
             .insert((1, condr), commit.id.clone());
         this.show_diff_on(1, condr, path.clone(), window, cx);
-        this.diff_tab
+        this.diff_pane
             .commits
             .insert((1, condr), DiffCommit { path, commit });
         this.rebuild_dock(window, cx);
@@ -374,21 +374,21 @@ pub(crate) fn run(directory: PathBuf) {
         "screen-main-diff",
         (0., 0., 1280., 800.),
     );
-    let diff_tab = cx.read(|app| {
+    let diff_pane = cx.read(|app| {
         let connection = view.read(app).connection(1).unwrap();
         connection.session().unwrap().diff_tab(condr).unwrap().id()
     });
     update(&mut cx, window, &view, move |this, window, cx| {
-        this.open_in_new_window(WindowScope::Tab(1, diff_tab), window, cx)
+        this.open_in_new_window(WindowScope::Tab(1, diff_pane), window, cx)
     });
     wait(&mut cx, "the Diff Tab has its window", |app| {
         view.read(app)
-            .window_for(WindowScope::Tab(1, diff_tab))
+            .window_for(WindowScope::Tab(1, diff_pane))
             .is_some()
     });
     let detached = cx.read(|app| {
         view.read(app)
-            .window_for(WindowScope::Tab(1, diff_tab))
+            .window_for(WindowScope::Tab(1, diff_pane))
             .unwrap()
     });
     update(&mut cx, window, &view, |this, window, cx| {

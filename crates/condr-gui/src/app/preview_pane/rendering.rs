@@ -351,7 +351,7 @@ impl Condr {
         workspace_id: WorkspaceId,
         cx: &mut Context<Self>,
     ) {
-        for path in self.preview_tab.images.wanted(key, workspace_id) {
+        for path in self.preview_pane.images.wanted(key, workspace_id) {
             let Some(connection) = self.connection(key) else {
                 return;
             };
@@ -363,7 +363,7 @@ impl Condr {
                 continue;
             };
             // Rendered draws unsaved text from the Editor instead (ADR 0045).
-            if self.preview_tab.editors.values().any(|editor| {
+            if self.preview_pane.editors.values().any(|editor| {
                 editor.dirty
                     && editor.workspace_id == workspace_id
                     && editor
@@ -374,7 +374,7 @@ impl Condr {
                 continue;
             }
             let image_key = (key, workspace_id, path);
-            if !self.preview_tab.images.feed(&image_key, generation) {
+            if !self.preview_pane.images.feed(&image_key, generation) {
                 continue;
             }
             let decodable = match (answer, image_format(&image_key.2)) {
@@ -392,7 +392,7 @@ impl Condr {
                 Ok(decodable) => decodable,
                 Err(reason) => {
                     let replaced =
-                        self.preview_tab
+                        self.preview_pane
                             .images
                             .land(&image_key, generation, None, Err(reason));
                     release_images(replaced.into_iter().collect(), cx);
@@ -413,7 +413,7 @@ impl Condr {
     ) {
         // No answer has this generation, so the file's next answer replaces the drawing.
         const UNSAVED: u64 = u64::MAX;
-        self.preview_tab.images.feed(&image_key, UNSAVED);
+        self.preview_pane.images.feed(&image_key, UNSAVED);
         self.decode_image(image_key, UNSAVED, text.into_bytes(), ImageFormat::Svg, cx);
     }
 
@@ -429,7 +429,7 @@ impl Condr {
         let mut hasher = DefaultHasher::new();
         bytes.hash(&mut hasher);
         let digest = hasher.finish();
-        if self.preview_tab.images.digest(&image_key) == Some(digest) {
+        if self.preview_pane.images.digest(&image_key) == Some(digest) {
             return;
         }
         let svg = cx.svg_renderer();
@@ -442,12 +442,12 @@ impl Condr {
                     .map(Arc::new)
                     .map_err(|error| NoImage::Failed(error.into()));
                 let replaced =
-                    this.preview_tab
+                    this.preview_pane
                         .images
                         .land(&image_key, generation, Some(digest), shown);
                 release_images(replaced.into_iter().collect(), cx);
                 // Kit keeps the size a Markdown image was first laid out at.
-                for editor in this.preview_tab.editors.values() {
+                for editor in this.preview_pane.editors.values() {
                     if let Some(markdown) = &editor.markdown {
                         markdown.update(cx, |state, cx| state.invalidate_inline_layout(cx));
                     }
@@ -482,7 +482,7 @@ impl Condr {
             .parent()
             .unwrap_or(RelativePath::new(""))
             .to_relative_path_buf();
-        let images = self.preview_tab.images.clone();
+        let images = self.preview_pane.images.clone();
         let owner = cx.weak_entity();
         let image_base = base.clone();
         let link_owner = cx.weak_entity();

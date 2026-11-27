@@ -437,7 +437,7 @@ impl Condr {
         let directories = connection
             .resources
             .refresh_files(workspace_id, shown.as_deref());
-        self.preview_tab
+        self.preview_pane
             .images
             .refresh(key, workspace_id, shown.as_deref());
         for path in directories {
@@ -465,7 +465,7 @@ impl Condr {
             .connection(key)
             .and_then(|connection| connection.session());
         let closing: Vec<TabId> = self
-            .preview_tab
+            .preview_pane
             .editors
             .keys()
             .filter(|(editor_key, tab_id)| {
@@ -488,9 +488,9 @@ impl Condr {
         };
         let session = connection.session();
         self.right_sidebar.retain_session(key, session);
-        self.diff_tab.retain_session(key, session);
+        self.diff_pane.retain_session(key, session);
         self.git_graph.retain_session(key, session);
-        release_images(self.preview_tab.retain_session(key, session), cx);
+        release_images(self.preview_pane.retain_session(key, session), cx);
         let tabs: HashSet<TabId> = session
             .into_iter()
             .flat_map(Session::workspaces)
@@ -513,7 +513,7 @@ impl Condr {
     /// `key` is gone: nothing this Client kept of its Workspaces and Tabs stays.
     pub(super) fn clear_workspace_views(&mut self, key: ConnectionKey, cx: &mut App) {
         let closing: Vec<TabId> = self
-            .preview_tab
+            .preview_pane
             .editors
             .keys()
             .filter(|(editor_key, _)| *editor_key == key)
@@ -523,9 +523,9 @@ impl Condr {
             self.keep_unsaved(key, tab_id, cx);
         }
         self.right_sidebar.retain_session(key, None);
-        self.diff_tab.retain_session(key, None);
+        self.diff_pane.retain_session(key, None);
         self.git_graph.retain_session(key, None);
-        release_images(self.preview_tab.retain_session(key, None), cx);
+        release_images(self.preview_pane.retain_session(key, None), cx);
         self.clear_pending_requests(key);
     }
 }

@@ -233,7 +233,7 @@ impl Condr {
             return empty_state(t!("git_history.no_commits"), cx);
         }
         let shown = self
-            .diff_tab
+            .diff_pane
             .commits
             .get(&(key, workspace_id))
             .filter(|chosen| shown_diff == Some(chosen.path.as_relative_path()))
@@ -514,7 +514,7 @@ impl Condr {
         cx: &mut Context<Self>,
     ) {
         self.show_diff_on(key, workspace_id, path.clone(), window, cx);
-        self.diff_tab
+        self.diff_pane
             .commits
             .insert((key, workspace_id), DiffCommit { path, commit });
         // A Tab already on this path gets no layout change to resync it.

@@ -270,7 +270,7 @@ fn a_detached_window_closes_with_its_tab() {
 }
 
 #[test]
-fn a_changes_click_retargets_a_detached_diff_tab_without_moving_either_window() {
+fn a_changes_click_retargets_a_detached_diff_pane_without_moving_either_window() {
     let _serial_guard = acquire_visual_test_lock();
     let repository = TestDirectory::new("detach-diff");
     run_git(&repository.0, ["init", "-q", "-b", "main"]);
@@ -308,8 +308,8 @@ fn a_changes_click_retargets_a_detached_diff_tab_without_moving_either_window() 
     assert!(wait_until(window, |window| {
         shown_diff(window).is_some_and(|(_, path)| path == "notes.txt")
     }));
-    let diff_tab = shown_diff(window).unwrap().0;
-    let scope = WindowScope::Tab(1, diff_tab);
+    let diff_pane = shown_diff(window).unwrap().0;
+    let scope = WindowScope::Tab(1, diff_pane);
     window.update(|window, cx| {
         view.update(cx, |this, cx| {
             this.open_in_new_window(scope, window, cx);
@@ -340,9 +340,9 @@ fn a_changes_click_retargets_a_detached_diff_tab_without_moving_either_window() 
         wait_until(window, |window| {
             window.read(|app| {
                 view.read(app)
-                    .diff_tab
+                    .diff_pane
                     .viewers
-                    .get(&(1, diff_tab))
+                    .get(&(1, diff_pane))
                     .is_some_and(|viewer| viewer.patch.contains("BETA"))
             })
         }),

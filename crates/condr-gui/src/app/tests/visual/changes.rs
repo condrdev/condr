@@ -4,7 +4,7 @@ use super::*;
 /// opens the Diff Tab through the Server, and the Diff Tab shows the file's hunks once the
 /// Server answers (ADR 0017).
 #[test]
-fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
+fn changes_sidebar_lists_the_repository_and_opens_one_diff_pane() {
     let _serial_guard = acquire_visual_test_lock();
     let directory = TestDirectory::new("gui-changes");
     let repository = directory.0.clone();
@@ -177,13 +177,13 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
     window.update(|_, cx| {
         view.update(cx, |view, _| {
             let viewer = view
-                .diff_tab
+                .diff_pane
                 .viewers
                 .values_mut()
                 .next()
                 .expect("one Diff Tab viewer");
             viewer.clicked = Some(gpui_kit::component::diff::DiffLinePosition::new(
-                crate::app::diff_tab::PATCH_PATH,
+                crate::app::diff_pane::PATCH_PATH,
                 gpui_kit::component::diff::DiffSide::Original,
                 2,
             ));
@@ -202,7 +202,7 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
                     session.tab(tab_id).unwrap().file().is_some_and(|file| {
                         file.path() == relative_path::RelativePath::new("notes.txt")
                     })
-                }) && view.preview_tab.editors.values().any(|editor| {
+                }) && view.preview_pane.editors.values().any(|editor| {
                     let state = editor.state.read(cx);
                     state.value().contains("BETA") && state.cursor_position().line == 1
                 })
@@ -255,7 +255,7 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
             window.update(|window, cx| _ = window.draw(cx));
             window.update(|_, cx| {
                 view.read(cx)
-                    .diff_tab
+                    .diff_pane
                     .viewers
                     .values()
                     .any(|viewer| viewer.patch.contains("+new") && !viewer.patch.contains("BETA"))
@@ -266,14 +266,14 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
     // It is coloured by the file's language, and by the code theme Settings picks.
     let painted = window.update(|_, cx| {
         let view = view.read(cx);
-        let viewer = view.diff_tab.viewers.values().next().unwrap();
+        let viewer = view.diff_pane.viewers.values().next().unwrap();
         assert_eq!(viewer.state.read(cx).files()[0].language().as_ref(), "txt");
         viewer.highlighter.clone()
     });
     window.update(|_, cx| crate::app::syntax::set_code_theme("Solarized Light".into(), cx));
     window.update(|_, cx| {
         let view = view.read(cx);
-        let viewer = view.diff_tab.viewers.values().next().unwrap();
+        let viewer = view.diff_pane.viewers.values().next().unwrap();
         assert!(!std::sync::Arc::ptr_eq(&viewer.highlighter, &painted));
         assert!(std::sync::Arc::ptr_eq(
             &viewer.highlighter,
@@ -377,7 +377,7 @@ fn the_changes_comparison_switches_between_head_and_the_base_branch() {
             window.update(|window, cx| _ = window.draw(cx));
             window.update(|_, cx| {
                 view.read(cx)
-                    .diff_tab
+                    .diff_pane
                     .viewers
                     .values()
                     .any(|viewer| viewer.patch.contains("+agent"))
@@ -394,8 +394,8 @@ fn the_changes_comparison_switches_between_head_and_the_base_branch() {
             window.update(|window, cx| _ = window.draw(cx));
             window.debug_bounds("change-committed.txt").is_none()
                 && window.read(|app| {
-                    view.read(app).diff_tab.viewers.values().all(|viewer| {
-                        viewer.content == crate::app::diff_tab::DiffContent::Unchanged
+                    view.read(app).diff_pane.viewers.values().all(|viewer| {
+                        viewer.content == crate::app::diff_pane::DiffContent::Unchanged
                     })
                 })
         }),
@@ -465,7 +465,7 @@ fn a_directory_listed_in_two_sections_folds_from_either_row() {
 /// Git History lists the real Server's commits, a commit unfolds into its files, a file opens
 /// in the Diff Tab as that commit changed it, and a new commit appears on its own (ADR 0046).
 #[test]
-fn git_history_lists_commits_and_shows_one_commits_file_in_the_diff_tab() {
+fn git_history_lists_commits_and_shows_one_commits_file_in_the_diff_pane() {
     let _serial_guard = acquire_visual_test_lock();
     let directory = TestDirectory::new("gui-git-history");
     let repository = directory.0.clone();
@@ -529,7 +529,7 @@ fn git_history_lists_commits_and_shows_one_commits_file_in_the_diff_tab() {
         wait_until(window, |window| {
             window.read(|app| {
                 view.read(app)
-                    .diff_tab
+                    .diff_pane
                     .viewers
                     .values()
                     .any(|viewer| viewer.patch.contains("+gamma"))
@@ -580,7 +580,7 @@ fn git_history_lists_commits_and_shows_one_commits_file_in_the_diff_tab() {
             window.update(|window, cx| _ = window.draw(cx));
             window.debug_bounds("diff-commit-header").is_some()
                 && window.read(|app| {
-                    view.read(app).diff_tab.viewers.values().any(|viewer| {
+                    view.read(app).diff_pane.viewers.values().any(|viewer| {
                         viewer.patch.contains("-beta") && viewer.patch.contains("+BETA")
                     })
                 })
@@ -589,7 +589,7 @@ fn git_history_lists_commits_and_shows_one_commits_file_in_the_diff_tab() {
     );
     assert!(window.read(|app| {
         view.read(app)
-            .diff_tab
+            .diff_pane
             .viewers
             .values()
             .all(|viewer| !viewer.patch.contains("gamma"))

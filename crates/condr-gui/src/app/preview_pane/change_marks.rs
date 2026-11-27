@@ -116,7 +116,7 @@ impl Condr {
         let against = self.workspace_diff_base(key, workspace_id);
         let (Some(connection), Some(editor)) = (
             self.connection(key),
-            self.preview_tab.editors.get(&(key, tab_id)),
+            self.preview_pane.editors.get(&(key, tab_id)),
         ) else {
             return;
         };
@@ -137,7 +137,7 @@ impl Condr {
         if let Some(slot) = ask {
             self.request_old_file(key, slot);
         }
-        let Some(editor) = self.preview_tab.editors.get_mut(&(key, tab_id)) else {
+        let Some(editor) = self.preview_pane.editors.get_mut(&(key, tab_id)) else {
             return;
         };
         let marks = &mut editor.marks;
@@ -205,7 +205,7 @@ impl Condr {
         tab_id: TabId,
         cx: &mut Context<Self>,
     ) {
-        let Some(editor) = self.preview_tab.editors.get_mut(&(key, tab_id)) else {
+        let Some(editor) = self.preview_pane.editors.get_mut(&(key, tab_id)) else {
             return;
         };
         let marks = &mut editor.marks;
@@ -223,7 +223,7 @@ impl Condr {
         marks.task = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(wait).await;
             let Ok(Some((revision, old, new))) = this.update(cx, |this, cx| {
-                let editor = this.preview_tab.editors.get_mut(&(key, tab_id))?;
+                let editor = this.preview_pane.editors.get_mut(&(key, tab_id))?;
                 let marks = &mut editor.marks;
                 marks.last_run = Some(cx.background_executor().now());
                 #[cfg(test)]
@@ -259,7 +259,7 @@ impl Condr {
         changes: Option<Vec<LineChange>>,
         cx: &mut Context<Self>,
     ) {
-        let Some(editor) = self.preview_tab.editors.get_mut(&(key, tab_id)) else {
+        let Some(editor) = self.preview_pane.editors.get_mut(&(key, tab_id)) else {
             return;
         };
         let marks = &mut editor.marks;
@@ -278,7 +278,7 @@ impl Condr {
 
     /// The GUI theme changed: the marks take its status colours.
     pub(in crate::app) fn recolor_change_marks(&mut self, cx: &mut Context<Self>) {
-        let tabs: Vec<_> = self.preview_tab.editors.keys().copied().collect();
+        let tabs: Vec<_> = self.preview_pane.editors.keys().copied().collect();
         for (key, tab_id) in tabs {
             self.schedule_change_marks(key, tab_id, cx);
         }

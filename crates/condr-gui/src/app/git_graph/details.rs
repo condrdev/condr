@@ -3,7 +3,7 @@
 
 use super::table::{label_chip, label_color, ref_labels};
 use super::*;
-use crate::app::diff_tab::escaped_markdown;
+use crate::app::diff_pane::escaped_markdown;
 use crate::app::format::commit_day_and_clock;
 use crate::app::right_sidebar::{TreeRow, directory_row, file_row, tree_rows};
 use condr_core::{CommitDetails, GitChangeEntry};

@@ -183,7 +183,7 @@ fn git_graph_lists_every_branch_filters_and_opens_a_commits_file() {
             window.debug_bounds("diff-commit-header").is_some()
                 && window.read(|app| {
                     view.read(app)
-                        .diff_tab
+                        .diff_pane
                         .viewers
                         .values()
                         .any(|viewer| viewer.patch.contains("+work"))

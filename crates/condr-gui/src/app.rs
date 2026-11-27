@@ -4,7 +4,7 @@ mod config;
 mod connection;
 mod connection_status;
 mod dialogs;
-mod diff_tab;
+mod diff_pane;
 mod directory_browser;
 mod dock;
 mod events;
@@ -28,7 +28,7 @@ mod placeholders;
 mod ports;
 mod power;
 mod presentation;
-mod preview_tab;
+mod preview_pane;
 mod right_sidebar;
 // GPUI renders offscreen on macOS alone.
 #[cfg(all(feature = "test-support", target_os = "macos"))]
@@ -83,7 +83,7 @@ use condr_server::{
 use connection::*;
 #[cfg(test)]
 use dialogs::accepted_text_input;
-use diff_tab::*;
+use diff_pane::*;
 use directory_browser::{DirectoryBrowser, browser_field, render_directory_browser};
 use dock::*;
 use git_graph::*;
@@ -122,7 +122,7 @@ use keymap::TAB_MODIFIER;
 #[cfg(test)]
 use left_sidebar::*;
 use new_workspace::{NewWorkspaceDialog, NewWorkspaceWay};
-use preview_tab::*;
+use preview_pane::*;
 use relative_path::{RelativePath, RelativePathBuf};
 use right_sidebar::*;
 use server_connection::*;
@@ -325,9 +325,9 @@ pub(crate) struct Condr {
     /// be created and dropped on the GPUI main thread, never from a background task.
     _keep_awake: Option<keepawake::KeepAwake>,
     right_sidebar: RightSidebarState,
-    diff_tab: DiffTabState,
+    diff_pane: DiffPaneState,
     git_graph: GitGraphState,
-    preview_tab: PreviewTabState,
+    preview_pane: PreviewPaneState,
     /// What the open Root Directory dialog lists for a remote Device; replaced by the
     /// next such dialog, so a closed one is harmless.
     directory_browser: Option<DirectoryBrowser>,
@@ -423,7 +423,7 @@ impl Condr {
         window.on_window_should_close(cx, move |window, cx| {
             owner
                 .update(cx, |this, cx| {
-                    if !this.preview_tab.has_unsaved() && this.live_transfers() == 0 {
+                    if !this.preview_pane.has_unsaved() && this.live_transfers() == 0 {
                         return true;
                     }
                     this.confirm_quit(Box::new(|_, window, _| window.remove_window()), window, cx);
@@ -576,11 +576,11 @@ impl Condr {
             updates: UpdateCheck::new(auto_check_updates, update_channel),
             _keep_awake: None,
             right_sidebar: RightSidebarState::default(),
-            diff_tab: DiffTabState {
+            diff_pane: DiffPaneState {
                 unified: restored_state.diff_unified,
-                ..DiffTabState::default()
+                ..DiffPaneState::default()
             },
-            preview_tab: PreviewTabState::default(),
+            preview_pane: PreviewPaneState::default(),
             git_graph: GitGraphState::default(),
             directory_browser: None,
             new_workspace: None,

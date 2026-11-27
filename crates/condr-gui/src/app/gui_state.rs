@@ -744,7 +744,7 @@ impl Condr {
                     display: view.display.map(u64::from),
                 }),
             right_sidebar_width: Some(self.main_view().right_sidebar_width.into()),
-            diff_unified: self.diff_tab.unified,
+            diff_unified: self.diff_pane.unified,
             // Until the active connection has bootstrapped (a slow first start), the
             // file's answer stands rather than `None`.
             active_server: self

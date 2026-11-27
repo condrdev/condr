@@ -234,7 +234,7 @@ impl Condr {
                 cx,
             );
             if let SaveOwner::Unsaved(unsaved) = owner {
-                self.preview_tab
+                self.preview_pane
                     .prompts
                     .push_back(FilePrompt::Unsaved(unsaved));
             }
@@ -252,7 +252,7 @@ impl Condr {
         );
         match request_id {
             Some(request_id) => {
-                self.preview_tab.saves.insert(
+                self.preview_pane.saves.insert(
                     (key, request_id),
                     PendingSave {
                         workspace_id,
@@ -264,7 +264,7 @@ impl Condr {
             }
             None => {
                 if let SaveOwner::Unsaved(unsaved) = owner {
-                    self.preview_tab
+                    self.preview_pane
                         .prompts
                         .push_back(FilePrompt::Unsaved(unsaved));
                 }
@@ -294,7 +294,7 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(editor) = self.preview_tab.editors.get(&(key, tab_id)) else {
+        let Some(editor) = self.preview_pane.editors.get(&(key, tab_id)) else {
             return;
         };
         // ponytail: a second Save while one runs is dropped; the first one's reply decides.
@@ -322,7 +322,7 @@ impl Condr {
             SaveOwner::Tab(tab_id),
             cx,
         );
-        if let Some(editor) = self.preview_tab.editors.get_mut(&(key, tab_id))
+        if let Some(editor) = self.preview_pane.editors.get_mut(&(key, tab_id))
             && let Some(request_id) = request_id
         {
             editor.saving = Some(request_id);
@@ -339,7 +339,7 @@ impl Condr {
         result: FileMutationResult,
         cx: &mut Context<Self>,
     ) {
-        if let Some(save) = self.preview_tab.saves.remove(&(key, request_id)) {
+        if let Some(save) = self.preview_pane.saves.remove(&(key, request_id)) {
             self.file_saved(key, request_id, save, result, cx);
         } else {
             self.entry_mutated(key, request_id, result, cx);
@@ -361,7 +361,7 @@ impl Condr {
                     FileMutationResult::Done { .. } => {}
                     FileMutationResult::Conflict => {
                         unsaved.conflicted = true;
-                        self.preview_tab
+                        self.preview_pane
                             .prompts
                             .push_back(FilePrompt::Unsaved(unsaved));
                     }
@@ -370,7 +370,7 @@ impl Condr {
                             t!("files.save_failed", path = save.path, error = error),
                             cx,
                         );
-                        self.preview_tab
+                        self.preview_pane
                             .prompts
                             .push_back(FilePrompt::Unsaved(unsaved));
                     }
@@ -380,7 +380,7 @@ impl Condr {
             }
         };
         let Some(editor) = self
-            .preview_tab
+            .preview_pane
             .editors
             .get_mut(&(key, tab_id))
             .filter(|editor| editor.saving == Some(request_id))
@@ -398,11 +398,11 @@ impl Condr {
                 // Reads that overlapped the save were dropped: read the file once more.
                 self.request_file(key, save.workspace_id, save.path);
                 if let Some(after) = after {
-                    self.preview_tab.deferred.push(after);
+                    self.preview_pane.deferred.push(after);
                 }
             }
             FileMutationResult::Conflict => {
-                self.preview_tab
+                self.preview_pane
                     .prompts
                     .push_back(FilePrompt::Conflict { key, tab_id, after });
             }
@@ -417,25 +417,25 @@ impl Condr {
     /// text whose Tab was already gone is asked about again.
     pub(in crate::app) fn forget_file_saves(&mut self, key: ConnectionKey) {
         let lost: Vec<_> = self
-            .preview_tab
+            .preview_pane
             .saves
             .keys()
             .filter(|(save_key, _)| *save_key == key)
             .copied()
             .collect();
         for slot in lost {
-            let Some(save) = self.preview_tab.saves.remove(&slot) else {
+            let Some(save) = self.preview_pane.saves.remove(&slot) else {
                 continue;
             };
             match save.owner {
                 SaveOwner::Tab(tab_id) => {
-                    if let Some(editor) = self.preview_tab.editors.get_mut(&(key, tab_id)) {
+                    if let Some(editor) = self.preview_pane.editors.get_mut(&(key, tab_id)) {
                         editor.saving = None;
                         editor.after_save = None;
                     }
                 }
                 SaveOwner::Unsaved(unsaved) => self
-                    .preview_tab
+                    .preview_pane
                     .prompts
                     .push_back(FilePrompt::Unsaved(unsaved)),
             }
@@ -446,8 +446,8 @@ impl Condr {
     /// Runs what waited for a window and asks what arrived without one, one dialog at a
     /// time. Called from `render`, so the work itself is deferred past the frame.
     pub(in crate::app) fn ask_file_prompts(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let idle = self.preview_tab.prompt_open || self.preview_tab.prompts.is_empty();
-        if self.preview_tab.deferred.is_empty() && idle {
+        let idle = self.preview_pane.prompt_open || self.preview_pane.prompts.is_empty();
+        if self.preview_pane.deferred.is_empty() && idle {
             return;
         }
         let owner = cx.weak_entity();
@@ -457,16 +457,16 @@ impl Condr {
     }
 
     fn ask_file_prompts_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        for deferred in std::mem::take(&mut self.preview_tab.deferred) {
+        for deferred in std::mem::take(&mut self.preview_pane.deferred) {
             deferred(self, window, cx);
         }
-        if self.preview_tab.prompt_open {
+        if self.preview_pane.prompt_open {
             return;
         }
-        let Some(prompt) = self.preview_tab.prompts.pop_front() else {
+        let Some(prompt) = self.preview_pane.prompts.pop_front() else {
             return;
         };
-        self.preview_tab.prompt_open = true;
+        self.preview_pane.prompt_open = true;
         match prompt {
             FilePrompt::Unsaved(unsaved) => self.ask_unsaved(unsaved, window, cx),
             FilePrompt::Conflict { key, tab_id, after } => {
@@ -476,7 +476,7 @@ impl Condr {
     }
 
     fn prompt_answered(&mut self, cx: &mut Context<Self>) {
-        self.preview_tab.prompt_open = false;
+        self.preview_pane.prompt_open = false;
         cx.notify();
     }
 
@@ -490,7 +490,7 @@ impl Condr {
         cx: &mut Context<Self>,
     ) {
         let Some((path, _)) = self
-            .preview_tab
+            .preview_pane
             .editors
             .get(&(key, tab_id))
             .and_then(|editor| editor.shown.clone())
@@ -543,7 +543,7 @@ impl Condr {
 
     /// Drops the Editor's edits and shows the file as it now is.
     fn discard_file_edits(&mut self, key: ConnectionKey, tab_id: TabId, cx: &mut Context<Self>) {
-        let Some(editor) = self.preview_tab.editors.get_mut(&(key, tab_id)) else {
+        let Some(editor) = self.preview_pane.editors.get_mut(&(key, tab_id)) else {
             return;
         };
         editor.dirty = false;
@@ -647,7 +647,7 @@ impl Condr {
         cx: &mut Context<Self>,
     ) {
         let dirty = self
-            .preview_tab
+            .preview_pane
             .editors
             .iter()
             .find(|((key, tab_id), editor)| {
@@ -691,7 +691,7 @@ impl Condr {
                 ChoiceStyle::Primary,
                 true,
                 move |this, window, cx| {
-                    if let Some(editor) = this.preview_tab.editors.get_mut(&(key, tab_id)) {
+                    if let Some(editor) = this.preview_pane.editors.get_mut(&(key, tab_id)) {
                         let text = editor.state.read(cx).value().to_string();
                         cx.write_to_clipboard(ClipboardItem::new_string(text));
                         editor.dirty = false;
@@ -724,7 +724,7 @@ impl Condr {
                     ChoiceStyle::Plain,
                     true,
                     move |this, window, cx| {
-                        if let Some(editor) = this.preview_tab.editors.get_mut(&(key, tab_id)) {
+                        if let Some(editor) = this.preview_pane.editors.get_mut(&(key, tab_id)) {
                             editor.dirty = false;
                         }
                         if let Some(after) = resume(&skip) {
@@ -742,7 +742,7 @@ impl Condr {
     /// The text of a Preview Tab that is going away without this Client's say, kept for
     /// the question `ask_file_prompts` puts.
     pub(in crate::app) fn keep_unsaved(&mut self, key: ConnectionKey, tab_id: TabId, cx: &App) {
-        let Some(editor) = self.preview_tab.editors.get_mut(&(key, tab_id)) else {
+        let Some(editor) = self.preview_pane.editors.get_mut(&(key, tab_id)) else {
             return;
         };
         if !editor.dirty {
@@ -762,7 +762,7 @@ impl Condr {
             crlf: editor.crlf,
             conflicted: false,
         };
-        self.preview_tab
+        self.preview_pane
             .prompts
             .push_back(FilePrompt::Unsaved(unsaved));
     }

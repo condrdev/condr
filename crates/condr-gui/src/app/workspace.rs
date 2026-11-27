@@ -163,7 +163,7 @@ impl Condr {
             .filter(|_| page.is_none())
             .and_then(|tab| match tab.content() {
                 TabContent::Diff(diff) => {
-                    Some(self.render_diff_tab(key, workspace_id, active_tab, diff.path(), cx))
+                    Some(self.render_diff_pane(key, workspace_id, active_tab, diff.path(), cx))
                 }
                 TabContent::File(file) => {
                     Some(self.render_file_tab(view, key, workspace_id, active_tab, file.path(), cx))
@@ -332,7 +332,7 @@ impl Condr {
             // A Preview Tab with unsaved text marks it where the close button appears, as
             // VS Code does, on the Tab's resting colour; hovering swaps in the close button.
             let unsaved = self
-                .preview_tab
+                .preview_pane
                 .editors
                 .get(&(key, tab_id))
                 .is_some_and(|editor| editor.dirty);

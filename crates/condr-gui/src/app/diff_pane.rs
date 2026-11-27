@@ -58,7 +58,7 @@ pub(super) struct DiffCommit {
 
 /// How this Client shows the Diff Tabs.
 #[derive(Default)]
-pub(super) struct DiffTabState {
+pub(super) struct DiffPaneState {
     /// The Diff Tabs' viewers, by connection and Tab; pruned with the Tabs.
     pub(super) viewers: HashMap<(ConnectionKey, TabId), DiffViewer>,
     /// Every Diff Tab shows one column rather than two (ADR 0046): how this person reads
@@ -71,7 +71,7 @@ pub(super) struct DiffTabState {
     pub(super) commit_message_open: bool,
 }
 
-impl DiffTabState {
+impl DiffPaneState {
     /// Forgets what `key`'s closed Workspaces and Tabs left behind; `None` is a connection
     /// gone, which leaves nothing of `key`.
     pub(super) fn retain_session(&mut self, key: ConnectionKey, session: Option<&Session>) {
@@ -98,7 +98,11 @@ impl Condr {
         cx: &mut Context<Self>,
     ) {
         // The working tree's, unless Git History puts its commit back right after (ADR 0046).
-        let left_commit = self.diff_tab.commits.remove(&(key, workspace_id)).is_some();
+        let left_commit = self
+            .diff_pane
+            .commits
+            .remove(&(key, workspace_id))
+            .is_some();
         self.send_presenting_layout_to(
             key,
             LayoutCommand::ShowViewer {
@@ -152,7 +156,7 @@ impl Condr {
     }
 
     /// The Diff Tab's body: one file's diff, or why there is none.
-    pub(super) fn render_diff_tab(
+    pub(super) fn render_diff_pane(
         &self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
@@ -173,7 +177,7 @@ impl Condr {
             (None, Some(git)) => comparison_label(git, against),
             (None, None) => t!("changes.comparison.head"),
         };
-        let viewer = self.diff_tab.viewers.get(&(key, tab_id));
+        let viewer = self.diff_pane.viewers.get(&(key, tab_id));
         let content = viewer.map_or(DiffContent::Loading, |viewer| viewer.content.clone());
         let muted = theme.muted_foreground;
         let header = viewer_header("diff-header", path, entry.map(|entry| entry.status), cx)
@@ -195,7 +199,7 @@ impl Condr {
                         .icon(Icon::new(gpui_kit::assets::IconName::Rows2))
                         .tooltip(t!("changes.diff.unified"))
                         .accessibility_label(t!("changes.diff.unified")),
-                    self.diff_tab.unified,
+                    self.diff_pane.unified,
                     move |unified, cx| {
                         let _ = owner.update(cx, |this, cx| this.set_diff_unified(unified, cx));
                     },
@@ -243,7 +247,7 @@ impl Condr {
                                 let position = position.clone();
                                 let _ = owner.update(cx, |this, _| {
                                     if let Some(viewer) =
-                                        this.diff_tab.viewers.get_mut(&(key, tab_id))
+                                        this.diff_pane.viewers.get_mut(&(key, tab_id))
                                     {
                                         viewer.clicked = Some(position);
                                     }
@@ -296,7 +300,7 @@ impl Condr {
             .and_then(|details| details.as_ref().ok())
             .map(|details| message_body(&details.message))
             .filter(|body| !body.is_empty());
-        let open = self.diff_tab.commit_message_open;
+        let open = self.diff_pane.commit_message_open;
         let owner = cx.weak_entity();
         let copy_id = commit.id.clone();
         let row = h_flex()
@@ -354,7 +358,7 @@ impl Condr {
                         })
                         .on_click(move |_, _, cx| {
                             let _ = owner.update(cx, |this, cx| {
-                                this.diff_tab.commit_message_open ^= true;
+                                this.diff_pane.commit_message_open ^= true;
                                 cx.notify();
                             });
                         }),
@@ -404,12 +408,12 @@ impl Condr {
     ) {
         // A commit's line numbers say nothing about today's file, so it opens at its top.
         if self.diff_commit(key, workspace_id, &path).is_some() {
-            self.preview_tab.pending_line = None;
+            self.preview_pane.pending_line = None;
             self.show_file_on(key, workspace_id, path, window, cx);
             return;
         }
         let clicked = self
-            .diff_tab
+            .diff_pane
             .viewers
             .get(&(key, tab_id))
             .and_then(|viewer| viewer.clicked.clone());
@@ -427,7 +431,7 @@ impl Condr {
                 _ => None,
             })
             .and_then(|hunks| file_line_for_click(hunks, clicked.as_ref()));
-        self.preview_tab.pending_line = line.map(|line| (key, workspace_id, path.clone(), line));
+        self.preview_pane.pending_line = line.map(|line| (key, workspace_id, path.clone(), line));
         self.show_file_on(key, workspace_id, path, window, cx);
     }
 
@@ -477,10 +481,10 @@ impl Condr {
             _ => {}
         }
 
-        let mode = diff_mode(self.diff_tab.unified);
+        let mode = diff_mode(self.diff_pane.unified);
         let highlighter = syntax::diff_highlighter(cx);
         let viewer = self
-            .diff_tab
+            .diff_pane
             .viewers
             .entry((key, tab_id))
             .or_insert_with(|| DiffViewer {
@@ -572,7 +576,7 @@ impl Condr {
     /// Hands every Diff the highlighter for the code theme painting now (ADR 0046).
     pub(super) fn sync_diff_highlighters(&mut self, cx: &mut Context<Self>) {
         let highlighter = syntax::diff_highlighter(cx);
-        for viewer in self.diff_tab.viewers.values_mut() {
+        for viewer in self.diff_pane.viewers.values_mut() {
             if Arc::ptr_eq(&viewer.highlighter, &highlighter) {
                 continue;
             }
@@ -585,9 +589,9 @@ impl Condr {
     }
 
     fn set_diff_unified(&mut self, unified: bool, cx: &mut Context<Self>) {
-        self.diff_tab.unified = unified;
+        self.diff_pane.unified = unified;
         let mode = diff_mode(unified);
-        for viewer in self.diff_tab.viewers.values() {
+        for viewer in self.diff_pane.viewers.values() {
             viewer
                 .state
                 .update(cx, |state, cx| state.set_mode(mode, cx));
@@ -632,7 +636,7 @@ impl Condr {
         workspace_id: WorkspaceId,
         path: &RelativePath,
     ) -> Option<&CommitSummary> {
-        self.diff_tab
+        self.diff_pane
             .commits
             .get(&(key, workspace_id))
             .filter(|chosen| chosen.path == path)

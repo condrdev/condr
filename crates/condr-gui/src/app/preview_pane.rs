@@ -20,7 +20,7 @@ pub(super) use rendering::*;
 
 /// What this Client keeps of the Preview Tabs.
 #[derive(Default)]
-pub(super) struct PreviewTabState {
+pub(super) struct PreviewPaneState {
     /// The Preview Tabs' Editors, by connection and Tab; pruned with the Tabs.
     pub(super) editors: HashMap<(ConnectionKey, TabId), FileEditor>,
     /// The 0-based line the Preview Tab lands on once it shows this file: set by the Diff
@@ -39,7 +39,7 @@ pub(super) struct PreviewTabState {
     pub(super) deferred: Vec<Continuation>,
 }
 
-impl PreviewTabState {
+impl PreviewPaneState {
     /// Whether any Preview Tab holds text it has not saved.
     pub(super) fn has_unsaved(&self) -> bool {
         self.editors.values().any(|editor| editor.dirty)
@@ -171,7 +171,7 @@ pub(super) struct FileEditor {
 pub(super) enum FileViewContent {
     Loading,
     Text,
-    /// Decoded into `PreviewTabState::images`.
+    /// Decoded into `PreviewPaneState::images`.
     Image,
     Binary,
     TooLarge {
@@ -225,14 +225,14 @@ impl Condr {
         path: &RelativePath,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let editor = self.preview_tab.editors.get(&(key, tab_id));
+        let editor = self.preview_pane.editors.get(&(key, tab_id));
         let content = editor.map_or(FileViewContent::Loading, |editor| editor.content.clone());
         let rendering = rendering_for(path).filter(|_| content == FileViewContent::Text);
         let source = editor.is_some_and(|editor| editor.source);
         let image = (content == FileViewContent::Image
             || (rendering == Some(Rendering::Svg) && !source))
             .then(|| {
-                self.preview_tab
+                self.preview_pane
                     .images
                     .get(&(key, workspace_id, path.to_relative_path_buf()))
             });
@@ -327,7 +327,7 @@ impl Condr {
             Some(Ok(image)) => Some(image_summary(image)),
             _ => None,
         });
-        let editor = self.preview_tab.editors.get(&(key, tab_id));
+        let editor = self.preview_pane.editors.get(&(key, tab_id));
         // What the person should know about editing it, most pressing first.
         let note = editor.and_then(|editor| {
             let gone = self
@@ -362,7 +362,7 @@ impl Condr {
                 source,
                 move |source, cx| {
                     let _ = owner.update(cx, |this, cx| {
-                        if let Some(editor) = this.preview_tab.editors.get_mut(&(key, tab_id)) {
+                        if let Some(editor) = this.preview_pane.editors.get_mut(&(key, tab_id)) {
                             editor.source = source;
                             // Rendered draws the Editor's text, saved or not (ADR 0045).
                             if !source && editor.dirty {
@@ -441,7 +441,7 @@ impl Condr {
             self.request_file(key, workspace_id, path.clone());
         }
 
-        if let Some(editor) = self.preview_tab.editors.get(&(key, tab_id))
+        if let Some(editor) = self.preview_pane.editors.get(&(key, tab_id))
             && let Some((shown, _)) = &editor.shown
             && *shown != path
         {
@@ -454,7 +454,7 @@ impl Condr {
             self.keep_unsaved(key, tab_id, cx);
         }
         let editor = self
-            .preview_tab
+            .preview_pane
             .editors
             .entry((key, tab_id))
             .or_insert_with(|| {
@@ -510,14 +510,18 @@ impl Condr {
                 editor.version = None;
                 // The images of the file shown before go with it.
                 let shown = (key, workspace_id, path.clone());
-                release_images(self.preview_tab.images.retain_shown(&shown), cx);
+                release_images(self.preview_pane.images.retain_shown(&shown), cx);
             }
             return;
         };
         if editor.shown.as_ref() == Some(&(path.clone(), generation)) {
             if editor.content == FileViewContent::Text
-                && let Some(line) =
-                    take_pending_line(&mut self.preview_tab.pending_line, key, workspace_id, &path)
+                && let Some(line) = take_pending_line(
+                    &mut self.preview_pane.pending_line,
+                    key,
+                    workspace_id,
+                    &path,
+                )
             {
                 editor.source = true;
                 editor
@@ -578,7 +582,7 @@ impl Condr {
         let land = (content == FileViewContent::Text)
             .then(|| {
                 take_pending_line(
-                    &mut self.preview_tab.pending_line,
+                    &mut self.preview_pane.pending_line,
                     key,
                     workspace_id,
                     &shown_path,
@@ -588,7 +592,7 @@ impl Condr {
         if !same_file {
             editor.source = false;
             let shown = (key, workspace_id, shown_path.clone());
-            release_images(self.preview_tab.images.retain_shown(&shown), cx);
+            release_images(self.preview_pane.images.retain_shown(&shown), cx);
         }
         if land.is_some() {
             editor.source = true;
@@ -610,7 +614,7 @@ impl Condr {
             _ => editor.markdown = None,
         }
         if content == FileViewContent::Image || rendering == Some(Rendering::Svg) {
-            self.preview_tab
+            self.preview_pane
                 .images
                 .want((key, workspace_id, shown_path.clone()));
         }
@@ -648,7 +652,7 @@ impl Condr {
     /// The Editor's text moved: it is unsaved while it differs from what was read.
     fn file_text_changed(&mut self, key: ConnectionKey, tab_id: TabId, cx: &mut Context<Self>) {
         self.schedule_change_marks(key, tab_id, cx);
-        let Some(editor) = self.preview_tab.editors.get_mut(&(key, tab_id)) else {
+        let Some(editor) = self.preview_pane.editors.get_mut(&(key, tab_id)) else {
             return;
         };
         let dirty =
@@ -689,7 +693,7 @@ impl Condr {
 
 #[cfg(test)]
 mod tests {
-    use super::{PreviewTabState, changed_span};
+    use super::{PreviewPaneState, changed_span};
     use condr_core::Session;
 
     #[test]
@@ -711,13 +715,13 @@ mod tests {
     }
 
     #[test]
-    fn closing_a_workspace_drops_the_line_its_preview_tab_was_to_land_on() {
+    fn closing_a_workspace_drops_the_line_its_preview_pane_was_to_land_on() {
         let mut session = Session::new();
         session.create_workspace(std::env::temp_dir()).unwrap();
         let id = session.workspaces()[0].id();
-        let mut state = PreviewTabState {
+        let mut state = PreviewPaneState {
             pending_line: Some((1, id, "README.md".into(), 10)),
-            ..PreviewTabState::default()
+            ..PreviewPaneState::default()
         };
         state.retain_session(2, None);
         assert!(
@@ -730,7 +734,7 @@ mod tests {
     }
 
     #[test]
-    fn closing_the_preview_tab_lets_its_images_go() {
+    fn closing_the_preview_pane_lets_its_images_go() {
         let mut session = Session::new();
         session.create_workspace(std::env::temp_dir()).unwrap();
         let id = session.workspaces()[0].id();
@@ -742,7 +746,7 @@ mod tests {
                 },
             )
             .unwrap();
-        let mut view = PreviewTabState::default();
+        let mut view = PreviewPaneState::default();
         assert!(view.images.want((1, id, "logo.png".into())));
         view.retain_session(1, Some(&session));
         assert!(

@@ -144,7 +144,7 @@ impl Condr {
                     path,
                     kind,
                 } => {
-                    self.preview_tab
+                    self.preview_pane
                         .deferred
                         .push(Box::new(move |this, window, cx| {
                             let name = path.file_name().unwrap_or_default().to_owned();
@@ -168,7 +168,7 @@ impl Condr {
                     to,
                     kind,
                 } => {
-                    self.preview_tab
+                    self.preview_pane
                         .deferred
                         .push(Box::new(move |this, window, cx| {
                             let name = to.file_name().unwrap_or_default().to_owned();
@@ -222,8 +222,8 @@ impl Condr {
                 }
                 if kind == FileKind::File {
                     // A new file opens in Source with the cursor in it.
-                    self.preview_tab.pending_line = Some((key, workspace_id, path.clone(), 0));
-                    self.preview_tab
+                    self.preview_pane.pending_line = Some((key, workspace_id, path.clone(), 0));
+                    self.preview_pane
                         .deferred
                         .push(Box::new(move |this, window, cx| {
                             this.show_file_on(key, workspace_id, path, window, cx);
@@ -246,7 +246,7 @@ impl Condr {
                     })
                 };
                 // The Server moved the Preview Tab; its text and folds follow here.
-                for ((editor_key, _), editor) in &mut self.preview_tab.editors {
+                for ((editor_key, _), editor) in &mut self.preview_pane.editors {
                     if *editor_key == key
                         && editor.workspace_id == workspace_id
                         && let Some((shown, generation)) = &mut editor.shown
