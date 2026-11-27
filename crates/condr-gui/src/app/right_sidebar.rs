@@ -505,7 +505,7 @@ impl Condr {
 /// A list of the right sidebar, scrolled with its scrollbar always shown: a list longer
 /// than the sidebar says so before anyone scrolls it. Kit's `overflow_y_scrollbar` follows
 /// the theme's mode, which on macOS hides the bar until a scroll. Its own styles size it
-/// in its parent; `content` is what scrolls.
+/// in its parent; `content` is what scrolls, kept clear of the bar drawn over its edge.
 #[derive(IntoElement)]
 pub(super) struct SidebarList {
     id: ElementId,
@@ -545,6 +545,7 @@ impl RenderOnce for SidebarList {
                     .flex_col()
                     .overflow_y_scroll()
                     .track_scroll(&handle)
+                    .pr(Scrollbar::width())
                     .child(self.content.flex_none().min_h_full()),
             )
             .child(
