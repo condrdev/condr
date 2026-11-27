@@ -1,4 +1,4 @@
-//! What the Preview Tab renders besides text (ADR 0037): images, decoded here with their
+//! What the Preview Pane renders besides text (ADR 0037): images, decoded here with their
 //! frames split so Condr rather than GPUI's `img` decides when an animation moves on, and
 //! Markdown, through GPUI Kit's TextView with Condr's images, links and highlighting. Every
 //! image comes from the Server through `ReadFile`, so a remote Workspace renders the same.
@@ -22,10 +22,10 @@ const MAX_DECODED_BYTES: usize = 256 << 20;
 /// A frame asking for less shows for [`SHORT_FRAME_DELAY`], as browsers do.
 const MIN_FRAME_DELAY: Duration = Duration::from_millis(20);
 const SHORT_FRAME_DELAY: Duration = Duration::from_millis(100);
-/// The widest a rendered Markdown file's text runs, in rems, centred in the Tab.
+/// The widest a rendered Markdown file's text runs, in rems, centred in the Pane.
 const MARKDOWN_MAX_WIDTH: f32 = 48.;
 
-/// A file the Preview Tab can render instead of showing its text.
+/// A file the Preview Pane can render instead of showing its text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::app) enum Rendering {
     Markdown,
@@ -65,7 +65,7 @@ pub(in crate::app) struct DecodedImage {
     /// When the redraw that shows the next frame is due, so drawing again in between
     /// does not schedule another one.
     wake: Mutex<Option<Instant>>,
-    /// In image pixels, for the Preview Tab's header.
+    /// In image pixels, for the Preview Pane's header.
     pub(in crate::app) size: Size<u32>,
     pub(in crate::app) file_bytes: usize,
 }
@@ -201,13 +201,13 @@ fn animation(frames: image::Frames<'_>) -> Result<Vec<(Arc<RenderImage>, Duratio
 /// One file of one Workspace on one connection.
 pub(in crate::app) type ImageKey = (ConnectionKey, WorkspaceId, RelativePathBuf);
 
-/// The Preview Tab's images: the file it shows when that is one, and the ones its
+/// The Preview Pane's images: the file it shows when that is one, and the ones its
 /// Markdown draws. Shared with the image loader Kit's TextView calls during layout,
 /// which cannot reach `Condr`.
 #[derive(Clone, Default)]
 pub(in crate::app) struct PreviewImages(Arc<Mutex<HashMap<ImageKey, ImageSlot>>>);
 
-/// Why the Preview Tab draws no picture: what the file is, which is no fault, or what went
+/// Why the Preview Pane draws no picture: what the file is, which is no fault, or what went
 /// wrong reading or decoding it.
 #[derive(Clone, Debug, PartialEq)]
 pub(in crate::app) enum NoImage {
@@ -281,7 +281,7 @@ impl PreviewImages {
         dropped
     }
 
-    /// Keeps, of `shown`'s Workspace, only `shown` itself: a Preview Tab that shows
+    /// Keeps, of `shown`'s Workspace, only `shown` itself: a Preview Pane that shows
     /// another file lets the last one's images go.
     pub(in crate::app) fn retain_shown(&self, shown: &ImageKey) -> Vec<Arc<DecodedImage>> {
         self.retain(|image| image.0 != shown.0 || image.1 != shown.1 || image == shown)
@@ -459,7 +459,7 @@ impl Condr {
         .detach();
     }
 
-    /// A rendered Markdown file: GPUI Kit's TextView over the Tab's state, its text centred
+    /// A rendered Markdown file: GPUI Kit's TextView over the Pane's state, its text centred
     /// at a readable width, its images and links resolved in the Workspace.
     #[allow(clippy::too_many_arguments)]
     pub(in crate::app) fn render_markdown(
@@ -476,7 +476,7 @@ impl Condr {
         let wheel_list = list.clone();
         let theme = cx.theme();
         let rem = theme.font_size;
-        // Padding rather than a narrower column keeps the scrollbar at the Tab's edge.
+        // Padding rather than a narrower column keeps the scrollbar at the Pane's edge.
         let gutter = ((view.workspace_size.width - rem * MARKDOWN_MAX_WIDTH) / 2.).max(rem * 1.5);
         let base = path
             .parent()
@@ -620,7 +620,7 @@ impl Condr {
     }
 }
 
-/// An image file, scaled down to fit the Tab and never up.
+/// An image file, scaled down to fit the Pane and never up.
 pub(in crate::app) fn render_image(image: Arc<DecodedImage>) -> AnyElement {
     div()
         .debug_selector(|| "file-image".into())
@@ -643,7 +643,7 @@ pub(in crate::app) fn render_image(image: Arc<DecodedImage>) -> AnyElement {
         .into_any_element()
 }
 
-/// An image's pixel size and file size, as the Preview Tab's header shows them.
+/// An image's pixel size and file size, as the Preview Pane's header shows them.
 pub(in crate::app) fn image_summary(image: &DecodedImage) -> String {
     format!(
         "{}×{} · {}",
@@ -654,7 +654,7 @@ pub(in crate::app) fn image_summary(image: &DecodedImage) -> String {
 }
 
 /// GPUI Kit's text colours, as Kit derives them for its own TextViews, with code blocks
-/// in the code font and the Highlight theme's colours like the Tab's source view.
+/// in the code font and the Highlight theme's colours like the Pane's source view.
 fn markdown_style(theme: &Theme, code_font: SharedString, code_size: Pixels) -> TextViewStyle {
     let code = &theme.highlight_theme.style;
     let mut code_block = StyleRefinement::default()
@@ -689,7 +689,7 @@ fn markdown_style(theme: &Theme, code_font: SharedString, code_size: Pixels) -> 
 }
 
 /// Shows an image the Workspace does not hold, such as a README's badges, as its alt
-/// text: the Preview Tab reaches nothing outside the Workspace.
+/// text: the Preview Pane reaches nothing outside the Workspace.
 struct UnreachableImages;
 
 impl MarkdownPlugin for UnreachableImages {
@@ -772,7 +772,7 @@ enum LinkTarget {
 }
 
 /// Where a click on a rendered Markdown link goes: the web and mail to the system, a
-/// file of the Workspace to the Preview Tab, anything else nowhere.
+/// file of the Workspace to the Preview Pane, anything else nowhere.
 fn link_target(base: &RelativePath, url: &str) -> LinkTarget {
     match scheme(url) {
         Some(scheme)
@@ -783,7 +783,7 @@ fn link_target(base: &RelativePath, url: &str) -> LinkTarget {
             LinkTarget::Browser
         }
         Some(_) => LinkTarget::Nothing,
-        // A directory, which the Preview Tab cannot show.
+        // A directory, which the Preview Pane cannot show.
         None if url
             .split(['#', '?'])
             .next()
@@ -894,7 +894,7 @@ mod tests {
     }
 
     /// GPUI's `img` freezes an animation when the system asks for reduced motion; the
-    /// Preview Tab plays it anyway, redrawing at the animation's own pace (ADR 0037).
+    /// Preview Pane plays it anyway, redrawing at the animation's own pace (ADR 0037).
     #[cfg(feature = "test-support")]
     #[test]
     fn an_animation_keeps_playing_under_reduced_motion() {

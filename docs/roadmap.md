@@ -67,7 +67,7 @@ ADR 要回答三个问题：
 
 这些还没有足够的使用证据；出现两次以上真实摩擦再排。外部用户的 Issue 和单人 dogfood 一样算数。
 
-- Diff Tab 内跳到编辑器。
+- Diff Pane 内跳到编辑器。
 - GUI 里启动 Agent 的菜单：列出这台 Device 上装了哪些 Agent，点一下就在 Pane 里启动。现在在终端里输入命令已经够快；从任务启动 Agent 由 ADR 0068 的 Start 承担。真要做时，用协议里现成的 `AgentCommand::Available` 和 `Start`。
 - 定时任务：按 cron 启动新的 Agent，或定时给已有的 Agent 发提示。现有的 `agent start`、`agent prompt` 和 `agent wait` 已经覆盖了大半。它会让 Condr 从看着 Agent 干活走向无人值守地派活，用户的期待也会跟着变，所以等有人提出需求再定。
 - `observe` 与 `control` 两级 capability（观察者拿 Bootstrap 和视觉流，不能输入、改布局、读文件；配对时决定，`condr server clients` 可看可改；开 Stream，即转发与文件传输，归 `control`，ADR 0061）：触发条件是第二个人开始共用同一个 Server。之后再谈设备密钥进 OS Keychain、密钥轮换、审计日志。不做账号体系、不做公网 listener。

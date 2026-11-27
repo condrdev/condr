@@ -400,98 +400,8 @@ impl Render for TerminalPanel {
                 )
             });
 
-        let menu_owner = self.owner.clone();
-        let pane_menu = Button::new(format!("terminal-pane-menu-{key}-{}", pane_id.as_u64()))
-            .icon(IconName::EllipsisVertical)
-            .xsmall()
-            .ghost()
-            .tab_stop(false)
-            .tooltip(t!("terminal.pane_menu.tooltip"))
-            .accessibility_label(t!("terminal.pane_menu.tooltip"))
-            .debug_selector(move || format!("terminal-pane-menu-{}", pane_id.as_u64()))
-            .dropdown_menu(move |menu, window, cx| {
-                let _ = menu_owner.update(cx, |app, cx| {
-                    app.set_target_pane(key, pane_id, cx);
-                });
-                menu.menu_with_enable(t!("terminal.pane_menu.find"), Box::new(Find), can_mutate)
-                    .separator()
-                    .menu_with_enable(
-                        t!("terminal.pane_menu.split_right"),
-                        Box::new(SplitRight),
-                        can_mutate,
-                    )
-                    .menu_with_enable(
-                        t!("terminal.pane_menu.split_down"),
-                        Box::new(SplitDown),
-                        can_mutate,
-                    )
-                    .separator()
-                    .submenu(
-                        t!("terminal.pane_menu.swap"),
-                        window,
-                        cx,
-                        move |menu, _, _| {
-                            menu.menu_with_enable(
-                                t!("terminal.pane_menu.swap_left"),
-                                Box::new(SwapLeft),
-                                can_mutate,
-                            )
-                            .menu_with_enable(
-                                t!("terminal.pane_menu.swap_right"),
-                                Box::new(SwapRight),
-                                can_mutate,
-                            )
-                            .menu_with_enable(
-                                t!("terminal.pane_menu.swap_up"),
-                                Box::new(SwapUp),
-                                can_mutate,
-                            )
-                            .menu_with_enable(
-                                t!("terminal.pane_menu.swap_down"),
-                                Box::new(SwapDown),
-                                can_mutate,
-                            )
-                        },
-                    )
-                    .separator()
-                    .menu_with_enable(
-                        t!("terminal.pane_menu.toggle_zoom"),
-                        Box::new(ToggleZoom),
-                        can_mutate,
-                    )
-                    .menu_with_enable(
-                        t!("terminal.pane_menu.close_pane"),
-                        Box::new(ClosePane),
-                        can_mutate,
-                    )
-            })
-            .anchor(Anchor::TopRight);
-        // The zoom state is otherwise invisible: a zoomed Pane looks like a one-Pane Tab.
-        let zoom_owner = self.owner.clone();
-        let zoom_label = if zoomed {
-            t!("terminal.zoom_out")
-        } else {
-            t!("terminal.zoom_in")
-        };
-        let pane_zoom = Button::new(format!("terminal-pane-zoom-{key}-{}", pane_id.as_u64()))
-            .icon(Icon::new(if zoomed {
-                super::icons::CondrIconName::Minimize2
-            } else {
-                super::icons::CondrIconName::Maximize2
-            }))
-            .xsmall()
-            .ghost()
-            .tab_stop(false)
-            .tooltip_with_action(zoom_label.clone(), &ToggleZoom, Some(SHORTCUT_CONTEXT))
-            .accessibility_label(zoom_label)
-            .debug_selector(move || format!("terminal-pane-zoom-{}", pane_id.as_u64()))
-            .disabled(!can_mutate)
-            .on_click(move |_, _, cx| {
-                let _ = zoom_owner.update(cx, |app, cx| {
-                    app.set_target_pane(key, pane_id, cx);
-                    app.toggle_zoom();
-                });
-            });
+        let (pane_zoom, pane_menu) =
+            pane_controls(&self.owner, key, pane_id, zoomed, can_mutate, true);
         let title_tooltip = pane_title.clone();
 
         // A card in the Tab's gaps; the focused one of several is outlined in the accent.
@@ -663,7 +573,127 @@ impl Render for TerminalPanel {
     }
 }
 /// What the card's contents round their corners to, inside its one-pixel border.
-const INNER_RADIUS: Pixels = px(7.);
+pub(super) const INNER_RADIUS: Pixels = px(7.);
+
+/// A Pane header's zoom button and menu, a terminal's or a viewer's (ADR 0078): a viewer has
+/// no Find.
+pub(super) fn pane_controls(
+    owner: &WeakEntity<Condr>,
+    key: ConnectionKey,
+    pane_id: PaneId,
+    zoomed: bool,
+    can_mutate: bool,
+    terminal: bool,
+) -> (Button, AnyElement) {
+    let menu_owner = owner.clone();
+    let pane_menu = Button::new(format!("terminal-pane-menu-{key}-{}", pane_id.as_u64()))
+        .icon(IconName::EllipsisVertical)
+        .xsmall()
+        .ghost()
+        .tab_stop(false)
+        .tooltip(t!("terminal.pane_menu.tooltip"))
+        .accessibility_label(t!("terminal.pane_menu.tooltip"))
+        .debug_selector(move || format!("terminal-pane-menu-{}", pane_id.as_u64()))
+        .dropdown_menu(move |menu, window, cx| {
+            let _ = menu_owner.update(cx, |app, cx| {
+                app.set_target_pane(key, pane_id, cx);
+            });
+            let move_owner = menu_owner.clone();
+            let menu = if terminal {
+                menu.menu_with_enable(t!("terminal.pane_menu.find"), Box::new(Find), can_mutate)
+                    .separator()
+            } else {
+                menu
+            };
+            menu.menu_with_enable(
+                t!("terminal.pane_menu.split_right"),
+                Box::new(SplitRight),
+                can_mutate,
+            )
+            .menu_with_enable(
+                t!("terminal.pane_menu.split_down"),
+                Box::new(SplitDown),
+                can_mutate,
+            )
+            .separator()
+            .submenu(
+                t!("terminal.pane_menu.swap"),
+                window,
+                cx,
+                move |menu, _, _| {
+                    menu.menu_with_enable(
+                        t!("terminal.pane_menu.swap_left"),
+                        Box::new(SwapLeft),
+                        can_mutate,
+                    )
+                    .menu_with_enable(
+                        t!("terminal.pane_menu.swap_right"),
+                        Box::new(SwapRight),
+                        can_mutate,
+                    )
+                    .menu_with_enable(
+                        t!("terminal.pane_menu.swap_up"),
+                        Box::new(SwapUp),
+                        can_mutate,
+                    )
+                    .menu_with_enable(
+                        t!("terminal.pane_menu.swap_down"),
+                        Box::new(SwapDown),
+                        can_mutate,
+                    )
+                },
+            )
+            // ADR 0078: out of its Tab, into one of its own.
+            .item(
+                PopupMenuItem::new(t!("terminal.pane_menu.move_to_new_tab"))
+                    .disabled(!can_mutate)
+                    .on_click(move |_, _, cx| {
+                        let _ = move_owner.update(cx, |app, _| {
+                            app.send_layout_to(key, LayoutCommand::MovePaneToNewTab { pane_id });
+                        });
+                    }),
+            )
+            .separator()
+            .menu_with_enable(
+                t!("terminal.pane_menu.toggle_zoom"),
+                Box::new(ToggleZoom),
+                can_mutate,
+            )
+            .menu_with_enable(
+                t!("terminal.pane_menu.close_pane"),
+                Box::new(ClosePane),
+                can_mutate,
+            )
+        })
+        .anchor(Anchor::TopRight);
+    // The zoom state is otherwise invisible: a zoomed Pane looks like a one-Pane Tab.
+    let zoom_owner = owner.clone();
+    let zoom_label = if zoomed {
+        t!("terminal.zoom_out")
+    } else {
+        t!("terminal.zoom_in")
+    };
+    let pane_zoom = Button::new(format!("terminal-pane-zoom-{key}-{}", pane_id.as_u64()))
+        .icon(Icon::new(if zoomed {
+            super::icons::CondrIconName::Minimize2
+        } else {
+            super::icons::CondrIconName::Maximize2
+        }))
+        .xsmall()
+        .ghost()
+        .tab_stop(false)
+        .tooltip_with_action(zoom_label.clone(), &ToggleZoom, Some(SHORTCUT_CONTEXT))
+        .accessibility_label(zoom_label)
+        .debug_selector(move || format!("terminal-pane-zoom-{}", pane_id.as_u64()))
+        .disabled(!can_mutate)
+        .on_click(move |_, _, cx| {
+            let _ = zoom_owner.update(cx, |app, cx| {
+                app.set_target_pane(key, pane_id, cx);
+                app.toggle_zoom();
+            });
+        });
+    (pane_zoom, pane_menu.into_any_element())
+}
 
 /// A program's progress (OSC 9;4, or a percentage in its OSC 7501 status) as a thin bar
 /// along the top of its terminal (ADR 0054), in the terminal colour scheme's own blue,

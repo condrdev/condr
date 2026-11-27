@@ -43,7 +43,7 @@ const KEYBINDINGS_TABLE: [&str; 2] = ["client", "keybindings"];
 // Each mode's terminal colour scheme, which the interface takes its colours from (ADR 0062).
 const DARK_COLOR_SCHEME_KEY: &str = "dark_color_scheme";
 const LIGHT_COLOR_SCHEME_KEY: &str = "light_color_scheme";
-// The Preview Tab's bat theme (ADR 0032).
+// The Preview Pane's bat theme (ADR 0032).
 const CODE_TABLE: [&str; 2] = ["client", "code"];
 const CODE_THEME_KEY: &str = "theme";
 

@@ -1,4 +1,4 @@
-//! File-type icons for the Files sidebar and the Preview Tab (ADR 0018): the
+//! File-type icons for the Files sidebar and the Preview Pane (ADR 0018): the
 //! JetBrains set (assets/icons/NOTICE-FILE-ICONS). Filename associations come from
 //! native file-type registrations and bundled language definitions, generated alongside
 //! the unmodified light/dark SVGs by `script/generate-file-icons.mjs`.

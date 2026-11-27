@@ -4,11 +4,11 @@ use std::path::{Path, PathBuf};
 
 use common::*;
 
-use relative_path::{RelativePath, RelativePathBuf};
+use relative_path::RelativePathBuf;
 
 use condr_core::{
     PaneDirection, PaneLayout, Session, SessionSnapshot, SnapshotError, SplitDirection, Viewer,
-    WorkspaceId,
+    ViewerKind, WorkspaceId,
 };
 
 #[test]
@@ -1013,125 +1013,53 @@ fn resizing_moves_the_divider_in_the_key_direction_from_either_side() {
 }
 
 #[test]
-fn show_diff_keeps_one_diff_tab_per_workspace_and_survives_a_snapshot() {
+fn a_viewer_opens_in_a_tab_of_its_own_and_retargets_in_place() {
     let mut session = Session::new();
-    let root = PathBuf::from("projects/diff");
-    let workspace_id = session.create_workspace(root).unwrap();
+    let workspace_id = session
+        .create_workspace(PathBuf::from("projects/viewers"))
+        .unwrap();
     let terminal_tab = session.workspaces()[0].tabs()[0].id();
+    for path in ["../escape.rs", ""] {
+        assert_eq!(
+            session.show_viewer(
+                workspace_id,
+                Viewer::Diff {
+                    path: RelativePathBuf::from(path)
+                }
+            ),
+            None,
+            "a path outside the Workspace root is refused"
+        );
+    }
 
-    assert_eq!(
-        session.show_viewer(
-            workspace_id,
-            Viewer::Diff {
-                path: RelativePathBuf::from("../escape.rs")
-            }
-        ),
-        None,
-        "a path outside the Workspace root is refused"
-    );
-    assert_eq!(
-        session.show_viewer(
-            workspace_id,
-            Viewer::Diff {
-                path: RelativePathBuf::new()
-            }
-        ),
-        None
-    );
-
-    let diff_tab = session
-        .show_viewer(
-            workspace_id,
-            Viewer::Diff {
-                path: RelativePathBuf::from("src/lib.rs"),
-            },
-        )
+    let diff = |path: &str| Viewer::Diff {
+        path: RelativePathBuf::from(path),
+    };
+    let (diff_tab, diff_pane) = session
+        .show_viewer(workspace_id, diff("src/lib.rs"))
         .unwrap();
     assert_ne!(diff_tab, terminal_tab);
     let tab = session.tab(diff_tab).unwrap();
-    assert_eq!(tab.name(), condr_core::DIFF_TAB_NAME);
-    assert!(tab.panes().is_empty());
-    assert!(tab.focused_pane().is_none());
-    assert!(tab.layout().is_none());
-    assert_eq!(tab.diff().unwrap().path(), RelativePath::new("src/lib.rs"));
-
-    // A second file retargets the same Tab; nothing accumulates.
     assert_eq!(
-        session.show_viewer(
-            workspace_id,
-            Viewer::Diff {
-                path: RelativePathBuf::from("README.md")
-            }
-        ),
-        Some(diff_tab)
+        tab.name(),
+        "",
+        "a viewer's Tab is named after it, not by it"
+    );
+    assert_eq!(tab.panes().len(), 1);
+    let pane = tab.focused_pane().unwrap();
+    assert_eq!(pane.id(), diff_pane);
+    assert!(!pane.is_terminal());
+    assert_eq!(pane.cwd(), None);
+    assert_eq!(pane.viewer(), Some(&diff("src/lib.rs")));
+
+    // A second file retargets the same Pane; nothing accumulates.
+    assert_eq!(
+        session.show_viewer(workspace_id, diff("README.md")),
+        Some((diff_tab, diff_pane))
     );
     assert_eq!(session.workspaces()[0].tabs().len(), 2);
-    assert_eq!(
-        session
-            .diff_tab(workspace_id)
-            .unwrap()
-            .diff()
-            .unwrap()
-            .path(),
-        RelativePath::new("README.md")
-    );
-
-    // A Tab created beside it inherits the Workspace root rather than a Pane cwd.
-    let new_tab = session.create_tab(workspace_id, None).unwrap();
-    assert_eq!(
-        session.tab(new_tab).unwrap().focused_pane().unwrap().cwd(),
-        Some(Path::new("projects/diff"))
-    );
-
-    let restored = Session::restore(session.snapshot()).unwrap();
-    let tab = restored.tab(diff_tab).unwrap();
-    assert_eq!(tab.diff().unwrap().path(), RelativePath::new("README.md"));
-    assert_eq!(tab.name(), condr_core::DIFF_TAB_NAME);
-
-    // Closing the Diff Tab frees no Panes and leaves the terminals alone.
-    let outcome = session.close_tab(diff_tab).unwrap();
-    assert!(outcome.panes().is_empty());
-    assert_eq!(outcome.tabs(), &[diff_tab]);
-    assert_eq!(session.workspaces().first().unwrap().tabs().len(), 2);
-    assert!(session.diff_tab(workspace_id).is_none());
-}
-
-#[test]
-fn show_file_keeps_one_preview_tab_beside_the_diff_tab_and_survives_a_snapshot() {
-    let mut session = Session::new();
-    let workspace_id = session
-        .create_workspace(PathBuf::from("projects/files"))
-        .unwrap();
-    let terminal_tab = session.workspaces()[0].tabs()[0].id();
-
-    assert_eq!(
-        session.show_viewer(
-            workspace_id,
-            Viewer::File {
-                path: RelativePathBuf::from("../escape.rs")
-            }
-        ),
-        None
-    );
-    assert_eq!(
-        session.show_viewer(
-            workspace_id,
-            Viewer::File {
-                path: RelativePathBuf::new()
-            }
-        ),
-        None
-    );
-
-    let diff_tab = session
-        .show_viewer(
-            workspace_id,
-            Viewer::Diff {
-                path: RelativePathBuf::from("src/lib.rs"),
-            },
-        )
-        .unwrap();
-    let file_tab = session
+    // The Preview is a kind of its own, in a Tab of its own.
+    let (file_tab, file_pane) = session
         .show_viewer(
             workspace_id,
             Viewer::File {
@@ -1139,57 +1067,99 @@ fn show_file_keeps_one_preview_tab_beside_the_diff_tab_and_survives_a_snapshot()
             },
         )
         .unwrap();
-    assert_ne!(file_tab, diff_tab, "the Preview Tab is its own viewer kind");
-    assert_ne!(file_tab, terminal_tab);
-    let tab = session.tab(file_tab).unwrap();
-    assert_eq!(tab.name(), condr_core::FILE_TAB_NAME);
-    assert!(tab.panes().is_empty());
-    assert!(tab.diff().is_none());
-    assert_eq!(tab.file().unwrap().path(), RelativePath::new("src/main.rs"));
+    assert_ne!(file_tab, diff_tab);
+    assert_eq!(
+        session
+            .viewer_pane(workspace_id, ViewerKind::Diff)
+            .map(|(tab, pane)| (tab.id(), pane.id())),
+        Some((diff_tab, diff_pane))
+    );
 
-    // A second file retargets the Preview Tab and leaves the Diff Tab alone.
-    assert_eq!(
-        session.show_viewer(
-            workspace_id,
-            Viewer::File {
-                path: RelativePathBuf::from("README.md")
-            }
-        ),
-        Some(file_tab)
-    );
-    assert_eq!(session.workspaces()[0].tabs().len(), 3);
-    assert_eq!(
-        session
-            .file_tab(workspace_id)
-            .unwrap()
-            .file()
-            .unwrap()
-            .path(),
-        RelativePath::new("README.md")
-    );
-    assert_eq!(
-        session
-            .diff_tab(workspace_id)
-            .unwrap()
-            .diff()
-            .unwrap()
-            .path(),
-        RelativePath::new("src/lib.rs")
-    );
+    // Splitting a viewer starts a terminal in the root.
+    let terminal = session
+        .split_pane(file_pane, SplitDirection::Horizontal, 0.5)
+        .unwrap();
+    let terminal = session.pane(terminal).unwrap();
+    assert!(terminal.is_terminal());
+    assert_eq!(terminal.cwd(), Some(Path::new("projects/viewers")));
 
     let restored = Session::restore(session.snapshot()).unwrap();
-    let tab = restored.tab(file_tab).unwrap();
-    assert_eq!(tab.file().unwrap().path(), RelativePath::new("README.md"));
-    assert_eq!(tab.name(), condr_core::FILE_TAB_NAME);
+    assert_eq!(
+        restored.pane(diff_pane).unwrap().viewer(),
+        Some(&diff("README.md"))
+    );
+    assert_eq!(restored.tab(file_tab).unwrap().panes().len(), 2);
 
-    let outcome = session.close_tab(file_tab).unwrap();
-    assert!(outcome.panes().is_empty());
-    assert!(session.file_tab(workspace_id).is_none());
-    assert!(session.diff_tab(workspace_id).is_some());
+    // Closing the Diff's Tab ends its Pane, which runs nothing.
+    let outcome = session.close_tab(diff_tab).unwrap();
+    assert_eq!(outcome.panes(), &[diff_pane]);
+    assert!(
+        session
+            .viewer_pane(workspace_id, ViewerKind::Diff)
+            .is_none()
+    );
 }
 
 #[test]
-fn restore_rejects_a_second_diff_tab_and_an_escaping_diff_path() {
+fn panes_move_across_tabs_and_tabs_merge_into_each_other() {
+    let mut session = Session::new();
+    let workspace_id = session
+        .create_workspace(PathBuf::from("projects/moves"))
+        .unwrap();
+    let terminal = session.workspaces()[0].tabs()[0].panes()[0].id();
+    let (diff_tab, diff_pane) = session
+        .show_viewer(
+            workspace_id,
+            Viewer::Diff {
+                path: RelativePathBuf::from("a.rs"),
+            },
+        )
+        .unwrap();
+
+    // The Diff's Pane joins the terminal's Tab, and its own Tab closes.
+    assert!(session.move_pane(diff_pane, terminal, PaneDirection::Right));
+    assert!(session.tab(diff_tab).is_none());
+    let tabs = session.workspaces()[0].tabs();
+    assert_eq!(tabs.len(), 1);
+    assert_eq!(tabs[0].panes().len(), 2);
+    assert_eq!(tabs[0].focused_pane().unwrap().id(), diff_pane);
+    let terminal_tab = tabs[0].id();
+    // Retargeting finds it where it went.
+    assert_eq!(
+        session.show_viewer(
+            workspace_id,
+            Viewer::Diff {
+                path: RelativePathBuf::from("b.rs"),
+            },
+        ),
+        Some((terminal_tab, diff_pane))
+    );
+
+    // Moved out again, it is a Tab of its own; a Tab's only Pane cannot leave it so.
+    let alone = session.move_pane_to_new_tab(diff_pane).unwrap();
+    assert_eq!(session.workspaces()[0].tabs()[1].id(), alone);
+    assert_eq!(session.move_pane_to_new_tab(diff_pane), None);
+
+    // A Tab of two Panes merges whole, as one side beside the target.
+    let graph = session
+        .show_viewer(workspace_id, Viewer::GitGraph)
+        .unwrap()
+        .1;
+    assert!(session.move_pane(graph, diff_pane, PaneDirection::Down));
+    assert!(session.move_tab_into(alone, terminal, PaneDirection::Left));
+    let tabs = session.workspaces()[0].tabs();
+    assert_eq!(tabs.len(), 1);
+    let rects = tabs[0].pane_rects();
+    let rect = |id| *rects.iter().find(|rect| rect.id == id).unwrap();
+    assert!(rect(diff_pane).right <= rect(terminal).left + 1e-6);
+    assert!(rect(diff_pane).bottom <= rect(graph).top + 1e-6);
+    let only = tabs[0].id();
+    assert!(!session.move_tab_into(only, terminal, PaneDirection::Left));
+    assert!(Session::restore(session.snapshot()).is_ok());
+}
+
+#[test]
+fn a_0_2_diff_tab_is_dropped_and_its_terminal_tab_loads() {
     let one_diff = encode(&EncodedSession {
         workspaces: vec![EncodedWorkspace {
             id: 1,
@@ -1216,74 +1186,12 @@ fn restore_rejects_a_second_diff_tab_and_an_escaping_diff_path() {
         }],
     });
     let restored = Session::restore(SessionSnapshot::from_bytes(&one_diff).unwrap()).unwrap();
-    assert_eq!(
+    let tabs = restored.workspaces()[0].tabs();
+    assert_eq!(tabs.len(), 1);
+    assert!(tabs[0].panes()[0].is_terminal());
+    assert!(
         restored
-            .diff_tab(WorkspaceId::from_u64(1))
-            .unwrap()
-            .diff()
-            .unwrap()
-            .path(),
-        RelativePath::new("src/main.rs")
+            .viewer_pane(WorkspaceId::from_u64(1), ViewerKind::Diff)
+            .is_none()
     );
-
-    let two_diffs = encode(&EncodedSession {
-        workspaces: vec![EncodedWorkspace {
-            id: 1,
-            name: "Workspace".into(),
-            root_directory: PathBuf::from("projects/1"),
-            worktree: None,
-            tabs: vec![
-                encoded_tab(
-                    2,
-                    vec![3],
-                    EncodedLayout {
-                        root: 0,
-                        nodes: vec![EncodedLayoutNode::Pane(3)],
-                    },
-                ),
-                EncodedTab {
-                    id: 4,
-                    name: "Diff".into(),
-                    content: EncodedTabContent::Diff {
-                        path: PathBuf::from("a.rs"),
-                    },
-                },
-                EncodedTab {
-                    id: 5,
-                    name: "Diff".into(),
-                    content: EncodedTabContent::Diff {
-                        path: PathBuf::from("b.rs"),
-                    },
-                },
-            ],
-        }],
-    });
-    assert!(Session::restore(SessionSnapshot::from_bytes(&two_diffs).unwrap()).is_err());
-
-    let escaping = encode(&EncodedSession {
-        workspaces: vec![EncodedWorkspace {
-            id: 1,
-            name: "Workspace".into(),
-            root_directory: PathBuf::from("projects/1"),
-            worktree: None,
-            tabs: vec![
-                encoded_tab(
-                    2,
-                    vec![3],
-                    EncodedLayout {
-                        root: 0,
-                        nodes: vec![EncodedLayoutNode::Pane(3)],
-                    },
-                ),
-                EncodedTab {
-                    id: 4,
-                    name: "Diff".into(),
-                    content: EncodedTabContent::Diff {
-                        path: PathBuf::from("../secret"),
-                    },
-                },
-            ],
-        }],
-    });
-    assert!(Session::restore(SessionSnapshot::from_bytes(&escaping).unwrap()).is_err());
 }

@@ -8,28 +8,52 @@ pub(super) fn split_layout(
     side: PaneDirection,
     ratio: f32,
 ) -> bool {
-    match layout {
-        PaneLayout::Pane(id) if *id == target => {
-            let direction = match side {
-                PaneDirection::Left | PaneDirection::Right => SplitDirection::Horizontal,
-                PaneDirection::Up | PaneDirection::Down => SplitDirection::Vertical,
-            };
-            let (first, second) = match side {
-                PaneDirection::Left | PaneDirection::Up => (new_pane, target),
-                PaneDirection::Right | PaneDirection::Down => (target, new_pane),
-            };
-            *layout = PaneLayout::Split {
-                direction,
-                ratio,
-                first: Box::new(PaneLayout::Pane(first)),
-                second: Box::new(PaneLayout::Pane(second)),
-            };
-            true
+    split_layout_with(layout, target, PaneLayout::Pane(new_pane), side, ratio)
+}
+
+/// Attaches the layout `new` beside `target` on the given side of a fresh split.
+pub(super) fn split_layout_with(
+    layout: &mut PaneLayout,
+    target: PaneId,
+    new: PaneLayout,
+    side: PaneDirection,
+    ratio: f32,
+) -> bool {
+    fn find(layout: &mut PaneLayout, target: PaneId) -> Option<&mut PaneLayout> {
+        match layout {
+            PaneLayout::Pane(id) if *id == target => Some(layout),
+            PaneLayout::Pane(_) => None,
+            PaneLayout::Split { first, second, .. } => {
+                find(first, target).or_else(|| find(second, target))
+            }
         }
-        PaneLayout::Pane(_) => false,
+    }
+    let Some(slot) = find(layout, target) else {
+        return false;
+    };
+    let direction = match side {
+        PaneDirection::Left | PaneDirection::Right => SplitDirection::Horizontal,
+        PaneDirection::Up | PaneDirection::Down => SplitDirection::Vertical,
+    };
+    let (first, second) = match side {
+        PaneDirection::Left | PaneDirection::Up => (new, PaneLayout::Pane(target)),
+        PaneDirection::Right | PaneDirection::Down => (PaneLayout::Pane(target), new),
+    };
+    *slot = PaneLayout::Split {
+        direction,
+        ratio,
+        first: Box::new(first),
+        second: Box::new(second),
+    };
+    true
+}
+
+/// How deep a layout's deepest Pane sits, the layout itself being 1.
+pub(super) fn layout_depth(layout: &PaneLayout) -> usize {
+    match layout {
+        PaneLayout::Pane(_) => 1,
         PaneLayout::Split { first, second, .. } => {
-            split_layout(first, target, new_pane, side, ratio)
-                || split_layout(second, target, new_pane, side, ratio)
+            1 + layout_depth(first).max(layout_depth(second))
         }
     }
 }

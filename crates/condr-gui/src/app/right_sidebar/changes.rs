@@ -55,7 +55,7 @@ impl ChangesSection {
 /// How this Client reads each Workspace's changes.
 #[derive(Default)]
 pub(in crate::app) struct ChangesState {
-    /// The Workspaces whose Changes and Diff Tab compare against the base (ADR 0034); the
+    /// The Workspaces whose Changes and Diff Pane compare against the base (ADR 0034); the
     /// others compare against `HEAD`. This Client's view, remembered in the state file.
     pub(in crate::app) against_base: HashSet<(ConnectionKey, WorkspaceId)>,
     pub(in crate::app) collapsed_sections: HashSet<ChangesSection>,
@@ -82,7 +82,7 @@ impl Condr {
         cx.notify();
     }
 
-    /// What a Workspace's Changes and Diff Tab compare against (ADR 0034): the base when
+    /// What a Workspace's Changes and Diff Pane compare against (ADR 0034): the base when
     /// this Client chose it and the Server reports one, else `HEAD`.
     pub(in crate::app) fn diff_base(
         &self,
@@ -105,7 +105,7 @@ impl Condr {
         }
     }
 
-    /// What a Workspace's Changes and Diff Tabs compare against, HEAD without Git.
+    /// What a Workspace's Changes and Diff Panes compare against, HEAD without Git.
     pub(in crate::app) fn workspace_diff_base(
         &self,
         key: ConnectionKey,
@@ -116,7 +116,7 @@ impl Condr {
             .map_or(DiffBase::Head, |git| self.diff_base(key, workspace_id, git))
     }
 
-    /// Switches what the Workspace's Changes compare against. The Diff Tab shows the other
+    /// Switches what the Workspace's Changes compare against. The Diff Pane shows the other
     /// side from now on, so its answers are dropped and asked for again on the rebuild.
     pub(in crate::app) fn compare_changes_against(
         &mut self,
@@ -368,7 +368,7 @@ impl Condr {
             .into_any_element()
     }
 
-    /// A Changes row: a directory folds, a file opens in the Diff Tab and has the file menu.
+    /// A Changes row: a directory folds, a file opens in the Diff Pane and has the file menu.
     /// `node` is a repository's file count and branch when the directory is its node.
     #[allow(clippy::too_many_arguments)]
     fn render_change_row(
@@ -459,7 +459,7 @@ pub(in crate::app) fn shown_entries(
         .flat_map(move |repository| &shown_changes(repository, against).entries)
 }
 
-/// What the Changes header and the Diff Tab header say a comparison is against; only the
+/// What the Changes header and the Diff Pane header say a comparison is against; only the
 /// repository the Root is in has a base.
 pub(in crate::app) fn comparison_label(
     git: &WorkspaceGitSnapshot,

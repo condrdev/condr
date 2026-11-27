@@ -223,6 +223,11 @@ impl Condr {
             .panels
             .get(&(key, pane_id))
             .map(|panel| panel.read(cx).focus_handle.clone())
+            .or_else(|| {
+                self.viewer_panels
+                    .get(&(key, pane_id))
+                    .map(|panel| panel.read(cx).focus_handle.clone())
+            })
         else {
             return;
         };
@@ -306,30 +311,14 @@ impl Condr {
         let tab = session
             .tab(tab_id)
             .expect("presented Tab belongs to the restored Session");
-        // A viewer Tab has no Panes and no Dock (ADR 0017); the body renders it directly.
-        let Some(tab_layout) = tab.layout().cloned() else {
-            let viewer = match tab.content() {
-                TabContent::Diff(diff) => Some((true, diff.path().to_relative_path_buf())),
-                TabContent::File(file) => Some((false, file.path().to_relative_path_buf())),
-                TabContent::GitGraph => {
-                    self.sync_git_graph_view(key, _workspace_id, tab_id, window, cx);
-                    None
-                }
-                TabContent::Unsupported | TabContent::Terminals(_) => None,
-            };
-            if input_window {
-                self.terminal_input.target = None;
-            }
-            self.window_view_mut(window).dock_surface = None;
-            match viewer {
-                Some((true, path)) => self.sync_diff_view(key, _workspace_id, tab_id, path, cx),
-                Some((false, path)) => {
-                    self.sync_file_view(key, _workspace_id, tab_id, path, window, cx)
-                }
-                None => {}
-            }
-            return;
-        };
+        let tab_layout = tab.layout().cloned().expect("a Tab has a layout");
+        // A viewer Pane is a Dock panel like a terminal's (ADR 0078); what it shows is
+        // prepared here, as a terminal's arrives over the wire.
+        let viewers: Vec<(PaneId, Viewer)> = tab
+            .panes()
+            .iter()
+            .filter_map(|pane| Some((pane.id(), pane.viewer()?.clone())))
+            .collect();
         // The Pane the user targeted, while it is in this Tab; else the Tab's own focus.
         let focused = self
             .terminal_input
@@ -347,9 +336,20 @@ impl Condr {
             .zoomed_pane(tab)
             .map(PaneLayout::Pane)
             .unwrap_or(tab_layout);
-        // Where "Insert Path into Terminal" goes once a viewer Tab takes the active slot.
+        for (pane_id, viewer) in viewers {
+            match viewer {
+                Viewer::Diff { path } => self.sync_diff_view(key, _workspace_id, pane_id, path, cx),
+                Viewer::File { path } => {
+                    self.sync_file_view(key, _workspace_id, pane_id, path, window, cx)
+                }
+                Viewer::GitGraph => {
+                    self.sync_git_graph_view(key, _workspace_id, pane_id, window, cx)
+                }
+            }
+        }
+        // Where "Insert Path into Terminal" looks for a terminal (ADR 0078).
         self.right_sidebar
-            .last_terminal_tabs
+            .last_presented_tabs
             .insert((key, _workspace_id), tab_id);
         let surface_key = DockSurfaceKey {
             connection_key: key,
@@ -500,6 +500,24 @@ impl Condr {
     ) -> DockLayout {
         match layout {
             PaneLayout::Pane(pane_id) => {
+                let terminal = self
+                    .connection(key)
+                    .and_then(ServerConnection::session)
+                    .and_then(|session| session.pane(*pane_id))
+                    .is_none_or(condr_core::Pane::is_terminal);
+                if !terminal {
+                    let panel = self
+                        .viewer_panels
+                        .entry((key, *pane_id))
+                        .or_insert_with(|| {
+                            let owner = cx.weak_entity();
+                            cx.new(|cx| {
+                                super::viewer_panel::ViewerPanel::new(key, *pane_id, owner, cx)
+                            })
+                        })
+                        .clone();
+                    return DockLayout::tabs().panel(panel);
+                }
                 let panel = self
                     .panels
                     .entry((key, *pane_id))
@@ -557,23 +575,45 @@ impl Condr {
         target: &DockDropTarget,
         cx: &mut Context<Self>,
     ) {
-        let Some(dragged) = item.value().downcast_ref::<DraggedPane>() else {
-            return;
-        };
         let node = target.node();
         let placement = target.placement();
         let key = surface_key.connection_key;
-        if dragged.key != key {
-            return;
-        }
         let Some(target_pane) = self.dock_group_pane(key, dock, node, cx) else {
             return;
         };
+        let side = |placement| match placement {
+            gpui_kit::base::Placement::Left => PaneDirection::Left,
+            gpui_kit::base::Placement::Right => PaneDirection::Right,
+            gpui_kit::base::Placement::Top => PaneDirection::Up,
+            gpui_kit::base::Placement::Bottom => PaneDirection::Down,
+        };
+        // Another Tab, dragged from the strip, merges beside the Pane; the centre puts it
+        // to the right (ADR 0078).
+        if let Some(tab) = item.value().downcast_ref::<super::workspace::DraggedTab>() {
+            if tab.key == key && tab.tab_id != surface_key.tab_id {
+                self.send_layout_to(
+                    key,
+                    LayoutCommand::MoveTabInto {
+                        tab_id: tab.tab_id,
+                        target_pane_id: target_pane,
+                        side: placement.map_or(PaneDirection::Right, side),
+                    },
+                );
+            }
+            return;
+        }
+        let Some(dragged) = item.value().downcast_ref::<DraggedPane>() else {
+            return;
+        };
+        if dragged.key != key {
+            return;
+        }
         let pane_id = dragged.pane_id;
         let same_tab = self.dock_surfaces.get(&surface_key).is_some_and(|surface| {
             surface.pane_ids.contains(&pane_id) && surface.pane_ids.contains(&target_pane)
         });
-        if target_pane == pane_id || !same_tab {
+        // Swapping takes two Panes of one Tab; a Pane from another Tab only moves in.
+        if target_pane == pane_id || (!same_tab && placement.is_none()) {
             return;
         }
         let command = match placement {
@@ -584,12 +624,7 @@ impl Condr {
             Some(placement) => LayoutCommand::MovePane {
                 pane_id,
                 target_pane_id: target_pane,
-                side: match placement {
-                    gpui_kit::base::Placement::Left => PaneDirection::Left,
-                    gpui_kit::base::Placement::Right => PaneDirection::Right,
-                    gpui_kit::base::Placement::Top => PaneDirection::Up,
-                    gpui_kit::base::Placement::Bottom => PaneDirection::Down,
-                },
+                side: side(placement),
             },
         };
         self.send_layout_to(key, command);
@@ -609,12 +644,18 @@ impl Condr {
             return None;
         };
         let panel = *panels.first()?;
-        self.panels
+        let ids = self
+            .panels
             .iter()
-            .find(|((panel_key, _), entity)| {
-                *panel_key == key && PanelId::from(entity.entity_id()) == panel
-            })
-            .map(|((_, pane_id), _)| *pane_id)
+            .map(|(id, entity)| (*id, entity.entity_id()))
+            .chain(
+                self.viewer_panels
+                    .iter()
+                    .map(|(id, entity)| (*id, entity.entity_id())),
+            );
+        ids.into_iter()
+            .find(|((panel_key, _), entity)| *panel_key == key && PanelId::from(*entity) == panel)
+            .map(|((_, pane_id), _)| pane_id)
     }
 
     pub(super) fn on_dock_layout_changed(

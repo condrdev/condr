@@ -83,7 +83,7 @@ Every key combination not declared on this page passes through to the child proc
 
 ## Git Graph
 
-These work while the [Git Graph](/docs/using/changes/#every-branch-at-once-git-graph) Tab has the keyboard, as in IntelliJ IDEA's Git log.
+These work while the [Git Graph](/docs/using/changes/#every-branch-at-once-git-graph) Pane has the keyboard, as in IntelliJ IDEA's Git log.
 
 | Action | macOS | Windows / Linux |
 | :--- | :--- | :--- |

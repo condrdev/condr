@@ -1176,14 +1176,15 @@ mod streams {
     }
 }
 
-/// A Tab of a kind this build does not know is an Unsupported Tab, and the Git Graph Tab
-/// rides beside `tabs` where a 0.2.6 peer, which has neither rule, skips it (ADR 0078).
+/// A viewer Pane says it is none of a terminal, so a build that does not know its kind
+/// shows an Unsupported Pane, never a shell; one viewer of each kind per Workspace
+/// (ADR 0078).
 #[test]
-fn a_newer_tab_kind_is_unsupported_and_git_graph_rides_beside_the_tabs() {
-    use prost::Message as _;
+fn a_viewer_pane_of_a_newer_kind_is_unsupported_and_never_a_terminal() {
     let mut session = crate::Session::new();
     let workspace_id = session.create_workspace(std::env::temp_dir()).unwrap();
-    session
+    let terminal = session.workspaces()[0].tabs()[0].panes()[0].id();
+    let (_, diff) = session
         .show_viewer(
             workspace_id,
             crate::Viewer::Diff {
@@ -1191,110 +1192,121 @@ fn a_newer_tab_kind_is_unsupported_and_git_graph_rides_beside_the_tabs() {
             },
         )
         .unwrap();
-    let git_graph = session
+    assert!(session.move_pane(diff, terminal, crate::PaneDirection::Right));
+    let (_, graph) = session
         .show_viewer(workspace_id, crate::Viewer::GitGraph)
         .unwrap();
-    assert_eq!(
-        session.show_viewer(workspace_id, crate::Viewer::GitGraph),
-        Some(git_graph),
-        "one Git Graph Tab per Workspace"
-    );
     let encoded = super::SessionSnapshot::try_from(&session.snapshot()).unwrap();
-    let workspace = &encoded.workspaces[0];
-    assert_eq!(workspace.tabs.len(), 2);
-    let beside = workspace.git_graph.as_ref().unwrap();
-    assert_eq!((beside.id, beside.index), (git_graph.as_u64(), 2));
-
-    // 0.2.6 decodes the same bytes without the field, and every Tab it sees it knows.
-    #[derive(Clone, PartialEq, prost::Message)]
-    struct OldWorkspace {
-        #[prost(message, repeated, tag = "5")]
-        tabs: Vec<super::TabSnapshot>,
-    }
-    let old = OldWorkspace::decode(workspace.encode_to_vec().as_slice()).unwrap();
-    assert!(old.tabs.iter().all(|tab| tab.content.is_some()));
-
-    // This build puts it back in its place, and reads it from `tabs` too.
+    let panes = |snapshot: &super::SessionSnapshot, tab: usize| {
+        snapshot.workspaces[0].tabs[tab]
+            .layout
+            .as_ref()
+            .unwrap()
+            .panes
+            .clone()
+    };
+    let first = panes(&encoded, 0);
+    assert!(!first[0].viewer && first[0].cwd.is_some(), "a terminal");
+    assert!(first[1].viewer && first[1].cwd.is_none(), "a viewer");
     let restored = crate::Session::restore(encoded.clone().try_into().unwrap()).unwrap();
-    let tabs = restored.workspaces()[0].tabs();
-    assert_eq!(tabs[2].id(), git_graph);
-    assert!(matches!(tabs[2].content(), crate::TabContent::GitGraph));
-    let mut inline = encoded.clone();
-    let tab = inline.workspaces[0].git_graph.take().unwrap();
-    inline.workspaces[0].tabs.push(super::TabSnapshot {
-        id: tab.id,
-        name: tab.name,
-        content: Some(tab_snapshot::Content::GitGraph(super::Empty {})),
-    });
-    let restored = crate::Session::restore(inline.try_into().unwrap()).unwrap();
-    assert!(matches!(
-        restored.workspaces()[0].tabs()[2].content(),
-        crate::TabContent::GitGraph
-    ));
+    assert_eq!(
+        restored.pane(graph).unwrap().viewer(),
+        Some(&crate::Viewer::GitGraph)
+    );
 
-    // A kind added after this build: kept by id and name, and dropped by a Server.
-    let mut newer = encoded;
-    newer.workspaces[0].tabs[1].content = None;
+    // A kind added after this build: kept where it is, and dropped by a Server.
+    let mut newer = encoded.clone();
+    let layout = newer.workspaces[0].tabs[0].layout.as_mut().unwrap();
+    layout.panes[1].kind = None;
     let mut restored = crate::Session::restore(newer.try_into().unwrap()).unwrap();
-    let unsupported = &restored.workspaces()[0].tabs()[1];
-    assert!(matches!(
-        unsupported.content(),
-        crate::TabContent::Unsupported
-    ));
-    assert_eq!(unsupported.name(), crate::DIFF_TAB_NAME);
+    let unsupported = restored.pane(diff).unwrap();
+    assert_eq!(unsupported.content(), &crate::PaneContent::Unsupported);
+    assert_eq!(unsupported.cwd(), None);
     let again = super::SessionSnapshot::try_from(&restored.snapshot()).unwrap();
-    assert_eq!(again.workspaces[0].tabs[1].content, None);
-    assert_eq!(restored.drop_unsupported_tabs(), 1);
-    assert_eq!(restored.workspaces()[0].tabs().len(), 2);
+    let pane = &panes(&again, 0)[1];
+    assert!(pane.viewer && pane.kind.is_none());
+    assert_eq!(restored.drop_unsupported_panes(), 1);
+    assert_eq!(restored.workspaces()[0].tabs()[0].panes().len(), 1);
+
+    // Two Diff Panes in one Workspace, or one that leaves the root, are refused.
+    let mut two = encoded.clone();
+    let mut second = panes(&encoded, 0)[1].clone();
+    second.id = 999_999;
+    let tab = two.workspaces[0].tabs[1].layout.as_mut().unwrap();
+    tab.panes.push(second);
+    tab.layout = Some(super::LayoutSnapshot {
+        root: 0,
+        nodes: vec![
+            super::LayoutNodeSnapshot {
+                node: Some(layout_node_snapshot::Node::Split(
+                    super::LayoutSplitSnapshot {
+                        direction: super::SplitDirection::Horizontal as i32,
+                        ratio: 0.5,
+                        first: 1,
+                        second: 2,
+                    },
+                )),
+            },
+            super::LayoutNodeSnapshot {
+                node: Some(layout_node_snapshot::Node::Pane(graph.as_u64())),
+            },
+            super::LayoutNodeSnapshot {
+                node: Some(layout_node_snapshot::Node::Pane(999_999)),
+            },
+        ],
+    });
+    assert!(crate::Session::restore(two.try_into().unwrap()).is_err());
+    let mut escaping = encoded;
+    let layout = escaping.workspaces[0].tabs[0].layout.as_mut().unwrap();
+    layout.panes[1].kind = Some(pane_snapshot::Kind::Diff(super::ViewerPath {
+        path: "../secret".into(),
+    }));
+    assert!(
+        crate::SessionSnapshot::try_from(escaping)
+            .map_or(true, |snapshot| crate::Session::restore(snapshot).is_err())
+    );
 }
 
-/// A Diff or Preview Tab's `ShowViewer` goes as the command a 0.2.6 Server knows, and the
-/// Git Graph's as the new one (ADR 0078).
+/// The layout commands ADR 0078 adds round-trip, and `ShowViewer`'s answer names its Pane.
 #[test]
-fn show_viewer_reaches_a_0_2_6_server_for_the_viewers_it_knows() {
+fn viewer_and_cross_tab_layout_commands_round_trip() {
     use crate::protocol::{LayoutCommand, LayoutResult};
     let workspace_id = crate::WorkspaceId::from_u64(3);
-    for (viewer, member) in [
-        (
-            crate::Viewer::Diff {
+    for command in [
+        LayoutCommand::ShowViewer {
+            workspace_id,
+            viewer: crate::Viewer::Diff {
                 path: "src/lib.rs".into(),
             },
-            "show_diff",
-        ),
-        (
-            crate::Viewer::File {
+        },
+        LayoutCommand::ShowViewer {
+            workspace_id,
+            viewer: crate::Viewer::File {
                 path: "README.md".into(),
             },
-            "show_file",
-        ),
-        (crate::Viewer::GitGraph, "show_viewer"),
-    ] {
-        let command = LayoutCommand::ShowViewer {
+        },
+        LayoutCommand::ShowViewer {
             workspace_id,
-            viewer,
-        };
+            viewer: crate::Viewer::GitGraph,
+        },
+        LayoutCommand::MoveTabInto {
+            tab_id: crate::TabId::from_u64(4),
+            target_pane_id: crate::PaneId::from_u64(5),
+            side: crate::PaneDirection::Left,
+        },
+        LayoutCommand::MovePaneToNewTab {
+            pane_id: crate::PaneId::from_u64(6),
+        },
+    ] {
         let encoded = super::LayoutCommand::try_from(&command).unwrap();
-        let sent = match encoded.command.as_ref().unwrap() {
-            layout_command::Command::ShowDiff(_) => "show_diff",
-            layout_command::Command::ShowFile(_) => "show_file",
-            layout_command::Command::ShowViewer(_) => "show_viewer",
-            _ => "another",
-        };
-        assert_eq!(sent, member);
         assert_eq!(LayoutCommand::try_from(encoded).unwrap(), command);
     }
-    // A 0.2.6 Server's answer to `show_file` is the Tab shown, as is this build's.
-    let tab = crate::TabId::from_u64(9);
-    for result in [
-        layout_result::Result::FileShown(super::TabTarget { tab_id: 9 }),
-        layout_result::Result::ViewerShown(super::TabTarget { tab_id: 9 }),
-    ] {
-        assert_eq!(
-            LayoutResult::try_from(super::LayoutResult {
-                result: Some(result),
-            })
-            .unwrap(),
-            LayoutResult::ViewerShown { tab_id: tab }
-        );
-    }
+    let shown = LayoutResult::ViewerShown {
+        tab_id: crate::TabId::from_u64(9),
+        pane_id: crate::PaneId::from_u64(10),
+    };
+    assert_eq!(
+        LayoutResult::try_from(super::LayoutResult::from(&shown)).unwrap(),
+        shown
+    );
 }

@@ -121,7 +121,7 @@ code { font-family: var(--mono); font-size: .875em; }
 
 /* Desk: two displays drawn in CSS, every length in cqw of the desk so the scene scales as one. A
    display is 44 wide: a 1-wide black glass bezel round a 16:10 screen, a metal rim, a neck and a
-   foot. The Diff Tab's window lives on the right display's screen; in the opening state it sits
+   foot. The Diff Pane's window lives on the right display's screen; in the opening state it sits
    over the left display, centred, which is 25 to the right of its place. */
 .desk { position: relative; container-type: inline-size; aspect-ratio: 100 / 36.5; }
 .monitor { position: absolute; top: 1cqw; width: 44cqw; }
@@ -138,7 +138,7 @@ code { font-family: var(--mono); font-size: .875em; }
 .desk .window { position: absolute; top: 2cqw; left: 54cqw; width: 42cqw; height: auto; aspect-ratio: 16 / 10; display: block; border-radius: .35cqw; }
 
 /* The scene, once and again while in view (index.astro sets .playing), 12 seconds round: one display
-   with the Diff Tab in the main window; the Tab lifts out as a window of its own while the main
+   with the Diff Pane in the main window; the Tab lifts out as a window of its own while the main
    window goes back to its agents; the display moves aside for a second one and the window flies over
    and lands; it rests, then lifts, flies back and drops into the main window. Exits are quicker
    than arrivals. Without motion the desk rests on two displays. */

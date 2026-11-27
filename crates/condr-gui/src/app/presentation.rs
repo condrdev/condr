@@ -26,7 +26,7 @@ impl Condr {
         tab_id: Option<TabId>,
     ) -> bool {
         // A Tab with a window of its own is shown there and moves nothing here, so a Diff
-        // Tab on the other screen follows the Changes clicked in this one (ADR 0043).
+        // Pane on the other screen follows the Changes clicked in this one (ADR 0043).
         if tab_id.is_some_and(|tab_id| self.window_for(WindowScope::Tab(key, tab_id)).is_some()) {
             return false;
         }
@@ -139,6 +139,9 @@ impl Condr {
             surface.connection_key != key || tab_ids.contains(&surface.tab_id)
         });
         self.panels.retain(|(connection_key, pane_id), _| {
+            *connection_key != key || pane_ids.contains(pane_id)
+        });
+        self.viewer_panels.retain(|(connection_key, pane_id), _| {
             *connection_key != key || pane_ids.contains(pane_id)
         });
         self.pending_sizes.retain(|(connection_key, pane_id), _| {

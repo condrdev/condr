@@ -149,7 +149,7 @@ pub(super) fn label_chip(label: &RefLabel, cx: &App) -> Div {
 pub(in crate::app) struct CommitTable {
     pub(super) owner: WeakEntity<Condr>,
     pub(super) key: ConnectionKey,
-    pub(super) tab_id: TabId,
+    pub(super) pane_id: PaneId,
     pub(super) rows: Vec<CommitRow>,
     pub(super) more: bool,
     pub(super) loading: bool,
@@ -357,12 +357,12 @@ impl TableDelegate for CommitTable {
             return menu;
         };
         let id = row.commit.id.clone();
-        let (owner, key, tab_id) = (self.owner.clone(), self.key, self.tab_id);
+        let (owner, key, pane_id) = (self.owner.clone(), self.key, self.pane_id);
         let step = move |parent: bool| {
             let owner = owner.clone();
             move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
                 let _ = owner.update(cx, |this, cx| {
-                    this.step_git_graph_commit(key, tab_id, row_ix, parent, window, cx);
+                    this.step_git_graph_commit(key, pane_id, row_ix, parent, window, cx);
                 });
             }
         };
@@ -401,11 +401,11 @@ impl TableDelegate for CommitTable {
     }
 
     fn load_more(&mut self, _: &mut Window, cx: &mut Context<TableState<Self>>) {
-        let (owner, key, tab_id) = (self.owner.clone(), self.key, self.tab_id);
+        let (owner, key, pane_id) = (self.owner.clone(), self.key, self.pane_id);
         // Never inside this table's own update: asking reads the table back.
         cx.defer(move |cx| {
             let _ = owner.update(cx, |this, cx| {
-                this.request_git_graph_page(key, tab_id, true);
+                this.request_git_graph_page(key, pane_id, true);
                 cx.notify();
             });
         });

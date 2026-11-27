@@ -99,7 +99,7 @@ pub(super) struct TabInfo {
     pub(super) workspace_id: u64,
     pub(super) name: String,
     pub(super) pane_count: usize,
-    /// `None` for a viewer Tab, which has no Panes (ADR 0017).
+    /// A terminal or a viewer (ADR 0078); every Tab has one.
     pub(super) focused_pane_id: Option<u64>,
 }
 

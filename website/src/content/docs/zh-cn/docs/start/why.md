@@ -45,7 +45,7 @@ Condr 不做二手聊天界面，不接管对话循环，也不代发 API 请求
 
 - **原生子进程直通**：Claude Code、Codex、OpenCode 等 CLI 原汁原味运行在系统真实 PTY 中。
 - **完整生态支持**：无缝保留各厂商原生的上下文压缩、本地配置、权限提示与丰富交互。
-- **开箱即用的审查面板**：无需切换到完整 IDE，即可通过轻量的 Diff Tab 与 Preview Tab 直观审查 Agent 产出的每一处代码变更。
+- **开箱即用的审查面板**：无需切换到完整 IDE，即可通过轻量的 Diff Pane 与 Preview Pane 直观审查 Agent 产出的每一处代码变更。
 
 ---
 

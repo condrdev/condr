@@ -38,7 +38,7 @@ pub(in crate::app) fn terminal_path_text(relative: &str) -> String {
 struct FilesContext<'a> {
     key: ConnectionKey,
     workspace_id: WorkspaceId,
-    /// The file the Preview Tab shows, drawn selected.
+    /// The file the Preview Pane shows, drawn selected.
     shown: Option<&'a RelativePath>,
 }
 
@@ -370,7 +370,7 @@ impl Condr {
     /// affords, then the edits ADR 0045 adds. Opening and revealing run on the GUI's
     /// machine, so they need a local Server like "Open in"; inserting goes to the
     /// Workspace's terminal on any Server. `show_file` is `Some(enabled)` in the Changes
-    /// view, whose click opens the diff, so the menu offers the Preview Tab (ADR 0017);
+    /// view, whose click opens the diff, so the menu offers the Preview Pane (ADR 0017);
     /// the Files view's click already does. Disabled there, the file is gone from disk.
     pub(in crate::app) fn file_context_menu(
         &self,
@@ -583,28 +583,35 @@ impl Condr {
         }
     }
 
-    /// The terminal "Insert Path" writes to: the Workspace's last presented terminal Tab,
-    /// else its first one; `None` when it has no terminal Tab at all.
+    /// The terminal "Insert Path" writes to: the one last focused in the Workspace's last
+    /// presented Tab, else in its first Tab with one; `None` when it has no terminal.
     fn insert_target_pane(
         &self,
         key: ConnectionKey,
-        session: &Session,
+        _: &Session,
         workspace: &condr_core::Workspace,
     ) -> Option<(TabId, PaneId)> {
-        let tab = self
-            .right_sidebar
-            .last_terminal_tabs
-            .get(&(key, workspace.id()))
-            .and_then(|tab_id| workspace.tabs().iter().find(|tab| tab.id() == *tab_id))
-            .filter(|tab| tab.terminals().is_some())
-            .or_else(|| {
-                workspace
-                    .tabs()
+        // The focused Pane when it is a terminal, else the one focused before it (ADR 0078).
+        let terminal = |tab: &Tab| {
+            let is_terminal = |id: &PaneId| {
+                tab.panes()
                     .iter()
-                    .find(|tab| tab.terminals().is_some())
-            })?;
-        let pane = session.tab(tab.id())?.focused_pane()?;
-        Some((tab.id(), pane.id()))
+                    .any(|pane| pane.id() == *id && pane.is_terminal())
+            };
+            tab.focused_pane()
+                .map(condr_core::Pane::id)
+                .into_iter()
+                .chain(tab.focus_history().iter().rev().copied())
+                .chain(tab.panes().iter().map(condr_core::Pane::id))
+                .find(is_terminal)
+                .map(|pane_id| (tab.id(), pane_id))
+        };
+        self.right_sidebar
+            .last_presented_tabs
+            .get(&(key, workspace.id()))
+            .and_then(|tab_id| workspace.tab(*tab_id))
+            .and_then(terminal)
+            .or_else(|| workspace.tabs().iter().find_map(terminal))
     }
 
     /// Opens one file in `target_id` on this machine; a failure is a toast.

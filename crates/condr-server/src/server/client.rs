@@ -1404,7 +1404,7 @@ pub(super) fn refresh_workspace(
 }
 
 /// What every Client learns after a file mutation that may have changed the disk, even
-/// partway: a rename moves the Preview Tab with its file, and a forced scan publishes
+/// partway: a rename moves the Preview Pane with its file, and a forced scan publishes
 /// `WorkspaceFilesChanged` and Git status, since the watcher skips ignored paths.
 pub(super) fn files_mutated(
     state: &Arc<Mutex<RuntimeState>>,
@@ -1426,7 +1426,7 @@ pub(super) fn files_mutated(
         if candidate.follow_rename(workspace_id, from, to) {
             match commit_layout_candidate(&mut state, candidate, None, None) {
                 Ok(effect) => state.publish_background(effect.event),
-                Err(error) => tracing::warn!("the Preview Tab did not follow a rename: {error}"),
+                Err(error) => tracing::warn!("the Preview Pane did not follow a rename: {error}"),
             }
         }
     }

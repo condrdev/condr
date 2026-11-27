@@ -1237,7 +1237,7 @@ fn a_commit_past_the_change_cap_is_truncated_without_line_counts() {
     );
 }
 
-/// ADR 0050: the Preview Tab's marks compare the editor with the side `file_diff` uses.
+/// ADR 0050: the Preview Pane's marks compare the editor with the side `file_diff` uses.
 #[test]
 fn old_file_is_the_compared_blob_added_or_nothing() {
     let root = scratch_repository("old-file");

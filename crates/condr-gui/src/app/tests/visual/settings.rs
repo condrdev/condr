@@ -845,7 +845,7 @@ fn the_mode_dropdown_reads_and_writes_the_appearance() {
     drop(server);
 }
 
-/// The Preview and Diff Tabs paint with the code theme (ADR 0032): Default follows the
+/// The Preview and Diff Panes paint with the code theme (ADR 0032): Default follows the
 /// GUI's mode, and a chosen theme is saved, reaches Kit's editor background and holds
 /// across a mode change.
 #[test]

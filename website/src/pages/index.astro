@@ -34,9 +34,9 @@ const features = [
 const phoneAgentsCrop = 1740;
 
 const reviews = [
-  { id: 'diff', name: 'Diff', copy: 'Every file an agent touched, side by side or in one column, against HEAD or against everything the branch changed since it forked.', src: diff, alt: 'The Diff Tab showing ports.rs side by side, with the Changes list of six modified files and their added and removed lines' },
-  { id: 'preview', name: 'Preview', copy: 'Any file, highlighted, with the lines it changed marked beside their numbers. Edit and save it there, on a remote Device too.', src: preview, alt: 'The Preview Tab showing ports.rs with its changed lines marked beside the line numbers and on the scrollbar, next to the Files tree' },
-  { id: 'history', name: 'Git History', copy: "The branch's commits, newest first, and every branch's in Git Graph. Pick one to see the files it changed and open each as that commit changed it.", src: history, alt: 'History listing the branch commits, one selected with its nine changed files, and the Diff Tab showing sidebar.rs as that commit changed it' },
+  { id: 'diff', name: 'Diff', copy: 'Every file an agent touched, side by side or in one column, against HEAD or against everything the branch changed since it forked.', src: diff, alt: 'The Diff Pane showing ports.rs side by side, with the Changes list of six modified files and their added and removed lines' },
+  { id: 'preview', name: 'Preview', copy: 'Any file, highlighted, with the lines it changed marked beside their numbers. Edit and save it there, on a remote Device too.', src: preview, alt: 'The Preview Pane showing ports.rs with its changed lines marked beside the line numbers and on the scrollbar, next to the Files tree' },
+  { id: 'history', name: 'Git History', copy: "The branch's commits, newest first, and every branch's in Git Graph. Pick one to see the files it changed and open each as that commit changed it.", src: history, alt: 'History listing the branch commits, one selected with its nine changed files, and the Diff Pane showing sidebar.rs as that commit changed it' },
 ];
 
 const agents = [
@@ -132,8 +132,8 @@ const methods = [
         <h3>One screen is not enough</h3>
         <p>Open a Tab, a Workspace or a whole Device in a window of its own, from its menu or by dragging it out, and move it to another display.</p>
       </div>
-      <!-- The Diff Tab leaves the main window for a second display and comes back (home.css, "Desk"). -->
-      <figure class="desk" aria-label="The Diff Tab leaves the main window for a window of its own on a second display, then comes back">
+      <!-- The Diff Pane leaves the main window for a second display and comes back (home.css, "Desk"). -->
+      <figure class="desk" aria-label="The Diff Pane leaves the main window for a window of its own on a second display, then comes back">
         {[0, 1].map((i) => (
           <div class={`monitor monitor-${i ? 'b' : 'a'}`}>
             <div class="panel">
@@ -146,7 +146,7 @@ const methods = [
             <div class="foot"></div>
           </div>
         ))}
-        <Image class="window" src={screenDiff} alt="The Diff Tab in a window of its own on the second display, showing ports.rs side by side, with Bring Back in its title bar" widths={[640, 1080, 1280]} sizes="(max-width: 760px) 45vw, 540px" />
+        <Image class="window" src={screenDiff} alt="The Diff Pane in a window of its own on the second display, showing ports.rs side by side, with Bring Back in its title bar" widths={[640, 1080, 1280]} sizes="(max-width: 760px) 45vw, 540px" />
       </figure>
     </article>
 

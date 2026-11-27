@@ -1,5 +1,5 @@
 //! Downloads and uploads in the GUI (ADR 0061): Download… on a file in Files, Changes and
-//! a Preview Tab's menu, Upload by a drop or Upload Files… on a directory, at most four
+//! a Preview Pane's menu, Upload by a drop or Upload Files… on a directory, at most four
 //! at once to a Device, and their progress in a strip at the bottom of the right sidebar.
 //! They ride the Device's Stream connection, the one its forwards use.
 

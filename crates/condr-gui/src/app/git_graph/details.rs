@@ -20,13 +20,13 @@ impl Condr {
     fn git_graph_commit(
         &self,
         key: ConnectionKey,
-        tab_id: TabId,
+        pane_id: PaneId,
         id: &str,
         cx: &App,
     ) -> Option<CommitSummary> {
         self.git_graph
             .views
-            .get(&(key, tab_id))?
+            .get(&(key, pane_id))?
             .table
             .read(cx)
             .delegate()
@@ -70,7 +70,7 @@ impl Condr {
         &self,
         view: &GitGraphView,
         key: ConnectionKey,
-        tab_id: TabId,
+        pane_id: PaneId,
         refs: &[GitRef],
         current: Option<&str>,
         cx: &mut Context<Self>,
@@ -122,17 +122,17 @@ impl Condr {
             .child(
                 v_resizable(SharedString::from(format!(
                     "git-graph-commit-{}",
-                    tab_id.as_u64()
+                    pane_id.as_u64()
                 )))
                 .child(
                     resizable_panel()
-                        .child(self.render_git_graph_files(view, key, tab_id, details, cx)),
+                        .child(self.render_git_graph_files(view, key, pane_id, details, cx)),
                 )
                 .child(
                     resizable_panel()
                         .size(px(240.))
                         .child(self.render_git_graph_details(
-                            view, key, tab_id, details, refs, current, branches, cx,
+                            view, key, pane_id, details, refs, current, branches, cx,
                         )),
                 ),
             )
@@ -140,12 +140,12 @@ impl Condr {
     }
 
     /// The files the commit changed, as Git History draws them, each folder counting its
-    /// files. A click selects one; a double click shows it in the Diff Tab.
+    /// files. A click selects one; a double click shows it in the Diff Pane.
     fn render_git_graph_files(
         &self,
         view: &GitGraphView,
         key: ConnectionKey,
-        tab_id: TabId,
+        pane_id: PaneId,
         details: &CommitDetails,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -175,7 +175,7 @@ impl Condr {
                         .child(div().flex_none().text_xs().text_color(muted).child(files))
                         .on_click(move |_, _, cx| {
                             let _ = owner.update(cx, |this, cx| {
-                                if let Some(view) = this.git_graph.views.get_mut(&(key, tab_id))
+                                if let Some(view) = this.git_graph.views.get_mut(&(key, pane_id))
                                     && !view.collapsed_dirs.remove(&path)
                                 {
                                     view.collapsed_dirs.insert(path.clone());
@@ -200,13 +200,13 @@ impl Condr {
                     .on_click(move |event, window, cx| {
                         let (path, id) = (path.clone(), id.clone());
                         let _ = owner.update(cx, |this, cx| {
-                            let Some(view) = this.git_graph.views.get_mut(&(key, tab_id)) else {
+                            let Some(view) = this.git_graph.views.get_mut(&(key, pane_id)) else {
                                 return;
                             };
                             view.selected_file = Some(path.clone());
                             let workspace_id = view.workspace_id;
                             if event.click_count() >= 2
-                                && let Some(commit) = this.git_graph_commit(key, tab_id, &id, cx)
+                                && let Some(commit) = this.git_graph_commit(key, pane_id, &id, cx)
                             {
                                 this.show_commit_diff(key, workspace_id, commit, path, window, cx);
                             }
@@ -236,7 +236,7 @@ impl Condr {
             )
             .child(
                 sidebar_list(
-                    SharedString::from(format!("git-graph-files-{}", tab_id.as_u64())),
+                    SharedString::from(format!("git-graph-files-{}", pane_id.as_u64())),
                     list,
                 )
                 .flex_1()
@@ -252,7 +252,7 @@ impl Condr {
         &self,
         view: &GitGraphView,
         key: ConnectionKey,
-        tab_id: TabId,
+        pane_id: PaneId,
         details: &CommitDetails,
         refs: &[GitRef],
         current: Option<&str>,
@@ -334,7 +334,7 @@ impl Condr {
                                 .on_click(move |_, _, cx| {
                                     let _ = owner.update(cx, |this, cx| {
                                         if let Some(view) =
-                                            this.git_graph.views.get_mut(&(key, tab_id))
+                                            this.git_graph.views.get_mut(&(key, pane_id))
                                         {
                                             view.all_branches = true;
                                         }
@@ -349,7 +349,7 @@ impl Condr {
         v_flex()
             .id(SharedString::from(format!(
                 "git-graph-details-{}",
-                tab_id.as_u64()
+                pane_id.as_u64()
             )))
             .debug_selector(|| "git-graph-details".into())
             .size_full()

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Vendor the Preview and Diff Tabs' code themes that two-face does not bundle, at fixed
+// Vendor the Preview and Diff Panes' code themes that two-face does not bundle, at fixed
 // upstream revisions, as .tmTheme files syntect loads (ADR 0032). Tokyo Night ships
 // tmThemes and is copied unchanged; GitHub's VS Code themes and JetBrains' editor
 // schemes are converted. Run with Node.js after changing a revision or a mapping.

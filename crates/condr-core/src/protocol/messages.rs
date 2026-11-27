@@ -73,7 +73,7 @@ pub enum ClientMessage {
         commit: Option<String>,
     },
     /// The side `GitDiff` compares one file with, as a checkout would write it, for the
-    /// Preview Tab's change marks (ADR 0050); answered with [`ServerMessage::GitOldFile`].
+    /// Preview Pane's change marks (ADR 0050); answered with [`ServerMessage::GitOldFile`].
     GitOldFile {
         server_id: ServerId,
         session_id: SessionId,
@@ -132,7 +132,7 @@ pub enum ClientMessage {
         /// Relative to the Workspace root; empty for the root itself.
         path: RelativePathBuf,
     },
-    /// One file's content for the Preview Tab (ADR 0018), answered with
+    /// One file's content for the Preview Pane (ADR 0018), answered with
     /// [`ServerMessage::FileContent`].
     ReadFile {
         server_id: ServerId,
@@ -513,12 +513,23 @@ pub enum LayoutCommand {
     CloseWorkspace {
         workspace_id: WorkspaceId,
     },
-    /// Shows `viewer` in the Workspace's single Tab of its kind, creating the Tab the first
-    /// time and retargeting it afterwards (ADR 0078). The requester learns the Tab from
-    /// `ViewerShown` and shows it; other viewers are left where they are.
+    /// Shows `viewer` in the Workspace's single Pane of its kind, retargeted where it is or
+    /// opened in a Tab of its own (ADR 0078). The requester learns the Pane from
+    /// `ViewerShown` and shows its Tab; other Clients stay where they are.
     ShowViewer {
         workspace_id: WorkspaceId,
         viewer: Viewer,
+    },
+    /// Puts all of Tab `tab_id` beside `target_pane_id`, a Pane of another Tab of its
+    /// Workspace, and closes it (ADR 0078).
+    MoveTabInto {
+        tab_id: TabId,
+        target_pane_id: PaneId,
+        side: PaneDirection,
+    },
+    /// Makes a Pane a Tab of its own, after the one it leaves; answered with `TabCreated`.
+    MovePaneToNewTab {
+        pane_id: PaneId,
     },
 }
 
@@ -544,6 +555,7 @@ pub enum LayoutResult {
     },
     ViewerShown {
         tab_id: TabId,
+        pane_id: PaneId,
     },
 }
 

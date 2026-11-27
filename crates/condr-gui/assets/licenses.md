@@ -403,7 +403,7 @@ SOFTWARE.
 
 ## Syntax definitions and themes
 
-The syntax definitions the Preview and Diff Tabs highlight with, and the themes
+The syntax definitions the Preview and Diff Panes highlight with, and the themes
 bundled with them, are the ones the bat project curates (https://github.com/sharkdp/bat),
 compiled into the two-face crate, version 0.5.2+bat-0.26.1:
 https://codeberg.org/CosmicHarper/two-face

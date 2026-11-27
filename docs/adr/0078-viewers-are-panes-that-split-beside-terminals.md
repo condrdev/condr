@@ -1,0 +1,30 @@
+# Viewers Are Panes That Split Beside Terminals
+
+Status: accepted 2026-11-27. Supersedes ADR 0017's Tab content kinds and `ShowDiff`, and ADR 0018's `ShowFile`: the Diff and Preview Tabs become viewer Panes. Amends ADR 0005's layout commands, which moved a Pane only within its Tab, and ADR 0028's rule for an unknown value nested in a known message, for a Pane's kind.
+
+A Pane is Condr's unit: it splits, zooms, moves, takes focus and opens in a window of its own (ADR 0043). ADR 0017 kept it a terminal and gave the Tab content kinds instead, so the Diff Tab, the Preview Tab (ADR 0018) and Git Graph (ADR 0079) each fill a Tab alone. None of them can sit beside the terminal an Agent works in, or beside each other: a file double-clicked in Git Graph opens the Diff Tab over it. Making them Panes gives them everything a Pane has.
+
+## Decision
+
+**A Pane is a terminal or a viewer.** A viewer Pane shows a file's diff, a file's content, or Git Graph, as the Tabs did; a Tab is only a layout of Panes, of any kinds. The Server starts a terminal only for a terminal Pane. Everything that belongs to terminals passes viewer Panes over: terminal frames and input, the Agent probe, the Agents section and "Needs you", notifications, Tasks, the Companion's list of Panes, and the find bar. `condr pane list` names each Pane's kind; `pane read` and `pane send` refuse a viewer. Every layout command applies to a viewer Pane; splitting one starts a terminal in the Workspace's root.
+
+**One viewer of each kind per Workspace.** `LayoutCommand::ShowViewer { workspace_id, viewer }` retargets the Workspace's Pane of that kind wherever it is, and the Client that asked shows its Tab and focuses it; with none, it opens a Tab holding that Pane alone. Its reply is `ViewerShown { tab_id, pane_id }` (ADR 0021). So clicking through Changes or Files never accumulates Panes, and a Diff Pane put beside Git Graph once is the one each double-click there retargets.
+
+**Panes move across Tabs.** `MovePane` takes a target in any Tab of the same Workspace, and a Tab its Pane leaves empty closes. `MoveTabInto { tab_id, target_pane_id, side }` puts a whole Tab's layout beside a Pane of another Tab of the Workspace, as one side of a split, and closes it. `MovePaneToNewTab { pane_id }` makes a Pane a Tab of its own, after its Tab, and is refused for a Tab's only Pane. In the GUI, a Tab dragged from the strip onto the presented Tab's Panes merges at the edge the Dock's drop zones show, as IntelliJ splits its editors; a Pane's header dragged onto the strip moves it to a new Tab; and the Pane menu has Move to New Tab.
+
+**A viewer Pane's header is a Pane header.** It has the terminal Pane's shell, so it drags, zooms and opens the same menu, less the terminal's items: an icon and a title (the file's path, or "Git Graph"), the controls the viewer Tabs had in their headers (Split or Unified, Show File, Rendered or Source), then zoom and the menu. Download stays in the menu of the Tab a Preview Pane is in. A Diff Pane showing a commit keeps its commit row at the top of its content. A Tab is named after its focused Pane, a viewer by its kind ("Diff", "Preview", "Git Graph"), unless someone named the Tab.
+
+**Pane kinds grow without breaking older Clients.** `PaneSnapshot` keeps the terminal's fields; a Pane that is not a terminal sets `viewer` and names its kind in a `oneof`. A build that does not know the kind decodes an Unsupported Pane instead of making the Session unknown or starting a shell for it: the GUI shows it under its Tab with "This Pane needs a newer version of Condr", naming both builds (ADR 0027); it closes, moves and splits like any Pane, and a Server restoring a Snapshot that holds one drops it. A Pane without `viewer` is a terminal, as every Pane written before this one was. A new kind of Pane, such as Ports, is one `oneof` member, one variant of the domain's `Viewer`, and its own view and requests.
+
+**No compatibility with 0.2.** The protocol stays at 1 and nothing accommodates a 0.2 peer: the next release is 0.3.0, and its notes ask that every GUI, Server and Companion be updated together. A 0.2 Snapshot's Diff and Preview Tabs, Tab content this build no longer knows, are dropped when it loads; its terminal Tabs load as before, since their layout keeps its field number. The accommodations an earlier draft of this decision carried for 0.2.6, Git Graph beside the Tabs and Diff and Preview sent as the old commands, are gone.
+
+## Considered
+
+- **Viewers as Tab kinds**, ADR 0017's choice, with an extension rule for unknown kinds. Declined: no viewer can sit beside a terminal or another viewer.
+- **Editor groups**, the Tab area split into groups each showing a Tab, as IDEs do. Declined: a second level of layout beside the Panes', where Condr already has one.
+- **A viewer opening beside the focused Pane** by default. Declined: it would split whatever an Agent works in on every first click; a viewer opens in a Tab of its own and is merged by a drag, once.
+- **Raising the protocol** so 0.2 peers are refused at the handshake. Declined: the release is a clean break and says so.
+
+## Tests
+
+`condr-core`: a viewer Pane created in a Tab of its own and retargeted in place in another Tab; one viewer of each kind per Workspace; a split of a viewer Pane starting a terminal in the root; `MovePane` across Tabs closing the emptied Tab; `MoveTabInto` merging a Tab of several Panes as one side; `MovePaneToNewTab` and its refusal for an only Pane; snapshot validation of viewer paths and kinds; an unknown kind decoding as an Unsupported Pane, kept by a Client and dropped by a Server; a 0.2 Diff Tab dropped from a Snapshot whose terminal Tab survives; the new commands round-tripping. Server: no terminal started for a viewer Pane, here or on restore. GUI, with a real Server: a viewer opening in its own Tab; its Tab dragged onto a terminal Pane's edge merging beside it; a Pane's header dragged onto the strip leaving as a new Tab; Git Graph's double-click retargeting the Diff Pane beside it without leaving the Tab. Offscreen screenshots in dark and light.

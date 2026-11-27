@@ -26,7 +26,7 @@ impl Condr {
         self.confirm_quit(Box::new(|_, _, cx| cx.quit()), window, cx);
     }
 
-    /// Quitting cancels transfers and takes every Preview Tab's unsaved text with it, so
+    /// Quitting cancels transfers and takes every Preview Pane's unsaved text with it, so
     /// it asks first, about each once (ADR 0045, ADR 0061); `quit` runs once agreed.
     pub(super) fn confirm_quit(
         &mut self,

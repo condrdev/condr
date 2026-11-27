@@ -1,4 +1,4 @@
-//! The Preview Tab (ADR 0018): one file of the Workspace in GPUI Kit's Editor, or
+//! The Preview Pane (ADR 0018): one file of the Workspace in GPUI Kit's Editor, or
 //! rendered when it is Markdown or an image (ADR 0037). The Editor saves what it edits
 //! back to the Server (ADR 0045); `edits` holds that side, `change_marks` the gutter's
 //! marks against the Workspace's Changes (ADR 0050).
@@ -18,16 +18,16 @@ use rust_i18n::t;
 pub(super) use edits::*;
 pub(super) use rendering::*;
 
-/// What this Client keeps of the Preview Tabs.
+/// What this Client keeps of the Preview Panes.
 #[derive(Default)]
 pub(super) struct PreviewPaneState {
-    /// The Preview Tabs' Editors, by connection and Tab; pruned with the Tabs.
-    pub(super) editors: HashMap<(ConnectionKey, TabId), FileEditor>,
-    /// The 0-based line the Preview Tab lands on once it shows this file: set by the Diff
-    /// Tab's "Show File", applied by `sync_file_view` when the text is there, then cleared.
+    /// The Preview Panes' Editors, by connection and Pane; pruned with the Panes.
+    pub(super) editors: HashMap<(ConnectionKey, PaneId), FileEditor>,
+    /// The 0-based line the Preview Pane lands on once it shows this file: set by the Diff
+    /// Pane's "Show File", applied by `sync_file_view` when the text is there, then cleared.
     /// Presentation only, so it never rides `ShowFile`.
     pub(super) pending_line: Option<(ConnectionKey, WorkspaceId, RelativePathBuf, u32)>,
-    /// The images the Preview Tabs show, decoded (ADR 0037).
+    /// The images the Preview Panes show, decoded (ADR 0037).
     pub(super) images: PreviewImages,
     /// Saves in flight, by connection and request (ADR 0045).
     pub(super) saves: HashMap<(ConnectionKey, u64), PendingSave>,
@@ -40,12 +40,12 @@ pub(super) struct PreviewPaneState {
 }
 
 impl PreviewPaneState {
-    /// Whether any Preview Tab holds text it has not saved.
+    /// Whether any Preview Pane holds text it has not saved.
     pub(super) fn has_unsaved(&self) -> bool {
         self.editors.values().any(|editor| editor.dirty)
     }
 
-    /// Forgets what `key`'s closed Workspaces and Tabs left behind; `None` is a connection
+    /// Forgets what `key`'s closed Workspaces and Panes left behind; `None` is a connection
     /// gone, which leaves nothing of `key`. Hands back the images it dropped, for
     /// `release_images` to free from the atlas.
     pub(super) fn retain_session(
@@ -54,9 +54,7 @@ impl PreviewPaneState {
         session: Option<&Session>,
     ) -> Vec<Arc<DecodedImage>> {
         self.editors.retain(|(connection, id), _| {
-            *connection != key
-                || session
-                    .is_some_and(|session| session.tab(*id).is_some_and(|tab| tab.file().is_some()))
+            *connection != key || viewer_is(session, *id, ViewerKind::File)
         });
         if self
             .pending_line
@@ -68,14 +66,11 @@ impl PreviewPaneState {
         {
             self.pending_line = None;
         }
-        // A Workspace's images are its Preview Tab's, so they go when that Tab closes.
+        // A Workspace's images are its Preview Pane's, so they go when that Pane closes.
         self.images.retain(|(connection, id, _)| {
             *connection != key
                 || session
-                    .and_then(|session| session.workspace(*id))
-                    .is_some_and(|workspace| {
-                        workspace.tabs().iter().any(|tab| tab.file().is_some())
-                    })
+                    .is_some_and(|session| session.viewer_pane(*id, ViewerKind::File).is_some())
         })
     }
 }
@@ -103,7 +98,7 @@ fn changed_span<'a>(old: &str, new: &'a str) -> (std::ops::Range<usize>, &'a str
     (prefix..old.len() - suffix, &new[prefix..new.len() - suffix])
 }
 
-/// Takes the line the Diff Tab asked the Preview Tab to land on, if it is for this file.
+/// Takes the line the Diff Pane asked the Preview Pane to land on, if it is for this file.
 fn take_pending_line(
     pending: &mut Option<(ConnectionKey, WorkspaceId, RelativePathBuf, u32)>,
     key: ConnectionKey,
@@ -129,11 +124,11 @@ fn land_on_line(
     state.set_cursor_position(Position::new(line.min(last), 0), window, cx);
 }
 
-/// The Preview Tab's Editor and what it currently shows.
+/// The Preview Pane's Editor and what it currently shows.
 pub(super) struct FileEditor {
     pub(super) state: Entity<EditorState>,
     pub(super) workspace_id: WorkspaceId,
-    /// The Workspace's root when the Tab opened, so unsaved text is never saved into a
+    /// The Workspace's root when the Pane opened, so unsaved text is never saved into a
     /// different Workspace that took over its id.
     pub(super) root: PathBuf,
     /// What a save starts from (ADR 0045); `None` keeps the Editor read-only.
@@ -160,7 +155,7 @@ pub(super) struct FileEditor {
     /// Where the rendered file was read, and its block count then, while an edit to it
     /// may still reset Kit's list to the top; see `render_markdown`.
     pub(super) markdown_scroll: Rc<Cell<Option<(usize, ListOffset)>>>,
-    /// A file the Tab can render shows its text instead. Each file opens rendered, except
+    /// A file the Pane can render shows its text instead. Each file opens rendered, except
     /// one "Show File" opens at a line.
     pub(super) source: bool,
     /// The lines the text changed against its Workspace's comparison (ADR 0050).
@@ -181,7 +176,7 @@ pub(super) enum FileViewContent {
 }
 
 impl Condr {
-    /// Shows `path` in the Workspace's Preview Tab: a layout command like any other,
+    /// Shows `path` in the Workspace's Preview Pane: a layout command like any other,
     /// presented once the Server confirms it.
     pub(super) fn show_file_on(
         &mut self,
@@ -191,12 +186,20 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Showing another file takes the Preview Tab's unsaved text away (ADR 0045).
+        // Showing another file takes the Preview Pane's unsaved text away (ADR 0045).
         let preview = self
             .connection(key)
-            .and_then(|connection| connection.session()?.file_tab(workspace_id))
-            .filter(|tab| tab.file().is_some_and(|file| file.path() != path))
-            .map(Tab::id);
+            .and_then(|connection| {
+                connection
+                    .session()?
+                    .viewer_pane(workspace_id, ViewerKind::File)
+            })
+            .filter(|(_, pane)| {
+                pane.viewer()
+                    .and_then(Viewer::path)
+                    .is_some_and(|shown| shown != path)
+            })
+            .map(|(_, pane)| pane.id());
         let show: Continuation = Box::new(move |this, window, cx| {
             this.send_presenting_layout_to(
                 key,
@@ -209,23 +212,25 @@ impl Condr {
             );
         });
         match preview {
-            Some(tab_id) => self.confirm_unsaved(UnsavedScope::Tab(key, tab_id), show, window, cx),
+            Some(pane_id) => {
+                self.confirm_unsaved(UnsavedScope::Pane(key, pane_id), show, window, cx)
+            }
             None => show(self, window, cx),
         }
     }
 
-    /// The Preview Tab's body: one file's content, rendered when it can be, or why there
+    /// The Preview Pane's body: one file's content, rendered when it can be, or why there
     /// is none.
-    pub(super) fn render_file_tab(
+    pub(super) fn render_preview_pane(
         &self,
         view: &WindowView,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
-        tab_id: TabId,
+        pane_id: PaneId,
         path: &RelativePath,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let editor = self.preview_pane.editors.get(&(key, tab_id));
+    ) -> (Div, AnyElement) {
+        let editor = self.preview_pane.editors.get(&(key, pane_id));
         let content = editor.map_or(FileViewContent::Loading, |editor| editor.content.clone());
         let rendering = rendering_for(path).filter(|_| content == FileViewContent::Text);
         let source = editor.is_some_and(|editor| editor.source);
@@ -239,7 +244,7 @@ impl Condr {
         let header = self.render_file_header(
             key,
             workspace_id,
-            tab_id,
+            pane_id,
             path,
             rendering,
             source,
@@ -263,7 +268,7 @@ impl Condr {
                     .debug_selector(|| "file-body".into())
                     .key_context("CondrPreview")
                     .on_action(cx.listener(move |this, _: &SaveFile, window, cx| {
-                        this.save_file(key, tab_id, None, window, cx);
+                        this.save_file(key, pane_id, None, window, cx);
                     }))
                     .flex_1()
                     .min_h_0()
@@ -296,28 +301,30 @@ impl Condr {
             }
             (None, None, FileViewContent::Failed(reason), _) => failed_state(reason.clone(), cx),
         };
-        v_flex()
+        let body = v_flex()
             .debug_selector(|| "file-tab".into())
-            .size_full()
-            .child(header)
+            .flex_1()
+            .min_h_0()
+            .w_full()
             .child(body)
-            .into_any_element()
+            .into_any_element();
+        (header, body)
     }
 
-    /// The path with its icon and Changes status, then what the Tab shows of it: an
+    /// The path with its icon and Changes status, then what the Pane shows of it: an
     /// image's size, or the choice between a renderable file's rendering and its text.
     #[allow(clippy::too_many_arguments)]
     fn render_file_header(
         &self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
-        tab_id: TabId,
+        pane_id: PaneId,
         path: &RelativePath,
         rendering: Option<Rendering>,
         source: bool,
         image: Option<&Option<Result<Arc<DecodedImage>, NoImage>>>,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
+    ) -> Div {
         let theme = cx.theme();
         let entry = self
             .connection(key)
@@ -327,7 +334,7 @@ impl Condr {
             Some(Ok(image)) => Some(image_summary(image)),
             _ => None,
         });
-        let editor = self.preview_pane.editors.get(&(key, tab_id));
+        let editor = self.preview_pane.editors.get(&(key, pane_id));
         // What the person should know about editing it, most pressing first.
         let note = editor.and_then(|editor| {
             let gone = self
@@ -362,7 +369,7 @@ impl Condr {
                 source,
                 move |source, cx| {
                     let _ = owner.update(cx, |this, cx| {
-                        if let Some(editor) = this.preview_pane.editors.get_mut(&(key, tab_id)) {
+                        if let Some(editor) = this.preview_pane.editors.get_mut(&(key, pane_id)) {
                             editor.source = source;
                             // Rendered draws the Editor's text, saved or not (ADR 0045).
                             if !source && editor.dirty {
@@ -390,23 +397,22 @@ impl Condr {
                 this.child(header_meta("file-image-summary", summary, muted))
             })
             .children(toggle)
-            .into_any_element()
     }
 
-    /// Brings the Preview Tab in line with the Server's answer for its file, and its
+    /// Brings the Preview Pane in line with the Server's answer for its file, and its
     /// images with theirs. Called from `rebuild_dock`, the one place that sees every
     /// presentation change.
     pub(super) fn sync_file_view(
         &mut self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
-        tab_id: TabId,
+        pane_id: PaneId,
         path: RelativePathBuf,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.sync_file_editor(key, workspace_id, tab_id, path, window, cx);
-        self.sync_change_marks(key, workspace_id, tab_id, cx);
+        self.sync_file_editor(key, workspace_id, pane_id, path, window, cx);
+        self.sync_change_marks(key, workspace_id, pane_id, cx);
         self.feed_images(key, workspace_id, cx);
     }
 
@@ -414,7 +420,7 @@ impl Condr {
         &mut self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
-        tab_id: TabId,
+        pane_id: PaneId,
         path: RelativePathBuf,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -441,27 +447,27 @@ impl Condr {
             self.request_file(key, workspace_id, path.clone());
         }
 
-        if let Some(editor) = self.preview_pane.editors.get(&(key, tab_id))
+        if let Some(editor) = self.preview_pane.editors.get(&(key, pane_id))
             && let Some((shown, _)) = &editor.shown
             && *shown != path
         {
-            // A rename of this Client's moves the Tab and its text together once the
-            // Server answers; until then the Tab keeps the text it had.
+            // A rename of this Client's moves the Pane and its text together once the
+            // Server answers; until then the Pane keeps the text it had.
             if self.rename_in_flight(key, workspace_id, shown) {
                 return;
             }
             // Another Client showed something else here (ADR 0045).
-            self.keep_unsaved(key, tab_id, cx);
+            self.keep_unsaved(key, pane_id, cx);
         }
         let editor = self
             .preview_pane
             .editors
-            .entry((key, tab_id))
+            .entry((key, pane_id))
             .or_insert_with(|| {
                 let state = cx.new(|cx| {
                     let mut state = EditorState::new(window, cx)
                         // Any language puts the Editor in code mode; the real one is set per
-                        // file below, since one Tab shows many files over its life.
+                        // file below, since one Pane shows many files over its life.
                         .language("text")
                         .line_number(true)
                         .soft_wrap(false)
@@ -473,7 +479,7 @@ impl Condr {
                 });
                 let changes = cx.subscribe(&state, move |this, _, event: &InputEvent, cx| {
                     if matches!(event, InputEvent::Change) {
-                        this.file_text_changed(key, tab_id, cx);
+                        this.file_text_changed(key, pane_id, cx);
                     }
                 });
                 FileEditor {
@@ -599,7 +605,7 @@ impl Condr {
         }
         let rendering = rendering_for(&shown_path).filter(|_| content == FileViewContent::Text);
         match (&editor.markdown, rendering) {
-            // An agent editing the file the Tab shows: the view keeps where it was read.
+            // An agent editing the file the Pane shows: the view keeps where it was read.
             (Some(markdown), Some(Rendering::Markdown)) if text_to_text => {
                 let list = markdown.read(cx).list_state();
                 editor
@@ -622,7 +628,7 @@ impl Condr {
         let language = language_for(&shown_path);
         editor.state.update(cx, |state, cx| {
             if text_to_text {
-                // The file the Tab shows changed under it, as when an agent edits it: an
+                // The file the Pane shows changed under it, as when an agent edits it: an
                 // edit to the open document, not a new one. Kit keeps the highlighter and
                 // its old tree, so the colours stay while the new parse runs, and the
                 // viewport stays where it was instead of jumping to the top.
@@ -646,13 +652,13 @@ impl Condr {
             }
         });
         // `set_value` emits no change event.
-        self.schedule_change_marks(key, tab_id, cx);
+        self.schedule_change_marks(key, pane_id, cx);
     }
 
     /// The Editor's text moved: it is unsaved while it differs from what was read.
-    fn file_text_changed(&mut self, key: ConnectionKey, tab_id: TabId, cx: &mut Context<Self>) {
-        self.schedule_change_marks(key, tab_id, cx);
-        let Some(editor) = self.preview_pane.editors.get_mut(&(key, tab_id)) else {
+    fn file_text_changed(&mut self, key: ConnectionKey, pane_id: PaneId, cx: &mut Context<Self>) {
+        self.schedule_change_marks(key, pane_id, cx);
+        let Some(editor) = self.preview_pane.editors.get_mut(&(key, pane_id)) else {
             return;
         };
         let dirty =
@@ -738,7 +744,7 @@ mod tests {
         let mut session = Session::new();
         session.create_workspace(std::env::temp_dir()).unwrap();
         let id = session.workspaces()[0].id();
-        let preview = session
+        let (preview, _) = session
             .show_viewer(
                 id,
                 condr_core::Viewer::File {
@@ -751,13 +757,13 @@ mod tests {
         view.retain_session(1, Some(&session));
         assert!(
             !view.images.want((1, id, "logo.png".into())),
-            "the open Preview Tab keeps its image"
+            "the open Preview Pane keeps its image"
         );
         session.close_tab(preview).unwrap();
         view.retain_session(1, Some(&session));
         assert!(
             view.images.want((1, id, "logo.png".into())),
-            "the closed Preview Tab's image was dropped"
+            "the closed Preview Pane's image was dropped"
         );
     }
 }

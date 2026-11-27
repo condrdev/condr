@@ -53,12 +53,12 @@ impl RuntimeState {
                     .and_then(|()| Session::restore(snapshot).map_err(|error| error.to_string()))
                 {
                     Ok(mut loaded) => {
-                        // A newer Server's Tabs this build cannot show or write back
+                        // A newer Server's Panes this build cannot show or write back
                         // (ADR 0078).
-                        let dropped = loaded.drop_unsupported_tabs();
+                        let dropped = loaded.drop_unsupported_panes();
                         if dropped > 0 {
                             tracing::warn!(
-                                "dropped {dropped} Tab(s) of kinds a newer Server wrote from the Session Snapshot"
+                                "dropped {dropped} Pane(s) of kinds a newer Server wrote from the Session Snapshot"
                             );
                         }
                         session = loaded;
@@ -98,13 +98,17 @@ impl RuntimeState {
             .iter()
             .flat_map(|workspace| {
                 workspace.tabs().iter().flat_map(move |tab| {
-                    tab.panes().iter().map(move |pane| {
-                        (
-                            pane.id(),
-                            pane.cwd().map(PathBuf::from),
-                            workspace.root_directory().to_path_buf(),
-                        )
-                    })
+                    // A viewer runs nothing (ADR 0078).
+                    tab.panes()
+                        .iter()
+                        .filter(|pane| pane.is_terminal())
+                        .map(move |pane| {
+                            (
+                                pane.id(),
+                                pane.cwd().map(PathBuf::from),
+                                workspace.root_directory().to_path_buf(),
+                            )
+                        })
                 })
             })
             .collect::<Vec<_>>();

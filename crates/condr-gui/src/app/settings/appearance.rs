@@ -480,7 +480,7 @@ fn font_size_stepper(
         ))
 }
 
-/// The Preview Tab's font size, apart from the terminal's; both start at the
+/// The Preview Pane's font size, apart from the terminal's; both start at the
 /// theme's mono font size.
 fn code_font_size_item(owner: &WeakEntity<Condr>) -> SettingItem {
     let get = owner.clone();

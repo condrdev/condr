@@ -25,11 +25,12 @@
 | `crates/condr-gui/src/app.rs` | GUI 根实体与初始化；持有连接、Dock 和功能状态，协调窗口与呈现；`server_management` 管理连接生命周期，`connection` 把 `condr-client` 的读写线程接到 GPUI 并处理剪贴板图片，`events` 消费事件，`presentation` 同步布局呈现 |
 | `crates/condr-gui/src/app/server_connection.rs` | 一条连接的 GUI 状态：视图、订阅、重连与 Settings 所需的 Server 状态，读取模型放在内嵌的 `SessionModel` 里；Bootstrap 和 LayoutChanged 由它校验后替换，无效时保留旧状态并交由连接层断开 |
 | `crates/condr-gui/src/app/workspace_resources.rs` | 连接持有的 `WorkspaceResources`；集中管理 Diff、目录、文件缓存及当前请求编号，处理响应匹配、刷新、折叠、Workspace 移除与连接重置 |
-| `crates/condr-gui/src/app/dock.rs` | Dock 布局投影；`terminal_panel.rs` 负责终端 Pane 的呈现、焦点和光标闪烁 |
+| `crates/condr-gui/src/app/dock.rs` | Dock 布局投影；`terminal_panel.rs` 负责终端 Pane 的呈现、焦点和光标闪烁，`viewer_panel.rs` 把 Diff、Preview 和 Git Graph 呈现为 viewer Pane |
 | `crates/condr-gui/src/app/terminal_input.rs` | 键盘输入与终端几何；`TerminalInputState` 管理目标、选择、链接、鼠标捕获、焦点、已转发按键和 IME 状态，统一按存活 Pane 清理；子模块处理鼠标、选择、剪贴板，`app/ime.rs` 处理输入法组合文本 |
-| `crates/condr-gui/src/app/right_sidebar.rs` | 右侧栏：开关、视图选择、宽度、标题与 Refresh；`changes`、`files`、`history` 各是一个视图，`change_tree` 是 Changes 与 History 共用的变更树，`entries` 新建、改名、删除条目；`RightSidebarState` 与各视图自己的状态按 Session 统一保留或清理 |
-| `crates/condr-gui/src/app/diff_tab.rs` | Diff Tab；`DiffTabState` 持有各 Tab 的 `Diff`、单栏选择和 History 选中的提交 |
-| `crates/condr-gui/src/app/preview_tab.rs` | Preview Tab；`PreviewTabState` 持有 Editor、跳转位置、图片、保存与待问的问题；`rendering` 渲染图片和 Markdown，`edits` 处理保存与冲突，`change_marks` 绘制改动标记 |
+| `crates/condr-gui/src/app/right_sidebar.rs` | 右侧栏：开关、视图选择、宽度、标题与 Refresh；`changes`、`files`、`git_history` 各是一个视图，`change_tree` 是 Changes 与 Git History 共用的变更树，`entries` 新建、改名、删除条目；`RightSidebarState` 与各视图自己的状态按 Session 统一保留或清理 |
+| `crates/condr-gui/src/app/diff_pane.rs` | Diff Pane；`DiffPaneState` 持有各 Pane 的 `Diff`、单栏选择和 Git History 选中的提交 |
+| `crates/condr-gui/src/app/preview_pane.rs` | Preview Pane；`PreviewPaneState` 持有 Editor、跳转位置、图片、保存与待问的问题；`rendering` 渲染图片和 Markdown，`edits` 处理保存与冲突，`change_marks` 绘制改动标记 |
+| `crates/condr-gui/src/app/git_graph.rs` | Git Graph；`GitGraphState` 持有各 Pane 的过滤、选择和表格，`branches` 画分支树，`table` 和 `lanes` 画提交表与提交图，`details` 画选中提交的文件和说明 |
 | `crates/condr-gui/src/app/list_row.rs` | 左右侧栏和 Tasks 共用的行：缩进、高亮、单行右键菜单；`git_marks` 画 Git 状态与行数，`format` 写时间和大小，`icons` 是 Condr 自己的图标 |
 | `crates/condr-gui/src/app/updates.rs` | `UpdateCheck` 管理更新渠道、结果、已读状态及自动检查任务；设置窗口和侧栏读取同一个状态 |
 | `crates/condr-gui/src/app/settings.rs` | 设置窗口；`appearance`、`server`、`shortcuts` 按页面功能组织 |

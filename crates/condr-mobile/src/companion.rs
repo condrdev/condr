@@ -550,6 +550,8 @@ impl Companion {
                     .tabs()
                     .iter()
                     .flat_map(|tab| tab.panes())
+                    // The Companion shows terminals; a viewer Pane is the GUI's (ADR 0078).
+                    .filter(|pane| pane.is_terminal())
                     .map(|pane| {
                         let pane_id = pane.id();
                         PaneView {

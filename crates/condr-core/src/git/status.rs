@@ -197,7 +197,7 @@ impl GitRepository {
             .take(MAX_DIFF_BYTES + 1)
             .read_to_end(&mut text)
             .map_err(git_error)?;
-        // gix's diff pipeline calls a NUL in the first 8000 bytes binary; so does the Diff Tab.
+        // gix's diff pipeline calls a NUL in the first 8000 bytes binary; so does the Diff Pane.
         if text.len() as u64 > MAX_DIFF_BYTES || text[..text.len().min(8000)].contains(&0) {
             return Ok(OldFile::None);
         }

@@ -6,11 +6,11 @@ History (ADR 0046) lists `HEAD`'s commits two lines each in a sidebar 400 px wid
 
 ## Names
 
-**History becomes Git History**, "Git 历史" in Chinese: "History" alone says too little beside a terminal's history and a shell's. The new Tab is **Git Graph**, in both languages. Code follows the names: the GUI's `history` module, state, `t!` keys and debug selectors become `git_history`, the core's `git/history.rs` becomes `git/log.rs` and `HISTORY_PAGE` `GIT_LOG_PAGE`. Earlier ADRs keep their words.
+**History becomes Git History**, "Git 历史" in Chinese: "History" alone says too little beside a terminal's history and a shell's. The new viewer is **Git Graph**, in both languages. Code follows the names: the GUI's `history` module, state, `t!` keys and debug selectors become `git_history`, the core's `git/history.rs` becomes `git/log.rs` and `HISTORY_PAGE` `GIT_LOG_PAGE`. Earlier ADRs keep their words.
 
-## The Git Graph Tab
+## The Git Graph Pane
 
-**A viewer Tab of its own** (ADR 0017), at most one per Workspace, opened through `ShowViewer` (ADR 0078) by a button beside Refresh in the right sidebar's header while Git History shows (Lucide `git-graph`), and by "Open Git Graph" in the Command Palette (ADR 0064); it has no default shortcut. Only a Workspace that has Git History offers it. The Session holds only that the Tab exists; the branch filter, the text filter, the selection, column widths and split positions are this Client's view and are not remembered. With several repositories (ADR 0073) it shows the one Git History shows, through the same choice, as a menu at the start of its filter bar.
+**A viewer Pane** (ADR 0078), at most one per Workspace, in a Tab of its own when it first opens, opened through `ShowViewer` by a button beside Refresh in the right sidebar's header while Git History shows (Lucide `git-graph`), and by "Open Git Graph" in the Command Palette (ADR 0064); it has no default shortcut. Only a Workspace that has Git History offers it. The Session holds only that the Pane exists; the branch filter, the text filter, the selection, column widths and split positions are this Client's view and are not remembered. With several repositories (ADR 0073) it shows the one Git History shows, through the same choice, as a menu at the start of its filter bar.
 
 **Three columns, as IDEA lays them out**: the branches; the commits; and the selected commit's files above its details. The branches start 180 px wide and the right column 300 px, so the commits take the rest; the details start 240 px high under the files; every divider drags. Git History in the sidebar stays as it is but for the button that opens Git Graph.
 
@@ -36,7 +36,7 @@ The tree has IDEA's groups, each shown only when it has entries: `HEAD` with the
 
 ### Files and details
 
-**The files** are Git History's tree (ADR 0046), each folder counting its files. A single click selects; a double-click or Enter shows the file in the Diff Tab as the commit changed it, as a click in Git History does. A Workspace shows one Tab at a time, so the Diff Tab takes the strip; Git Graph keeps its selection for the way back.
+**The files** are Git History's tree (ADR 0046), each folder counting its files. A single click selects; a double-click shows the file in the Workspace's Diff Pane as the commit changed it, as a click in Git History does. The first time, the Diff Pane opens in a Tab of its own; dragged beside Git Graph once (ADR 0078), each double-click after retargets it there without leaving the Tab.
 
 **The details**: the full message, selectable; `short id  author <email>  on date at time`; `committed by name on date at time` when the committer differs; the branch labels, then the tag labels; and "In N branches: …", up to six with "Show all", asked of the Server when the commit is selected and "Loading…" until it lands.
 
@@ -62,8 +62,8 @@ Everything in IDEA that changes the repository; favourite branches; Go to Hash; 
 ## Delivery
 
 1. **refactor**: the renames above, with no text a user reads.
-2. **feat**: ADR 0078 and this one; the protocol, Server and core; the GUI with its `en` and `zh-CN` text; `CONTEXT.md` (Git History, Git Graph, Unsupported Tab, the Chinese terms); AGENTS.md's dependency rule for `chrono`; the website's Changes, Overview, Workspaces and Keybindings pages in both languages.
+2. **feat**: this ADR; the protocol, Server and core; the GUI with its `en` and `zh-CN` text; `CONTEXT.md` (Git History, Git Graph, the Chinese terms); AGENTS.md's dependency rule for `chrono`; the website's Changes, Overview, Workspaces and Keybindings pages in both languages.
 
 ## Tests
 
-`condr-core`: date order keeping parents after children under clock skew; walking from every ref, from one and from `HEAD` as a ref with the refs; the text filter over the full message, ignoring case, and an id prefix of seven digits or more; pages staying consistent from the returned starts while a branch moves; refs with their kinds and annotated tags peeled; the `HEAD` marks; a differing committer; the branches reaching a commit; every new field round-tripping. GUI: lane layout for a line, a fork and merge, an octopus merge and lanes cut at a page's end; ref labels merging; the branch tree's groups, folders, folding and filter; dates at each boundary; with a real Server, Git Graph opening from Git History's header, every branch listed, a double-click filtering by branch and the clear button undoing it, Right stepping to the first parent, the text filter focused with its shortcut and applied on Enter, a selected commit listing its files, details and branches, and a double-clicked file opening the Diff Tab; offscreen screenshots in dark and light.
+`condr-core`: date order keeping parents after children under clock skew; walking from every ref, from one and from `HEAD` as a ref with the refs; the text filter over the full message, ignoring case, and an id prefix of seven digits or more; pages staying consistent from the returned starts while a branch moves; refs with their kinds and annotated tags peeled; the `HEAD` marks; a differing committer; the branches reaching a commit; every new field round-tripping. GUI: lane layout for a line, a fork and merge, an octopus merge and lanes cut at a page's end; ref labels merging; the branch tree's groups, folders, folding and filter; dates at each boundary; with a real Server, Git Graph opening from Git History's header, every branch listed, a double-click filtering by branch and the clear button undoing it, Right stepping to the first parent, the text filter focused with its shortcut and applied on Enter, a selected commit listing its files, details and branches, and a double-clicked file opening the Diff Pane; offscreen screenshots in dark and light.

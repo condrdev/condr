@@ -1,4 +1,5 @@
 use super::*;
+use condr_core::{Pane, PaneContent, Viewer};
 
 /// How many rows `pane read` returns by default, as herdr does.
 const DEFAULT_READ_LINES: u32 = 80;
@@ -53,7 +54,7 @@ pub(crate) enum PaneCommand {
         #[arg(long, value_enum)]
         direction: Side,
     },
-    /// Detach a Pane and reattach it beside another Pane in the same Tab
+    /// Detach a Pane and reattach it beside another Pane of its Workspace, closing a Tab it leaves empty
     Move {
         /// Defaults to the calling Pane
         pane_id: Option<u64>,
@@ -133,7 +134,7 @@ pub(crate) fn run_pane(device: Option<&str>, command: PaneCommand) -> i32 {
     // `read` prints the text itself so agents can consume it without a JSON step.
     if let PaneCommand::Read { pane_id, lines } = command {
         return match connect(device).and_then(|mut client| {
-            find_pane(&client.session()?, pane_id)?;
+            terminal_pane(&client.session()?, pane_id)?;
             Ok(client.read_pane(PaneId::from_u64(pane_id), lines)?)
         }) {
             Ok(text) => {
@@ -156,6 +157,9 @@ pub(super) struct PaneInfo {
     pub(super) pane_id: u64,
     pub(super) tab_id: u64,
     pub(super) workspace_id: u64,
+    /// `terminal`, or the viewer it is (ADR 0078): `diff`, `preview`, `git-graph`, or
+    /// `unsupported` for a kind a newer Condr added.
+    pub(super) kind: &'static str,
     /// The focused Pane of its Tab.
     pub(super) focused: bool,
     /// Fills its Tab, hiding the other Panes.
@@ -191,10 +195,22 @@ pub(super) fn pane_info(
         .iter()
         .find(|agent| agent.pane_id == pane_id)
         .map(|agent| &agent.agent);
+    let content = tab
+        .panes()
+        .iter()
+        .find(|pane| pane.id() == pane_id)
+        .map(Pane::content);
     PaneInfo {
         pane_id: pane_id.as_u64(),
         tab_id: tab.id().as_u64(),
         workspace_id: workspace.id().as_u64(),
+        kind: match content {
+            Some(PaneContent::Terminal { .. }) | None => "terminal",
+            Some(PaneContent::Viewer(Viewer::Diff { .. })) => "diff",
+            Some(PaneContent::Viewer(Viewer::File { .. })) => "preview",
+            Some(PaneContent::Viewer(Viewer::GitGraph)) => "git-graph",
+            Some(PaneContent::Unsupported) => "unsupported",
+        },
         focused: tab.focused_pane().is_some_and(|pane| pane.id() == pane_id),
         // Zoom is live state, not part of the structural Snapshot (ADR 0005).
         zoomed: overview.zoomed_panes.contains(&pane_id),
@@ -227,6 +243,23 @@ pub(super) fn find_pane(session: &Session, id: u64) -> Result<(&Workspace, &Tab)
                 .map(|tab| (workspace, tab))
         })
         .ok_or_else(|| CliError::new("pane_not_found", format!("pane {id} not found")))
+}
+
+/// `find_pane`, refusing a Pane that is no terminal: a viewer has nothing to read or type
+/// into (ADR 0078).
+fn terminal_pane(session: &Session, id: u64) -> Result<(), CliError> {
+    find_pane(session, id)?;
+    if session
+        .pane(PaneId::from_u64(id))
+        .is_some_and(Pane::is_terminal)
+    {
+        Ok(())
+    } else {
+        Err(CliError::new(
+            "pane_not_terminal",
+            format!("pane {id} is not a terminal"),
+        ))
+    }
 }
 
 /// The Pane this process runs in, or a usage-style error when there is none. With
@@ -538,12 +571,12 @@ fn pane(
         }
         PaneCommand::Read { .. } => unreachable!("read prints text, see run_pane"),
         PaneCommand::SendText { pane_id, text } => {
-            find_pane(&client.session()?, pane_id)?;
+            terminal_pane(&client.session()?, pane_id)?;
             send(client, pane_id, [TerminalCommand::Text(text)])?;
             Ok(json!({ "ok": true }))
         }
         PaneCommand::SendKeys { pane_id, keys } => {
-            find_pane(&client.session()?, pane_id)?;
+            terminal_pane(&client.session()?, pane_id)?;
             // Every key is validated before anything is typed.
             let commands = keys
                 .iter()
@@ -553,7 +586,7 @@ fn pane(
             Ok(json!({ "ok": true }))
         }
         PaneCommand::Run { pane_id, command } => {
-            find_pane(&client.session()?, pane_id)?;
+            terminal_pane(&client.session()?, pane_id)?;
             // A paste, then Enter once the program has taken it: an Enter that follows at
             // once is absorbed by a TUI's paste detector (Codex), leaving the line unrun.
             send(client, pane_id, [TerminalCommand::Submit(command)])?;
@@ -592,8 +625,9 @@ fn target_pane(device: Option<&str>, pane_id: Option<u64>) -> Result<PaneId, Cli
     }))
 }
 
-/// Applies a rearrangement inside a Pane's Tab and reports whether the Tab changed at
-/// all: the Server accepts a resize or swap with no neighbor as a no-op.
+/// Applies a rearrangement of a Pane and reports whether its Tab changed at all: the
+/// Server accepts a resize or swap with no neighbor as a no-op. A Pane moved to another
+/// Tab changed it, and may have closed it (ADR 0078).
 fn arrange(
     client: &mut ClientConnection,
     pane_id: PaneId,
@@ -608,6 +642,9 @@ fn arrange(
     );
     apply(client, command)?;
     let after = client.session()?;
+    if let Some(moved) = after.tab_for_pane(pane_id).filter(|tab| tab.id() != tab_id) {
+        return Ok((true, moved.id()));
+    }
     let tab = after
         .tab(tab_id)
         .ok_or_else(|| CliError::new("pane_not_found", "the Tab vanished"))?;

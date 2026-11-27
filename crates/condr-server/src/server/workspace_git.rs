@@ -779,7 +779,7 @@ fn refresh_workspace(
     if apply_workspace_git_refresh(&mut state, workspace_id, &entry.root, next)
         && working_tree_changed
     {
-        // The same batch is what the Files sidebar and Preview Tabs follow (ADR 0018).
+        // The same batch is what the Files sidebar and Preview Panes follow (ADR 0018).
         state.publish_background(SessionEvent::WorkspaceFilesChanged { workspace_id });
     }
     true

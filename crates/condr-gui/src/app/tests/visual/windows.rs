@@ -291,8 +291,11 @@ fn a_changes_click_retargets_a_detached_diff_pane_without_moving_either_window()
     let shown_diff = |window: &mut VisualTestContext| {
         window.read(|app| {
             let session = view.read(app).connection(1)?.session()?;
-            let tab = session.diff_tab(workspace_id)?;
-            Some((tab.id(), tab.diff()?.path().to_string()))
+            let (tab, pane) = session.viewer_pane(workspace_id, ViewerKind::Diff)?;
+            Some((
+                (tab.id(), pane.id()),
+                viewer_path(session, workspace_id, ViewerKind::Diff)?,
+            ))
         })
     };
     let show_diff = |window: &mut VisualTestContext, path: &str| {
@@ -308,8 +311,8 @@ fn a_changes_click_retargets_a_detached_diff_pane_without_moving_either_window()
     assert!(wait_until(window, |window| {
         shown_diff(window).is_some_and(|(_, path)| path == "notes.txt")
     }));
-    let diff_pane = shown_diff(window).unwrap().0;
-    let scope = WindowScope::Tab(1, diff_pane);
+    let (diff_tab, diff_pane) = shown_diff(window).unwrap().0;
+    let scope = WindowScope::Tab(1, diff_tab);
     window.update(|window, cx| {
         view.update(cx, |this, cx| {
             this.open_in_new_window(scope, window, cx);
@@ -330,7 +333,7 @@ fn a_changes_click_retargets_a_detached_diff_pane_without_moving_either_window()
     assert_eq!(
         super::dock::presented(window, &view).map(|(_, _, tab)| tab),
         Some(terminal_tab),
-        "the main window keeps its terminal while the Diff Tab elsewhere follows"
+        "the main window keeps its terminal while the Diff Pane elsewhere follows"
     );
     assert!(window.debug_bounds("shown-elsewhere").is_none());
     assert_eq!(window.read(|app| app.active_window()), Some(main));
@@ -346,7 +349,7 @@ fn a_changes_click_retargets_a_detached_diff_pane_without_moving_either_window()
                     .is_some_and(|viewer| viewer.patch.contains("BETA"))
             })
         }),
-        "the Diff Tab in the other window shows the file clicked"
+        "the Diff Pane in the other window shows the file clicked"
     );
 }
 

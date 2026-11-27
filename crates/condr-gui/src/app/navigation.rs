@@ -605,9 +605,9 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // A Preview Tab's unsaved text is asked about first (ADR 0045). A Pane close that
-        // ends its Workspace leaves a single terminal Tab, so no Preview Tab with it.
+        // A Preview Pane's unsaved text is asked about first (ADR 0045, ADR 0078).
         let scope = match command {
+            LayoutCommand::ClosePane { pane_id } => Some(UnsavedScope::Pane(key, pane_id)),
             LayoutCommand::CloseTab { tab_id } => Some(UnsavedScope::Tab(key, tab_id)),
             LayoutCommand::CloseWorkspace { workspace_id } => {
                 Some(UnsavedScope::Workspace(key, workspace_id))

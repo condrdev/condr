@@ -14,6 +14,7 @@ mod settings;
 mod tasks;
 mod terminal;
 mod transfers;
+mod viewers;
 mod windows;
 mod workflows;
 
@@ -42,7 +43,7 @@ use condr_core::{
     AgentKind, AgentSnapshot, AgentState, PaneId, ProxyMode, ProxySetting, Session, TabId,
     TerminalCell, TerminalColor, TerminalCommand, TerminalMousePosition, TerminalMouseTracking,
     TerminalPosition, TerminalSelection, TerminalSide, TerminalSize, TerminalView,
-    TerminalViewFrame, WorkspaceId,
+    TerminalViewFrame, ViewerKind, WorkspaceId,
 };
 use condr_server::{BoundServer, ClientConnection, Endpoint, ServerConfig, ServerHandle};
 use gpui_kit::component::dialog::Confirm;
@@ -464,4 +465,22 @@ fn wait_until_event_driven(
         std::thread::sleep(TEST_POLL_INTERVAL);
     }
     false
+}
+
+/// What the Tab's focused Pane shows, when it is a viewer (ADR 0078).
+fn tab_viewer(
+    session: &condr_core::Session,
+    tab_id: condr_core::TabId,
+) -> Option<condr_core::Viewer> {
+    session.tab(tab_id)?.focused_pane()?.viewer().cloned()
+}
+
+/// The file the Workspace's viewer Pane of `kind` shows.
+fn viewer_path(
+    session: &condr_core::Session,
+    workspace_id: condr_core::WorkspaceId,
+    kind: condr_core::ViewerKind,
+) -> Option<String> {
+    let (_, pane) = session.viewer_pane(workspace_id, kind)?;
+    Some(pane.viewer()?.path()?.to_string())
 }

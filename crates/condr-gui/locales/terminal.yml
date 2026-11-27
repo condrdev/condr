@@ -56,6 +56,9 @@ terminal:
     close_pane:
       en: Close Pane
       zh-CN: 关闭 Pane
+    move_to_new_tab:
+      en: Move to New Tab
+      zh-CN: 移到新 Tab
   zoom_in:
     en: Zoom In
     zh-CN: 放大

@@ -83,10 +83,10 @@ git_graph:
     show_all:
       en: Show all
       zh-CN: 显示全部
-unsupported_tab:
+unsupported_pane:
   title:
-    en: This Tab needs a newer version of Condr.
-    zh-CN: 这个 Tab 需要更新版本的 Condr 才能显示。
+    en: This Pane needs a newer version of Condr.
+    zh-CN: 这个 Pane 需要更新版本的 Condr 才能显示。
   builds:
     en: 'This Condr: %{this} · Server: %{server}'
     zh-CN: '本机 Condr：%{this} · Server：%{server}'

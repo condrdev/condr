@@ -22,7 +22,7 @@ fn readme_answer(this: &mut Condr, workspace_id: WorkspaceId, text: &str) -> Inc
 
 /// The right sidebar opens on Files for a Workspace outside a repository, lists the root
 /// from the real Server, follows the Server's watcher, unfolds a directory on click, and a
-/// file click opens the Preview Tab with the file's text (ADR 0018).
+/// file click opens the Preview Pane with the file's text (ADR 0018).
 #[test]
 fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_pane() {
     let _serial_guard = acquire_visual_test_lock();
@@ -123,7 +123,7 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_pane()
         "children follow their directory row"
     );
 
-    // Clicking a file opens the Preview Tab on the Server and the text reaches the Editor.
+    // Clicking a file opens the Preview Pane on the Server and the text reaches the Editor.
     window.simulate_click(main.center(), Modifiers::default());
     assert!(
         wait_until(window, |window| {
@@ -131,13 +131,16 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_pane()
                 view.read(app)
                     .presented()
                     .is_some_and(|(_, session, _, tab_id)| {
-                        session.tab(tab_id).unwrap().file().is_some_and(|file| {
-                            file.path() == relative_path::RelativePath::new("src/main.rs")
-                        })
+                        tab_viewer(session, tab_id)
+                            .and_then(|viewer| viewer.path().map(ToString::to_string))
+                            .as_deref()
+                            == Some("src/main.rs")
+                            && tab_viewer(session, tab_id)
+                                .is_some_and(|viewer| viewer.kind() == ViewerKind::File)
                     })
             })
         }),
-        "the Preview Tab should become the shown Tab"
+        "the Preview Pane should become the shown Tab"
     );
     assert!(
         wait_until(window, |window| {
@@ -153,14 +156,15 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_pane()
         }),
         "the Server's file should reach the Editor"
     );
-    // Alt+N into the Preview Tab takes the focused terminal out of the window; Alt+N
+    // Alt+N into the Preview Pane takes the focused terminal out of the window; Alt+N
     // must still answer there.
     let shows_preview = |window: &mut VisualTestContext| {
         window.read(|app| {
             view.read(app)
                 .presented()
                 .is_some_and(|(_, session, _, tab_id)| {
-                    session.tab(tab_id).unwrap().file().is_some()
+                    tab_viewer(session, tab_id)
+                        .is_some_and(|viewer| viewer.kind() == ViewerKind::File)
                 })
         })
     };
@@ -185,7 +189,7 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_pane()
     window.simulate_keystrokes(&format!("{TAB_MODIFIER}-1"));
     assert!(
         wait_until(window, |window| !shows_preview(window)),
-        "the Tab shortcut works from a Preview Tab the keyboard followed"
+        "the Tab shortcut works from a Preview Pane the keyboard followed"
     );
     window.simulate_keystrokes(&format!("{TAB_MODIFIER}-2"));
     assert!(wait_until(window, shows_preview));
@@ -205,12 +209,7 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_pane()
     assert!(wait_until(window, |window| {
         window.read(|app| {
             view.read(app).active_session().is_some_and(|session| {
-                session
-                    .file_tab(workspace_id)
-                    .and_then(|tab| tab.file())
-                    .is_some_and(|file| {
-                        file.path() == relative_path::RelativePath::new("README.md")
-                    })
+                viewer_path(session, workspace_id, ViewerKind::File).as_deref() == Some("README.md")
                     && session.workspace(workspace_id).unwrap().tabs().len() == 2
             })
         })
@@ -225,7 +224,7 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_pane()
                 })
             })
         }),
-        "the retargeted Preview Tab should show the second file"
+        "the retargeted Preview Pane should show the second file"
     );
     // Markdown opens rendered (ADR 0037); the header switches it to its text and back.
     window.update(|window, cx| _ = window.draw(cx));
@@ -280,7 +279,7 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_pane()
         "changed content should reach the Editor"
     );
 
-    // A working-tree batch refetches only the file the Preview Tab shows; src/main.rs,
+    // A working-tree batch refetches only the file the Preview Pane shows; src/main.rs,
     // cached when it was shown earlier, is dropped rather than asked for again.
     let cached_files = |window: &mut VisualTestContext| {
         window.read(|app| {
@@ -342,7 +341,7 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_pane()
             .editors
             .values()
             .next()
-            .expect("the Preview Tab has an Editor")
+            .expect("the Preview Pane has an Editor")
             .state
             .clone()
     });
@@ -493,7 +492,7 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_pane()
     let _ = std::fs::remove_dir_all(&root);
 }
 
-/// The Preview Tab renders what it can (ADR 0037): an image file scaled to fit with its
+/// The Preview Pane renders what it can (ADR 0037): an image file scaled to fit with its
 /// size in the header, an SVG that switches to its text, and Markdown that fetches the
 /// images it draws from the Server, keeps them through a working-tree refresh without
 /// decoding them again, and lets them go once the Tab shows another file.
@@ -568,10 +567,10 @@ fn preview_pane_renders_images_and_the_images_markdown_draws() {
             wait_until(window, |window| window.read(|app| {
                 view.read(app)
                     .active_session()
-                    .and_then(|session| session.file_tab(workspace_id)?.file())
-                    .is_some_and(|file| file.path() == relative_path::RelativePath::new(path))
+                    .and_then(|session| viewer_path(session, workspace_id, ViewerKind::File))
+                    .is_some_and(|shown| shown == path)
             })),
-            "the Preview Tab should show {path}"
+            "the Preview Pane should show {path}"
         );
     };
     let image = |window: &mut VisualTestContext, path: &str| {
@@ -673,7 +672,7 @@ fn preview_pane_renders_images_and_the_images_markdown_draws() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-/// The Preview Tab edits the file it shows (ADR 0045): typing marks it unsaved, Save
+/// The Preview Pane edits the file it shows (ADR 0045): typing marks it unsaved, Save
 /// writes it back with its CRLF line breaks, a change on disk under unsaved text leaves
 /// the text alone and makes the next Save ask, and text another action takes away is
 /// asked about rather than lost.
@@ -724,12 +723,17 @@ fn preview_pane_saves_edits_and_never_drops_unsaved_text() {
                 .any(|editor| editor.version.is_some())
         })
     }));
-    let (tab_id, editor) = window.read(|app| {
-        let (&(_, tab_id), editor) = view.read(app).preview_pane.editors.iter().next().unwrap();
-        (tab_id, editor.state.clone())
+    let (pane_id, editor) = window.read(|app| {
+        let (&(_, pane_id), editor) = view.read(app).preview_pane.editors.iter().next().unwrap();
+        (pane_id, editor.state.clone())
+    });
+    // The Tab the Preview Pane is in carries the unsaved mark (ADR 0078).
+    let tab_id = window.read(|app| {
+        let session = view.read(app).active_session().unwrap();
+        session.tab_for_pane(pane_id).unwrap().id()
     });
     let dirty = |window: &mut VisualTestContext| {
-        window.read(|app| view.read(app).preview_pane.editors[&(1, tab_id)].dirty)
+        window.read(|app| view.read(app).preview_pane.editors[&(1, pane_id)].dirty)
     };
     let type_at_end = |window: &mut VisualTestContext, text: &str| {
         window.update(|window, cx| {
@@ -748,7 +752,7 @@ fn preview_pane_saves_edits_and_never_drops_unsaved_text() {
     let unsaved_mark = leaked_selector(format!("tab-unsaved-{}", tab_id.as_u64()));
     assert!(window.debug_bounds(unsaved_mark).is_some());
     window.update(|window, cx| {
-        view.update(cx, |this, cx| this.save_file(1, tab_id, None, window, cx));
+        view.update(cx, |this, cx| this.save_file(1, pane_id, None, window, cx));
     });
     assert!(
         wait_until(window, |window| {
@@ -767,13 +771,13 @@ fn preview_pane_saves_edits_and_never_drops_unsaved_text() {
     assert!(
         wait_until(window, |window| {
             window.update(|window, cx| _ = window.draw(cx));
-            window.read(|app| view.read(app).preview_pane.editors[&(1, tab_id)].disk_changed)
+            window.read(|app| view.read(app).preview_pane.editors[&(1, pane_id)].disk_changed)
         }),
         "a newer file under unsaved text should be noticed, not applied"
     );
     assert!(window.read(|app| editor.read(app).value().contains("mine")));
     window.update(|window, cx| {
-        view.update(cx, |this, cx| this.save_file(1, tab_id, None, window, cx));
+        view.update(cx, |this, cx| this.save_file(1, pane_id, None, window, cx));
     });
     assert!(
         wait_until(window, |window| {
@@ -808,7 +812,7 @@ fn preview_pane_saves_edits_and_never_drops_unsaved_text() {
 
     // Something else retargets the Tab: the text is asked about, and Copy keeps it.
     let workspace_id =
-        window.read(|app| view.read(app).preview_pane.editors[&(1, tab_id)].workspace_id);
+        window.read(|app| view.read(app).preview_pane.editors[&(1, pane_id)].workspace_id);
     window.update(|_, cx| {
         view.update(cx, |this, _| {
             this.send_layout_to(
@@ -844,7 +848,7 @@ fn preview_pane_saves_edits_and_never_drops_unsaved_text() {
 }
 
 /// The Files view creates, renames and deletes (ADR 0045): a new file opens in the
-/// Preview Tab, renaming its directory carries the Tab and its unsaved text along, a name
+/// Preview Pane, renaming its directory carries the Tab and its unsaved text along, a name
 /// already taken stays in its dialog with the reason, and Delete asks first.
 #[test]
 fn files_view_creates_renames_and_deletes_entries() {
@@ -927,16 +931,12 @@ fn files_view_creates_renames_and_deletes_entries() {
             root.join("docs/plan.md").is_file()
                 && window.read(|app| {
                     view.read(app).active_session().is_some_and(|session| {
-                        session
-                            .file_tab(workspace_id)
-                            .and_then(|tab| tab.file())
-                            .is_some_and(|file| {
-                                file.path() == relative_path::RelativePath::new("docs/plan.md")
-                            })
+                        viewer_path(session, workspace_id, ViewerKind::File).as_deref()
+                            == Some("docs/plan.md")
                     })
                 })
         }),
-        "a new file is created and opens in the Preview Tab"
+        "a new file is created and opens in the Preview Pane"
     );
     assert!(wait_until(window, |window| {
         window.update(|window, cx| _ = window.draw(cx));
@@ -950,9 +950,9 @@ fn files_view_creates_renames_and_deletes_entries() {
     }));
 
     // Unsaved text follows its directory's rename.
-    let (tab_id, editor) = window.read(|app| {
-        let (&(_, tab_id), editor) = view.read(app).preview_pane.editors.iter().next().unwrap();
-        (tab_id, editor.state.clone())
+    let (pane_id, editor) = window.read(|app| {
+        let (&(_, pane_id), editor) = view.read(app).preview_pane.editors.iter().next().unwrap();
+        (pane_id, editor.state.clone())
     });
     window.update(|window, cx| {
         editor.update(cx, |state, cx| {
@@ -981,7 +981,7 @@ fn files_view_creates_renames_and_deletes_entries() {
             root.join("notes/plan.md").is_file()
                 && window.read(|app| {
                     let this = view.read(app);
-                    let editor = &this.preview_pane.editors[&(1, tab_id)];
+                    let editor = &this.preview_pane.editors[&(1, pane_id)];
                     editor.dirty
                         && editor
                             .shown
@@ -989,7 +989,7 @@ fn files_view_creates_renames_and_deletes_entries() {
                             .is_some_and(|(path, _)| path == "notes/plan.md")
                 })
         }),
-        "the Preview Tab and its unsaved text follow the rename"
+        "the Preview Pane and its unsaved text follow the rename"
     );
     assert!(window.read(|app| editor.read(app).value().contains("draft")));
     assert!(window.debug_bounds("file-choice-copy").is_none());
@@ -1022,7 +1022,7 @@ fn files_view_creates_renames_and_deletes_entries() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-/// The Preview Tab marks the lines a file changed against its Workspace's comparison
+/// The Preview Pane marks the lines a file changed against its Workspace's comparison
 /// (ADR 0050), in the gutter and on the scrollbar: what an agent changed on disk and what
 /// the person types, against `HEAD` or the base branch. The old side is asked for again on
 /// a Git change but not when only files moved, and a Server too old to answer shows no

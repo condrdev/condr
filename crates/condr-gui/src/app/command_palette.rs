@@ -355,7 +355,7 @@ impl Condr {
                         detail: format!("{name}{device}"),
                         enabled: true,
                         look: Look::Tab {
-                            viewer: !matches!(tab.content(), TabContent::Terminals(_)),
+                            viewer: tab.focused_pane().is_some_and(|pane| !pane.is_terminal()),
                         },
                     });
                     for pane in tab.panes() {

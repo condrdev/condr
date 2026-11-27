@@ -45,7 +45,7 @@ Condr does not build a second-hand chat interface, take over the conversation lo
 
 - **Native subprocess passthrough**: CLIs such as Claude Code, Codex and OpenCode run exactly as they are in a real system PTY.
 - **Full ecosystem support**: each vendor's native context compaction, local configuration, permission prompts and rich interactions are kept intact.
-- **Review panels out of the box**: review every code change an Agent produces through the light Diff Tab and Preview Tab, without switching to a full IDE.
+- **Review panels out of the box**: review every code change an Agent produces through the light Diff Pane and Preview Pane, without switching to a full IDE.
 
 ---
 

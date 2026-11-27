@@ -16,7 +16,6 @@ use std::{
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
-pub use workspace::{DIFF_TAB_NAME, FILE_TAB_NAME, GIT_GRAPH_TAB_NAME};
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 const MAX_STABLE_ID: u64 = u64::MAX / 2;
@@ -119,39 +118,10 @@ pub struct Workspace {
 pub struct Tab {
     id: TabId,
     name: String,
-    content: TabContent,
+    layout: TabLayout,
 }
 
-/// What a Tab shows: a layout of terminal Panes, or a viewer with no Panes at all
-/// (ADR 0017, ADR 0018). Pane commands only ever reach terminal Tabs, since a viewer has
-/// none. A Workspace has at most one viewer Tab of each kind.
-#[derive(Clone, Debug)]
-pub enum TabContent {
-    Terminals(TerminalLayout),
-    Diff(DiffView),
-    File(FileView),
-    /// The Workspace's commits on every branch (ADR 0079); what it shows is each Client's
-    /// own view, so the Session holds only that the Tab exists.
-    GitGraph,
-    /// A kind a newer peer added that this build does not know (ADR 0078): the Tab keeps
-    /// its id and name and shows nothing.
-    Unsupported,
-}
-
-impl TabContent {
-    /// Whether two contents are the same viewer kind; terminal layouts never are, and
-    /// neither are two Tabs this build cannot tell apart.
-    fn same_viewer_kind(&self, other: &Self) -> bool {
-        matches!(
-            (self, other),
-            (Self::Diff(_), Self::Diff(_))
-                | (Self::File(_), Self::File(_))
-                | (Self::GitGraph, Self::GitGraph)
-        )
-    }
-}
-
-/// The viewer Tab `ShowViewer` creates or retargets (ADR 0078).
+/// The viewer a viewer Pane shows (ADR 0078), which `ShowViewer` creates or retargets.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Viewer {
     /// `path`'s diff (ADR 0017).
@@ -162,8 +132,51 @@ pub enum Viewer {
     GitGraph,
 }
 
+/// A viewer's kind, of which a Workspace has at most one Pane (ADR 0078).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ViewerKind {
+    Diff,
+    File,
+    GitGraph,
+}
+
+impl Viewer {
+    pub fn kind(&self) -> ViewerKind {
+        match self {
+            Self::Diff { .. } => ViewerKind::Diff,
+            Self::File { .. } => ViewerKind::File,
+            Self::GitGraph => ViewerKind::GitGraph,
+        }
+    }
+
+    /// The file it shows, relative to the Workspace root.
+    pub fn path(&self) -> Option<&RelativePath> {
+        match self {
+            Self::Diff { path } | Self::File { path } => Some(path),
+            Self::GitGraph => None,
+        }
+    }
+
+    fn valid(&self) -> bool {
+        self.path().is_none_or(valid_diff_path)
+    }
+}
+
+impl ViewerKind {
+    /// What a Tab is called while this viewer is its focused Pane and nobody named it; the
+    /// same in every language (ADR 0078).
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Diff => "Diff",
+            Self::File => "Preview",
+            Self::GitGraph => "Git Graph",
+        }
+    }
+}
+
+/// A Tab's Panes and how they are laid out.
 #[derive(Clone, Debug)]
-pub struct TerminalLayout {
+struct TabLayout {
     panes: Vec<Pane>,
     focused_pane: PaneId,
     focus_history: Vec<PaneId>,
@@ -171,29 +184,24 @@ pub struct TerminalLayout {
     zoomed_pane: Option<PaneId>,
 }
 
-/// One file's working-tree diff against `HEAD`, named relative to the Workspace root.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DiffView {
-    path: RelativePathBuf,
-}
-
-/// One file's content as it is on disk (ADR 0018), named relative to the Workspace root.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FileView {
-    path: RelativePathBuf,
-}
-
-impl FileView {
-    pub fn path(&self) -> &RelativePath {
-        &self.path
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct Pane {
     id: PaneId,
-    cwd: Option<PathBuf>,
-    agent_resume: Option<crate::AgentResume>,
+    content: PaneContent,
+}
+
+/// What a Pane holds (ADR 0078).
+#[derive(Clone, Debug, PartialEq)]
+pub enum PaneContent {
+    /// A shell, started where `cwd` names, and the Agent conversation to resume in it.
+    Terminal {
+        cwd: Option<PathBuf>,
+        agent_resume: Option<crate::AgentResume>,
+    },
+    Viewer(Viewer),
+    /// A kind a newer peer added that this build does not know: it keeps its place and
+    /// shows nothing.
+    Unsupported,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -257,20 +265,26 @@ impl Session {
         })
     }
 
-    /// The Workspace's Diff Tab, if it has one; at most one exists (ADR 0017).
-    pub fn diff_tab(&self, workspace_id: WorkspaceId) -> Option<&Tab> {
-        self.workspace(workspace_id)?
-            .tabs
-            .iter()
-            .find(|tab| tab.diff().is_some())
+    /// The Workspace's viewer Pane of `kind`, and the Tab it is in; at most one exists
+    /// (ADR 0078).
+    pub fn viewer_pane(
+        &self,
+        workspace_id: WorkspaceId,
+        kind: ViewerKind,
+    ) -> Option<(&Tab, &Pane)> {
+        self.workspace(workspace_id)?.tabs.iter().find_map(|tab| {
+            tab.panes()
+                .iter()
+                .find(|pane| pane.viewer().is_some_and(|viewer| viewer.kind() == kind))
+                .map(|pane| (tab, pane))
+        })
     }
 
-    /// The Workspace's Preview Tab, if it has one; at most one exists (ADR 0018).
-    pub fn file_tab(&self, workspace_id: WorkspaceId) -> Option<&Tab> {
-        self.workspace(workspace_id)?
-            .tabs
+    pub fn tab_for_pane(&self, pane_id: PaneId) -> Option<&Tab> {
+        self.workspaces
             .iter()
-            .find(|tab| tab.file().is_some())
+            .flat_map(Workspace::tabs)
+            .find(|tab| tab.panes().iter().any(|pane| pane.id == pane_id))
     }
 
     pub fn workspace_by_root(&self, root_directory: &Path) -> Option<&Workspace> {
@@ -291,11 +305,9 @@ impl Session {
         None
     }
 
-    /// The terminal layout of the Tab `find_pane` located: a Pane is always in one.
-    fn terminal_layout_mut(&mut self, workspace_ix: usize, tab_ix: usize) -> &mut TerminalLayout {
-        self.workspaces[workspace_ix].tabs[tab_ix]
-            .terminals_mut()
-            .expect("a Pane lives in a terminal Tab")
+    /// The layout of the Tab `find_pane` located.
+    fn tab_layout_mut(&mut self, workspace_ix: usize, tab_ix: usize) -> &mut TabLayout {
+        &mut self.workspaces[workspace_ix].tabs[tab_ix].layout
     }
 
     fn tab_count(&self) -> usize {
@@ -365,86 +377,45 @@ impl Tab {
         &self.name
     }
 
-    pub fn content(&self) -> &TabContent {
-        &self.content
-    }
-
-    pub fn terminals(&self) -> Option<&TerminalLayout> {
-        match &self.content {
-            TabContent::Terminals(terminals) => Some(terminals),
-            _ => None,
-        }
-    }
-
-    fn terminals_mut(&mut self) -> Option<&mut TerminalLayout> {
-        match &mut self.content {
-            TabContent::Terminals(terminals) => Some(terminals),
-            _ => None,
-        }
-    }
-
-    pub fn diff(&self) -> Option<&DiffView> {
-        match &self.content {
-            TabContent::Diff(diff) => Some(diff),
-            _ => None,
-        }
-    }
-
-    pub fn file(&self) -> Option<&FileView> {
-        match &self.content {
-            TabContent::File(file) => Some(file),
-            _ => None,
-        }
-    }
-
-    /// Empty for a viewer Tab.
     pub fn panes(&self) -> &[Pane] {
-        self.terminals()
-            .map_or(&[], |terminals| terminals.panes.as_slice())
+        &self.layout.panes
     }
 
-    /// `None` for a viewer Tab; a terminal Tab always has one.
+    /// Always `Some`: a Tab has at least one Pane, and one has the focus.
     pub fn focused_pane(&self) -> Option<&Pane> {
-        let terminals = self.terminals()?;
-        Some(
-            terminals
-                .panes
-                .iter()
-                .find(|pane| pane.id == terminals.focused_pane)
-                .expect("focused pane belongs to tab"),
-        )
+        self.layout
+            .panes
+            .iter()
+            .find(|pane| pane.id == self.layout.focused_pane)
     }
 
     pub fn focus_history(&self) -> &[PaneId] {
-        self.terminals()
-            .map_or(&[], |terminals| terminals.focus_history.as_slice())
+        &self.layout.focus_history
     }
 
+    /// Always `Some`.
     pub fn layout(&self) -> Option<&PaneLayout> {
-        self.terminals().map(|terminals| &terminals.layout)
+        Some(&self.layout.layout)
     }
 
-    /// Where every Pane sits, in layout order; empty for a viewer Tab.
+    /// Where every Pane sits, in layout order.
     pub fn pane_rects(&self) -> Vec<PaneRect> {
-        let Some(terminals) = self.terminals() else {
-            return Vec::new();
-        };
-        let mut rects = Vec::with_capacity(terminals.panes.len());
-        collect_pane_rects(&terminals.layout, 0.0, 0.0, 1.0, 1.0, &mut rects);
+        let mut rects = Vec::with_capacity(self.layout.panes.len());
+        collect_pane_rects(&self.layout.layout, 0.0, 0.0, 1.0, 1.0, &mut rects);
         rects
     }
 
     /// The Pane that focus, swap and resize in `direction` would reach.
     pub fn neighbor(&self, pane_id: PaneId, direction: PaneDirection) -> Option<PaneId> {
-        neighbor_pane_id(&self.terminals()?.layout, pane_id, direction)
+        neighbor_pane_id(&self.layout.layout, pane_id, direction)
     }
 
     pub fn zoomed_pane_id(&self) -> Option<PaneId> {
-        self.terminals()?.zoomed_pane
+        self.layout.zoomed_pane
     }
 }
 
-impl TerminalLayout {
+impl TabLayout {
     fn single(pane: Pane) -> Self {
         let pane_id = pane.id;
         Self {
@@ -457,14 +428,7 @@ impl TerminalLayout {
     }
 }
 
-impl DiffView {
-    /// Relative to the Workspace root.
-    pub fn path(&self) -> &RelativePath {
-        &self.path
-    }
-}
-
-/// A Diff Tab names its file relative to the Workspace root: non-empty and made of plain
+/// A viewer names its file relative to the Workspace root: non-empty and made of plain
 /// names only, so it cannot reach outside the working tree. A [`RelativePath`] is
 /// `/`-separated on every platform; the Server turns it into a native path under the root.
 pub fn valid_diff_path(path: &RelativePath) -> bool {
@@ -475,16 +439,48 @@ pub fn valid_diff_path(path: &RelativePath) -> bool {
 }
 
 impl Pane {
-    pub fn agent_resume(&self) -> Option<&crate::AgentResume> {
-        self.agent_resume.as_ref()
+    fn terminal(id: PaneId, cwd: PathBuf) -> Self {
+        Self {
+            id,
+            content: PaneContent::Terminal {
+                cwd: Some(cwd),
+                agent_resume: None,
+            },
+        }
     }
 
     pub fn id(&self) -> PaneId {
         self.id
     }
 
+    pub fn content(&self) -> &PaneContent {
+        &self.content
+    }
+
+    pub fn is_terminal(&self) -> bool {
+        matches!(self.content, PaneContent::Terminal { .. })
+    }
+
+    /// `None` for a Pane that is no terminal.
     pub fn cwd(&self) -> Option<&Path> {
-        self.cwd.as_deref()
+        match &self.content {
+            PaneContent::Terminal { cwd, .. } => cwd.as_deref(),
+            _ => None,
+        }
+    }
+
+    pub fn agent_resume(&self) -> Option<&crate::AgentResume> {
+        match &self.content {
+            PaneContent::Terminal { agent_resume, .. } => agent_resume.as_ref(),
+            _ => None,
+        }
+    }
+
+    pub fn viewer(&self) -> Option<&Viewer> {
+        match &self.content {
+            PaneContent::Viewer(viewer) => Some(viewer),
+            _ => None,
+        }
     }
 }
 

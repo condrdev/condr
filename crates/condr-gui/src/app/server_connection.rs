@@ -408,20 +408,16 @@ impl ServerConnection {
         Ok(self.dock_projection() != previous_layout || self.presented_viewer() != previous_viewer)
     }
 
-    /// The viewer Tab this Client shows, if the shown Tab is one: its identity and file.
-    /// A retarget changes the file and nothing the Dock projection sees.
-    pub(super) fn presented_viewer(&self) -> Option<(TabId, RelativePathBuf)> {
-        let session = self.session()?;
-        let (_, tab_id) = self.viewed(session)?;
-        let tab = session.tab(tab_id)?;
-        let path = match tab.content() {
-            TabContent::Diff(diff) => diff.path(),
-            TabContent::File(file) => file.path(),
-            // Nothing a Session change retargets.
-            TabContent::GitGraph | TabContent::Unsupported => RelativePath::new(""),
-            TabContent::Terminals(_) => return None,
+    /// The viewer Panes of the Tab this Client shows, and what each shows (ADR 0078). A
+    /// retarget changes them and nothing the Dock projection sees.
+    pub(super) fn presented_viewer(&self) -> Vec<(PaneId, Viewer)> {
+        let Some(session) = self.session() else {
+            return Vec::new();
         };
-        Some((tab.id(), path.to_relative_path_buf()))
+        self.viewed(session)
+            .and_then(|(_, tab_id)| session.tab(tab_id))
+            .map(tab_viewers)
+            .unwrap_or_default()
     }
 
     pub(super) fn dock_projection(&self) -> Option<PaneLayout> {

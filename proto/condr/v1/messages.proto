@@ -297,7 +297,7 @@ message GitDiffRequest {
 }
 
 // The side GitDiff compares a file with, as a checkout would write it, for the Preview
-// Tab's change marks (ADR 0050).
+// Pane's change marks (ADR 0050).
 message GitOldFileRequest {
   uint64 server_id = 1;
   uint64 session_id = 2;
@@ -458,23 +458,31 @@ message LayoutCommand {
     PaneTarget close_pane = 21;
     TabTarget close_tab = 22;
     WorkspaceTarget close_workspace = 23;
-    // compat(0.2.6): a Diff or Preview Tab's `ShowViewer` goes as these two, which a
-    // 0.2.6 Server knows (ADR 0078). Delete them once 0.2.6 no longer updates in place.
-    WorkspacePath show_diff = 24;
-    WorkspacePath show_file = 25;
     CreateWorkspaceDirectory create_workspace_directory = 26;
     ShowViewer show_viewer = 27;
+    MoveTabInto move_tab_into = 28;
+    PaneTarget move_pane_to_new_tab = 29;
   }
+  // 0.2's `show_diff` and `show_file`, which `show_viewer` replaced (ADR 0078).
+  reserved 24, 25;
 }
 
-// Creates or retargets the Workspace's one Tab of the viewer's kind (ADR 0078).
+// Retargets the Workspace's one Pane of the viewer's kind, or opens it in a Tab of its
+// own (ADR 0078).
 message ShowViewer {
   uint64 workspace_id = 1;
   oneof viewer {
-    PathTabSnapshot diff = 2;
-    PathTabSnapshot file = 3;
+    ViewerPath diff = 2;
+    ViewerPath file = 3;
     Empty git_graph = 4;
   }
+}
+
+// Puts all of a Tab beside a Pane of another Tab of its Workspace (ADR 0078).
+message MoveTabInto {
+  uint64 tab_id = 1;
+  uint64 target_pane_id = 2;
+  PaneDirection side = 3;
 }
 
 message WorkspaceTarget {
@@ -570,11 +578,6 @@ message MovePane {
   uint64 pane_id = 1;
   uint64 target_pane_id = 2;
   PaneDirection side = 3;
-}
-
-message WorkspacePath {
-  uint64 workspace_id = 1;
-  string path = 2;
 }
 
 message ServerMessage {
@@ -946,11 +949,15 @@ message LayoutResult {
     TabCreated tab_created = 3;
     PaneTarget pane_created = 4;
     WorkspaceTarget workspace_opened = 5;
-    // The Tab `ShowViewer` showed; a 0.2.6 GUI reads it as its `diff_shown` (ADR 0078).
-    TabTarget viewer_shown = 6;
-    // compat(0.2.6): a 0.2.6 Server's answer to `show_file`. Delete with it.
-    TabTarget file_shown = 7;
+    ViewerShown viewer_shown = 6;
   }
+  reserved 7;
+}
+
+// The Pane `ShowViewer` showed, and its Tab (ADR 0078).
+message ViewerShown {
+  uint64 tab_id = 1;
+  uint64 pane_id = 2;
 }
 
 message WorkspaceCreated {

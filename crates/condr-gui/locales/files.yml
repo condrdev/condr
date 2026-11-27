@@ -161,8 +161,8 @@ files:
       en: Another program changed this file. Overwrite it, copy your text, or discard your edits.
       zh-CN: 该文件已被其它程序修改。请覆盖保存、复制文本，或者放弃编辑。
     orphaned:
-      en: Its Preview Tab no longer shows this file. Save it, copy your text, or discard your edits.
-      zh-CN: Preview Tab 已不再显示该文件。请保存、复制文本，或者放弃编辑。
+      en: Its Preview Pane no longer shows this file. Save it, copy your text, or discard your edits.
+      zh-CN: Preview Pane 已不再显示该文件。请保存、复制文本，或者放弃编辑。
   save_prompt:
     title:
       en: 'Save changes to %{path}?'

@@ -35,6 +35,11 @@ Workspace（工作区）是 Condr 管理项目的基本单位。一个工作区�
 - **分屏**：选择 **向右拆分**（Split Right）或 **向下拆分**（Split Down）。
 - **放大专注（Zoom）**：选择 **切换放大**（Toggle Zoom），将当前分屏临时铺满整个窗口，再按一次恢复原样（适合查看长日志）。
 - **调整位置**：直接按住分屏的标题栏**拖拽**，即可与旁边分屏交换位置或重新组合。
+- **移到别的 Tab**：把分屏的标题栏拖到标签栏上，或在它的菜单中选择 **移到新 Tab**（Move to New Tab），它就有了自己的 Tab。把一个 Tab 拖到当前 Tab 的某个分屏上，整个 Tab 会放到这个分屏旁边；放在分屏边缘时就在那一侧拆分。
+
+### Diff、Preview 和 Git Graph 也是 Pane
+
+[Diff Pane、Preview Pane 和 Git Graph](/zh-cn/docs/using/changes/) 第一次打开时各占一个 Tab，之后再点别的文件，会在同一个 Pane 中显示，不管它在哪个 Tab。把这个 Tab 拖到终端上，就能在做出改动的 Agent 旁边审查它。它们和其他 Pane 一样可以拆分、放大和移动；拆分时会在项目根目录新开一个终端。
 
 ## 高效使用技巧
 

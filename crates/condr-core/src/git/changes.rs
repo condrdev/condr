@@ -98,7 +98,7 @@ pub struct FileDiff {
     pub content: FileDiffContent,
 }
 
-/// The side a Workspace file is compared with, for the Preview Tab's change marks
+/// The side a Workspace file is compared with, for the Preview Pane's change marks
 /// (ADR 0050): what `GitDiff` would diff the working tree against.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum OldFile {

@@ -245,7 +245,7 @@ impl Condr {
                         }
                     })
                 };
-                // The Server moved the Preview Tab; its text and folds follow here.
+                // The Server moved the Preview Pane; its text and folds follow here.
                 for ((editor_key, _), editor) in &mut self.preview_pane.editors {
                     if *editor_key == key
                         && editor.workspace_id == workspace_id

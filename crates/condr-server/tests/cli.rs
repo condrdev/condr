@@ -346,7 +346,30 @@ fn workspace_and_tab_commands_drive_a_live_server() {
         true
     );
 
-    assert_eq!(ok(&endpoint_path, &["tab", "close", &tab_arg])["ok"], true);
+    // A Pane moved beside one of another Tab closes the Tab it leaves empty (ADR 0078).
+    let build_pane = tab["root_pane"]["pane_id"].as_u64().unwrap().to_string();
+    let moved = ok(
+        &endpoint_path,
+        &[
+            "pane",
+            "move",
+            &build_pane,
+            "--to",
+            &root_pane_arg,
+            "--side",
+            "right",
+        ],
+    );
+    assert_eq!(moved["changed"], true);
+    assert_eq!(moved["pane"]["tab_id"], first_tab);
+    assert_eq!(
+        err(&endpoint_path, &["tab", "get", &tab_arg])["code"],
+        "tab_not_found"
+    );
+    assert_eq!(
+        ok(&endpoint_path, &["pane", "close", &build_pane])["ok"],
+        true
+    );
     assert_eq!(
         ok(&endpoint_path, &["tab", "list"])["tabs"]
             .as_array()

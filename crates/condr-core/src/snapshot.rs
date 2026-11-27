@@ -32,36 +32,16 @@ pub(crate) struct WorkspaceSnapshot {
 pub(crate) struct TabSnapshot {
     pub(crate) id: TabId,
     pub(crate) name: String,
-    pub(crate) content: TabContentSnapshot,
-}
-
-/// A Tab's content (ADR 0017): its terminal layout, or the file a Diff Tab shows.
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum TabContentSnapshot {
-    Terminals {
-        panes: Vec<PaneSnapshot>,
-        focused_pane: PaneId,
-        focus_history: Vec<PaneId>,
-        layout: LayoutSnapshot,
-    },
-    Diff {
-        path: relative_path::RelativePathBuf,
-    },
-    /// The file a Preview Tab shows (ADR 0018).
-    File {
-        path: relative_path::RelativePathBuf,
-    },
-    /// A Git Graph Tab (ADR 0079), which holds nothing more.
-    GitGraph,
-    /// A kind this build does not know (ADR 0078).
-    Unsupported,
+    pub(crate) panes: Vec<PaneSnapshot>,
+    pub(crate) focused_pane: PaneId,
+    pub(crate) focus_history: Vec<PaneId>,
+    pub(crate) layout: LayoutSnapshot,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct PaneSnapshot {
     pub(crate) id: PaneId,
-    pub(crate) cwd: Option<PathBuf>,
-    pub(crate) agent_resume: Option<crate::AgentResume>,
+    pub(crate) content: crate::PaneContent,
 }
 
 #[derive(Clone, Debug, PartialEq)]

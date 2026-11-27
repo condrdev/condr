@@ -426,3 +426,59 @@ fn the_focused_client_sizes_and_leaving_releases_its_mouse_before_its_focus() {
     drop(observer);
     thread.join().unwrap().unwrap();
 }
+
+/// A viewer Pane runs nothing, here or after it merges beside a terminal (ADR 0078).
+#[test]
+fn a_viewer_pane_starts_no_terminal_and_merges_beside_one() {
+    let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
+    // Built straight in the Session, so no terminal runs here at all.
+    state.session.create_workspace(empty_root()).unwrap();
+    let workspace_id = state.session.workspaces()[0].id();
+    let terminal_tab = state.session.workspaces()[0].tabs()[0].id();
+    let terminal = state.session.workspaces()[0].tabs()[0].panes()[0].id();
+    let terminals_before = state.terminals.len();
+    let show = |path: &str| LayoutCommand::ShowViewer {
+        workspace_id,
+        viewer: condr_core::Viewer::Diff {
+            path: RelativePathBuf::from(path),
+        },
+    };
+
+    let effect = apply_layout_command(&mut state, show("src/lib.rs")).unwrap();
+    let LayoutResult::ViewerShown { tab_id, pane_id } = effect.result else {
+        panic!("ShowViewer reports the Diff Pane: {:?}", effect.result);
+    };
+    assert!(effect.started_terminals.is_empty());
+    assert_eq!(state.terminals.len(), terminals_before);
+    assert_ne!(tab_id, terminal_tab);
+    assert!(!state.session.pane(pane_id).unwrap().is_terminal());
+
+    let again = apply_layout_command(&mut state, show("README.md")).unwrap();
+    assert_eq!(again.result, LayoutResult::ViewerShown { tab_id, pane_id });
+    assert_eq!(state.session.workspaces()[0].tabs().len(), 2);
+    assert!(apply_layout_command(&mut state, show("../outside")).is_err());
+
+    // Its Tab merges beside the terminal and closes; the terminal keeps running.
+    let merged = apply_layout_command(
+        &mut state,
+        LayoutCommand::MoveTabInto {
+            tab_id,
+            target_pane_id: terminal,
+            side: condr_core::PaneDirection::Right,
+        },
+    )
+    .unwrap();
+    assert!(merged.started_terminals.is_empty() && merged.removed_terminals.is_empty());
+    assert_eq!(state.session.workspaces()[0].tabs().len(), 1);
+    assert_eq!(state.terminals.len(), terminals_before);
+
+    // Out again as a Tab of its own, then closed, which ends no terminal.
+    let moved =
+        apply_layout_command(&mut state, LayoutCommand::MovePaneToNewTab { pane_id }).unwrap();
+    let LayoutResult::TabCreated { tab_id, .. } = moved.result else {
+        panic!("MovePaneToNewTab reports its Tab: {:?}", moved.result);
+    };
+    let closed = apply_layout_command(&mut state, LayoutCommand::CloseTab { tab_id }).unwrap();
+    assert!(closed.removed_terminals.is_empty());
+    assert_eq!(state.session.workspaces()[0].tabs()[0].id(), terminal_tab);
+}

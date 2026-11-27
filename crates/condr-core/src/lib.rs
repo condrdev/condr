@@ -62,9 +62,9 @@ pub use paths::{
     config_directory, data_directory, log_directory, runtime_directory, state_directory,
 };
 pub use session::{
-    CloseOutcome, DIFF_TAB_NAME, DiffView, FILE_TAB_NAME, FileView, GIT_GRAPH_TAB_NAME, Pane,
-    PaneDirection, PaneId, PaneLayout, PaneRect, Session, SplitDirection, Tab, TabContent, TabId,
-    TerminalLayout, Viewer, Workspace, WorkspaceId, WorktreeAssociation, valid_diff_path,
+    CloseOutcome, Pane, PaneContent, PaneDirection, PaneId, PaneLayout, PaneRect, Session,
+    SplitDirection, Tab, TabId, Viewer, ViewerKind, Workspace, WorkspaceId, WorktreeAssociation,
+    valid_diff_path,
 };
 pub use snapshot::{SessionSnapshot, SnapshotError};
 #[cfg(feature = "runtime")]

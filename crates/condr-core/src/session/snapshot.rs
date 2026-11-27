@@ -1,5 +1,5 @@
 use super::*;
-use crate::snapshot::TabContentSnapshot;
+use std::collections::HashMap;
 
 impl Session {
     pub fn snapshot(&self) -> SessionSnapshot {
@@ -18,30 +18,18 @@ impl Session {
                         .map(|tab| TabSnapshot {
                             id: tab.id,
                             name: tab.name.clone(),
-                            content: match &tab.content {
-                                TabContent::Terminals(terminals) => TabContentSnapshot::Terminals {
-                                    panes: terminals
-                                        .panes
-                                        .iter()
-                                        .map(|pane| PaneSnapshot {
-                                            id: pane.id,
-                                            cwd: pane.cwd.clone(),
-                                            agent_resume: pane.agent_resume.clone(),
-                                        })
-                                        .collect(),
-                                    focused_pane: terminals.focused_pane,
-                                    focus_history: terminals.focus_history.clone(),
-                                    layout: LayoutSnapshot::from_layout(&terminals.layout),
-                                },
-                                TabContent::Diff(diff) => TabContentSnapshot::Diff {
-                                    path: diff.path.clone(),
-                                },
-                                TabContent::File(file) => TabContentSnapshot::File {
-                                    path: file.path.clone(),
-                                },
-                                TabContent::GitGraph => TabContentSnapshot::GitGraph,
-                                TabContent::Unsupported => TabContentSnapshot::Unsupported,
-                            },
+                            panes: tab
+                                .layout
+                                .panes
+                                .iter()
+                                .map(|pane| PaneSnapshot {
+                                    id: pane.id,
+                                    content: pane.content.clone(),
+                                })
+                                .collect(),
+                            focused_pane: tab.layout.focused_pane,
+                            focus_history: tab.layout.focus_history.clone(),
+                            layout: LayoutSnapshot::from_layout(&tab.layout.layout),
                         })
                         .collect(),
                 })
@@ -56,35 +44,23 @@ impl Session {
         for workspace in snapshot.workspaces {
             let mut tabs = Vec::with_capacity(workspace.tabs.len());
             for tab in workspace.tabs {
-                let content = match tab.content {
-                    TabContentSnapshot::Terminals {
-                        panes,
-                        focused_pane,
-                        focus_history,
-                        layout,
-                    } => TabContent::Terminals(TerminalLayout {
-                        panes: panes
-                            .into_iter()
-                            .map(|pane| Pane {
-                                id: pane.id,
-                                cwd: pane.cwd,
-                                agent_resume: pane.agent_resume,
-                            })
-                            .collect(),
-                        focused_pane,
-                        focus_history,
-                        layout: restore_layout(&layout),
-                        zoomed_pane: None,
-                    }),
-                    TabContentSnapshot::Diff { path } => TabContent::Diff(DiffView { path }),
-                    TabContentSnapshot::File { path } => TabContent::File(FileView { path }),
-                    TabContentSnapshot::GitGraph => TabContent::GitGraph,
-                    TabContentSnapshot::Unsupported => TabContent::Unsupported,
-                };
                 tabs.push(Tab {
                     id: tab.id,
                     name: tab.name,
-                    content,
+                    layout: TabLayout {
+                        panes: tab
+                            .panes
+                            .into_iter()
+                            .map(|pane| Pane {
+                                id: pane.id,
+                                content: pane.content,
+                            })
+                            .collect(),
+                        focused_pane: tab.focused_pane,
+                        focus_history: tab.focus_history,
+                        layout: restore_layout(&tab.layout),
+                        zoomed_pane: None,
+                    },
                 });
             }
             workspaces.push(Workspace {
@@ -125,49 +101,13 @@ impl Session {
                     return Err(SnapshotError::Invalid("invalid Worktree association"));
                 }
             }
-            let (mut diff_tabs, mut file_tabs, mut git_graph_tabs) = (0, 0, 0);
+            let mut viewers = HashMap::new();
             for tab in &workspace.tabs {
                 validate_id(tab.id.0, &mut max_id)?;
                 if !tab_ids.insert(tab.id) {
                     return Err(SnapshotError::Invalid("duplicate Tab ID"));
                 }
-                let terminals = match &tab.content {
-                    TabContent::Terminals(terminals) => terminals,
-                    TabContent::Diff(diff) => {
-                        if !valid_diff_path(&diff.path) {
-                            return Err(SnapshotError::Invalid("invalid Diff Tab path"));
-                        }
-                        diff_tabs += 1;
-                        if diff_tabs > 1 {
-                            return Err(SnapshotError::Invalid(
-                                "a Workspace has at most one Diff Tab",
-                            ));
-                        }
-                        continue;
-                    }
-                    TabContent::File(file) => {
-                        if !valid_diff_path(&file.path) {
-                            return Err(SnapshotError::Invalid("invalid Preview Tab path"));
-                        }
-                        file_tabs += 1;
-                        if file_tabs > 1 {
-                            return Err(SnapshotError::Invalid(
-                                "a Workspace has at most one Preview Tab",
-                            ));
-                        }
-                        continue;
-                    }
-                    TabContent::GitGraph => {
-                        git_graph_tabs += 1;
-                        if git_graph_tabs > 1 {
-                            return Err(SnapshotError::Invalid(
-                                "a Workspace has at most one Git Graph Tab",
-                            ));
-                        }
-                        continue;
-                    }
-                    TabContent::Unsupported => continue,
-                };
+                let terminals = &tab.layout;
                 if terminals.panes.is_empty() {
                     return Err(SnapshotError::Invalid("invalid Tab"));
                 }
@@ -175,12 +115,26 @@ impl Session {
                 let mut tab_pane_ids = HashSet::new();
                 for pane in &terminals.panes {
                     validate_id(pane.id.0, &mut max_id)?;
-                    if pane
-                        .agent_resume
-                        .as_ref()
-                        .is_some_and(|resume| !crate::agent::valid_session_id(&resume.session_id))
-                    {
-                        return Err(SnapshotError::Invalid("invalid Agent resume ID"));
+                    match &pane.content {
+                        PaneContent::Terminal { agent_resume, .. } => {
+                            if agent_resume.as_ref().is_some_and(|resume| {
+                                !crate::agent::valid_session_id(&resume.session_id)
+                            }) {
+                                return Err(SnapshotError::Invalid("invalid Agent resume ID"));
+                            }
+                        }
+                        PaneContent::Viewer(viewer) => {
+                            if !viewer.valid() {
+                                return Err(SnapshotError::Invalid("invalid viewer path"));
+                            }
+                            // One viewer of each kind per Workspace (ADR 0078).
+                            if viewers.insert(viewer.kind(), pane.id).is_some() {
+                                return Err(SnapshotError::Invalid(
+                                    "a Workspace has at most one viewer of each kind",
+                                ));
+                            }
+                        }
+                        PaneContent::Unsupported => {}
                     }
                     if !pane_ids.insert(pane.id) || !tab_pane_ids.insert(pane.id) {
                         return Err(SnapshotError::Invalid("duplicate Pane ID"));
@@ -224,9 +178,7 @@ fn validate_snapshot_resources(snapshot: &SessionSnapshot) -> Result<(), Snapsho
             return Err(SnapshotError::Invalid("too many Tabs"));
         }
         for tab in &workspace.tabs {
-            let TabContentSnapshot::Terminals { panes, layout, .. } = &tab.content else {
-                continue;
-            };
+            let (panes, layout) = (&tab.panes, &tab.layout);
             pane_count = pane_count
                 .checked_add(panes.len())
                 .ok_or(SnapshotError::Invalid("too many Panes"))?;
@@ -244,9 +196,7 @@ fn validate_snapshot_resources(snapshot: &SessionSnapshot) -> Result<(), Snapsho
 
     for workspace in &snapshot.workspaces {
         for tab in &workspace.tabs {
-            let TabContentSnapshot::Terminals { panes, layout, .. } = &tab.content else {
-                continue;
-            };
+            let (panes, layout) = (&tab.panes, &tab.layout);
             let pane_ids = panes.iter().map(|pane| pane.id).collect::<HashSet<_>>();
             if pane_ids.len() != panes.len() {
                 return Err(SnapshotError::Invalid("duplicate Pane ID"));

@@ -96,7 +96,7 @@ pub(super) struct RightSidebarState {
     pub(super) refreshing: HashMap<(ConnectionKey, WorkspaceId), Task<()>>,
     /// The terminal Tab each Workspace presented last: where "Insert Path into Terminal"
     /// sends its text once a viewer Tab has taken the Workspace's active slot.
-    pub(super) last_terminal_tabs: HashMap<(ConnectionKey, WorkspaceId), TabId>,
+    pub(super) last_presented_tabs: HashMap<(ConnectionKey, WorkspaceId), TabId>,
     /// Creates, renames and deletes in flight, by connection and request.
     pub(super) entry_requests: HashMap<(ConnectionKey, u64), EntryRequest>,
     pub(super) changes: ChangesState,
@@ -115,14 +115,14 @@ impl RightSidebarState {
             .retain(|(connection, id)| workspace_live(*connection, *id));
         self.views
             .retain(|(connection, id), _| workspace_live(*connection, *id));
-        self.last_terminal_tabs.retain(|(connection, id), tab_id| {
+        self.last_presented_tabs.retain(|(connection, id), tab_id| {
             workspace_live(*connection, *id)
                 && (*connection != key
                     || session.is_some_and(|session| {
                         session
                             .workspace(*id)
                             .and_then(|workspace| workspace.tab(*tab_id))
-                            .is_some_and(|tab| tab.terminals().is_some())
+                            .is_some()
                     }))
         });
         self.changes
@@ -387,14 +387,19 @@ impl Condr {
         let Some(workspace) = session.workspace(workspace_id) else {
             return column.into_any_element();
         };
-        let shown_diff = session
-            .diff_tab(workspace_id)
-            .filter(|tab| presented_tab == Some(tab.id()))
-            .and_then(|tab| tab.diff().map(|diff| diff.path().to_relative_path_buf()));
-        let shown_file = session
-            .file_tab(workspace_id)
-            .filter(|tab| presented_tab == Some(tab.id()))
-            .and_then(|tab| tab.file().map(|file| file.path().to_relative_path_buf()));
+        // The file a viewer Pane of the presented Tab shows (ADR 0078).
+        let shown_path = |kind| {
+            session
+                .viewer_pane(workspace_id, kind)
+                .filter(|(tab, _)| presented_tab == Some(tab.id()))
+                .and_then(|(_, pane)| {
+                    pane.viewer()?
+                        .path()
+                        .map(RelativePath::to_relative_path_buf)
+                })
+        };
+        let shown_diff = shown_path(ViewerKind::Diff);
+        let shown_file = shown_path(ViewerKind::File);
         let git = self
             .connection(key)
             .and_then(|connection| connection.model.workspace_git.get(&workspace_id));
@@ -569,7 +574,7 @@ mod tests {
             state.open.insert((key, id));
             state.changes.against_base.insert((key, id));
             state.files.expanded_dirs.insert((key, id, "src".into()));
-            state.last_terminal_tabs.insert((key, id), tab);
+            state.last_presented_tabs.insert((key, id), tab);
         }
         state.retain_session(1, Some(&session));
         assert!(
@@ -579,13 +584,13 @@ mod tests {
         session.close_workspace(id).unwrap();
         state.retain_session(1, Some(&session));
         assert!(!state.open.contains(&(1, id)));
-        assert!(!state.last_terminal_tabs.contains_key(&(1, id)));
+        assert!(!state.last_presented_tabs.contains_key(&(1, id)));
         assert!(state.open.contains(&(2, id)));
-        assert!(state.last_terminal_tabs.contains_key(&(2, id)));
+        assert!(state.last_presented_tabs.contains_key(&(2, id)));
         state.retain_session(2, None);
         assert!(state.open.is_empty());
         assert!(state.changes.against_base.is_empty());
         assert!(state.files.expanded_dirs.is_empty());
-        assert!(state.last_terminal_tabs.is_empty());
+        assert!(state.last_presented_tabs.is_empty());
     }
 }

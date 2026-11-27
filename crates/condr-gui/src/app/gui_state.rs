@@ -39,7 +39,7 @@ pub(super) struct GuiState {
     /// How the Agents section groups and orders its rows (ADR 0074).
     pub agents_order: super::left_sidebar::AgentsOrder,
     pub right_sidebar_width: Option<f32>,
-    /// Diff Tabs show one column rather than two (ADR 0046).
+    /// Diff Panes show one column rather than two (ADR 0046).
     pub diff_unified: bool,
     /// The Device whose Workspace the window showed.
     pub active_server: Option<ServerId>,

@@ -414,7 +414,7 @@ impl Condr {
                     }
                 }
                 IncomingEffect {
-                    // A presented Diff Tab refetches its file on the rebuild.
+                    // A presented Diff Pane refetches its file on the rebuild.
                     rebuild: git_changed && self.presents(key),
                     notify,
                     ..IncomingEffect::default()
@@ -570,7 +570,7 @@ impl Condr {
                     } => Some((workspace_id, Some(tab_id))),
                     LayoutResult::WorkspaceOpened { workspace_id } => Some((workspace_id, None)),
                     LayoutResult::TabCreated { tab_id, .. }
-                    | LayoutResult::ViewerShown { tab_id } => session.and_then(|session| {
+                    | LayoutResult::ViewerShown { tab_id, .. } => session.and_then(|session| {
                         session
                             .workspaces()
                             .iter()
@@ -809,7 +809,7 @@ impl Condr {
                 result,
             } => {
                 let resources = &mut self.connections[index].resources;
-                // Git History's page, or else a Git Graph Tab's (ADR 0079).
+                // Git History's page, or else a Git Graph Pane's (ADR 0079).
                 let notify = if resources
                     .pending_logs
                     .get(&workspace_id)
@@ -850,7 +850,7 @@ impl Condr {
                 ) {
                     return IncomingEffect::default();
                 }
-                // A Diff Tab on this commit takes its status and message from it.
+                // A Diff Pane on this commit takes its status and message from it.
                 IncomingEffect {
                     rebuild: self.presents(key),
                     notify: true,

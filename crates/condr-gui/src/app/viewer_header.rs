@@ -1,5 +1,5 @@
-//! The bar along the top of the Diff Tab and the Preview Tab. "Show File" and "Show
-//! Changes" switch between the two, so both bars read the same way.
+//! The header of a Diff and a Preview Pane (ADR 0078). "Show File" and "Show Changes"
+//! switch between the two, so both read the same way.
 
 use super::git_marks::status_glyph;
 use super::*;
@@ -16,16 +16,7 @@ pub(super) fn viewer_header(
 ) -> Div {
     let theme = cx.theme();
     let icon = file_icons::file_icon_for_path(std::path::Path::new(path.as_str()), theme.is_dark());
-    h_flex()
-        .debug_selector(move || selector.into())
-        .flex_none()
-        .h_9()
-        .w_full()
-        .px_3()
-        .gap_2()
-        .items_center()
-        .border_b_1()
-        .border_color(theme.border)
+    pane_header_bar(selector, cx)
         .child(img(icon).size_4().flex_shrink_0())
         .child(
             div()
@@ -37,6 +28,23 @@ pub(super) fn viewer_header(
                 .child(path.to_string()),
         )
         .children(status.map(|status| status_glyph(status, cx)))
+}
+
+/// A viewer Pane's header bar, the height of a terminal Pane's; the caller adds what it
+/// shows.
+pub(super) fn pane_header_bar(selector: &'static str, cx: &App) -> Div {
+    let theme = cx.theme();
+    h_flex()
+        .debug_selector(move || selector.into())
+        .flex_none()
+        .h(px(28.))
+        .w_full()
+        .px_2()
+        .gap_2()
+        .items_center()
+        .border_b_1()
+        .border_color(theme.border)
+        .bg(theme.background)
 }
 
 /// A short fact in the bar, muted unless it warns.

@@ -705,9 +705,7 @@ pub(super) fn apply_layout_command(
                 return Err("unknown Pane".into());
             }
             if !candidate.move_pane(pane_id, target_pane_id, side) {
-                return Err(
-                    "Panes must differ, share a Tab, and leave the Tab another Pane".into(),
-                );
+                return Err("Panes must differ, share a Workspace, and fit the layout".into());
             }
         }
         LayoutCommand::TogglePaneZoom { pane_id } => {
@@ -741,10 +739,30 @@ pub(super) fn apply_layout_command(
             workspace_id,
             viewer,
         } => {
-            let tab_id = candidate.show_viewer(workspace_id, viewer).ok_or_else(|| {
-                "unknown Workspace, invalid path, or Session Tab limit reached".to_string()
+            // A viewer runs nothing: no terminal starts for it (ADR 0078).
+            let (tab_id, pane_id) =
+                candidate.show_viewer(workspace_id, viewer).ok_or_else(|| {
+                    "unknown Workspace, invalid path, or Session Tab limit reached".to_string()
+                })?;
+            result = LayoutResult::ViewerShown { tab_id, pane_id };
+        }
+        LayoutCommand::MoveTabInto {
+            tab_id,
+            target_pane_id,
+            side,
+        } => {
+            if !candidate.move_tab_into(tab_id, target_pane_id, side) {
+                return Err(
+                    "the Tab and the Pane must share a Workspace, be apart, and fit the layout"
+                        .into(),
+                );
+            }
+        }
+        LayoutCommand::MovePaneToNewTab { pane_id } => {
+            let tab_id = candidate.move_pane_to_new_tab(pane_id).ok_or_else(|| {
+                "unknown Pane, a Tab's only Pane, or Session Tab limit reached".to_string()
             })?;
-            result = LayoutResult::ViewerShown { tab_id };
+            result = LayoutResult::TabCreated { tab_id, pane_id };
         }
     }
 

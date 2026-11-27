@@ -6,12 +6,13 @@ use gpui_kit::component::InteractiveElementExt as _;
 use gpui_kit::component::resizable::{HandleEdge, resize_handle};
 use rust_i18n::t;
 
+/// A Tab under drag, as an `AnyDrag`: the strip reorders it, and the Dock merges it into the
+/// presented Tab at the edge its drop zones show (ADR 0078).
 #[derive(Clone)]
-struct DraggedTab {
-    key: ConnectionKey,
-    workspace_id: WorkspaceId,
-    tab_id: TabId,
-    name: SharedString,
+pub(super) struct DraggedTab {
+    pub(super) key: ConnectionKey,
+    pub(super) workspace_id: WorkspaceId,
+    pub(super) tab_id: TabId,
 }
 
 /// A Tab wider than this truncates its name; the tooltip keeps it.
@@ -157,23 +158,6 @@ impl Condr {
             .flatten()
             .map(|surface| surface.area.clone());
         let page = elsewhere.map(|(scope, handle)| self.render_shown_elsewhere(scope, handle, cx));
-        // A viewer Tab has no Dock; its body is the diff or the file (ADR 0017, ADR 0018).
-        let viewer = session
-            .tab(active_tab)
-            .filter(|_| page.is_none())
-            .and_then(|tab| match tab.content() {
-                TabContent::Diff(diff) => {
-                    Some(self.render_diff_pane(key, workspace_id, active_tab, diff.path(), cx))
-                }
-                TabContent::File(file) => {
-                    Some(self.render_file_tab(view, key, workspace_id, active_tab, file.path(), cx))
-                }
-                TabContent::GitGraph => {
-                    Some(self.render_git_graph(key, workspace_id, active_tab, cx))
-                }
-                TabContent::Unsupported => Some(self.render_unsupported_tab(key, cx)),
-                TabContent::Terminals(_) => None,
-            });
         let strip = self.render_tab_strip(
             view,
             key,
@@ -189,7 +173,6 @@ impl Condr {
             .size_full()
             .relative()
             .when_some(dock_area, |view, dock_area| view.child(dock_area))
-            .children(viewer)
             .children(page)
             .children(self.render_reconnect_veil(connection, cx))
             .into_any_element();
@@ -255,7 +238,8 @@ impl Condr {
         let separator_color = cx.theme().border;
         let transparent = cx.theme().transparent;
         let muted = cx.theme().muted_foreground;
-        // An unnamed terminal Tab shows its focused Pane's title after its number.
+        // An unnamed Tab shows its focused Pane's title after its number, a viewer's kind
+        // (ADR 0078).
         let pane_titles = workspace
             .tabs()
             .iter()
@@ -265,7 +249,10 @@ impl Condr {
                     .is_empty()
                     .then(|| tab.focused_pane())
                     .flatten()?;
-                self.connection(key)?.pane_title(pane.id())
+                match pane.viewer() {
+                    Some(viewer) => Some(viewer.kind().name().to_owned()),
+                    None => self.connection(key)?.pane_title(pane.id()),
+                }
             })
             .collect::<Vec<_>>();
         // A Tab leads with the state of its Pane that most wants a person, as the sidebar
@@ -304,8 +291,11 @@ impl Condr {
                 Some(title) => format!("{}  {title}", tab_index + 1),
                 None => tab_label(tab_index, &tab_name),
             };
-            // A Preview Tab's file can be downloaded from its menu (ADR 0061).
-            let preview_file = tab.file().map(|file| file.path().to_relative_path_buf());
+            // The file of a Preview Pane in the Tab can be downloaded from its menu (ADR 0061).
+            let preview_file = tab.panes().iter().find_map(|pane| match pane.viewer()? {
+                Viewer::File { path } => Some(path.clone()),
+                _ => None,
+            });
             let activate_owner = cx.weak_entity();
             let menu_owner = cx.weak_entity();
             let target = DropTarget::Tab {
@@ -329,13 +319,14 @@ impl Condr {
             };
             let close_chip = cx.theme().background.blend(tint);
             let close_radius = cx.theme().radius;
-            // A Preview Tab with unsaved text marks it where the close button appears, as
+            // A Preview Pane with unsaved text marks it where the close button appears, as
             // VS Code does, on the Tab's resting colour; hovering swaps in the close button.
-            let unsaved = self
-                .preview_pane
-                .editors
-                .get(&(key, tab_id))
-                .is_some_and(|editor| editor.dirty);
+            let unsaved = tab.panes().iter().any(|pane| {
+                self.preview_pane
+                    .editors
+                    .get(&(key, pane.id()))
+                    .is_some_and(|editor| editor.dirty)
+            });
             let rest_chip = if tab_id == active_tab {
                 close_chip
             } else {
@@ -356,16 +347,16 @@ impl Condr {
                 // the Tab's own drag needs it.
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .when(can_mutate, |this| {
+                    let name: SharedString = tab_label.clone().into();
                     this.on_drag(
-                        DraggedTab {
+                        AnyDrag::new(DraggedTab {
                             key,
                             workspace_id,
                             tab_id,
-                            name: tab_label.clone().into(),
-                        },
-                        move |drag, offset, _, cx| {
+                        }),
+                        move |_, offset, _, cx| {
                             cx.stop_propagation();
-                            let name = drag.name.clone();
+                            let name = name.clone();
                             cx.new(|_| DragPreview {
                                 icon: None,
                                 name,
@@ -376,7 +367,7 @@ impl Condr {
                 });
             let move_owner = cx.weak_entity();
             let tab_row = if can_mutate {
-                attach_drop_target::<DraggedTab, _>(
+                attach_drop_target::<AnyDrag, _>(
                     tab_row,
                     true,
                     tab_gap,
@@ -545,12 +536,27 @@ impl Condr {
                             .lock_scroll_axis()
                             .track_scroll(&view.tab_strip_scroll)
                             // A Tab let go anywhere over the strip, gaps included, lands
-                            // where the insertion line shows.
+                            // where the insertion line shows; a Pane's header let go here
+                            // leaves its Tab for one of its own (ADR 0078).
                             .when(can_mutate, |this| {
                                 let drop_owner = cx.weak_entity();
-                                this.on_drop(move |dragged: &DraggedTab, _, cx| {
+                                this.on_drop(move |dragged: &AnyDrag, _, cx| {
                                     let _ = drop_owner.update(cx, |this, _| {
-                                        this.drop_tab(dragged, key, workspace_id, &tab_ids)
+                                        let dragged = dragged.value();
+                                        if let Some(tab) = dragged.downcast_ref::<DraggedTab>() {
+                                            this.drop_tab(tab, key, workspace_id, &tab_ids);
+                                        } else if let Some(pane) =
+                                            dragged.downcast_ref::<super::dock::DraggedPane>()
+                                            && pane.key == key
+                                        {
+                                            this.drop_target = None;
+                                            this.send_layout_to(
+                                                key,
+                                                LayoutCommand::MovePaneToNewTab {
+                                                    pane_id: pane.pane_id,
+                                                },
+                                            );
+                                        }
                                     });
                                 })
                             })
@@ -982,12 +988,11 @@ impl Render for Condr {
             .on_key_down(cx.listener(Self::key_down))
             .on_key_up(cx.listener(Self::key_up))
             // Dragging a Tab, Workspace or Device out of the window detaches it (ADR 0043).
-            .on_drag_move(
-                cx.listener(|this, event: &DragMoveEvent<DraggedTab>, _, cx| {
-                    let tab = event.drag(cx);
+            .on_drag_move(cx.listener(|this, event: &DragMoveEvent<AnyDrag>, _, cx| {
+                if let Some(tab) = event.drag(cx).value().downcast_ref::<DraggedTab>() {
                     this.track_drag_out(WindowScope::Tab(tab.key, tab.tab_id));
-                }),
-            )
+                }
+            }))
             .on_drag_move(cx.listener(
                 |this, event: &DragMoveEvent<left_sidebar::DraggedWorkspace>, _, cx| {
                     let workspace = event.drag(cx);

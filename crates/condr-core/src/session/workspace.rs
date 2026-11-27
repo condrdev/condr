@@ -1,13 +1,5 @@
 use super::*;
 
-/// The display name every Diff Tab starts with; the Tab is identified by its content, not by
-/// this name, which the user may change.
-pub const DIFF_TAB_NAME: &str = "Diff";
-/// The same for the Preview Tab (ADR 0018).
-pub const FILE_TAB_NAME: &str = "Preview";
-/// The same for the Git Graph Tab (ADR 0079).
-pub const GIT_GRAPH_TAB_NAME: &str = "Git Graph";
-
 impl Session {
     /// Keeps every existing Tab's Pane focus, history and zoom when a split does not
     /// request focus; the new Pane still exists, it just does not take the focus.
@@ -15,13 +7,23 @@ impl Session {
         for workspace in &mut self.workspaces {
             if let Some(old) = previous.workspace(workspace.id) {
                 for tab in &mut workspace.tabs {
-                    let old = old.tabs.iter().find(|old| old.id == tab.id);
-                    if let (Some(terminals), Some(old)) =
-                        (tab.terminals_mut(), old.and_then(Tab::terminals))
-                    {
-                        terminals.focused_pane = old.focused_pane;
-                        terminals.focus_history.clone_from(&old.focus_history);
-                        terminals.zoomed_pane = old.zoomed_pane;
+                    let Some(old) = old.tabs.iter().find(|old| old.id == tab.id) else {
+                        continue;
+                    };
+                    let tab = &mut tab.layout;
+                    let present = |id: &PaneId| tab.panes.iter().any(|pane| pane.id == *id);
+                    // Only what is still in this Tab: a Pane may have moved to another.
+                    if present(&old.layout.focused_pane) {
+                        let history: Vec<PaneId> = old
+                            .layout
+                            .focus_history
+                            .iter()
+                            .copied()
+                            .filter(present)
+                            .collect();
+                        tab.focused_pane = old.layout.focused_pane;
+                        tab.focus_history = history;
+                        tab.zoomed_pane = old.layout.zoomed_pane.filter(present);
                     }
                 }
             }
@@ -47,11 +49,7 @@ impl Session {
             tabs: vec![Tab {
                 id: tab_id,
                 name: String::new(),
-                content: TabContent::Terminals(TerminalLayout::single(Pane {
-                    id: pane_id,
-                    cwd: Some(root_directory),
-                    agent_resume: None,
-                })),
+                layout: TabLayout::single(Pane::terminal(pane_id, root_directory)),
             }],
         };
 
@@ -84,7 +82,7 @@ impl Session {
                     .flat_map(Tab::panes)
                     .find(|pane| pane.id == pane_id)
             })
-            .and_then(|pane| pane.cwd.clone())
+            .and_then(|pane| pane.cwd().map(Path::to_path_buf))
             .unwrap_or_else(|| workspace.root_directory.clone());
         let first_id = reserve_ids(2)?;
         let tab_id = TabId(first_id);
@@ -92,78 +90,77 @@ impl Session {
         workspace.tabs.push(Tab {
             id: tab_id,
             name: String::new(),
-            content: TabContent::Terminals(TerminalLayout::single(Pane {
-                id: pane_id,
-                cwd: Some(cwd),
-                agent_resume: None,
-            })),
+            layout: TabLayout::single(Pane::terminal(pane_id, cwd)),
         });
         Some(tab_id)
     }
 
-    /// Shows `viewer` in the Workspace's Tab of its kind, creating the Tab the first time and
-    /// retargeting it afterwards (ADR 0017, ADR 0018, ADR 0078). `None` for an unknown
-    /// Workspace, an invalid path, or when the Tab limit is reached.
-    pub fn show_viewer(&mut self, workspace_id: WorkspaceId, viewer: Viewer) -> Option<TabId> {
-        let (content, name) = match viewer {
-            Viewer::Diff { path } if valid_diff_path(&path) => {
-                (TabContent::Diff(DiffView { path }), DIFF_TAB_NAME)
-            }
-            Viewer::File { path } if valid_diff_path(&path) => {
-                (TabContent::File(FileView { path }), FILE_TAB_NAME)
-            }
-            Viewer::GitGraph => (TabContent::GitGraph, GIT_GRAPH_TAB_NAME),
-            Viewer::Diff { .. } | Viewer::File { .. } => return None,
-        };
+    /// Shows `viewer` in the Workspace's Pane of its kind: retargeted where it is, which
+    /// takes its Tab's focus, or the first time in a Tab of its own (ADR 0078). `None` for an
+    /// unknown Workspace, an invalid path, or when the Tab or Pane limit is reached.
+    pub fn show_viewer(
+        &mut self,
+        workspace_id: WorkspaceId,
+        viewer: Viewer,
+    ) -> Option<(TabId, PaneId)> {
+        if !viewer.valid() {
+            return None;
+        }
         let workspace_ix = self
             .workspaces
             .iter()
             .position(|workspace| workspace.id == workspace_id)?;
-        let workspace = &mut self.workspaces[workspace_ix];
-        let tab_id = match workspace
-            .tabs
-            .iter_mut()
-            .find(|tab| tab.content.same_viewer_kind(&content))
-        {
-            Some(tab) => {
-                tab.content = content;
-                tab.id
-            }
-            None => {
-                if self.tab_count() >= MAX_SNAPSHOT_TABS {
-                    return None;
-                }
-                let tab_id = TabId(reserve_ids(1)?);
-                let workspace = &mut self.workspaces[workspace_ix];
-                workspace.tabs.push(Tab {
-                    id: tab_id,
-                    name: name.to_owned(),
-                    content,
-                });
-                tab_id
-            }
-        };
-        Some(tab_id)
-    }
-
-    /// Drops the Tabs of kinds this build does not know, and a Workspace left with none, as a
-    /// Server does with a Snapshot a newer one wrote (ADR 0078); how many Tabs went.
-    pub fn drop_unsupported_tabs(&mut self) -> usize {
-        let mut dropped = 0;
-        for workspace in &mut self.workspaces {
-            let before = workspace.tabs.len();
-            workspace
-                .tabs
-                .retain(|tab| !matches!(tab.content, TabContent::Unsupported));
-            dropped += before - workspace.tabs.len();
+        let shown = self.workspaces[workspace_ix].tabs.iter().find_map(|tab| {
+            tab.panes()
+                .iter()
+                .find(|pane| {
+                    pane.viewer()
+                        .is_some_and(|shown| shown.kind() == viewer.kind())
+                })
+                .map(|pane| (tab.id, pane.id))
+        });
+        if let Some((tab_id, pane_id)) = shown {
+            let (workspace_ix, tab_ix, pane_ix) = self.find_pane(pane_id)?;
+            self.tab_layout_mut(workspace_ix, tab_ix).panes[pane_ix].content =
+                PaneContent::Viewer(viewer);
+            self.focus_pane(pane_id);
+            return Some((tab_id, pane_id));
         }
-        self.workspaces
-            .retain(|workspace| !workspace.tabs.is_empty());
-        dropped
+        if self.tab_count() >= MAX_SNAPSHOT_TABS || self.pane_count() >= MAX_SNAPSHOT_PANES {
+            return None;
+        }
+        let first_id = reserve_ids(2)?;
+        let (tab_id, pane_id) = (TabId(first_id), PaneId(first_id + 1));
+        self.workspaces[workspace_ix].tabs.push(Tab {
+            id: tab_id,
+            name: String::new(),
+            layout: TabLayout::single(Pane {
+                id: pane_id,
+                content: PaneContent::Viewer(viewer),
+            }),
+        });
+        Some((tab_id, pane_id))
     }
 
-    /// Points the Workspace's Preview Tab at `to` when it shows `from` or a path under it,
-    /// after a rename (ADR 0045). `false` when no Tab changed.
+    /// Drops the Panes of kinds this build does not know, with a Tab or Workspace they leave
+    /// empty, as a Server does with a Snapshot a newer one wrote (ADR 0078); how many went.
+    pub fn drop_unsupported_panes(&mut self) -> usize {
+        let unsupported: Vec<PaneId> = self
+            .workspaces
+            .iter()
+            .flat_map(Workspace::tabs)
+            .flat_map(Tab::panes)
+            .filter(|pane| pane.content == PaneContent::Unsupported)
+            .map(Pane::id)
+            .collect();
+        for pane_id in &unsupported {
+            self.close_pane(*pane_id);
+        }
+        unsupported.len()
+    }
+
+    /// Points the Workspace's Preview Pane at `to` when it shows `from` or a path under it,
+    /// after a rename (ADR 0045). `false` when nothing changed.
     pub fn follow_rename(
         &mut self,
         workspace_id: WorkspaceId,
@@ -178,11 +175,15 @@ impl Session {
             return false;
         };
         let mut changed = false;
-        for tab in &mut workspace.tabs {
-            if let TabContent::File(file) = &mut tab.content
-                && let Ok(rest) = file.path.strip_prefix(from)
+        for pane in workspace
+            .tabs
+            .iter_mut()
+            .flat_map(|tab| tab.layout.panes.iter_mut())
+        {
+            if let PaneContent::Viewer(Viewer::File { path }) = &mut pane.content
+                && let Ok(rest) = path.strip_prefix(from)
             {
-                file.path = if rest.as_str().is_empty() {
+                *path = if rest.as_str().is_empty() {
                     to.to_owned()
                 } else {
                     to.join(rest)

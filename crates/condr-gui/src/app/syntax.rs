@@ -1,5 +1,5 @@
-//! Syntax highlighting for the Preview Tab's Editor (ADR 0032), the code blocks of a
-//! rendered Markdown file (ADR 0037) and the Diff Tab (ADR 0046): the Sublime syntaxes
+//! Syntax highlighting for the Preview Pane's Editor (ADR 0032), the code blocks of a
+//! rendered Markdown file (ADR 0037) and the Diff Pane (ADR 0046): the Sublime syntaxes
 //! `bat` curates, parsed by syntect on Oniguruma behind GPUI Kit's `InputHighlighter`,
 //! code block and Diff seams, and coloured by the theme Settings picks.
 
@@ -193,7 +193,7 @@ pub(crate) fn highlighter_factory(cx: &App) -> InputHighlighterFactory {
 pub(crate) type CodeBlockHighlighter =
     Arc<dyn Fn(&CodeBlock) -> Vec<(Range<usize>, HighlightStyle)> + Send + Sync>;
 
-/// Colours one side of a Diff Tab hunk, given the file's language name.
+/// Colours one side of a Diff Pane hunk, given the file's language name.
 pub(crate) type DiffHighlighter =
     Arc<dyn Fn(&str, &str) -> Vec<(Range<usize>, HighlightStyle)> + Send + Sync>;
 

@@ -24,12 +24,11 @@ Device (physical or virtual machine, holds a unique Ed25519 key)
 └── Server (the single resident background service on the machine, owns the runtime)
     └── Session (the Workspace topology and split layout snapshot the server maintains)
         ├── Workspace 1 (main Workspace: bound to a root directory such as ~/code/my-app)
-        │   ├── Tab 1 (terminal Tab: holds split Panes running Agents or plain shells)
-        │   ├── Tab 2 Diff (code review: view one file's diff against HEAD or the base branch)
-        │   └── Tab 3 Preview (source preview: browse a file with syntax highlighting)
+        │   ├── Tab 1 (split Panes running Agents or plain shells, and a Diff Pane beside them)
+        │   └── Tab 2 Preview (a Preview Pane: browse and edit a file with syntax highlighting)
         │
         └── Workspace 2 (managed worktree: an isolated branch environment based on Git Worktree)
-            └── Tab 1 (terminal Tab)
+            └── Tab 1
                 └── Pane 1 (an Agent running another task)
 ```
 
@@ -38,8 +37,8 @@ Device (physical or virtual machine, holds a unique Ed25519 key)
 | **Device / Server** | The abstraction of a machine running Condr. Each device holds a unique cryptographic identity (Device Key); closing the client does not affect the Server. |
 | **Session** | The layout topology the server maintains. Layout changes are written to the snapshot in real time, and after a Server restart the structure and Agent session contexts are restored automatically. |
 | **Workspace** | A unit of project work, anchored to a unique absolute **root directory**. An isolated **Managed Worktree** Workspace can be derived from it using Git Worktree. |
-| **Tab** | A page inside a Workspace: either a **terminal Tab** (holds split Panes, switchable with the `1~9` shortcuts) or a **viewer Tab** (the Diff review page or the Preview page that also edits the file). |
-| **Pane / Terminal** | A leaf of the layout and the virtual terminal engine (Ghostty's terminal core, `libghostty-vt`). Supports horizontal and vertical splits, zoom, and safe cascading exit of the process tree. |
+| **Tab** | A page inside a Workspace that holds split Panes, switchable with the `1~9` shortcuts. |
+| **Pane / Terminal** | A leaf of the layout: a terminal, on Ghostty's terminal core (`libghostty-vt`), or a viewer: the **Diff Pane** for reviewing a change, the **Preview Pane** that also edits the file, and **Git Graph**. Every Pane splits horizontally and vertically, zooms and moves; closing a terminal safely ends its whole process tree. |
 | **Agent** | A recognized command-line program running inside a Pane. Its state is synced to the sidebar in real time, including the reason it is blocked. |
 
 ---
@@ -78,5 +77,5 @@ When several Agents change the same project at once, code and Git conflicts are 
 
 - [Workspaces, Tabs and Panes](/docs/using/workspaces/): splitting Panes, shortcuts and using Managed Worktrees.
 - [Agent integrations](/docs/using/agents/): the list of supported Agents and how state reporting is configured.
-- [Changes and file preview](/docs/using/changes/): reviewing files with the Diff Tab and Preview Tab.
+- [Changes and file preview](/docs/using/changes/): reviewing files with the Diff Pane and Preview Pane.
 - [Remote connections](/docs/using/remote/): setting up SSH, TCP LAN pairing or direct P2P connections through NAT.

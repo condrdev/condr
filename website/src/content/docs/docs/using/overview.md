@@ -63,9 +63,9 @@ Manages Devices, project Workspaces and Agent state. Drag Devices or Workspaces 
 ### Right sidebar
 
 * **View buttons**: a column of buttons along the window's right edge opens **Files**, **Changes** or **Git History**; click the highlighted one to close the sidebar. Which view is shown, and whether the sidebar is open, is kept per Workspace.
-* **Files (project tree)**: browse the project's directories. Folders with changes carry a dot, and files ignored through `.gitignore` are greyed out. Click a file to view it in the Preview Tab.
-* **Changes**: active in Git repositories only. Lists changed files with added and removed lines, grouped as `Conflicts`, `Tracked` and `Untracked`. Click a file to review it in the Diff Tab.
-* **Git History**: the commits of the current branch, newest first. Click one to list the files it changed, and a file to see its change in the Diff Tab. Its header opens **Git Graph**, a Tab with every branch's commits, their graph and filters.
+* **Files (project tree)**: browse the project's directories. Folders with changes carry a dot, and files ignored through `.gitignore` are greyed out. Click a file to view it in the Preview Pane.
+* **Changes**: active in Git repositories only. Lists changed files with added and removed lines, grouped as `Conflicts`, `Tracked` and `Untracked`. Click a file to review it in the Diff Pane.
+* **Git History**: the commits of the current branch, newest first. Click one to list the files it changed, and a file to see its change in the Diff Pane. Its header opens **Git Graph**, a Pane with every branch's commits, their graph and filters.
 * **Context menu**: copy the relative or absolute path, insert the path into the terminal, open the file in a local editor or reveal it in the file manager. It also creates, renames and deletes files and folders.
 
 ---

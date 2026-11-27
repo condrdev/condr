@@ -32,11 +32,11 @@ Each Workspace remembers its own choice.
 
 ## View code diffs (Diff)
 
-1. Click any file in the **Changes** list, and a **Diff** Tab opens in the center area automatically.
+1. Click any file in the **Changes** list, and the **Diff Pane** opens in the center area automatically. The first time it opens in a Tab of its own; drag that Tab onto your terminal to review side by side (see [Workspaces, Tabs and Panes](/docs/using/workspaces/)).
 2. The page highlights exactly how the file differs from what you compare against, and the title bar names it, for example `Against main`.
-3. **Split** (the two-column icon) shows the old and new file side by side; **Unified** (the two-row icon) shows them in one column. The choice in the title bar applies to every Diff Tab and is remembered.
+3. **Split** (the two-column icon) shows the old and new file side by side; **Unified** (the two-row icon) shows them in one column. The choice in the title bar applies to every Diff Pane and is remembered.
 4. Unchanged stretches are folded; click a fold to show more lines above or below it, or all of them.
-5. Click **Show File** in the title bar to open the file in the Preview Tab at the line you last clicked in the diff.
+5. Click **Show File** in the title bar to open the file in the Preview Pane at the line you last clicked in the diff.
 
 > **Tip**: For very large binary files, or any single file over 1 MiB, the detailed comparison is hidden automatically to protect performance.
 
@@ -46,19 +46,19 @@ Click **Git History** in the column of buttons along the window's right edge to 
 
 - **The top row** names the branch and, when it has an upstream, how many commits it is ahead (`↑2`) and behind (`↓1`) as of the last fetch.
 - **Each row** shows the commit's subject, short ID, author and age. When an Agent commits, the new commit appears at the top on its own.
-- **Click a commit** to list the files it changed in a pane below the commits, with how many lines each added and deleted; drag the line between them to resize, and click the commit again to hide the pane. Click a file to open it in the Diff Tab as that commit changed it; the header shows the commit's subject, and the arrow next to it shows the rest of the message.
-- **Copy the commit ID** from the Diff Tab header or a commit's right-click menu.
+- **Click a commit** to list the files it changed in a pane below the commits, with how many lines each added and deleted; drag the line between them to resize, and click the commit again to hide the pane. Click a file to open it in the Diff Pane as that commit changed it; the header shows the commit's subject, and the arrow next to it shows the rest of the message.
+- **Copy the commit ID** from the Diff Pane header or a commit's right-click menu.
 - **Show more** at the end of the list loads the next 100 commits.
 
-Git History only reads the repository: it does not check out, revert or create commits. Clicking a file in **Changes** returns the Diff Tab to the working tree.
+Git History only reads the repository: it does not check out, revert or create commits. Clicking a file in **Changes** returns the Diff Pane to the working tree.
 
 ## Every branch at once (Git Graph)
 
-Click the graph button in Git History's header, or choose **Open Git Graph** in the Command Palette, to open the **Git Graph** Tab: the Workspace's commits on every branch and tag, laid out as IntelliJ IDEA's Git log lays them out.
+Click the graph button in Git History's header, or choose **Open Git Graph** in the Command Palette, to open **Git Graph**: the Workspace's commits on every branch and tag, laid out as IntelliJ IDEA's Git log lays them out.
 
 - **Branches** on the left: `HEAD`, then Local, Remote with each remote, and Tags, with names like `feat/search` grouped into folders. Type in the field above to find one. Double-click a branch to show only its commits; the filter above the commits names it, and its clear button shows every branch again.
 - **Commits** in the middle, with the graph of how branches fork and merge drawn beside each subject, the branches and tags at each commit, the author, the date and the short ID. Merge commits are grey, your own commits bold, and those on the current branch tinted. Scroll down and the next commits load. Type in **Text or hash** and press Enter to keep only the commits whose message holds the text, or whose ID starts with a hash of seven digits or more.
-- **The selected commit** on the right: the files it changed above its message, its author and when, who committed it if someone else did, its branches and tags, and every branch it is on. Double-click a file to open it in the Diff Tab as that commit changed it.
+- **The selected commit** on the right: the files it changed above its message, its author and when, who committed it if someone else did, its branches and tags, and every branch it is on. Double-click a file to open it in the Diff Pane as that commit changed it.
 - **Keys**: Up and Down move through the commits, Right goes to the parent and Left to the child, `Cmd + L` (`Ctrl + L`) jumps to the text filter, and `Cmd + D` (`Ctrl + D`) opens the selected file's diff. A commit's right-click menu copies its ID and goes to its parent or child.
 
 Git Graph reloads when `HEAD` or its upstream moves; click **Refresh** to pick up a branch fetched or committed elsewhere. Like Git History, it only reads.
@@ -78,18 +78,18 @@ Only repositories directly inside the folder count, submodules included, not dee
 
 - **Switch to the file tree**: click **Files** in the column of buttons along the window's right edge to expand and browse project folders as you would in a file manager.
 - **Change markers**: a folder with changes carries a dot, and files ignored by `.gitignore` are grayed out automatically.
-- **Click to preview**: click any text file to open it in the **Preview** Tab. Syntax highlighting and scroll position refresh automatically when the file changes on disk.
-- **Rendered Markdown and images**: Markdown and SVG files open rendered by default; switch between **Preview** and **Source** in the Tab header. Images (PNG, JPEG, GIF, WebP, BMP, ICO and TIFF under roughly 2 MiB) scale automatically to fit, and animated images play automatically. Images in Markdown files are loaded locally from the project; web images display their alt text instead.
+- **Click to preview**: click any text file to open it in the **Preview Pane**. Syntax highlighting and scroll position refresh automatically when the file changes on disk.
+- **Rendered Markdown and images**: Markdown and SVG files open rendered by default; switch between **Preview** and **Source** in the Pane's header. Images (PNG, JPEG, GIF, WebP, BMP, ICO and TIFF under roughly 2 MiB) scale automatically to fit, and animated images play automatically. Images in Markdown files are loaded locally from the project; web images display their alt text instead.
 
 ## Edit files (Preview)
 
-The **Source** view of the Preview Tab is an editor, on local and remote Devices alike:
+The **Source** view of the Preview Pane is an editor, on local and remote Devices alike:
 
-- **Edit and save**: type into the file, then press `Cmd + S` (macOS) or `Ctrl + S` (Windows/Linux). A dot in the Tab header marks unsaved changes. Nothing is saved automatically, so your edits never race the Agent's.
+- **Edit and save**: type into the file, then press `Cmd + S` (macOS) or `Ctrl + S` (Windows/Linux). A dot on its Tab marks unsaved changes. Nothing is saved automatically, so your edits never race the Agent's.
 - **Changed lines**: beside the line numbers, a bar marks each line added (green) or modified (yellow) and a red mark shows where lines were deleted; the scrollbar shows the same marks, so changes are easy to find in a long file. They compare with what **Changes** compares with (`HEAD` or the base branch), follow your unsaved edits as you type, and appear only in Git projects.
 - **Line endings are kept**: a file that uses Windows line endings (`CRLF`) keeps them for the lines you add.
 - **When the file changes on disk**: if the Agent writes the file while you have unsaved changes, your text stays as it is and the header says **Changed on disk**. Saving then asks whether to **Overwrite** the file with your text or to **Discard and Reload** it.
-- **Unsaved changes are never dropped silently**: before you switch to another file, close the Tab or quit Condr, Condr asks whether to save. If another device switches or closes the Tab, you can still save your text, copy it or discard it.
+- **Unsaved changes are never dropped silently**: before you switch to another file, close the Pane or its Tab, or quit Condr, Condr asks whether to save. If another device switches or closes the Pane, you can still save your text, copy it or discard it.
 - **Read-only files**: files that are not valid UTF-8 text, binary files and files over 1 MiB can be viewed but not edited; the header says why.
 
 ## Right-click menu
@@ -100,7 +100,7 @@ Right-click a file in the Changes or Files list to choose one of these common ac
 - **Insert Path into Terminal**: paste the file's relative path into the most recently used terminal Pane, ready to pass to a command-line tool.
 - **Copy Relative Path / Copy Path**: copy the file's relative or absolute path in one click.
 - **Reveal in Finder / Reveal in File Explorer / Open Containing Folder**: show the file or folder in the system file manager (local Devices only).
-- **New File… / New Folder…**: create an entry in the Files view: inside a folder, beside a file or at the project root from the empty area below the tree. A new file opens in the Preview Tab, ready to type.
+- **New File… / New Folder…**: create an entry in the Files view: inside a folder, beside a file or at the project root from the empty area below the tree. A new file opens in the Preview Pane, ready to type.
 - **Rename…**: rename a file or folder within its folder. A name that is already taken is refused.
 - **Delete…**: delete a file or a folder with everything in it, after you confirm. Deletion is permanent and skips the system trash.
 

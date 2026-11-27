@@ -5,7 +5,7 @@
 //! ```
 //!
 //! What they show is real wherever it can be. A worktree of this repository holds
-//! [`DEMO`]'s change uncommitted, for Changes, the Diff and Preview Tabs and Git History, and
+//! [`DEMO`]'s change uncommitted, for Changes, the Diff and Preview Panes and Git History, and
 //! Claude Code, Codex and lazygit run in its Panes, so all three must be installed and the
 //! first two must trust this repository. Two more Servers on loopback stand in for remote
 //! Devices; the Agents listed on them and the transfers in flight are staged. Each picture
@@ -229,7 +229,7 @@ pub(crate) fn run(directory: PathBuf) {
             .connection(1)
             .is_some_and(|connection| connection.resources.logs.contains_key(&condr))
     });
-    // The commit before the change, selected, and one of its files in the Diff Tab.
+    // The commit before the change, selected, and one of its files in the Diff Pane.
     update(&mut cx, window, &view, |this, window, cx| {
         let commit = this.connection(1).unwrap().resources.logs[&condr].commits[0].clone();
         let path = RelativePathBuf::from("crates/condr-gui/src/app/sidebar.rs");
@@ -353,7 +353,7 @@ pub(crate) fn run(directory: PathBuf) {
         (1280. - 320., 36., 320., 764.),
     );
 
-    // Two screens: the main window with its agents and Changes, and beside it the Diff Tab in a
+    // Two screens: the main window with its agents and Changes, and beside it the Diff Pane in a
     // window of its own, as it would sit on a second display (ADR 0043).
     update(&mut cx, window, &view, |this, window, cx| {
         this.select_workspace(1, condr, window, cx);
@@ -362,7 +362,7 @@ pub(crate) fn run(directory: PathBuf) {
             .insert((1, condr), RightSidebarView::Changes);
         this.show_diff_on(1, condr, RelativePathBuf::from(DEMO_FILE), window, cx);
     });
-    // Before: the Diff Tab still in the main window, where the website's animation starts.
+    // Before: the Diff Pane still in the main window, where the website's animation starts.
     settle(&mut cx);
     stage(&mut cx, window, &view, &staged);
     let mut image = capture(&mut cx, window);
@@ -376,12 +376,13 @@ pub(crate) fn run(directory: PathBuf) {
     );
     let diff_pane = cx.read(|app| {
         let connection = view.read(app).connection(1).unwrap();
-        connection.session().unwrap().diff_tab(condr).unwrap().id()
+        let session = connection.session().unwrap();
+        session.viewer_pane(condr, ViewerKind::Diff).unwrap().0.id()
     });
     update(&mut cx, window, &view, move |this, window, cx| {
         this.open_in_new_window(WindowScope::Tab(1, diff_pane), window, cx)
     });
-    wait(&mut cx, "the Diff Tab has its window", |app| {
+    wait(&mut cx, "the Diff Pane has its window", |app| {
         view.read(app)
             .window_for(WindowScope::Tab(1, diff_pane))
             .is_some()

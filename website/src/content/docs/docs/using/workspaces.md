@@ -35,6 +35,11 @@ Click the menu in the top-right corner of a Pane:
 - **Split**: choose **Split Right** (side by side) or **Split Down** (one above the other).
 - **Zoom to focus (Zoom)**: choose **Toggle Zoom** to let the current Pane fill the whole window for a while, and choose it again to restore the layout (handy for reading long logs).
 - **Rearrange**: press and hold a Pane's title bar and **drag** it to swap places with a neighboring Pane or regroup the layout.
+- **Move to another Tab**: drag a Pane's title bar onto the Tab strip, or choose **Move to New Tab** in its menu, to give it a Tab of its own. Drag a Tab onto a Pane of the Tab you are looking at to put all of it beside that Pane; dropped on a Pane's edge it splits there.
+
+### Diff, Preview and Git Graph are Panes too
+
+The [Diff Pane, the Preview Pane and Git Graph](/docs/using/changes/) open in a Tab of their own the first time, and later clicks show the new file in the same Pane wherever it is. Drag that Tab onto your terminal to review a change beside the Agent that made it. They split, zoom and move like any Pane; splitting one starts a terminal in the project's root directory.
 
 ## Tips for working efficiently
 

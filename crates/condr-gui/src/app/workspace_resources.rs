@@ -98,22 +98,22 @@ pub(super) struct WorkspaceResources {
     pub(super) logs: HashMap<WorkspaceId, GitLog>,
     /// The page each Workspace waits for: its request and how many commits it skips.
     pub(super) pending_logs: HashMap<WorkspaceId, (u64, u32)>,
-    /// Each Git Graph Tab's log as far as it was loaded (ADR 0079), or why its first page
+    /// Each Git Graph Pane's log as far as it was loaded (ADR 0079), or why its first page
     /// failed.
-    pub(super) graph_logs: HashMap<TabId, Result<GitLog, String>>,
-    /// The page each Git Graph Tab waits for: its request and how many commits it skips.
-    pub(super) pending_graph_logs: HashMap<TabId, (u64, u32)>,
+    pub(super) graph_logs: HashMap<PaneId, Result<GitLog, String>>,
+    /// The page each Git Graph Pane waits for: its request and how many commits it skips.
+    pub(super) pending_graph_logs: HashMap<PaneId, (u64, u32)>,
     /// Moves on with every page that lands, so a table knows to take its rows again.
     pub(super) graph_generation: u64,
     /// The branches that reach a commit, which Git Graph's details list (ADR 0079).
     pub(super) commit_branches: Fetched<(WorkspaceId, String), Result<Vec<String>, String>>,
     /// Unfolded commits; a commit never changes, so only a reset drops them.
     pub(super) commits: Fetched<(WorkspaceId, String), Result<CommitDetails, String>>,
-    /// One file of one commit, as its Diff Tab shows it.
+    /// One file of one commit, as its Diff Pane shows it.
     pub(super) commit_diffs: HashMap<CommitPath, Result<FileDiff, String>>,
     /// The `GitDiff` requests for them; the reply names only the path.
     pub(super) pending_commit_diffs: HashMap<u64, CommitPath>,
-    /// The side each Preview Tab's file is compared with for its change marks (ADR 0050),
+    /// The side each Preview Pane's file is compared with for its change marks (ADR 0050),
     /// with the generation it landed at; `None` marks nothing.
     pub(super) old_files: Fetched<OldFilePath, (u64, Option<Arc<str>>)>,
     pub(super) old_files_generation: u64,
@@ -183,7 +183,7 @@ impl WorkspaceResources {
     }
 
     /// The Workspace's Git state or comparison moved: diffs and old sides are asked for
-    /// again. A Preview Tab keeps its marks until the new side lands.
+    /// again. A Preview Pane keeps its marks until the new side lands.
     pub(super) fn invalidate_diffs(&mut self, workspace_id: WorkspaceId) {
         self.diffs.retain(|(id, _)| *id != workspace_id);
         self.diffs_generation += 1;
@@ -347,15 +347,15 @@ impl WorkspaceResources {
         &mut self,
         request_id: u64,
         result: Result<GitLog, String>,
-    ) -> Option<TabId> {
-        let (tab_id, skip) = self
+    ) -> Option<PaneId> {
+        let (pane_id, skip) = self
             .pending_graph_logs
             .iter()
             .find(|(_, (pending, _))| *pending == request_id)
-            .map(|(tab_id, (_, skip))| (*tab_id, *skip))?;
-        self.pending_graph_logs.remove(&tab_id);
+            .map(|(pane_id, (_, skip))| (*pane_id, *skip))?;
+        self.pending_graph_logs.remove(&pane_id);
         self.graph_generation += 1;
-        match (self.graph_logs.get_mut(&tab_id), result) {
+        match (self.graph_logs.get_mut(&pane_id), result) {
             (Some(Ok(log)), Ok(page)) if skip > 0 && log.from == page.from => {
                 log.commits.extend(page.commits);
                 log.more = page.more;
@@ -371,13 +371,13 @@ impl WorkspaceResources {
                     page.refs = std::mem::take(&mut shown.refs);
                     page.user_email = shown.user_email.take();
                 }
-                self.graph_logs.insert(tab_id, Ok(page));
+                self.graph_logs.insert(pane_id, Ok(page));
             }
             (_, Err(error)) => {
-                self.graph_logs.insert(tab_id, Err(error));
+                self.graph_logs.insert(pane_id, Err(error));
             }
         }
-        Some(tab_id)
+        Some(pane_id)
     }
 
     pub(super) fn accept_directory(
@@ -414,7 +414,7 @@ impl WorkspaceResources {
 
 impl Condr {
     /// The working tree moved: asks again for every cached listing of the Workspace and
-    /// for the file its Preview Tab shows, keeping the old answers on screen until the new
+    /// for the file its Preview Pane shows, keeping the old answers on screen until the new
     /// ones land. Every other cached file is dropped rather than refetched; a Tab that
     /// comes back to one asks for it again.
     pub(super) fn refresh_workspace_files(
@@ -426,13 +426,8 @@ impl Condr {
             return;
         };
         let shown = connection.session().and_then(|session| {
-            Some(
-                session
-                    .file_tab(workspace_id)?
-                    .file()?
-                    .path()
-                    .to_relative_path_buf(),
-            )
+            let (_, pane) = session.viewer_pane(workspace_id, ViewerKind::File)?;
+            Some(pane.viewer()?.path()?.to_relative_path_buf())
         });
         let directories = connection
             .resources
@@ -464,20 +459,17 @@ impl Condr {
         let session = self
             .connection(key)
             .and_then(|connection| connection.session());
-        let closing: Vec<TabId> = self
+        let closing: Vec<PaneId> = self
             .preview_pane
             .editors
             .keys()
-            .filter(|(editor_key, tab_id)| {
-                *editor_key == key
-                    && !session.is_some_and(|session| {
-                        session.tab(*tab_id).is_some_and(|tab| tab.file().is_some())
-                    })
+            .filter(|(editor_key, pane_id)| {
+                *editor_key == key && !viewer_is(session, *pane_id, ViewerKind::File)
             })
-            .map(|(_, tab_id)| *tab_id)
+            .map(|(_, pane_id)| *pane_id)
             .collect();
-        for tab_id in closing {
-            self.keep_unsaved(key, tab_id, cx);
+        for pane_id in closing {
+            self.keep_unsaved(key, pane_id, cx);
         }
         let Some(connection) = self
             .connections
@@ -491,16 +483,16 @@ impl Condr {
         self.diff_pane.retain_session(key, session);
         self.git_graph.retain_session(key, session);
         release_images(self.preview_pane.retain_session(key, session), cx);
-        let tabs: HashSet<TabId> = session
-            .into_iter()
-            .flat_map(Session::workspaces)
-            .flat_map(Workspace::tabs)
-            .map(Tab::id)
-            .collect();
-        connection
+        let gone: Vec<PaneId> = connection
             .resources
             .graph_logs
-            .retain(|tab_id, _| tabs.contains(tab_id));
+            .keys()
+            .copied()
+            .filter(|pane_id| !viewer_is(session, *pane_id, ViewerKind::GitGraph))
+            .collect();
+        for pane_id in gone {
+            connection.resources.graph_logs.remove(&pane_id);
+        }
         let live = connection
             .session()
             .into_iter()
@@ -512,15 +504,15 @@ impl Condr {
 
     /// `key` is gone: nothing this Client kept of its Workspaces and Tabs stays.
     pub(super) fn clear_workspace_views(&mut self, key: ConnectionKey, cx: &mut App) {
-        let closing: Vec<TabId> = self
+        let closing: Vec<PaneId> = self
             .preview_pane
             .editors
             .keys()
             .filter(|(editor_key, _)| *editor_key == key)
-            .map(|(_, tab_id)| *tab_id)
+            .map(|(_, pane_id)| *pane_id)
             .collect();
-        for tab_id in closing {
-            self.keep_unsaved(key, tab_id, cx);
+        for pane_id in closing {
+            self.keep_unsaved(key, pane_id, cx);
         }
         self.right_sidebar.retain_session(key, None);
         self.diff_pane.retain_session(key, None);

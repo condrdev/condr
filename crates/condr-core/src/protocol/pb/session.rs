@@ -3,15 +3,14 @@
 use super::*;
 use crate::snapshot::{
     LayoutNodeSnapshot, LayoutSnapshot, MAX_SNAPSHOT_LAYOUT_NODES, MAX_SNAPSHOT_PANES,
-    MAX_SNAPSHOT_TABS, MAX_SNAPSHOT_WORKSPACES, PaneSnapshot, TabContentSnapshot, TabSnapshot,
-    WorkspaceSnapshot,
+    MAX_SNAPSHOT_TABS, MAX_SNAPSHOT_WORKSPACES, PaneSnapshot, TabSnapshot, WorkspaceSnapshot,
 };
 use crate::{
     AgentKind, AgentResume, AgentSnapshot, AgentState, CommitDetails, CommitPerson, CommitSummary,
     DiffHunk, DiffLine, DiffLineKind, DirectoryEntry, DirectoryListing, FileContent, FileDiff,
     FileDiffContent, FileKind, GitChangeEntry, GitChangeStatus, GitChanges, GitDiffStat, GitLog,
-    GitRef, GitUpstream, PaneDirection, PaneId, SessionSnapshot, SplitDirection, TabId,
-    WorkspaceId, WorktreeAssociation,
+    GitRef, GitUpstream, PaneContent, PaneDirection, PaneId, SessionSnapshot, SplitDirection,
+    TabId, Viewer, WorkspaceId, WorktreeAssociation,
     agent_discovery::AgentInstallation,
     agent_hooks::{HooksAction, HooksReport, HooksState},
 };
@@ -39,13 +38,15 @@ impl TryFrom<super::SessionSnapshot> for SessionSnapshot {
             MAX_SNAPSHOT_WORKSPACES,
             "Workspaces",
         )?;
-        Ok(Self {
-            workspaces: snapshot
-                .workspaces
-                .into_iter()
-                .map(WorkspaceSnapshot::try_from)
-                .collect::<WireResult<_>>()?,
-        })
+        let mut workspaces = Vec::with_capacity(snapshot.workspaces.len());
+        for workspace in snapshot.workspaces {
+            let workspace = WorkspaceSnapshot::try_from(workspace)?;
+            // One that held only 0.2 Diff or Preview Tabs has none left (ADR 0078).
+            if !workspace.tabs.is_empty() {
+                workspaces.push(workspace);
+            }
+        }
+        Ok(Self { workspaces })
     }
 }
 
@@ -69,21 +70,9 @@ impl TryFrom<&WorkspaceSnapshot> for super::WorkspaceSnapshot {
                     }))
                 })
                 .transpose()?,
-            // compat(0.2.6): a Git Graph Tab goes beside `tabs`, which a 0.2.6 peer skips
-            // (ADR 0078); delete this and let it go in `tabs`.
-            git_graph: workspace.tabs.iter().enumerate().find_map(|(index, tab)| {
-                matches!(tab.content, TabContentSnapshot::GitGraph).then(|| {
-                    Box::new(super::GitGraphTabSnapshot {
-                        id: tab.id.as_u64(),
-                        name: tab.name.clone(),
-                        index: index as u32,
-                    })
-                })
-            }),
             tabs: workspace
                 .tabs
                 .iter()
-                .filter(|tab| !matches!(tab.content, TabContentSnapshot::GitGraph))
                 .map(super::TabSnapshot::try_from)
                 .collect::<Result<_, _>>()?,
         })
@@ -108,25 +97,13 @@ impl TryFrom<super::WorkspaceSnapshot> for WorkspaceSnapshot {
                     base_branch: worktree.base_branch,
                 }
             }),
-            tabs: {
-                let mut tabs = workspace
-                    .tabs
-                    .into_iter()
-                    .map(TabSnapshot::try_from)
-                    .collect::<WireResult<Vec<_>>>()?;
-                if let Some(git_graph) = workspace.git_graph.map(|tab| *tab) {
-                    let index = (git_graph.index as usize).min(tabs.len());
-                    tabs.insert(
-                        index,
-                        TabSnapshot {
-                            id: TabId::from_u64(git_graph.id),
-                            name: git_graph.name,
-                            content: TabContentSnapshot::GitGraph,
-                        },
-                    );
-                }
-                tabs
-            },
+            // A 0.2 Diff or Preview Tab has no layout; it is dropped (ADR 0078).
+            tabs: workspace
+                .tabs
+                .into_iter()
+                .filter(|tab| tab.layout.is_some())
+                .map(TabSnapshot::try_from)
+                .collect::<WireResult<_>>()?,
         })
     }
 }
@@ -135,42 +112,19 @@ impl TryFrom<&TabSnapshot> for super::TabSnapshot {
     type Error = String;
 
     fn try_from(tab: &TabSnapshot) -> Result<Self, String> {
-        use tab_snapshot::Content;
-        let content = match &tab.content {
-            TabContentSnapshot::Terminals {
-                panes,
-                focused_pane,
-                focus_history,
-                layout,
-            } => Some(Content::Terminals(TerminalsTabSnapshot {
-                panes: panes
-                    .iter()
-                    .map(|pane| {
-                        Ok::<_, String>(super::PaneSnapshot {
-                            id: pane.id.as_u64(),
-                            cwd: optional_path_text(pane.cwd.as_ref())?,
-                            agent_resume: pane.agent_resume.as_ref().map(super::AgentResume::from),
-                        })
-                    })
-                    .collect::<Result<_, _>>()?,
-                focused_pane: focused_pane.as_u64(),
-                focus_history: focus_history.iter().map(|pane| pane.as_u64()).collect(),
-                layout: Some(layout.into()),
-            })),
-            TabContentSnapshot::Diff { path } => Some(Content::Diff(PathTabSnapshot {
-                path: path.to_string(),
-            })),
-            TabContentSnapshot::File { path } => Some(Content::File(PathTabSnapshot {
-                path: path.to_string(),
-            })),
-            TabContentSnapshot::GitGraph => Some(Content::GitGraph(super::Empty {})),
-            // Unset, as it arrived.
-            TabContentSnapshot::Unsupported => None,
-        };
         Ok(Self {
             id: tab.id.as_u64(),
             name: tab.name.clone(),
-            content,
+            layout: Some(TabLayoutSnapshot {
+                panes: tab
+                    .panes
+                    .iter()
+                    .map(super::PaneSnapshot::try_from)
+                    .collect::<Result<_, _>>()?,
+                focused_pane: tab.focused_pane.as_u64(),
+                focus_history: tab.focus_history.iter().map(|pane| pane.as_u64()).collect(),
+                layout: Some((&tab.layout).into()),
+            }),
         })
     }
 }
@@ -179,60 +133,96 @@ impl TryFrom<super::TabSnapshot> for TabSnapshot {
     type Error = WireError;
 
     fn try_from(tab: super::TabSnapshot) -> WireResult<Self> {
-        use tab_snapshot::Content;
-        // A kind a newer peer added is an Unsupported Tab, not an unknown Snapshot
-        // (ADR 0078).
-        let Some(content) = tab.content else {
-            return Ok(Self {
-                id: TabId::from_u64(tab.id),
-                name: tab.name,
-                content: TabContentSnapshot::Unsupported,
-            });
-        };
-        let content = match content {
-            Content::Terminals(terminals) => {
-                bounded(terminals.panes.len(), MAX_SNAPSHOT_PANES, "Panes")?;
-                bounded(
-                    terminals.focus_history.len(),
-                    MAX_SNAPSHOT_PANES,
-                    "focus history entries",
-                )?;
-                TabContentSnapshot::Terminals {
-                    panes: terminals
-                        .panes
-                        .into_iter()
-                        .map(|pane| {
-                            Ok(PaneSnapshot {
-                                id: PaneId::from_u64(pane.id),
-                                cwd: pane.cwd.map(PathBuf::from),
-                                agent_resume: pane
-                                    .agent_resume
-                                    .map(AgentResume::try_from)
-                                    .transpose()?
-                                    .filter(|resume| resume.kind != AgentKind::Other),
-                            })
-                        })
-                        .collect::<WireResult<_>>()?,
-                    focused_pane: PaneId::from_u64(terminals.focused_pane),
-                    focus_history: terminals
-                        .focus_history
-                        .into_iter()
-                        .map(PaneId::from_u64)
-                        .collect(),
-                    layout: required(terminals.layout, "layout")?.try_into()?,
-                }
-            }
-            Content::Diff(diff) => TabContentSnapshot::Diff {
-                path: relative_path(diff.path)?,
-            },
-            Content::File(file) => TabContentSnapshot::File {
-                path: relative_path(file.path)?,
-            },
-            Content::GitGraph(_) => TabContentSnapshot::GitGraph,
-        };
+        let layout = required(tab.layout, "Tab layout")?;
+        bounded(layout.panes.len(), MAX_SNAPSHOT_PANES, "Panes")?;
+        bounded(
+            layout.focus_history.len(),
+            MAX_SNAPSHOT_PANES,
+            "focus history entries",
+        )?;
         Ok(Self {
             id: TabId::from_u64(tab.id),
             name: tab.name,
+            panes: layout
+                .panes
+                .into_iter()
+                .map(PaneSnapshot::try_from)
+                .collect::<WireResult<_>>()?,
+            focused_pane: PaneId::from_u64(layout.focused_pane),
+            focus_history: layout
+                .focus_history
+                .into_iter()
+                .map(PaneId::from_u64)
+                .collect(),
+            layout: required(layout.layout, "layout")?.try_into()?,
+        })
+    }
+}
+
+impl TryFrom<&PaneSnapshot> for super::PaneSnapshot {
+    type Error = String;
+
+    fn try_from(pane: &PaneSnapshot) -> Result<Self, String> {
+        use pane_snapshot::Kind;
+        let (cwd, agent_resume, kind) = match &pane.content {
+            PaneContent::Terminal { cwd, agent_resume } => (
+                optional_path_text(cwd.as_ref())?,
+                agent_resume.as_ref().map(super::AgentResume::from),
+                None,
+            ),
+            PaneContent::Viewer(viewer) => (
+                None,
+                None,
+                Some(match viewer {
+                    Viewer::Diff { path } => Kind::Diff(super::ViewerPath {
+                        path: path.to_string(),
+                    }),
+                    Viewer::File { path } => Kind::File(super::ViewerPath {
+                        path: path.to_string(),
+                    }),
+                    Viewer::GitGraph => Kind::GitGraph(super::Empty {}),
+                }),
+            ),
+            // Unset, as it arrived.
+            PaneContent::Unsupported => (None, None, None),
+        };
+        Ok(Self {
+            id: pane.id.as_u64(),
+            cwd,
+            agent_resume,
+            viewer: !matches!(pane.content, PaneContent::Terminal { .. }),
+            kind,
+        })
+    }
+}
+
+impl TryFrom<super::PaneSnapshot> for PaneSnapshot {
+    type Error = WireError;
+
+    /// A Pane marked a viewer whose kind this build does not know is an Unsupported Pane,
+    /// not an unknown Snapshot and not a terminal (ADR 0078).
+    fn try_from(pane: super::PaneSnapshot) -> WireResult<Self> {
+        use pane_snapshot::Kind;
+        let content = match (pane.viewer, pane.kind) {
+            (false, _) => PaneContent::Terminal {
+                cwd: pane.cwd.map(PathBuf::from),
+                agent_resume: pane
+                    .agent_resume
+                    .map(AgentResume::try_from)
+                    .transpose()?
+                    .filter(|resume| resume.kind != AgentKind::Other),
+            },
+            (true, Some(Kind::Diff(diff))) => PaneContent::Viewer(Viewer::Diff {
+                path: relative_path(diff.path)?,
+            }),
+            (true, Some(Kind::File(file))) => PaneContent::Viewer(Viewer::File {
+                path: relative_path(file.path)?,
+            }),
+            (true, Some(Kind::GitGraph(_))) => PaneContent::Viewer(Viewer::GitGraph),
+            (true, None) => PaneContent::Unsupported,
+        };
+        Ok(Self {
+            id: PaneId::from_u64(pane.id),
             content,
         })
     }

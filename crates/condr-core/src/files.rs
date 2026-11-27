@@ -26,9 +26,9 @@ pub use transfer::{
 #[cfg(feature = "runtime")]
 pub use write::{TransferRefusal, Upload, begin_upload, mutate_file, open_download};
 
-/// The largest file the Preview Tab shows; larger ones yield a placeholder like a diff.
+/// The largest file the Preview Pane shows; larger ones yield a placeholder like a diff.
 pub const MAX_FILE_BYTES: u64 = crate::MAX_DIFF_BYTES;
-/// The largest image the Preview Tab shows (ADR 0037): its bytes ride one reply frame,
+/// The largest image the Preview Pane shows (ADR 0037): its bytes ride one reply frame,
 /// with room left for the reply's own fields.
 // ponytail: one frame per image; chunk the reply if larger screenshots need showing.
 pub const MAX_IMAGE_BYTES: u64 = (crate::protocol::MAX_FRAME_SIZE - 64 * 1024) as u64;

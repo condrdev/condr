@@ -1,6 +1,6 @@
 use super::*;
 
-/// ADR 0045: a rename moves the Preview Tab with its file, and a mutation refreshes Files
+/// ADR 0045: a rename moves the Preview Pane with its file, and a mutation refreshes Files
 /// for every Client itself, since the watcher skips ignored paths or may not run at all.
 #[test]
 fn a_rename_moves_the_preview_tab_and_refreshes_files_without_notify() {
@@ -13,7 +13,7 @@ fn a_rename_moves_the_preview_tab_and_refreshes_files_without_notify() {
     std::fs::write(root.join("dir/a.md"), "a").unwrap();
     let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
     let workspace_id = state.session.create_workspace(root.clone()).unwrap();
-    let tab_id = state
+    let (_, pane_id) = state
         .session
         .show_viewer(
             workspace_id,
@@ -39,10 +39,11 @@ fn a_rename_moves_the_preview_tab_and_refreshes_files_without_notify() {
     files_mutated(&state, workspace_id, &rename, &result);
     {
         let locked = state.lock().unwrap();
-        let workspace = locked.session.workspace(workspace_id).unwrap();
         assert_eq!(
-            workspace.tab(tab_id).unwrap().file().unwrap().path(),
-            relative_path::RelativePath::new("docs/a.md")
+            locked.session.pane(pane_id).unwrap().viewer(),
+            Some(&condr_core::Viewer::File {
+                path: RelativePathBuf::from("docs/a.md")
+            })
         );
         assert!(
             locked

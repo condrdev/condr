@@ -1,5 +1,5 @@
 //! Git Graph (ADR 0079): a Workspace's commits on every branch as IntelliJ's log shows
-//! them, in a viewer Tab of its own: the branch tree, the commit table with its graph and
+//! them, in a viewer Pane: the branch tree, the commit table with its graph and
 //! filters, and the selected commit's files and details. It only reads.
 
 mod branches;
@@ -31,7 +31,7 @@ actions!(
     ]
 );
 
-/// The key context around a Git Graph Tab.
+/// The key context around a Git Graph Pane.
 const CONTEXT: &str = "GitGraph";
 
 /// IntelliJ's keys in its log (ADR 0079): Right to the parent, Left to the child, and its
@@ -62,10 +62,10 @@ pub(super) fn key_bindings() -> [KeyBinding; 4] {
     ]
 }
 
-/// Each Git Graph Tab's view, which is this Client's own and never remembered.
+/// Each Git Graph Pane's view, which is this Client's own and never remembered.
 #[derive(Default)]
 pub(in crate::app) struct GitGraphState {
-    views: HashMap<(ConnectionKey, TabId), GitGraphView>,
+    views: HashMap<(ConnectionKey, PaneId), GitGraphView>,
 }
 
 struct GitGraphView {
@@ -88,15 +88,10 @@ struct GitGraphView {
 }
 
 impl GitGraphState {
-    /// Forgets the views of `key`'s Git Graph Tabs that closed; `None` is a connection gone.
+    /// Forgets the views of `key`'s Git Graph Panes that closed; `None` is a connection gone.
     pub(in crate::app) fn retain_session(&mut self, key: ConnectionKey, session: Option<&Session>) {
-        self.views.retain(|(connection, tab_id), _| {
-            *connection != key
-                || session.is_some_and(|session| {
-                    session
-                        .tab(*tab_id)
-                        .is_some_and(|tab| matches!(tab.content(), TabContent::GitGraph))
-                })
+        self.views.retain(|(connection, pane_id), _| {
+            *connection != key || viewer_is(session, *pane_id, ViewerKind::GitGraph)
         });
     }
 }
@@ -151,7 +146,7 @@ impl Condr {
             .is_some_and(|repository| repository.head.is_some())
     }
 
-    /// Opens the Workspace's Git Graph Tab, creating it the first time (ADR 0078, ADR 0079).
+    /// Opens the Workspace's Git Graph Pane, creating it the first time (ADR 0078, ADR 0079).
     pub(in crate::app) fn open_git_graph(
         &mut self,
         key: ConnectionKey,
@@ -184,17 +179,17 @@ impl Condr {
         }
     }
 
-    /// Makes the view of a Git Graph Tab this window shows, the first time it shows: its
+    /// Makes the view of a Git Graph Pane this window shows, the first time it shows: its
     /// table, its two fields and what listens to them.
     pub(in crate::app) fn sync_git_graph_view(
         &mut self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
-        tab_id: TabId,
+        pane_id: PaneId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.git_graph.views.contains_key(&(key, tab_id)) {
+        if self.git_graph.views.contains_key(&(key, pane_id)) {
             return;
         }
         let owner = cx.weak_entity();
@@ -203,7 +198,7 @@ impl Condr {
                 CommitTable {
                     owner,
                     key,
-                    tab_id,
+                    pane_id,
                     rows: Vec::new(),
                     more: false,
                     loading: true,
@@ -226,12 +221,12 @@ impl Condr {
         let subscriptions = vec![
             cx.subscribe_in(&table, window, move |this, _, event: &TableEvent, _, cx| {
                 if let TableEvent::SelectRow(row_ix) = event {
-                    this.select_git_graph_row(key, tab_id, *row_ix, cx);
+                    this.select_git_graph_row(key, pane_id, *row_ix, cx);
                 }
             }),
             cx.subscribe(&text, move |this, _, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
-                    this.apply_git_graph_text(key, tab_id, cx);
+                    this.apply_git_graph_text(key, pane_id, cx);
                 }
             }),
             cx.subscribe(&search, |_, _, event: &InputEvent, cx| {
@@ -241,7 +236,7 @@ impl Condr {
             }),
         ];
         self.git_graph.views.insert(
-            (key, tab_id),
+            (key, pane_id),
             GitGraphView {
                 workspace_id,
                 table,
@@ -260,26 +255,26 @@ impl Condr {
         );
     }
 
-    /// Asks for the first page of a Git Graph Tab, or with `more` for the next; the shown
+    /// Asks for the first page of a Git Graph Pane, or with `more` for the next; the shown
     /// list stays until the answer lands.
     pub(in crate::app) fn request_git_graph_page(
         &mut self,
         key: ConnectionKey,
-        tab_id: TabId,
+        pane_id: PaneId,
         more: bool,
     ) {
         let (Some(view), Some(connection)) = (
-            self.git_graph.views.get(&(key, tab_id)),
+            self.git_graph.views.get(&(key, pane_id)),
             self.connection(key),
         ) else {
             return;
         };
         let resources = &connection.resources;
         let (from, skip) = if more {
-            let Some(Ok(log)) = resources.graph_logs.get(&tab_id) else {
+            let Some(Ok(log)) = resources.graph_logs.get(&pane_id) else {
                 return;
             };
-            if !log.more || resources.pending_graph_logs.contains_key(&tab_id) {
+            if !log.more || resources.pending_graph_logs.contains_key(&pane_id) {
                 return;
             }
             (log.from.clone(), log.commits.len() as u32)
@@ -312,28 +307,28 @@ impl Condr {
             connection
                 .resources
                 .pending_graph_logs
-                .insert(tab_id, (request_id, skip));
+                .insert(pane_id, (request_id, skip));
         }
     }
 
-    /// The first page again for every Git Graph Tab of the Workspace: `HEAD` or its
+    /// The first page again for every Git Graph Pane of the Workspace: `HEAD` or its
     /// upstream moved, or the user refreshed (ADR 0079).
     pub(in crate::app) fn reload_git_graph(
         &mut self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
     ) {
-        let tabs: Vec<TabId> = self
+        let tabs: Vec<PaneId> = self
             .git_graph
             .views
             .iter()
             .filter(|((connection, _), view)| {
                 *connection == key && view.workspace_id == workspace_id
             })
-            .map(|((_, tab_id), _)| *tab_id)
+            .map(|((_, pane_id), _)| *pane_id)
             .collect();
-        for tab_id in tabs {
-            self.request_git_graph_page(key, tab_id, false);
+        for pane_id in tabs {
+            self.request_git_graph_page(key, pane_id, false);
         }
     }
 
@@ -343,25 +338,25 @@ impl Condr {
         key: ConnectionKey,
         workspace_id: WorkspaceId,
     ) {
-        let tabs: Vec<TabId> = self
+        let tabs: Vec<PaneId> = self
             .git_graph
             .views
             .iter_mut()
             .filter(|((connection, _), view)| {
                 *connection == key && view.workspace_id == workspace_id
             })
-            .map(|((_, tab_id), view)| {
+            .map(|((_, pane_id), view)| {
                 view.branch = None;
                 view.selected_ref = None;
                 view.selected_commit = None;
                 view.selected_file = None;
-                *tab_id
+                *pane_id
             })
             .collect();
         if let Some(connection) = self.connection_mut(key) {
-            for tab_id in tabs {
-                connection.resources.graph_logs.remove(&tab_id);
-                connection.resources.pending_graph_logs.remove(&tab_id);
+            for pane_id in tabs {
+                connection.resources.graph_logs.remove(&pane_id);
+                connection.resources.pending_graph_logs.remove(&pane_id);
             }
             connection.resources.graph_generation += 1;
         }
@@ -370,11 +365,11 @@ impl Condr {
     fn select_git_graph_row(
         &mut self,
         key: ConnectionKey,
-        tab_id: TabId,
+        pane_id: PaneId,
         row_ix: usize,
         cx: &mut Context<Self>,
     ) {
-        let Some(view) = self.git_graph.views.get_mut(&(key, tab_id)) else {
+        let Some(view) = self.git_graph.views.get_mut(&(key, pane_id)) else {
             return;
         };
         let id = view
@@ -397,13 +392,13 @@ impl Condr {
     pub(in crate::app) fn step_git_graph_commit(
         &mut self,
         key: ConnectionKey,
-        tab_id: TabId,
+        pane_id: PaneId,
         row_ix: usize,
         parent: bool,
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(view) = self.git_graph.views.get(&(key, tab_id)) else {
+        let Some(view) = self.git_graph.views.get(&(key, pane_id)) else {
             return;
         };
         view.table.update(cx, |table, cx| {
@@ -431,7 +426,7 @@ impl Condr {
     fn step_selected_git_graph_commit(
         &mut self,
         key: ConnectionKey,
-        tab_id: TabId,
+        pane_id: PaneId,
         parent: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -439,16 +434,21 @@ impl Condr {
         let Some(row_ix) = self
             .git_graph
             .views
-            .get(&(key, tab_id))
+            .get(&(key, pane_id))
             .and_then(|view| view.table.read(cx).selected_row())
         else {
             return;
         };
-        self.step_git_graph_commit(key, tab_id, row_ix, parent, window, cx);
+        self.step_git_graph_commit(key, pane_id, row_ix, parent, window, cx);
     }
 
-    fn apply_git_graph_text(&mut self, key: ConnectionKey, tab_id: TabId, cx: &mut Context<Self>) {
-        let Some(view) = self.git_graph.views.get_mut(&(key, tab_id)) else {
+    fn apply_git_graph_text(
+        &mut self,
+        key: ConnectionKey,
+        pane_id: PaneId,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(view) = self.git_graph.views.get_mut(&(key, pane_id)) else {
             return;
         };
         let text = view.text.read(cx).value().trim().to_owned();
@@ -456,18 +456,18 @@ impl Condr {
             return;
         }
         view.text_filter = text;
-        self.request_git_graph_page(key, tab_id, false);
+        self.request_git_graph_page(key, pane_id, false);
         cx.notify();
     }
 
     fn set_git_graph_branch(
         &mut self,
         key: ConnectionKey,
-        tab_id: TabId,
+        pane_id: PaneId,
         branch: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        let Some(view) = self.git_graph.views.get_mut(&(key, tab_id)) else {
+        let Some(view) = self.git_graph.views.get_mut(&(key, pane_id)) else {
             return;
         };
         if view.branch == branch {
@@ -475,19 +475,19 @@ impl Condr {
         }
         view.selected_ref.clone_from(&branch);
         view.branch = branch;
-        self.request_git_graph_page(key, tab_id, false);
+        self.request_git_graph_page(key, pane_id, false);
         cx.notify();
     }
 
-    /// `Cmd+D`: the selected file of the selected commit, in the Diff Tab.
+    /// `Cmd+D`: the selected file of the selected commit, in the Diff Pane.
     fn show_git_graph_diff(
         &mut self,
         key: ConnectionKey,
-        tab_id: TabId,
+        pane_id: PaneId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(view) = self.git_graph.views.get(&(key, tab_id)) else {
+        let Some(view) = self.git_graph.views.get(&(key, pane_id)) else {
             return;
         };
         let (Some(id), Some(path)) = (view.selected_commit.clone(), view.selected_file.clone())
@@ -508,49 +508,17 @@ impl Condr {
         }
     }
 
-    /// A Tab whose kind this build does not know (ADR 0078): its name in the strip, and
-    /// here what it needs.
-    pub(in crate::app) fn render_unsupported_tab(
-        &self,
-        key: ConnectionKey,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let server = self
-            .connection(key)
-            .and_then(|connection| connection.server_build.clone())
-            .unwrap_or_default();
-        v_flex()
-            .debug_selector(|| "unsupported-tab".into())
-            .size_full()
-            .items_center()
-            .justify_center()
-            .gap_1()
-            .p_4()
-            .child(div().text_sm().child(t!("unsupported_tab.title")))
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(t!(
-                        "unsupported_tab.builds",
-                        this = condr_core::build_identity(),
-                        server = server
-                    )),
-            )
-            .into_any_element()
-    }
-
-    /// The Git Graph Tab: the branches, the commits under their filters, and the selected
+    /// The Git Graph Pane: the branches, the commits under their filters, and the selected
     /// commit's files above its details, as IntelliJ lays out its log (ADR 0079).
     pub(in crate::app) fn render_git_graph(
         &self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
-        tab_id: TabId,
+        pane_id: PaneId,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let (Some(view), Some(connection)) = (
-            self.git_graph.views.get(&(key, tab_id)),
+            self.git_graph.views.get(&(key, pane_id)),
             self.connection(key),
         ) else {
             return empty_state(t!("git_history.loading"), cx);
@@ -562,23 +530,23 @@ impl Condr {
             return empty_state(t!("git_graph.not_a_repository"), cx);
         };
         let resources = &connection.resources;
-        if !resources.graph_logs.contains_key(&tab_id)
-            && !resources.pending_graph_logs.contains_key(&tab_id)
+        if !resources.graph_logs.contains_key(&pane_id)
+            && !resources.pending_graph_logs.contains_key(&pane_id)
         {
             // Asked here rather than once, so a reconnect that dropped the answer asks again.
             let owner = cx.weak_entity();
             cx.defer(move |cx| {
                 let _ = owner.update(cx, |this, cx| {
-                    this.request_git_graph_page(key, tab_id, false);
+                    this.request_git_graph_page(key, pane_id, false);
                     cx.notify();
                 });
             });
         }
-        let log = resources.graph_logs.get(&tab_id);
+        let log = resources.graph_logs.get(&pane_id);
         let current = current_branch(repository);
         // The table takes the rows of a page that landed since it last did.
         let generation = resources.graph_generation;
-        let pending = resources.pending_graph_logs.contains_key(&tab_id);
+        let pending = resources.pending_graph_logs.contains_key(&pane_id);
         let selected = view.selected_commit.clone();
         let (tint_head, filtered) = (view.branch.is_none(), !view.text_filter.is_empty());
         view.table.update(cx, |table, cx| {
@@ -655,36 +623,41 @@ impl Condr {
         };
         let commits = v_flex()
             .size_full()
-            .child(self.render_git_graph_filters(view, key, workspace_id, tab_id, git, cx))
+            .child(self.render_git_graph_filters(view, key, workspace_id, pane_id, git, cx))
             .child(div().flex_1().min_h_0().child(commits));
-        let branches = self.render_git_graph_branches(view, key, tab_id, refs, current, cx);
-        let details = self.render_git_graph_commit(view, key, tab_id, refs, current, cx);
+        let branches = self.render_git_graph_branches(view, key, pane_id, refs, current, cx);
+        let details = self.render_git_graph_commit(view, key, pane_id, refs, current, cx);
         div()
-            .id(SharedString::from(format!("git-graph-{}", tab_id.as_u64())))
+            .id(SharedString::from(format!(
+                "git-graph-{}",
+                pane_id.as_u64()
+            )))
             .debug_selector(|| "git-graph".into())
             .key_context(CONTEXT)
-            .size_full()
+            .flex_1()
+            .min_h_0()
+            .w_full()
             .bg(cx.theme().background)
             .on_action(cx.listener(move |this, _: &GoToParentCommit, window, cx| {
-                this.step_selected_git_graph_commit(key, tab_id, true, window, cx);
+                this.step_selected_git_graph_commit(key, pane_id, true, window, cx);
             }))
             .on_action(cx.listener(move |this, _: &GoToChildCommit, window, cx| {
-                this.step_selected_git_graph_commit(key, tab_id, false, window, cx);
+                this.step_selected_git_graph_commit(key, pane_id, false, window, cx);
             }))
             .on_action(
                 cx.listener(move |this, _: &FocusGitGraphFilter, window, cx| {
-                    if let Some(view) = this.git_graph.views.get(&(key, tab_id)) {
+                    if let Some(view) = this.git_graph.views.get(&(key, pane_id)) {
                         window.focus(&view.text.read(cx).focus_handle(cx), cx);
                     }
                 }),
             )
             .on_action(cx.listener(move |this, _: &ShowGitGraphDiff, window, cx| {
-                this.show_git_graph_diff(key, tab_id, window, cx);
+                this.show_git_graph_diff(key, pane_id, window, cx);
             }))
             .child(
                 h_resizable(SharedString::from(format!(
                     "git-graph-columns-{}",
-                    tab_id.as_u64()
+                    pane_id.as_u64()
                 )))
                 .child(resizable_panel().size(px(180.)).child(branches))
                 .child(resizable_panel().child(commits))
@@ -700,7 +673,7 @@ impl Condr {
         view: &GitGraphView,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
-        tab_id: TabId,
+        pane_id: PaneId,
         git: &WorkspaceGitSnapshot,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -725,7 +698,7 @@ impl Condr {
                         .accessibility_label(t!("git_graph.clear_branch"))
                         .on_click(move |_, _, cx| {
                             let _ = owner.update(cx, |this, cx| {
-                                this.set_git_graph_branch(key, tab_id, None, cx);
+                                this.set_git_graph_branch(key, pane_id, None, cx);
                             });
                         }),
                 )
@@ -769,7 +742,7 @@ impl Condr {
         &self,
         view: &GitGraphView,
         key: ConnectionKey,
-        tab_id: TabId,
+        pane_id: PaneId,
         refs: &[GitRef],
         current: Option<&str>,
         cx: &mut Context<Self>,
@@ -777,7 +750,7 @@ impl Condr {
         let filter = view.search.read(cx).value().trim().to_owned();
         let mut list = v_flex().w_full().px_1().py_1();
         for row in branch_rows(refs, current, &filter, &view.folded) {
-            list = list.child(self.render_branch_row(view, key, tab_id, row, cx));
+            list = list.child(self.render_branch_row(view, key, pane_id, row, cx));
         }
         v_flex()
             .size_full()
@@ -792,7 +765,7 @@ impl Condr {
             )
             .child(
                 sidebar_list(
-                    SharedString::from(format!("git-graph-branches-{}", tab_id.as_u64())),
+                    SharedString::from(format!("git-graph-branches-{}", pane_id.as_u64())),
                     list,
                 )
                 .flex_1()
@@ -806,7 +779,7 @@ impl Condr {
         &self,
         view: &GitGraphView,
         key: ConnectionKey,
-        tab_id: TabId,
+        pane_id: PaneId,
         row: BranchRow,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -835,7 +808,7 @@ impl Condr {
                 .child(div().min_w_0().flex_1().truncate().child(label))
                 .on_click(move |_, _, cx| {
                     let _ = owner.update(cx, |this, cx| {
-                        if let Some(view) = this.git_graph.views.get_mut(&(key, tab_id))
+                        if let Some(view) = this.git_graph.views.get_mut(&(key, pane_id))
                             && !view.folded.remove(&folder)
                         {
                             view.folded.insert(folder.clone());
@@ -877,8 +850,8 @@ impl Condr {
                     let _ = owner.update(cx, |this, cx| {
                         // A single click selects; a double click filters the log by it.
                         if event.click_count() >= 2 {
-                            this.set_git_graph_branch(key, tab_id, Some(name), cx);
-                        } else if let Some(view) = this.git_graph.views.get_mut(&(key, tab_id)) {
+                            this.set_git_graph_branch(key, pane_id, Some(name), cx);
+                        } else if let Some(view) = this.git_graph.views.get_mut(&(key, pane_id)) {
                             view.selected_ref = Some(name);
                             cx.notify();
                         }
@@ -892,16 +865,16 @@ impl Condr {
 
 #[cfg(any(test, feature = "test-support"))]
 impl Condr {
-    /// The subjects a Git Graph Tab's table lists, in order.
+    /// The subjects a Git Graph Pane's table lists, in order.
     pub(in crate::app) fn git_graph_subjects(
         &self,
         key: ConnectionKey,
-        tab_id: TabId,
+        pane_id: PaneId,
         cx: &App,
     ) -> Vec<String> {
         self.git_graph
             .views
-            .get(&(key, tab_id))
+            .get(&(key, pane_id))
             .map(|view| {
                 view.table
                     .read(cx)
@@ -914,17 +887,17 @@ impl Condr {
             .unwrap_or_default()
     }
 
-    /// The ids a Git Graph Tab's table lists, in order.
+    /// The ids a Git Graph Pane's table lists, in order.
     #[cfg(test)]
     pub(in crate::app) fn git_graph_ids(
         &self,
         key: ConnectionKey,
-        tab_id: TabId,
+        pane_id: PaneId,
         cx: &App,
     ) -> Vec<String> {
         self.git_graph
             .views
-            .get(&(key, tab_id))
+            .get(&(key, pane_id))
             .map(|view| {
                 let table = view.table.read(cx);
                 table
@@ -937,12 +910,12 @@ impl Condr {
             .unwrap_or_default()
     }
 
-    /// A Git Graph Tab's table, to select a row as a click would.
+    /// A Git Graph Pane's table, to select a row as a click would.
     pub(in crate::app) fn git_graph_table(
         &self,
         key: ConnectionKey,
-        tab_id: TabId,
+        pane_id: PaneId,
     ) -> Option<Entity<TableState<CommitTable>>> {
-        Some(self.git_graph.views.get(&(key, tab_id))?.table.clone())
+        Some(self.git_graph.views.get(&(key, pane_id))?.table.clone())
     }
 }

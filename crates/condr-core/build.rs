@@ -9,10 +9,8 @@ fn main() {
     let descriptors = protox::compile(&files, [proto]).expect("proto/condr/v1 compiles");
     prost_build::Config::new()
         // A frame of empty Workspaces decodes to one struct per two bytes, so the inline
-        // association, or Git Graph Tab, would size every one of them past ADR 0028's
-        // decode bound.
+        // association would size every one of them past ADR 0028's decode bound.
         .boxed(".condr.v1.WorkspaceSnapshot.worktree")
-        .boxed(".condr.v1.WorkspaceSnapshot.git_graph")
         .compile_fds(descriptors)
         .expect("generated protocol code is written");
 }

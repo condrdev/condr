@@ -28,7 +28,7 @@ pub(super) enum CondrIconName {
     SquareMinus,
     /// Lucide `square-kanban`: Tasks mode (ADR 0068).
     SquareKanban,
-    /// Lucide `file-text`: the Diff Tab's "Show File" button.
+    /// Lucide `file-text`: the Diff Pane's "Show File" button.
     FileText,
     /// Lucide `qr-code`: the pairing card before its code shows.
     QrCode,

@@ -33,7 +33,7 @@ On Windows, a WSL 2 distribution connects as a Device of its own, so Agents runn
 
 These are under consideration but need more real use cases before they are scheduled. If you need one of them, describe your use case in an Issue.
 
-- **Jump from a Diff Tab to your editor**: open the current file in an external editor straight from the Diff Tab.
+- **Jump from a Diff Pane to your editor**: open the current file in an external editor straight from the Diff Pane.
 - **Start an Agent from the GUI**: list the Agents installed on a Device and start one in a Pane with a click.
 - **Scheduled tasks**: start an Agent on a schedule, or send a running Agent a prompt at set times.
 

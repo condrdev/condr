@@ -1,5 +1,5 @@
 //! Git History (ADR 0046): the presented Workspace's commits, newest first, and below them
-//! the files a selected one changed; clicking one shows it in the Workspace's Diff Tab. It
+//! the files a selected one changed; clicking one shows it in the Workspace's Diff Pane. It
 //! reads only; nothing here acts on the repository.
 
 use super::change_tree::{TreeRow, directory_row, file_row, tree_rows};
@@ -450,7 +450,7 @@ impl Condr {
             .into_any_element()
     }
 
-    /// A row of a commit's files: a directory folds, a file shows in the Diff Tab as the
+    /// A row of a commit's files: a directory folds, a file shows in the Diff Pane as the
     /// commit changed it.
     fn render_commit_file_row(
         &self,
@@ -502,7 +502,7 @@ impl Condr {
         }
     }
 
-    /// Shows `path` as `commit` changed it in the Workspace's Diff Tab: the ordinary
+    /// Shows `path` as `commit` changed it in the Workspace's Diff Pane: the ordinary
     /// `ShowDiff`, with the commit as this Client's own choice (ADR 0046).
     pub(in crate::app) fn show_commit_diff(
         &mut self,

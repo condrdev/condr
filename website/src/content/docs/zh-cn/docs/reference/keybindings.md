@@ -85,7 +85,7 @@ Condr 的快捷键分为两层逻辑：
 
 ## Git Graph
 
-[Git Graph](/zh-cn/docs/using/changes/#一次看全部分支-git-graph) 标签页获得键盘焦点时可用，和 IntelliJ IDEA 的 Git 日志一致。
+[Git Graph](/zh-cn/docs/using/changes/#一次看全部分支-git-graph) Pane 获得键盘焦点时可用，和 IntelliJ IDEA 的 Git 日志一致。
 
 | 操作 | macOS | Windows / Linux |
 | :--- | :--- | :--- |

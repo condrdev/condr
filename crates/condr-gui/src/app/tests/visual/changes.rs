@@ -1,7 +1,7 @@
 use super::*;
 
 /// The Changes view lists the real Server's status for a repository Workspace, a click
-/// opens the Diff Tab through the Server, and the Diff Tab shows the file's hunks once the
+/// opens the Diff Pane through the Server, and the Diff Pane shows the file's hunks once the
 /// Server answers (ADR 0017).
 #[test]
 fn changes_sidebar_lists_the_repository_and_opens_one_diff_pane() {
@@ -127,7 +127,7 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_pane() {
         "rows live inside the sidebar column: {row:?} vs {changes:?}"
     );
 
-    // Clicking a file opens the Workspace's Diff Tab on the Server and presents it.
+    // Clicking a file opens the Workspace's Diff Pane on the Server and presents it.
     window.simulate_click(row.center(), Modifiers::default());
     assert!(
         wait_until(window, |window| {
@@ -135,20 +135,23 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_pane() {
                 view.read(app)
                     .presented()
                     .is_some_and(|(_, session, _, tab_id)| {
-                        session.tab(tab_id).unwrap().diff().is_some_and(|diff| {
-                            diff.path() == relative_path::RelativePath::new("notes.txt")
-                        })
+                        tab_viewer(session, tab_id)
+                            .and_then(|viewer| viewer.path().map(ToString::to_string))
+                            .as_deref()
+                            == Some("notes.txt")
+                            && tab_viewer(session, tab_id)
+                                .is_some_and(|viewer| viewer.kind() == ViewerKind::Diff)
                     })
             })
         }),
-        "the Diff Tab should become the shown Tab"
+        "the Diff Pane should become the shown Tab"
     );
     assert!(
         wait_until(window, |window| {
             window.update(|window, cx| _ = window.draw(cx));
             window.debug_bounds("diff-body").is_some()
         }),
-        "the Server's diff should reach the Diff Tab"
+        "the Server's diff should reach the Diff Pane"
     );
     let workspace_id = window.read(|app| {
         view.read(app)
@@ -169,9 +172,9 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_pane() {
             .tabs()
             .len()
     });
-    assert_eq!(tab_count, 2, "one terminal Tab and one Diff Tab");
+    assert_eq!(tab_count, 2, "one terminal Tab and one Diff Pane");
 
-    // "Show File" opens the Preview Tab at the new-file line last clicked in the diff:
+    // "Show File" opens the Preview Pane at the new-file line last clicked in the diff:
     // the hunk is " alpha", "-beta", "+BETA", "+gamma", so a click on the old side's
     // "beta" lands on "BETA", the second line of the file.
     window.update(|_, cx| {
@@ -181,7 +184,7 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_pane() {
                 .viewers
                 .values_mut()
                 .next()
-                .expect("one Diff Tab viewer");
+                .expect("one Diff Pane viewer");
             viewer.clicked = Some(gpui_kit::component::diff::DiffLinePosition::new(
                 crate::app::diff_pane::PATCH_PATH,
                 gpui_kit::component::diff::DiffSide::Original,
@@ -191,7 +194,7 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_pane() {
     });
     let show_file = window
         .debug_bounds("diff-show-file")
-        .expect("the Diff Tab header should offer Show File");
+        .expect("the Diff Pane header should offer Show File");
     window.simulate_click(show_file.center(), Modifiers::default());
     assert!(
         wait_until(window, |window| {
@@ -199,16 +202,19 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_pane() {
             window.update(|_, cx| {
                 let view = view.read(cx);
                 view.presented().is_some_and(|(_, session, _, tab_id)| {
-                    session.tab(tab_id).unwrap().file().is_some_and(|file| {
-                        file.path() == relative_path::RelativePath::new("notes.txt")
-                    })
+                    tab_viewer(session, tab_id)
+                        .and_then(|viewer| viewer.path().map(ToString::to_string))
+                        .as_deref()
+                        == Some("notes.txt")
+                        && tab_viewer(session, tab_id)
+                            .is_some_and(|viewer| viewer.kind() == ViewerKind::File)
                 }) && view.preview_pane.editors.values().any(|editor| {
                     let state = editor.state.read(cx);
                     state.value().contains("BETA") && state.cursor_position().line == 1
                 })
             })
         }),
-        "the Preview Tab should show notes.txt with its cursor on BETA"
+        "the Preview Pane should show notes.txt with its cursor on BETA"
     );
     let tab_count = window.read(|app| {
         view.read(app)
@@ -219,8 +225,8 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_pane() {
             .tabs()
             .len()
     });
-    assert_eq!(tab_count, 3, "the Preview Tab sits beside the Diff Tab");
-    // Back to the Diff Tab for the rest.
+    assert_eq!(tab_count, 3, "the Preview Pane sits beside the Diff Pane");
+    // Back to the Diff Pane for the rest.
     let row = window.debug_bounds("change-notes.txt").unwrap();
     window.simulate_click(row.center(), Modifiers::default());
     assert!(wait_until(window, |window| {
@@ -228,7 +234,8 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_pane() {
             view.read(app)
                 .presented()
                 .is_some_and(|(_, session, _, tab_id)| {
-                    session.tab(tab_id).unwrap().diff().is_some()
+                    tab_viewer(session, tab_id)
+                        .is_some_and(|viewer| viewer.kind() == ViewerKind::Diff)
                 })
         })
     }));
@@ -239,12 +246,7 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_pane() {
     assert!(wait_until(window, |window| {
         window.read(|app| {
             view.read(app).active_session().is_some_and(|session| {
-                session
-                    .diff_tab(workspace_id)
-                    .and_then(|tab| tab.diff())
-                    .is_some_and(|diff| {
-                        diff.path() == relative_path::RelativePath::new("fresh.txt")
-                    })
+                viewer_path(session, workspace_id, ViewerKind::Diff).as_deref() == Some("fresh.txt")
                     && session.workspace(workspace_id).unwrap().tabs().len() == 3
             })
         })
@@ -261,7 +263,7 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_pane() {
                     .any(|viewer| viewer.patch.contains("+new") && !viewer.patch.contains("BETA"))
             })
         }),
-        "the retargeted Diff Tab should show the second file's hunks"
+        "the retargeted Diff Pane should show the second file's hunks"
     );
     // It is coloured by the file's language, and by the code theme Settings picks.
     let painted = window.update(|_, cx| {
@@ -289,7 +291,7 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_pane() {
     assert!(window.debug_bounds("condr-right-sidebar").is_none());
 }
 
-/// The Changes header switches a Workspace between `HEAD` and its base, and the Diff Tab
+/// The Changes header switches a Workspace between `HEAD` and its base, and the Diff Pane
 /// follows: a committed file is only in the base list (ADR 0034).
 #[test]
 fn the_changes_comparison_switches_between_head_and_the_base_branch() {
@@ -369,7 +371,7 @@ fn the_changes_comparison_switches_between_head_and_the_base_branch() {
         "the committed file should be listed against the base"
     );
 
-    // The Diff Tab asks for the same side.
+    // The Diff Pane asks for the same side.
     let row = window.debug_bounds("change-committed.txt").unwrap();
     window.simulate_click(row.center(), Modifiers::default());
     assert!(
@@ -383,7 +385,7 @@ fn the_changes_comparison_switches_between_head_and_the_base_branch() {
                     .any(|viewer| viewer.patch.contains("+agent"))
             })
         }),
-        "the Diff Tab should show the committed file against the base"
+        "the Diff Pane should show the committed file against the base"
     );
     assert!(window.debug_bounds("diff-comparison").is_some());
 
@@ -463,7 +465,7 @@ fn a_directory_listed_in_two_sections_folds_from_either_row() {
 }
 
 /// Git History lists the real Server's commits, a commit unfolds into its files, a file opens
-/// in the Diff Tab as that commit changed it, and a new commit appears on its own (ADR 0046).
+/// in the Diff Pane as that commit changed it, and a new commit appears on its own (ADR 0046).
 #[test]
 fn git_history_lists_commits_and_shows_one_commits_file_in_the_diff_pane() {
     let _serial_guard = acquire_visual_test_lock();
@@ -498,7 +500,7 @@ fn git_history_lists_commits_and_shows_one_commits_file_in_the_diff_pane() {
         ["update-ref", "refs/remotes/origin/main", "HEAD~1"],
     );
     run_git(&repository, ["branch", "-q", "-u", "origin/main"]);
-    // Uncommitted, so the Diff Tab first shows notes.txt from the working tree.
+    // Uncommitted, so the Diff Pane first shows notes.txt from the working tree.
     std::fs::write(repository.join("notes.txt"), "alpha\nBETA\ngamma\n").unwrap();
 
     let mut cx = TestAppContext::single();
@@ -535,7 +537,7 @@ fn git_history_lists_commits_and_shows_one_commits_file_in_the_diff_pane() {
                     .any(|viewer| viewer.patch.contains("+gamma"))
             })
         }),
-        "the Diff Tab first shows the working tree"
+        "the Diff Pane first shows the working tree"
     );
 
     // The button appears once the Server's Git snapshot names `HEAD`.
@@ -562,7 +564,7 @@ fn git_history_lists_commits_and_shows_one_commits_file_in_the_diff_pane() {
         "Git History shows how far the branch is ahead of its upstream"
     );
 
-    // Selecting asks for the commit's files, listed below; one of them opens in the Diff Tab.
+    // Selecting asks for the commit's files, listed below; one of them opens in the Diff Pane.
     let row = window.debug_bounds(commit_row).unwrap();
     window.simulate_click(row.center(), Modifiers::default());
     let file_row: &'static str = format!("commit-file-{second}-notes.txt").leak();
@@ -585,7 +587,7 @@ fn git_history_lists_commits_and_shows_one_commits_file_in_the_diff_pane() {
                     })
                 })
         }),
-        "the same path's Diff Tab switches to the file as the commit changed it"
+        "the same path's Diff Pane switches to the file as the commit changed it"
     );
     assert!(window.read(|app| {
         view.read(app)

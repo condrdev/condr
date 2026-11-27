@@ -1,5 +1,4 @@
 use super::*;
-use condr_core::{Tab, TabContent};
 use gpui_kit::{Bounds, Focusable as _, Pixels};
 
 fn double_click(window: &mut VisualTestContext, bounds: Bounds<Pixels>) {
@@ -24,7 +23,7 @@ fn double_click(window: &mut VisualTestContext, bounds: Bounds<Pixels>) {
 /// Git Graph opens from Git History's header as a Tab of its own, lists every branch's
 /// commits, filters by a branch double-clicked in its tree and by text on Enter, steps to a
 /// parent with Right, and shows a selected commit's files and details, a double-clicked file
-/// in the Diff Tab (ADR 0079).
+/// in the Diff Pane beside it (ADR 0078, ADR 0079).
 #[test]
 fn git_graph_lists_every_branch_filters_and_opens_a_commits_file() {
     let _serial_guard = acquire_visual_test_lock();
@@ -79,23 +78,25 @@ fn git_graph_lists_every_branch_filters_and_opens_a_commits_file() {
         .expect("Git History's header opens Git Graph");
     window.simulate_click(open.center(), Modifiers::default());
 
-    // The Server makes the Tab and this window shows it.
-    let tab_id = |window: &mut VisualTestContext| {
+    // The Server makes the Pane, in a Tab of its own, and this window shows it.
+    let graph = |window: &mut VisualTestContext| {
         window.read(|app| {
             view.read(app).active_session().and_then(|session| {
-                session.workspaces()[0]
-                    .tabs()
-                    .iter()
-                    .find(|tab| matches!(tab.content(), TabContent::GitGraph))
-                    .map(Tab::id)
+                let workspace_id = session.workspaces()[0].id();
+                let (tab, pane) = session.viewer_pane(workspace_id, ViewerKind::GitGraph)?;
+                Some((workspace_id, tab.id(), pane.id()))
             })
         })
     };
-    assert!(wait_until(window, |window| tab_id(window).is_some()));
-    let tab_id = tab_id(window).unwrap();
+    assert!(wait_until(window, |window| graph(window).is_some()));
+    let (workspace_id, graph_tab, pane_id) = graph(window).unwrap();
+    let presented_tab = |window: &mut VisualTestContext| {
+        window.read(|app| view.read(app).presented().map(|(_, _, _, tab_id)| tab_id))
+    };
+    assert_eq!(presented_tab(window), Some(graph_tab));
     let subjects = |window: &mut VisualTestContext| {
         window.update(|window, cx| _ = window.draw(cx));
-        window.read(|app| view.read(app).git_graph_subjects(1, tab_id, app))
+        window.read(|app| view.read(app).git_graph_subjects(1, pane_id, app))
     };
     assert!(
         wait_until(window, |window| subjects(window).len() == 4),
@@ -123,7 +124,7 @@ fn git_graph_lists_every_branch_filters_and_opens_a_commits_file() {
 
     // Right goes from the merge to its first parent.
     let table = window
-        .read(|app| view.read(app).git_graph_table(1, tab_id))
+        .read(|app| view.read(app).git_graph_table(1, pane_id))
         .unwrap();
     window.update(|window, cx| {
         table.update(cx, |table, cx| table.set_selected_row(0, cx));
@@ -136,7 +137,85 @@ fn git_graph_lists_every_branch_filters_and_opens_a_commits_file() {
         "Right selects the merge's first parent"
     );
 
-    // The text filter applies on Enter, and matches the message.
+    // A double-clicked file opens the Diff in a Tab of its own the first time.
+    let open_file = |window: &mut VisualTestContext, row: usize, file: &'static str| {
+        window.update(|_, cx| table.update(cx, |table, cx| table.set_selected_row(row, cx)));
+        assert!(wait_until(window, |window| {
+            window.update(|window, cx| _ = window.draw(cx));
+            window.debug_bounds(file).is_some()
+        }));
+        let bounds = window.debug_bounds(file).unwrap();
+        double_click(window, bounds);
+    };
+    let diff_shows = |window: &mut VisualTestContext, line: &'static str| {
+        wait_until(window, |window| {
+            window.update(|window, cx| _ = window.draw(cx));
+            window.debug_bounds("diff-commit-header").is_some()
+                && window.read(|app| {
+                    view.read(app)
+                        .diff_pane
+                        .viewers
+                        .values()
+                        .any(|viewer| viewer.patch.contains(line))
+                })
+        })
+    };
+    open_file(window, 1, "git-graph-file-notes.txt");
+    assert!(
+        diff_shows(window, "+beta"),
+        "the Diff shows the commit's change"
+    );
+    let diff_tab = window
+        .read(|app| {
+            let session = view.read(app).active_session()?;
+            Some(session.viewer_pane(workspace_id, ViewerKind::Diff)?.0.id())
+        })
+        .unwrap();
+    assert_ne!(diff_tab, graph_tab);
+    assert_eq!(presented_tab(window), Some(diff_tab));
+
+    // Merged beside Git Graph once, the Diff is retargeted there without leaving its Tab.
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.send_layout(LayoutCommand::MoveTabInto {
+                tab_id: diff_tab,
+                target_pane_id: pane_id,
+                side: condr_core::PaneDirection::Right,
+            });
+        });
+    });
+    assert!(wait_until(window, |window| {
+        window.read(|app| {
+            view.read(app).active_session().is_some_and(|session| {
+                session.tab(diff_tab).is_none()
+                    && session
+                        .tab(graph_tab)
+                        .is_some_and(|tab| tab.panes().len() == 2)
+            })
+        })
+    }));
+    let graph_tab_button = {
+        window.update(|window, cx| _ = window.draw(cx));
+        window
+            .debug_bounds(leaked_selector(format!("tab-{}", graph_tab.as_u64())))
+            .unwrap()
+    };
+    window.simulate_click(graph_tab_button.center(), Modifiers::default());
+    assert!(wait_until(window, |window| presented_tab(window) == Some(graph_tab)));
+    open_file(window, 2, "git-graph-file-feature.txt");
+    assert!(
+        diff_shows(window, "+work"),
+        "the Diff beside Git Graph follows it"
+    );
+    assert_eq!(
+        presented_tab(window),
+        Some(graph_tab),
+        "nothing left the Tab"
+    );
+
+    // The text filter applies on Enter, and matches the message; its key works while Git
+    // Graph has the keyboard.
+    window.update(|window, cx| window.focus(&table.read(cx).focus_handle(cx), cx));
     let find = if cfg!(target_os = "macos") {
         "cmd-l"
     } else {
@@ -147,15 +226,14 @@ fn git_graph_lists_every_branch_filters_and_opens_a_commits_file() {
     window.simulate_keystrokes("enter");
     assert!(wait_until(window, |window| subjects(window) == ["feature work"]));
 
-    // The selected commit lists its files and details; a double-clicked file opens in the
-    // Diff Tab as the commit changed it.
+    // The selected commit lists its files, details and the branches it is on.
     window.update(|_, cx| table.update(cx, |table, cx| table.set_selected_row(0, cx)));
     assert!(wait_until(window, |window| {
         window.update(|window, cx| _ = window.draw(cx));
         window.debug_bounds("git-graph-file-feature.txt").is_some()
             && window.debug_bounds("git-graph-details").is_some()
     }));
-    let feature_work = window.read(|app| view.read(app).git_graph_ids(1, tab_id, app)[0].clone());
+    let feature_work = window.read(|app| view.read(app).git_graph_ids(1, pane_id, app)[0].clone());
     assert!(
         wait_until(window, |window| {
             window.read(|app| {
@@ -174,21 +252,5 @@ fn git_graph_lists_every_branch_filters_and_opens_a_commits_file() {
             })
         }),
         "the details ask which branches the commit is on"
-    );
-    let file = window.debug_bounds("git-graph-file-feature.txt").unwrap();
-    double_click(window, file);
-    assert!(
-        wait_until(window, |window| {
-            window.update(|window, cx| _ = window.draw(cx));
-            window.debug_bounds("diff-commit-header").is_some()
-                && window.read(|app| {
-                    view.read(app)
-                        .diff_pane
-                        .viewers
-                        .values()
-                        .any(|viewer| viewer.patch.contains("+work"))
-                })
-        }),
-        "the Diff Tab shows the file as the commit changed it"
     );
 }

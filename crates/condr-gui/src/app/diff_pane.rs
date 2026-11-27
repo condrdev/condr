@@ -1,4 +1,4 @@
-//! The Diff Tab (ADR 0017, ADR 0046): one file's diff in GPUI Kit's `Diff`, against the
+//! The Diff Pane (ADR 0017, ADR 0046): one file's diff in GPUI Kit's `Diff`, against the
 //! side the Workspace's Changes compare with, or as a commit Git History chose changed it.
 //! Everything shown here is Server data; the Client only asks and draws.
 
@@ -16,7 +16,7 @@ use gpui_kit::component::diff::{Diff, DiffFile, DiffLinePosition, DiffMode, Diff
 use gpui_kit::component::scroll::ScrollableElement as _;
 use rust_i18n::t;
 
-/// The Diff Tab's Kit `Diff` and what it currently shows (ADR 0046).
+/// The Diff Pane's Kit `Diff` and what it currently shows (ADR 0046).
 pub(super) struct DiffViewer {
     pub(super) state: Entity<DiffState>,
     /// The path, the commit when Git History chose one, and the connection's diff generation
@@ -32,7 +32,7 @@ pub(super) struct DiffViewer {
     pub(super) highlighter: syntax::DiffHighlighter,
 }
 
-/// The one name every patch gives its file. The Tab header shows the path, and Kit's
+/// The one name every patch gives its file. The Pane header shows the path, and Kit's
 /// parser then never meets a path that needs quoting.
 pub(super) const PATCH_PATH: &str = "file";
 
@@ -49,45 +49,43 @@ pub(super) enum DiffContent {
     Failed(String),
 }
 
-/// The commit this Client's Diff Tab shows for one path, chosen in Git History. Any other path
-/// in the Tab, whoever put it there, is the working tree's.
+/// The commit this Client's Diff Pane shows for one path, chosen in Git History. Any other path
+/// in the Pane, whoever put it there, is the working tree's.
 pub(super) struct DiffCommit {
     pub(super) path: RelativePathBuf,
     pub(super) commit: CommitSummary,
 }
 
-/// How this Client shows the Diff Tabs.
+/// How this Client shows the Diff Panes.
 #[derive(Default)]
 pub(super) struct DiffPaneState {
-    /// The Diff Tabs' viewers, by connection and Tab; pruned with the Tabs.
-    pub(super) viewers: HashMap<(ConnectionKey, TabId), DiffViewer>,
-    /// Every Diff Tab shows one column rather than two (ADR 0046): how this person reads
+    /// The Diff Panes' viewers, by connection and Pane; pruned with the Panes.
+    pub(super) viewers: HashMap<(ConnectionKey, PaneId), DiffViewer>,
+    /// Every Diff Pane shows one column rather than two (ADR 0046): how this person reads
     /// diffs, remembered in the state file.
     pub(super) unified: bool,
-    /// The commit each Workspace's Diff Tab shows, chosen in Git History (ADR 0046); this
+    /// The commit each Workspace's Diff Pane shows, chosen in Git History (ADR 0046); this
     /// Client's view, never remembered.
     pub(super) commits: HashMap<(ConnectionKey, WorkspaceId), DiffCommit>,
-    /// The Diff Tab shows a commit's whole message, not only its subject.
+    /// The Diff Pane shows a commit's whole message, not only its subject.
     pub(super) commit_message_open: bool,
 }
 
 impl DiffPaneState {
-    /// Forgets what `key`'s closed Workspaces and Tabs left behind; `None` is a connection
+    /// Forgets what `key`'s closed Workspaces and Panes left behind; `None` is a connection
     /// gone, which leaves nothing of `key`.
     pub(super) fn retain_session(&mut self, key: ConnectionKey, session: Option<&Session>) {
         self.commits.retain(|(connection, id), _| {
             *connection != key || session.is_some_and(|session| session.workspace(*id).is_some())
         });
         self.viewers.retain(|(connection, id), _| {
-            *connection != key
-                || session
-                    .is_some_and(|session| session.tab(*id).is_some_and(|tab| tab.diff().is_some()))
+            *connection != key || viewer_is(session, *id, ViewerKind::Diff)
         });
     }
 }
 
 impl Condr {
-    /// Shows `path`'s diff in the Workspace's Diff Tab: a layout command like any other,
+    /// Shows `path`'s diff in the Workspace's Diff Pane: a layout command like any other,
     /// presented once the Server confirms it.
     pub(super) fn show_diff_on(
         &mut self,
@@ -112,13 +110,13 @@ impl Condr {
             window,
             cx,
         );
-        // Retargeting the Tab to its own path changes no layout, so nothing else resyncs it.
+        // Retargeting the Pane to its own path changes no layout, so nothing else resyncs it.
         if left_commit {
             self.rebuild_dock(window, cx);
         }
     }
 
-    /// The change a Diff Tab of `path` shows: its commit's own entry once Git History has the
+    /// The change a Diff Pane of `path` shows: its commit's own entry once Git History has the
     /// commit, otherwise the Workspace's against its comparison.
     fn diff_entry(
         &self,
@@ -147,7 +145,7 @@ impl Condr {
         changes.entries.iter().find(|entry| entry.path == path)
     }
 
-    /// Every diff of the Workspace is stale: a Diff Tab showing one asks again on the
+    /// Every diff of the Workspace is stale: a Diff Pane showing one asks again on the
     /// rebuild.
     pub(super) fn forget_workspace_diffs(&mut self, key: ConnectionKey, workspace_id: WorkspaceId) {
         if let Some(connection) = self.connection_mut(key) {
@@ -155,15 +153,15 @@ impl Condr {
         }
     }
 
-    /// The Diff Tab's body: one file's diff, or why there is none.
+    /// The Diff Pane's header and body: one file's diff, or why there is none (ADR 0078).
     pub(super) fn render_diff_pane(
         &self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
-        tab_id: TabId,
+        pane_id: PaneId,
         path: &RelativePath,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
+    ) -> (Div, AnyElement) {
         let theme = cx.theme();
         let path_text = path.to_string();
         let git = self
@@ -177,7 +175,7 @@ impl Condr {
             (None, Some(git)) => comparison_label(git, against),
             (None, None) => t!("changes.comparison.head"),
         };
-        let viewer = self.diff_pane.viewers.get(&(key, tab_id));
+        let viewer = self.diff_pane.viewers.get(&(key, pane_id));
         let content = viewer.map_or(DiffContent::Loading, |viewer| viewer.content.clone());
         let muted = theme.muted_foreground;
         let header = viewer_header("diff-header", path, entry.map(|entry| entry.status), cx)
@@ -223,7 +221,7 @@ impl Condr {
                             this.show_file_from_diff(
                                 key,
                                 workspace_id,
-                                tab_id,
+                                pane_id,
                                 path.clone(),
                                 window,
                                 cx,
@@ -240,14 +238,14 @@ impl Condr {
                     .min_h_0()
                     .w_full()
                     .child(
-                        // The Tab header already names the file, its status and its counts.
+                        // The Pane header already names the file, its status and its counts.
                         Diff::new(&viewer.state)
                             .header_visible(false)
                             .on_line_click(move |position, _, _, cx| {
                                 let position = position.clone();
                                 let _ = owner.update(cx, |this, _| {
                                     if let Some(viewer) =
-                                        this.diff_pane.viewers.get_mut(&(key, tab_id))
+                                        this.diff_pane.viewers.get_mut(&(key, pane_id))
                                     {
                                         viewer.clicked = Some(position);
                                     }
@@ -268,18 +266,20 @@ impl Condr {
             (DiffContent::Failed(reason), _) => failed_state(reason.clone(), cx),
             (DiffContent::Text, None) => empty_state(t!("changes.diff.loading"), cx),
         };
-        v_flex()
+        let body = v_flex()
             .debug_selector(|| "diff-tab".into())
-            .size_full()
-            .child(header)
+            .flex_1()
+            .min_h_0()
+            .w_full()
             .when_some(commit.cloned(), |this, commit| {
                 this.child(self.render_commit_header(key, workspace_id, &commit, cx))
             })
             .child(body)
-            .into_any_element()
+            .into_any_element();
+        (header, body)
     }
 
-    /// The Diff Tab's second header row for a commit: its subject, short id, author and
+    /// The Diff Pane's second header row for a commit: its subject, short id, author and
     /// age, Copy Commit ID, and the rest of the message behind a disclosure.
     pub(super) fn render_commit_header(
         &self,
@@ -394,14 +394,14 @@ impl Condr {
             .into_any_element()
     }
 
-    /// The Diff Tab's "Show File": opens the file in the Preview Tab at the line last
+    /// The Diff Pane's "Show File": opens the file in the Preview Pane at the line last
     /// clicked in the diff, or at the first change (ADR 0017, ADR 0046). The line is this
     /// Client's presentation: it waits in `pending_file_line` until the text lands.
     fn show_file_from_diff(
         &mut self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
-        tab_id: TabId,
+        pane_id: PaneId,
         path: RelativePathBuf,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -415,7 +415,7 @@ impl Condr {
         let clicked = self
             .diff_pane
             .viewers
-            .get(&(key, tab_id))
+            .get(&(key, pane_id))
             .and_then(|viewer| viewer.clicked.clone());
         let line = self
             .connection(key)
@@ -435,14 +435,14 @@ impl Condr {
         self.show_file_on(key, workspace_id, path, window, cx);
     }
 
-    /// Brings the Diff Tab's `Diff` in line with the Server's answer for its file: asks for
+    /// Brings the Diff Pane's `Diff` in line with the Server's answer for its file: asks for
     /// the diff once, then hands the hunks to Kit as a patch (ADR 0046). Called from
     /// `rebuild_dock`, the one place that sees every presentation change.
     pub(super) fn sync_diff_view(
         &mut self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
-        tab_id: TabId,
+        pane_id: PaneId,
         path: RelativePathBuf,
         cx: &mut Context<Self>,
     ) {
@@ -486,7 +486,7 @@ impl Condr {
         let viewer = self
             .diff_pane
             .viewers
-            .entry((key, tab_id))
+            .entry((key, pane_id))
             .or_insert_with(|| DiffViewer {
                 state: cx.new(|cx| {
                     let highlight = highlighter.clone();
@@ -629,7 +629,7 @@ impl Condr {
         }
     }
 
-    /// The commit the Diff Tab shows for `path`, when this Client chose one in Git History.
+    /// The commit the Diff Pane shows for `path`, when this Client chose one in Git History.
     pub(super) fn diff_commit(
         &self,
         key: ConnectionKey,
@@ -643,7 +643,7 @@ impl Condr {
             .map(|chosen| &chosen.commit)
     }
 
-    /// One file of one commit for the Diff Tab, with every line as context.
+    /// One file of one commit for the Diff Pane, with every line as context.
     pub(super) fn request_commit_diff(
         &mut self,
         key: ConnectionKey,

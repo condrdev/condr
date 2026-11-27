@@ -11,7 +11,8 @@
 //! per state: the Workspace, a Pane's find bar, the Command Palette's pages, Tasks mode with Tasks and with an
 //! Agent in every column and with columns folded, the same Agents in the sidebar's Agents
 //! section by Workspace, by state and in the tree's order, the Ports page empty, with forwards, for one Device, the right
-//! sidebar's transfer strip, Git Graph on a repository with branches in dark and light, the
+//! sidebar's transfer strip, Git Graph on a repository with branches in dark and light and
+//! with a commit's Diff Pane beside it, the
 //! left sidebar with its Device folded, and a finished download's toast. The website's screenshots come from the same window, in `website`.
 
 mod website;
@@ -668,23 +669,17 @@ fn git_graph(
         view.read(app)
             .connection(1)
             .and_then(ServerConnection::session)
-            .and_then(|session| session.workspace(workspace_id))
-            .and_then(|workspace| {
-                workspace
-                    .tabs()
-                    .iter()
-                    .find(|tab| matches!(tab.content(), TabContent::GitGraph))
-                    .map(Tab::id)
-            })
+            .and_then(|session| session.viewer_pane(workspace_id, ViewerKind::GitGraph))
+            .map(|(_, pane)| pane.id())
     };
-    wait(cx, "the Git Graph Tab", |app| tab(app).is_some());
-    let tab_id = cx.read(|app| tab(app)).unwrap();
+    wait(cx, "the Git Graph Pane", |app| tab(app).is_some());
+    let pane_id = cx.read(|app| tab(app)).unwrap();
     wait(cx, "the commits loaded", |app| {
-        view.read(app).git_graph_subjects(1, tab_id, app).len() == 9
+        view.read(app).git_graph_subjects(1, pane_id, app).len() == 9
     });
     // The merge, selected, with its details and the branches it is on.
     update(cx, window, view, move |this, _, cx| {
-        if let Some(table) = this.git_graph_table(1, tab_id) {
+        if let Some(table) = this.git_graph_table(1, pane_id) {
             table.update(cx, |table, cx| table.set_selected_row(3, cx));
         }
     });
@@ -698,6 +693,59 @@ fn git_graph(
     cx.update(|cx| apply_appearance(Appearance::Light, None, cx));
     shot(cx, window, directory, "05h-git-graph-light");
     cx.update(|cx| apply_appearance(appearance, None, cx));
+
+    // A commit's file in the Diff Pane, merged beside Git Graph (ADR 0078).
+    update(cx, window, view, move |this, window, cx| {
+        let commit = match &this.connection(1).unwrap().resources.graph_logs[&pane_id] {
+            Ok(log) => log.commits[5].clone(),
+            Err(error) => panic!("the log failed: {error}"),
+        };
+        if let Some(table) = this.git_graph_table(1, pane_id) {
+            table.update(cx, |table, cx| table.set_selected_row(5, cx));
+        }
+        this.show_commit_diff(
+            1,
+            workspace_id,
+            commit,
+            RelativePathBuf::from("src/search/rank.rs"),
+            window,
+            cx,
+        );
+    });
+    let diff_tab = |app: &App| {
+        view.read(app)
+            .connection(1)
+            .and_then(ServerConnection::session)
+            .and_then(|session| session.viewer_pane(workspace_id, ViewerKind::Diff))
+            .map(|(tab, _)| tab.id())
+    };
+    wait(cx, "the Diff Pane", |app| diff_tab(app).is_some());
+    let diff = cx.read(|app| diff_tab(app)).unwrap();
+    admin
+        .layout(LayoutCommand::MoveTabInto {
+            tab_id: diff,
+            target_pane_id: pane_id,
+            side: condr_core::PaneDirection::Right,
+        })
+        .unwrap()
+        .unwrap();
+    wait(cx, "the Diff beside Git Graph", |app| {
+        diff_tab(app).is_some_and(|tab| tab != diff)
+    });
+    let graph_tab = cx.read(|app| diff_tab(app)).unwrap();
+    update(cx, window, view, move |this, window, cx| {
+        this.show_view(1, workspace_id, Some(graph_tab));
+        this.rebuild_dock(window, cx);
+        cx.notify();
+    });
+    wait(cx, "the commit's diff", |app| {
+        view.read(app)
+            .diff_pane
+            .viewers
+            .values()
+            .any(|viewer| viewer.patch.contains("+Search: rank"))
+    });
+    shot(cx, window, directory, "05i-git-graph-beside-diff");
     admin
         .layout(LayoutCommand::CloseWorkspace { workspace_id })
         .unwrap()

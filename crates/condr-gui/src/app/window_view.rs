@@ -438,13 +438,10 @@ impl Condr {
         )
     }
 
-    /// What each detached window shows of connection `key`: its Tab's Dock projection or
-    /// viewer file. A change there needs a rebuild that the connection, which compares
+    /// What each detached window shows of connection `key`: its Tab's Dock projection and
+    /// what its viewer Panes show. A change there needs a rebuild that the connection, which compares
     /// only the Tab it shows itself, would not ask for.
-    pub(super) fn detached_presentations(
-        &self,
-        key: ConnectionKey,
-    ) -> Vec<(TabId, Option<PaneLayout>, Option<RelativePathBuf>)> {
+    pub(super) fn detached_presentations(&self, key: ConnectionKey) -> Vec<DetachedPresentation> {
         let Some(connection) = self.connection(key) else {
             return Vec::new();
         };
@@ -458,13 +455,7 @@ impl Condr {
                     .zoomed_pane(tab)
                     .map(PaneLayout::Pane)
                     .or_else(|| tab.layout().cloned());
-                let viewer = match tab.content() {
-                    TabContent::Diff(diff) => Some(diff.path().to_relative_path_buf()),
-                    TabContent::File(file) => Some(file.path().to_relative_path_buf()),
-                    TabContent::GitGraph | TabContent::Unsupported => Some(RelativePathBuf::new()),
-                    TabContent::Terminals(_) => None,
-                };
-                Some((tab_id, layout, viewer))
+                Some((tab_id, layout, tab_viewers(tab)))
             })
             .collect()
     }

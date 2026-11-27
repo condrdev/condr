@@ -1010,10 +1010,6 @@ impl TryFrom<&LayoutCommand> for super::LayoutCommand {
         };
         let direction =
             |direction: &crate::PaneDirection| super::PaneDirection::from(*direction) as i32;
-        let workspace_path = |workspace_id: &WorkspaceId, path: &RelativePathBuf| WorkspacePath {
-            workspace_id: workspace_id.as_u64(),
-            path: path.to_string(),
-        };
         let command = match command {
             LayoutCommand::CreateWorkspace {
                 root_directory,
@@ -1147,23 +1143,33 @@ impl TryFrom<&LayoutCommand> for super::LayoutCommand {
             LayoutCommand::CloseWorkspace { workspace_id } => {
                 Command::CloseWorkspace(workspace_target(workspace_id))
             }
-            // compat(0.2.6): a Diff or Preview Tab goes as the command a 0.2.6 Server knows,
-            // so a newer GUI still opens them there (ADR 0078); delete with those members.
             LayoutCommand::ShowViewer {
                 workspace_id,
-                viewer: Viewer::Diff { path },
-            } => Command::ShowDiff(workspace_path(workspace_id, path)),
-            LayoutCommand::ShowViewer {
-                workspace_id,
-                viewer: Viewer::File { path },
-            } => Command::ShowFile(workspace_path(workspace_id, path)),
-            LayoutCommand::ShowViewer {
-                workspace_id,
-                viewer: Viewer::GitGraph,
+                viewer,
             } => Command::ShowViewer(super::ShowViewer {
                 workspace_id: workspace_id.as_u64(),
-                viewer: Some(show_viewer::Viewer::GitGraph(super::Empty {})),
+                viewer: Some(match viewer {
+                    Viewer::Diff { path } => show_viewer::Viewer::Diff(super::ViewerPath {
+                        path: path.to_string(),
+                    }),
+                    Viewer::File { path } => show_viewer::Viewer::File(super::ViewerPath {
+                        path: path.to_string(),
+                    }),
+                    Viewer::GitGraph => show_viewer::Viewer::GitGraph(super::Empty {}),
+                }),
             }),
+            LayoutCommand::MoveTabInto {
+                tab_id,
+                target_pane_id,
+                side,
+            } => Command::MoveTabInto(super::MoveTabInto {
+                tab_id: tab_id.as_u64(),
+                target_pane_id: target_pane_id.as_u64(),
+                side: direction(side),
+            }),
+            LayoutCommand::MovePaneToNewTab { pane_id } => {
+                Command::MovePaneToNewTab(pane_target(pane_id))
+            }
         };
         Ok(Self {
             command: Some(command),
@@ -1271,19 +1277,6 @@ impl TryFrom<super::LayoutCommand> for LayoutCommand {
             Command::CloseWorkspace(target) => Self::CloseWorkspace {
                 workspace_id: workspace(target.workspace_id),
             },
-            // compat(0.2.6): a 0.2.6 GUI's two commands, and how this build sends them.
-            Command::ShowDiff(target) => Self::ShowViewer {
-                workspace_id: workspace(target.workspace_id),
-                viewer: Viewer::Diff {
-                    path: relative_path(target.path)?,
-                },
-            },
-            Command::ShowFile(target) => Self::ShowViewer {
-                workspace_id: workspace(target.workspace_id),
-                viewer: Viewer::File {
-                    path: relative_path(target.path)?,
-                },
-            },
             Command::ShowViewer(show) => Self::ShowViewer {
                 workspace_id: workspace(show.workspace_id),
                 viewer: match member(show.viewer)? {
@@ -1295,6 +1288,14 @@ impl TryFrom<super::LayoutCommand> for LayoutCommand {
                     },
                     show_viewer::Viewer::GitGraph(_) => Viewer::GitGraph,
                 },
+            },
+            Command::MoveTabInto(target) => Self::MoveTabInto {
+                tab_id: tab(target.tab_id),
+                target_pane_id: pane(target.target_pane_id),
+                side: pane_direction(target.side)?,
+            },
+            Command::MovePaneToNewTab(target) => Self::MovePaneToNewTab {
+                pane_id: pane(target.pane_id),
             },
         })
     }
@@ -1329,9 +1330,12 @@ impl From<&LayoutResult> for super::LayoutResult {
                         workspace_id: workspace_id.as_u64(),
                     })
                 }
-                LayoutResult::ViewerShown { tab_id } => Wire::ViewerShown(TabTarget {
-                    tab_id: tab_id.as_u64(),
-                }),
+                LayoutResult::ViewerShown { tab_id, pane_id } => {
+                    Wire::ViewerShown(super::ViewerShown {
+                        tab_id: tab_id.as_u64(),
+                        pane_id: pane_id.as_u64(),
+                    })
+                }
             }),
         }
     }
@@ -1359,8 +1363,9 @@ impl TryFrom<super::LayoutResult> for LayoutResult {
             Wire::WorkspaceOpened(target) => Self::WorkspaceOpened {
                 workspace_id: workspace(target.workspace_id),
             },
-            Wire::ViewerShown(target) | Wire::FileShown(target) => Self::ViewerShown {
-                tab_id: tab(target.tab_id),
+            Wire::ViewerShown(shown) => Self::ViewerShown {
+                tab_id: tab(shown.tab_id),
+                pane_id: pane(shown.pane_id),
             },
         })
     }

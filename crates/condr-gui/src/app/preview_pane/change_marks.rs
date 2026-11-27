@@ -1,4 +1,4 @@
-//! The Preview Tab's change marks (ADR 0050): the Source view's text, unsaved edits
+//! The Preview Pane's change marks (ADR 0050): the Source view's text, unsaved edits
 //! included, against the side its Workspace's Changes compare with, drawn in the gutter
 //! and on the scrollbar track through Kit's decoration collections.
 
@@ -32,7 +32,7 @@ pub(in crate::app) enum LineChange {
     Deleted(usize),
 }
 
-/// A Preview Tab's marks: Kit's two collections while its file has a side to compare
+/// A Preview Pane's marks: Kit's two collections while its file has a side to compare
 /// with, and the throttled diff that fills them.
 #[derive(Default)]
 pub(in crate::app) struct ChangeMarks {
@@ -102,7 +102,7 @@ impl ChangeMarks {
 }
 
 impl Condr {
-    /// Keeps a Preview Tab's marks on the side its Workspace's Changes compare with
+    /// Keeps a Preview Pane's marks on the side its Workspace's Changes compare with
     /// (ADR 0050): asks for that side whenever none is cached, which a Git change or a
     /// comparison switch causes, and diffs again when a new answer lands. Only text in a
     /// Workspace with Git is marked.
@@ -110,13 +110,13 @@ impl Condr {
         &mut self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
-        tab_id: TabId,
+        pane_id: PaneId,
         cx: &mut Context<Self>,
     ) {
         let against = self.workspace_diff_base(key, workspace_id);
         let (Some(connection), Some(editor)) = (
             self.connection(key),
-            self.preview_pane.editors.get(&(key, tab_id)),
+            self.preview_pane.editors.get(&(key, pane_id)),
         ) else {
             return;
         };
@@ -137,7 +137,7 @@ impl Condr {
         if let Some(slot) = ask {
             self.request_old_file(key, slot);
         }
-        let Some(editor) = self.preview_pane.editors.get_mut(&(key, tab_id)) else {
+        let Some(editor) = self.preview_pane.editors.get_mut(&(key, pane_id)) else {
             return;
         };
         let marks = &mut editor.marks;
@@ -167,7 +167,7 @@ impl Condr {
         let markable = text.is_some();
         marks.old = Some((slot, generation, text));
         if markable {
-            self.schedule_change_marks(key, tab_id, cx);
+            self.schedule_change_marks(key, pane_id, cx);
         } else {
             // A diff in flight against the previous side must not draw its marks back.
             marks.task = None;
@@ -202,10 +202,10 @@ impl Condr {
     pub(in crate::app) fn schedule_change_marks(
         &mut self,
         key: ConnectionKey,
-        tab_id: TabId,
+        pane_id: PaneId,
         cx: &mut Context<Self>,
     ) {
-        let Some(editor) = self.preview_pane.editors.get_mut(&(key, tab_id)) else {
+        let Some(editor) = self.preview_pane.editors.get_mut(&(key, pane_id)) else {
             return;
         };
         let marks = &mut editor.marks;
@@ -223,7 +223,7 @@ impl Condr {
         marks.task = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(wait).await;
             let Ok(Some((revision, old, new))) = this.update(cx, |this, cx| {
-                let editor = this.preview_pane.editors.get_mut(&(key, tab_id))?;
+                let editor = this.preview_pane.editors.get_mut(&(key, pane_id))?;
                 let marks = &mut editor.marks;
                 marks.last_run = Some(cx.background_executor().now());
                 #[cfg(test)]
@@ -245,7 +245,7 @@ impl Condr {
                 )
                 .await;
             this.update(cx, |this, cx| {
-                this.apply_change_marks(key, tab_id, revision, changes, cx)
+                this.apply_change_marks(key, pane_id, revision, changes, cx)
             })
             .ok();
         }));
@@ -254,12 +254,12 @@ impl Condr {
     fn apply_change_marks(
         &mut self,
         key: ConnectionKey,
-        tab_id: TabId,
+        pane_id: PaneId,
         revision: u64,
         changes: Option<Vec<LineChange>>,
         cx: &mut Context<Self>,
     ) {
-        let Some(editor) = self.preview_pane.editors.get_mut(&(key, tab_id)) else {
+        let Some(editor) = self.preview_pane.editors.get_mut(&(key, pane_id)) else {
             return;
         };
         let marks = &mut editor.marks;
@@ -267,7 +267,7 @@ impl Condr {
         if marks.revision != revision {
             // Kit has moved the marks with the edits since; only the latest text's diff
             // replaces them.
-            self.schedule_change_marks(key, tab_id, cx);
+            self.schedule_change_marks(key, pane_id, cx);
             return;
         }
         // A diff past its deadline keeps the marks Kit has been moving with the edits.
@@ -279,8 +279,8 @@ impl Condr {
     /// The GUI theme changed: the marks take its status colours.
     pub(in crate::app) fn recolor_change_marks(&mut self, cx: &mut Context<Self>) {
         let tabs: Vec<_> = self.preview_pane.editors.keys().copied().collect();
-        for (key, tab_id) in tabs {
-            self.schedule_change_marks(key, tab_id, cx);
+        for (key, pane_id) in tabs {
+            self.schedule_change_marks(key, pane_id, cx);
         }
     }
 }

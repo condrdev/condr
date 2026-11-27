@@ -120,7 +120,7 @@ pub(super) struct SettingsWindow {
     focus_handle: FocusHandle,
     pub(super) dark_color_scheme: Entity<ColorSchemeSelect>,
     pub(super) light_color_scheme: Entity<ColorSchemeSelect>,
-    /// The Preview Tab's theme, the same kind of Select.
+    /// The Preview Pane's theme, the same kind of Select.
     pub(super) code_theme: Entity<ColorSchemeSelect>,
     /// The font as last committed from this window. `Condr` only ever holds the
     /// normalized form, so a half-edited value never reaches the theme or the config

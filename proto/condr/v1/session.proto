@@ -17,17 +17,7 @@ message WorkspaceSnapshot {
   string root_directory = 3;
   WorktreeAssociation worktree = 4;
   repeated TabSnapshot tabs = 5;
-  // compat(0.2.6): the Git Graph Tab, out of `tabs` so a 0.2.6 peer skips it rather than
-  // failing the whole Snapshot (ADR 0078). Delete once 0.2.6 no longer updates in place,
-  // and send it in `tabs` as `TabSnapshot.git_graph`, which this build already reads.
-  GitGraphTabSnapshot git_graph = 6;
-}
-
-// A Git Graph Tab and where it sits among `tabs`.
-message GitGraphTabSnapshot {
-  uint64 id = 1;
-  string name = 2;
-  uint32 index = 3;
+  reserved 6;
 }
 
 message WorktreeAssociation {
@@ -37,35 +27,41 @@ message WorktreeAssociation {
   optional string base_branch = 4;
 }
 
-// A `content` this build does not know is a Tab of a newer kind: it decodes as an
-// Unsupported Tab rather than making the Snapshot unknown (ADR 0078).
+// A Tab is only a layout of Panes (ADR 0078). A 0.2 Diff or Preview Tab has no layout,
+// and a Snapshot drops it on load.
 message TabSnapshot {
   uint64 id = 1;
   string name = 2;
-  oneof content {
-    TerminalsTabSnapshot terminals = 3;
-    PathTabSnapshot diff = 4;
-    PathTabSnapshot file = 5;
-    // ADR 0079; written to `WorkspaceSnapshot.git_graph` until compat(0.2.6) goes.
-    Empty git_graph = 6;
-  }
+  TabLayoutSnapshot layout = 3;
+  reserved 4, 5, 6;
 }
 
-message TerminalsTabSnapshot {
+message TabLayoutSnapshot {
   repeated PaneSnapshot panes = 1;
   uint64 focused_pane = 2;
   repeated uint64 focus_history = 3;
   LayoutSnapshot layout = 4;
 }
 
-message PathTabSnapshot {
+// The file a Diff or Preview Pane shows, relative to the Workspace root.
+message ViewerPath {
   string path = 1;
 }
 
+// A terminal, or a viewer (ADR 0078).
 message PaneSnapshot {
   uint64 id = 1;
+  // A terminal's directory and the Agent conversation to resume in it.
   optional string cwd = 2;
   AgentResume agent_resume = 3;
+  // Set on every Pane that is no terminal, so a build that does not know its `kind`
+  // shows an Unsupported Pane rather than starting a shell for it.
+  bool viewer = 4;
+  oneof kind {
+    ViewerPath diff = 5;
+    ViewerPath file = 6;
+    Empty git_graph = 7;
+  }
 }
 
 // The split tree as a flat arena of nodes that name their children by index.

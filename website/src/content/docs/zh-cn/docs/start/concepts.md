@@ -24,12 +24,11 @@ Device（物理机/虚拟机，持有唯一 Ed25519 密钥）
 └── Server（单机唯一的常驻后台服务，掌管运行时）
     └── Session（服务端维护的工作区拓扑与分屏布局快照）
         ├── Workspace 1（主工作区：绑定根目录，如 ~/code/my-app）
-        │   ├── Tab 1（终端页：承载分屏 Pane，运行 Agent 或普通 Shell）
-        │   ├── Tab 2 Diff（代码审查：查看单文件相对 HEAD 或 base 分支的差异）
-        │   └── Tab 3 Preview（源码预览：语法高亮浏览文件）
+        │   ├── Tab 1（分屏 Pane，运行 Agent 或普通 Shell，旁边还有一个 Diff Pane）
+        │   └── Tab 2 Preview（一个 Preview Pane：语法高亮浏览和编辑文件）
         │
         └── Workspace 2（托管工作树：基于 Git Worktree 的隔离分支环境）
-            └── Tab 1（终端页）
+            └── Tab 1
                 └── Pane 1（运行另一任务的 Agent）
 ```
 
@@ -38,8 +37,8 @@ Device（物理机/虚拟机，持有唯一 Ed25519 密钥）
 | **Device / Server** | 运行 Condr 的机器抽象。每台设备持有唯一的加密身份（Device Key），关闭客户端不影响 Server 运行。 |
 | **Session** | 服务端维护的布局拓扑。布局变动实时写入快照，Server 重启后自动恢复结构与 Agent 会话上下文。 |
 | **Workspace** | 项目任务单元，锚定唯一的绝对路径**根目录**。支持基于 Git Worktree 派生出隔离的 **Managed Worktree** 独立工作区。 |
-| **Tab** | Workspace 内的页面，分为**终端 Tab**（承载分屏窗格，支持快捷键 `1~9` 切换）与**查看 Tab**（Diff 审查页以及支持编辑文件的 Preview 页）。 |
-| **Pane / Terminal** | 布局叶子节点与虚拟终端引擎（Ghostty 的终端内核 `libghostty-vt`）。支持水平/垂直切分、缩放与进程树安全级联退出。 |
+| **Tab** | Workspace 内承载分屏 Pane 的页面，支持快捷键 `1~9` 切换。 |
+| **Pane / Terminal** | 布局叶子节点：终端（基于 Ghostty 的终端内核 `libghostty-vt`），或查看器：审查改动的 **Diff Pane**、也能编辑文件的 **Preview Pane**，以及 **Git Graph**。每个 Pane 都支持水平/垂直切分、缩放和移动；关闭终端会安全地结束它的整棵进程树。 |
 | **Agent** | 运行在 Pane 内受识别的命令行程序。状态实时同至侧边栏，支持阻断原因提取。 |
 
 ---
@@ -78,5 +77,5 @@ Device（物理机/虚拟机，持有唯一 Ed25519 密钥）
 
 - [Workspace、Tab 与 Pane](/zh-cn/docs/using/workspaces/)：分屏切分、快捷键及 Managed Worktree 使用。
 - [Agent 集成](/zh-cn/docs/using/agents/)：受支持的 Agent 列表与状态上报配置。
-- [改动与文件预览](/zh-cn/docs/using/changes/)：使用 Diff Tab 和 Preview Tab 审查文件。
+- [改动与文件预览](/zh-cn/docs/using/changes/)：使用 Diff Pane 和 Preview Pane 审查文件。
 - [远程连接](/zh-cn/docs/using/remote/)：配置 SSH、TCP 局域网配对或 P2P 穿透直连。

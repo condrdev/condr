@@ -46,6 +46,7 @@ mod terminal_panel;
 mod transfers;
 mod updates;
 mod viewer_header;
+mod viewer_panel;
 mod window_view;
 mod workspace;
 mod workspace_resources;
@@ -72,11 +73,32 @@ use condr_core::protocol::{
 use condr_core::{
     AgentAlert, AgentDisplayState, AgentKind, AgentSnapshot, BrowsedDirectory, CommitDetails,
     CommitSummary, DirectoryListing, FileContent, FileDiff, GitLog, PaneDirection, PaneId,
-    PaneLayout, ProxyMode, ProxySetting, Session, SessionSnapshot, SplitDirection, Tab, TabContent,
-    TabId, TerminalCommand, TerminalKey, TerminalKeyEventKind, TerminalModifiers,
-    TerminalMouseButton, TerminalMouseEvent, TerminalMouseTracking, TerminalPosition,
-    TerminalSelection, TerminalSelectionUnit, TerminalSize, Viewer, Workspace, WorkspaceId,
+    PaneLayout, ProxyMode, ProxySetting, Session, SessionSnapshot, SplitDirection, Tab, TabId,
+    TerminalCommand, TerminalKey, TerminalKeyEventKind, TerminalModifiers, TerminalMouseButton,
+    TerminalMouseEvent, TerminalMouseTracking, TerminalPosition, TerminalSelection,
+    TerminalSelectionUnit, TerminalSize, Viewer, ViewerKind, Workspace, WorkspaceId,
 };
+
+/// What a detached window shows of its Tab: the Tab, its Dock projection, and its viewer
+/// Panes with what each shows.
+type DetachedPresentation = (TabId, Option<PaneLayout>, Vec<(PaneId, Viewer)>);
+
+/// A Tab's viewer Panes and what each shows (ADR 0078).
+fn tab_viewers(tab: &Tab) -> Vec<(PaneId, Viewer)> {
+    tab.panes()
+        .iter()
+        .filter_map(|pane| Some((pane.id(), pane.viewer()?.clone())))
+        .collect()
+}
+
+/// Whether `session` still has Pane `pane_id` and it is a viewer of `kind` (ADR 0078): what
+/// a viewer's state outlives only as long as its Pane does.
+fn viewer_is(session: Option<&Session>, pane_id: PaneId, kind: ViewerKind) -> bool {
+    session
+        .and_then(|session| session.pane(pane_id))
+        .and_then(condr_core::Pane::viewer)
+        .is_some_and(|viewer| viewer.kind() == kind)
+}
 use condr_server::{
     ClientConnection, ConnectionCancellation, DeviceKey, Endpoint, ServerConfig, TcpEndpoint,
 };
@@ -306,6 +328,8 @@ pub(crate) struct Condr {
     /// The Agent a Task was last started with, which Start offers first.
     last_task_agent: Option<AgentKind>,
     panels: HashMap<(ConnectionKey, PaneId), Entity<TerminalPanel>>,
+    /// The viewer Panes' panels (ADR 0078), beside the terminals'.
+    viewer_panels: HashMap<(ConnectionKey, PaneId), Entity<viewer_panel::ViewerPanel>>,
     /// Every window this Client draws in, the main window first (ADR 0043).
     windows: Vec<WindowView>,
     /// The window last activated, which the keyboard and the reported focus follow.
@@ -358,7 +382,7 @@ pub(crate) struct Condr {
     /// Each mode's terminal colour scheme, empty for its default (ADR 0062).
     dark_color_scheme: SharedString,
     light_color_scheme: SharedString,
-    /// The Preview Tab's font size; it shares the terminal's font family.
+    /// The Preview Pane's font size; it shares the terminal's font family.
     code_font_size: f32,
     /// What "Open in" offers, once the startup scan has reported; `None` hides the button.
     open_targets: Option<Vec<open_in::OpenTarget>>,
@@ -564,6 +588,7 @@ impl Condr {
             tasks_archived_open: false,
             last_task_agent: None,
             panels: HashMap::new(),
+            viewer_panels: HashMap::new(),
             windows: vec![main_view],
             last_active: window.window_handle(),
             terminal_input: terminal_input::TerminalInputState::default(),

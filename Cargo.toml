@@ -42,7 +42,7 @@ gpui-kit = "0.10"
 gpui-pre-reqwest-client = "0.3"
 gpui-pre-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots"] }
 gpui-pre-http-client-tls = "0.3"
-# The Preview Tab's line diff for its change marks (ADR 0050); Kit already builds it into
+# The Preview Pane's line diff for its change marks (ADR 0050); Kit already builds it into
 # the GUI for its `Diff`, so this adds no code. Keep it on Kit's version.
 similar = "2.7"
 # The GUI's translations (ADR 0066); Kit already builds it for its components' own
@@ -90,7 +90,7 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 hyper-util = { version = "0.1", default-features = false, features = ["client-proxy", "client-proxy-system"] }
 url = "2"
 # Protocol relative paths: `/`-separated whatever platform the client or Server runs on.
-# Preview and Diff Tab highlighting (ADR 0032): the Sublime syntaxes bat curates, on Oniguruma,
+# Preview and Diff Pane highlighting (ADR 0032): the Sublime syntaxes bat curates, on Oniguruma,
 # and tmTheme loading for the themes two-face does not bundle.
 syntect = { version = "5.3", default-features = false, features = ["plist-load"] }
 two-face = { version = "0.5", default-features = false, features = ["syntect-onig"] }
