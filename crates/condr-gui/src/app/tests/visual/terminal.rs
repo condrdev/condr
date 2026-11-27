@@ -374,11 +374,18 @@ fn find_searches_the_panes_history_from_a_bar_over_it() {
     window.update(|window, cx| _ = window.draw(cx));
     let shaped = render_cache.borrow().shaped_cells();
 
-    window.simulate_keystrokes("cmd-f");
+    window.simulate_keystrokes(if cfg!(target_os = "macos") {
+        "cmd-f"
+    } else {
+        "ctrl-shift-f"
+    });
     window.run_until_parked();
     window.update(|window, cx| _ = window.draw(cx));
     let bar = Box::leak(format!("terminal-find-{}", pane_id.as_u64()).into_boxed_str());
-    assert!(window.debug_bounds(bar).is_some(), "Cmd+F opens the bar");
+    assert!(
+        window.debug_bounds(bar).is_some(),
+        "the find shortcut opens the bar"
+    );
     assert!(
         !terminal_focused(window),
         "the keyboard is in the bar's field"
