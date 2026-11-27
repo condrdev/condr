@@ -162,6 +162,8 @@ pub(in crate::app) struct CommitTable {
     pub(super) loading: bool,
     /// The repository's `user.email`, whose commits are bold.
     pub(super) user_email: Option<String>,
+    /// The selected row, which Kit keeps to itself, for its outline.
+    pub(super) selected: Option<usize>,
     /// The text filter is set, so an empty table says nothing matched.
     pub(super) filtered: bool,
     /// The resources' generation the rows were taken at.
@@ -263,6 +265,19 @@ impl TableDelegate for CommitTable {
             .id(("git-graph-row", row_ix))
             // No rule between rows, so the graph's lanes run on unbroken.
             .border_b_0()
+            .relative()
+            // Outlined as Tasks outlines its selected card; drawn over the row rather
+            // than as its border, which would break the lanes at every row.
+            .when(self.selected == Some(row_ix), |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .rounded(theme.radius)
+                        .border_1()
+                        .border_color(theme.primary),
+                )
+            })
             .when(row.commit.parents.len() > 1, |this| {
                 this.text_color(theme.muted_foreground)
             })

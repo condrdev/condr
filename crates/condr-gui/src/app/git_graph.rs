@@ -222,6 +222,7 @@ impl Condr {
                     more: false,
                     loading: true,
                     user_email: None,
+                    selected: None,
                     filtered: false,
                     generation: None,
                     width: px(0.),
@@ -237,11 +238,24 @@ impl Condr {
         let search = cx
             .new(|cx| InputState::new(window, cx).placeholder(t!("git_graph.branch_placeholder")));
         let subscriptions = vec![
-            cx.subscribe_in(&table, window, move |this, _, event: &TableEvent, _, cx| {
-                if let TableEvent::SelectRow(row_ix) = event {
-                    this.select_git_graph_row(key, pane_id, *row_ix, cx);
-                }
-            }),
+            cx.subscribe_in(
+                &table,
+                window,
+                move |this, table, event: &TableEvent, _, cx| {
+                    let selected = match event {
+                        TableEvent::SelectRow(row_ix) => Some(*row_ix),
+                        TableEvent::ClearSelection => None,
+                        _ => return,
+                    };
+                    table.update(cx, |table, cx| {
+                        table.delegate_mut().selected = selected;
+                        cx.notify();
+                    });
+                    if let Some(row_ix) = selected {
+                        this.select_git_graph_row(key, pane_id, row_ix, cx);
+                    }
+                },
+            ),
             cx.subscribe(&text, move |this, _, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
                     this.apply_git_graph_text(key, pane_id, cx);
