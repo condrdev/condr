@@ -78,7 +78,8 @@ struct GitGraphView {
     /// The text filter as last applied, on Enter or when its field lost the keyboard.
     text_filter: String,
     selected_ref: Option<String>,
-    folded: HashSet<String>,
+    /// The branch folders opened or shut against where they start (see `branch_rows`).
+    toggled: HashSet<String>,
     selected_commit: Option<String>,
     selected_file: Option<RelativePathBuf>,
     collapsed_dirs: HashSet<RelativePathBuf>,
@@ -94,6 +95,20 @@ impl GitGraphState {
             *connection != key || viewer_is(session, *pane_id, ViewerKind::GitGraph)
         });
     }
+}
+
+/// The bar atop each of the three columns, one height so their rules line up as
+/// IntelliJ's toolbars do.
+fn column_header(cx: &App) -> Div {
+    h_flex()
+        .flex_none()
+        .w_full()
+        .h_9()
+        .px_2()
+        .gap_3()
+        .items_center()
+        .border_b_1()
+        .border_color(cx.theme().border)
 }
 
 /// The checked-out branch's short name in `repository`.
@@ -146,7 +161,8 @@ impl Condr {
             .is_some_and(|repository| repository.head.is_some())
     }
 
-    /// Opens the Workspace's Git Graph Pane, creating it the first time (ADR 0078, ADR 0079).
+    /// Opens the Workspace's Git Graph Pane, creating it the first time (ADR 0078, ADR 0079),
+    /// and closes the Workspace's right sidebar, whose Git History it shows more of.
     pub(in crate::app) fn open_git_graph(
         &mut self,
         key: ConnectionKey,
@@ -154,6 +170,9 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.right_sidebar.open.remove(&(key, workspace_id)) {
+            self.schedule_state_save(cx);
+        }
         self.send_presenting_layout_to(
             key,
             LayoutCommand::ShowViewer {
@@ -203,7 +222,6 @@ impl Condr {
                     more: false,
                     loading: true,
                     user_email: None,
-                    tint_head: true,
                     filtered: false,
                     generation: None,
                     width: px(0.),
@@ -245,7 +263,7 @@ impl Condr {
                 branch: None,
                 text_filter: String::new(),
                 selected_ref: None,
-                folded: HashSet::new(),
+                toggled: HashSet::new(),
                 selected_commit: None,
                 selected_file: None,
                 collapsed_dirs: HashSet::new(),
@@ -548,7 +566,7 @@ impl Condr {
         let generation = resources.graph_generation;
         let pending = resources.pending_graph_logs.contains_key(&pane_id);
         let selected = view.selected_commit.clone();
-        let (tint_head, filtered) = (view.branch.is_none(), !view.text_filter.is_empty());
+        let filtered = !view.text_filter.is_empty();
         view.table.update(cx, |table, cx| {
             let delegate = table.delegate_mut();
             delegate.loading = pending;
@@ -556,7 +574,6 @@ impl Condr {
                 return;
             }
             delegate.generation = Some(generation);
-            delegate.tint_head = tint_head;
             delegate.filtered = filtered;
             match log {
                 Some(Ok(log)) => {
@@ -677,8 +694,7 @@ impl Condr {
         git: &WorkspaceGitSnapshot,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = cx.theme();
-        let (muted, border) = (theme.muted_foreground, theme.border);
+        let muted = cx.theme().muted_foreground;
         let owner = cx.weak_entity();
         let branch = match view.branch.as_deref() {
             Some(name) => h_flex()
@@ -710,15 +726,7 @@ impl Condr {
                 .child(t!("git_graph.branch_any"))
                 .into_any_element(),
         };
-        h_flex()
-            .flex_none()
-            .w_full()
-            .h_9()
-            .px_2()
-            .gap_3()
-            .items_center()
-            .border_b_1()
-            .border_color(border)
+        column_header(cx)
             .children(self.git_history_repository_menu(
                 "git-graph-repository",
                 key,
@@ -749,7 +757,7 @@ impl Condr {
     ) -> AnyElement {
         let filter = view.search.read(cx).value().trim().to_owned();
         let mut list = v_flex().w_full().px_1().py_1();
-        for row in branch_rows(refs, current, &filter, &view.folded) {
+        for row in branch_rows(refs, current, &filter, &view.toggled) {
             list = list.child(self.render_branch_row(view, key, pane_id, row, cx));
         }
         v_flex()
@@ -757,7 +765,7 @@ impl Condr {
             .border_r_1()
             .border_color(cx.theme().border)
             .child(
-                div().flex_none().p_1().child(
+                column_header(cx).child(
                     Input::new(&view.search)
                         .xsmall()
                         .prefix(Icon::new(IconName::Search).size_3()),
@@ -809,9 +817,9 @@ impl Condr {
                 .on_click(move |_, _, cx| {
                     let _ = owner.update(cx, |this, cx| {
                         if let Some(view) = this.git_graph.views.get_mut(&(key, pane_id))
-                            && !view.folded.remove(&folder)
+                            && !view.toggled.remove(&folder)
                         {
-                            view.folded.insert(folder.clone());
+                            view.toggled.insert(folder.clone());
                         }
                         cx.notify();
                     });

@@ -232,7 +232,8 @@ message CommitSummary {
   repeated string parents = 5;
   string author_email = 6;
   bool committer_differs = 7;
-  bool on_head = 8;
+  // Was whether `HEAD` reached it, for a tint Git Graph no longer draws.
+  reserved 8;
 }
 
 message GitLog {

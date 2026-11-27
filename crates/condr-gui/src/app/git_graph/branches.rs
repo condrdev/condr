@@ -72,14 +72,15 @@ impl<'a> Folder<'a> {
     }
 }
 
-/// The rows `refs` show, folders `folded` names shut. `current` is the checked-out branch's
-/// short name. A non-empty `filter` keeps the refs whose short name holds it, ignoring
-/// case, and opens every folder on the way to them.
+/// The rows `refs` show. `current` is the checked-out branch's short name: only the folders
+/// on the way to it start open, and `toggled` names the folders opened or shut against
+/// that. A non-empty `filter` keeps the refs whose short name holds it, ignoring case, and
+/// opens every folder on the way to them.
 pub(super) fn branch_rows(
     refs: &[GitRef],
     current: Option<&str>,
     filter: &str,
-    folded: &HashSet<String>,
+    toggled: &HashSet<String>,
 ) -> Vec<BranchRow> {
     let filter = filter.to_lowercase();
     let shown = |name: &str| filter.is_empty() || short_name(name).to_lowercase().contains(&filter);
@@ -109,7 +110,7 @@ pub(super) fn branch_rows(
         if root.folders.is_empty() && root.refs.is_empty() {
             continue;
         }
-        let open = !filter.is_empty() || !folded.contains(group);
+        let open = is_open(group, current, &filter, toggled);
         rows.push(BranchRow::Folder {
             key: group.into(),
             label: group.into(),
@@ -118,10 +119,19 @@ pub(super) fn branch_rows(
         });
         if open {
             let current = current.filter(|_| kind == RefKind::Local);
-            walk(&root, group, 1, kind, current, &filter, folded, &mut rows);
+            walk(&root, group, 1, kind, current, &filter, toggled, &mut rows);
         }
     }
     rows
+}
+
+/// Whether the folder `key` (`local`, `local/feat`, `remote/origin`…) is open.
+fn is_open(key: &str, current: Option<&str>, filter: &str, toggled: &HashSet<String>) -> bool {
+    // The folders a Local branch `feat/x` sits in are `local` and `local/feat`.
+    let on_the_way = key.strip_prefix("local").is_some_and(|path| {
+        current.is_some_and(|current| format!("/{current}").starts_with(&format!("{path}/")))
+    });
+    !filter.is_empty() || on_the_way != toggled.contains(key)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -132,7 +142,7 @@ fn walk(
     kind: RefKind,
     current: Option<&str>,
     filter: &str,
-    folded: &HashSet<String>,
+    toggled: &HashSet<String>,
     rows: &mut Vec<BranchRow>,
 ) {
     let is_current = |name: &str| current == Some(short_name(name));
@@ -154,7 +164,7 @@ fn walk(
     }
     for (label, child) in &folder.folders {
         let child_key = format!("{key}/{label}");
-        let open = !filter.is_empty() || !folded.contains(&child_key);
+        let open = is_open(&child_key, current, filter, toggled);
         rows.push(BranchRow::Folder {
             key: child_key.clone(),
             label: (*label).into(),
@@ -169,7 +179,7 @@ fn walk(
                 kind,
                 current,
                 filter,
-                folded,
+                toggled,
                 rows,
             );
         }
@@ -222,7 +232,16 @@ mod tests {
             "refs/heads/main",
             "HEAD",
         ]);
-        let rows = branch_rows(&refs, Some("main"), "", &HashSet::new());
+        let opened: HashSet<String> = [
+            "local/feat",
+            "remote",
+            "remote/origin",
+            "remote/origin/feat",
+            "tags",
+        ]
+        .map(str::to_owned)
+        .into();
+        let rows = branch_rows(&refs, Some("main"), "", &opened);
         assert_eq!(
             labels(&rows),
             [
@@ -241,15 +260,31 @@ mod tests {
     }
 
     #[test]
-    fn a_folded_folder_hides_its_refs_and_a_filter_opens_the_way() {
-        let refs = refs(&["refs/heads/feat/x", "refs/heads/main", "refs/tags/v1"]);
-        let folded: HashSet<String> = ["local/feat".to_owned(), "tags".to_owned()].into();
+    fn only_the_way_to_the_current_branch_starts_open_and_a_filter_opens_the_way() {
+        let refs = refs(&[
+            "refs/heads/feat/x",
+            "refs/heads/main",
+            "refs/remotes/origin/main",
+            "refs/tags/v1",
+        ]);
+        let none = HashSet::new();
         assert_eq!(
-            labels(&branch_rows(&refs, None, "", &folded)),
-            ["0local/", "1feat/", "1main", "0tags/"]
+            labels(&branch_rows(&refs, Some("feat/x"), "", &none)),
+            ["0local/", "1feat/", "2x", "1main", "0remote/", "0tags/"]
+        );
+        // Detached, every folder starts shut.
+        assert_eq!(
+            labels(&branch_rows(&refs, None, "", &none)),
+            ["0local/", "0remote/", "0tags/"]
+        );
+        // A toggle shuts a folder on the way and opens one off it.
+        let toggled: HashSet<String> = ["local/feat".to_owned(), "tags".to_owned()].into();
+        assert_eq!(
+            labels(&branch_rows(&refs, Some("feat/x"), "", &toggled)),
+            ["0local/", "1feat/", "1main", "0remote/", "0tags/", "1v1"]
         );
         assert_eq!(
-            labels(&branch_rows(&refs, None, "X", &folded)),
+            labels(&branch_rows(&refs, Some("feat/x"), "X", &toggled)),
             ["0local/", "1feat/", "2x"]
         );
     }

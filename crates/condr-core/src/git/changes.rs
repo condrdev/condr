@@ -126,8 +126,6 @@ pub struct CommitSummary {
     pub author_email: String,
     /// Someone other than the author committed it.
     pub committer_differs: bool,
-    /// `HEAD` reaches it: it is on the current branch.
-    pub on_head: bool,
 }
 
 /// Where a log walk starts (ADR 0079).

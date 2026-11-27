@@ -1022,8 +1022,6 @@ fn git_graph_walks_every_ref_in_date_order_and_marks_what_head_reaches() {
 
     let all = repository.log(&[], &LogStart::All, None, 0, 10).unwrap();
     assert_eq!(subjects(&all), ["main work", "feature work", "root"]);
-    let on_head: Vec<bool> = all.commits.iter().map(|commit| commit.on_head).collect();
-    assert_eq!(on_head, [true, false, true]);
     assert_eq!(all.commits[0].parents, [all.commits[2].id.clone()]);
     assert!(all.commits[0].committer_differs);
     assert!(!all.commits[1].committer_differs);

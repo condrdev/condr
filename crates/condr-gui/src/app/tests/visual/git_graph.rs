@@ -94,6 +94,10 @@ fn git_graph_lists_every_branch_filters_and_opens_a_commits_file() {
         window.read(|app| view.read(app).presented().map(|(_, _, _, tab_id)| tab_id))
     };
     assert_eq!(presented_tab(window), Some(graph_tab));
+    assert!(
+        window.read(|app| view.read(app).right_sidebar.open.is_empty()),
+        "Git Graph closes the right sidebar it was opened from"
+    );
     let subjects = |window: &mut VisualTestContext| {
         window.update(|window, cx| _ = window.draw(cx));
         window.read(|app| view.read(app).git_graph_subjects(1, pane_id, app))

@@ -111,11 +111,18 @@ pub(super) fn ref_labels(
     by_commit
 }
 
-/// The lane colour a seed names, as IntelliJ makes them: a hue at fixed saturation and
-/// brightness (HSB 0.4, 0.65).
-pub(super) fn lane_color(seed: u32) -> Hsla {
-    let hue = (seed as f32 * 0.618_034).fract();
-    hsla(hue, 0.27, 0.52, 1.)
+/// The lane colours: the theme's own, which the terminal scheme gives (ADR 0062), so the
+/// graph sits in the palette of everything around it. A seed picks one.
+fn lane_colors(cx: &App) -> [Hsla; 6] {
+    let theme = cx.theme();
+    [
+        theme.blue,
+        theme.green,
+        theme.magenta,
+        theme.yellow,
+        theme.cyan,
+        theme.red,
+    ]
 }
 
 /// A label's colour: `HEAD` yellow, local green, remote violet, as IntelliJ has them.
@@ -155,8 +162,6 @@ pub(in crate::app) struct CommitTable {
     pub(super) loading: bool,
     /// The repository's `user.email`, whose commits are bold.
     pub(super) user_email: Option<String>,
-    /// Tint the commits `HEAD` reaches: only while every ref shows, as IntelliJ does.
-    pub(super) tint_head: bool,
     /// The text filter is set, so an empty table says nothing matched.
     pub(super) filtered: bool,
     /// The resources' generation the rows were taken at.
@@ -167,8 +172,10 @@ pub(in crate::app) struct CommitTable {
 }
 
 impl CommitTable {
-    fn graph_cell(&self, row: &GraphRow) -> impl IntoElement {
+    fn graph_cell(&self, row: &GraphRow, cx: &App) -> impl IntoElement {
         let row = row.clone();
+        let colors = lane_colors(cx);
+        let lane_color = move |seed: u32| colors[seed as usize % colors.len()];
         let width = LANE * row.width as f32;
         canvas(
             |_, _, _| {},
@@ -256,9 +263,6 @@ impl TableDelegate for CommitTable {
             .id(("git-graph-row", row_ix))
             // No rule between rows, so the graph's lanes run on unbroken.
             .border_b_0()
-            .when(self.tint_head && row.commit.on_head, |this| {
-                this.bg(theme.blue.opacity(0.08))
-            })
             .when(row.commit.parents.len() > 1, |this| {
                 this.text_color(theme.muted_foreground)
             })
@@ -280,7 +284,7 @@ impl TableDelegate for CommitTable {
                 .size_full()
                 .gap_2()
                 .items_center()
-                .child(self.graph_cell(&row.graph))
+                .child(self.graph_cell(&row.graph, cx))
                 .child(
                     div()
                         .min_w(rems(6.))

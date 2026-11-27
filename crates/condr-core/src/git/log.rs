@@ -89,15 +89,9 @@ impl GitRepository {
             Box::new(date_order(&repo, tips)?)
         };
         let filter = text.map(TextFilter::new);
-        // Children come before parents, so `HEAD`'s reach passes down as the walk goes.
-        let mut on_head: HashSet<gix::ObjectId> = head.into_iter().collect();
         let mut skipped = 0;
         for walked in walk {
             let (id, parents) = walked?;
-            let reached = on_head.remove(&id);
-            if reached {
-                on_head.extend(parents.iter().copied());
-            }
             let commit = repo.find_commit(id).map_err(git_error)?;
             if let Some(filter) = &filter
                 && !filter.matches(&id, &commit)
@@ -122,7 +116,6 @@ impl GitRepository {
                 parents: parents.iter().map(ToString::to_string).collect(),
                 author_email: author.email.to_string(),
                 committer_differs: author.name != committer.name || author.email != committer.email,
-                on_head: reached,
             });
         }
         Ok(log)

@@ -75,15 +75,23 @@ impl Condr {
         current: Option<&str>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let column = v_flex()
-            .size_full()
-            .border_l_1()
-            .border_color(cx.theme().border);
+        let column = |header: Option<SharedString>, body: AnyElement, cx: &App| {
+            v_flex()
+                .size_full()
+                .border_l_1()
+                .border_color(cx.theme().border)
+                .child(
+                    column_header(cx)
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .children(header),
+                )
+                .child(div().flex_1().min_h_0().child(body))
+                .into_any_element()
+        };
         let (Some(id), Some(connection)) = (view.selected_commit.clone(), self.connection(key))
         else {
-            return column
-                .child(empty_state(t!("git_graph.select_commit"), cx))
-                .into_any_element();
+            return column(None, empty_state(t!("git_graph.select_commit"), cx), cx);
         };
         let workspace_id = view.workspace_id;
         let resources = &connection.resources;
@@ -106,37 +114,30 @@ impl Condr {
         }
         let details = match resources.commits.get(&slot) {
             None => {
-                return column
-                    .child(empty_state(t!("git_history.loading_commit"), cx))
-                    .into_any_element();
+                return column(None, empty_state(t!("git_history.loading_commit"), cx), cx);
             }
             Some(Err(error)) => {
-                return column
-                    .child(failed_state(error.clone(), cx))
-                    .into_any_element();
+                return column(None, failed_state(error.clone(), cx), cx);
             }
             Some(Ok(details)) => details,
         };
         let branches = resources.commit_branches.get(&slot);
-        column
-            .child(
-                v_resizable(SharedString::from(format!(
-                    "git-graph-commit-{}",
-                    pane_id.as_u64()
-                )))
-                .child(
-                    resizable_panel()
-                        .child(self.render_git_graph_files(view, key, pane_id, details, cx)),
-                )
-                .child(
-                    resizable_panel()
-                        .size(px(240.))
-                        .child(self.render_git_graph_details(
-                            view, key, pane_id, details, refs, current, branches, cx,
-                        )),
-                ),
-            )
-            .into_any_element()
+        let header = t!(
+            "git_history.changed_files",
+            count = details.changes.entries.len()
+        );
+        let body = v_resizable(SharedString::from(format!(
+            "git-graph-commit-{}",
+            pane_id.as_u64()
+        )))
+        .child(
+            resizable_panel().child(self.render_git_graph_files(view, key, pane_id, details, cx)),
+        )
+        .child(resizable_panel().size(px(240.)).child(
+            self.render_git_graph_details(view, key, pane_id, details, refs, current, branches, cx),
+        ))
+        .into_any_element();
+        column(Some(header.into()), body, cx)
     }
 
     /// The files the commit changed, as Git History draws them, each folder counting its
@@ -218,32 +219,12 @@ impl Condr {
             };
             list = list.child(row);
         }
-        v_flex()
-            .size_full()
-            .child(
-                div()
-                    .flex_none()
-                    .h_7()
-                    .px_2()
-                    .flex()
-                    .items_center()
-                    .text_xs()
-                    .text_color(muted)
-                    .child(t!(
-                        "git_history.changed_files",
-                        count = details.changes.entries.len()
-                    )),
-            )
-            .child(
-                sidebar_list(
-                    SharedString::from(format!("git-graph-files-{}", pane_id.as_u64())),
-                    list,
-                )
-                .flex_1()
-                .min_h_0()
-                .w_full(),
-            )
-            .into_any_element()
+        sidebar_list(
+            SharedString::from(format!("git-graph-files-{}", pane_id.as_u64())),
+            list,
+        )
+        .size_full()
+        .into_any_element()
     }
 
     /// The commit's message, who made it and when, its refs, and the branches it is on.

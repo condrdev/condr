@@ -819,7 +819,6 @@ impl From<&GitLog> for super::GitLog {
                     parents: commit.parents.clone(),
                     author_email: commit.author_email.clone(),
                     committer_differs: commit.committer_differs,
-                    on_head: commit.on_head,
                 })
                 .collect(),
             more: log.more,
@@ -858,7 +857,6 @@ impl TryFrom<super::GitLog> for GitLog {
                         parents: commit.parents,
                         author_email: commit.author_email,
                         committer_differs: commit.committer_differs,
-                        on_head: commit.on_head,
                     })
                 })
                 .collect::<WireResult<_>>()?,

@@ -866,7 +866,6 @@ fn git_log_replies_round_trip() {
                     parents: vec!["1a2b".into(), "3c4d".into()],
                     author_email: "ada@example.com".into(),
                     committer_differs: true,
-                    on_head: true,
                 }],
                 more: true,
                 refs: vec![crate::GitRef {
