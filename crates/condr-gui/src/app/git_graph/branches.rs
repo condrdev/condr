@@ -72,6 +72,58 @@ impl<'a> Folder<'a> {
     }
 }
 
+/// A submenu of the Branch filter: its `/` folders, then its refs by label and full name.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) struct RefMenu {
+    pub(super) folders: BTreeMap<String, RefMenu>,
+    pub(super) refs: Vec<(String, String)>,
+}
+
+impl RefMenu {
+    fn insert(&mut self, path: &str, name: &str) {
+        match path.split_once('/') {
+            Some((folder, rest)) => self
+                .folders
+                .entry(folder.to_owned())
+                .or_default()
+                .insert(rest, name),
+            None => self.refs.push((path.to_owned(), name.to_owned())),
+        }
+    }
+}
+
+/// The Branch filter's submenus as IntelliJ's has them: Local, each remote by its name,
+/// then Tags; empty ones left out.
+pub(super) fn ref_menus(refs: &[GitRef]) -> Vec<(RefKind, String, RefMenu)> {
+    let (mut local, mut remotes, mut tags) = (
+        RefMenu::default(),
+        BTreeMap::<&str, RefMenu>::new(),
+        RefMenu::default(),
+    );
+    for reference in refs {
+        let name = reference.name.as_str();
+        if let Some(path) = name.strip_prefix("refs/heads/") {
+            local.insert(path, name);
+        } else if let Some((remote, path)) = name
+            .strip_prefix("refs/remotes/")
+            .and_then(|rest| rest.split_once('/'))
+        {
+            remotes.entry(remote).or_default().insert(path, name);
+        } else if let Some(path) = name.strip_prefix("refs/tags/") {
+            tags.insert(path, name);
+        }
+    }
+    let mut menus = vec![(RefKind::Local, String::new(), local)];
+    menus.extend(
+        remotes
+            .into_iter()
+            .map(|(remote, menu)| (RefKind::Remote, remote.to_owned(), menu)),
+    );
+    menus.push((RefKind::Tag, String::new(), tags));
+    menus.retain(|(_, _, menu)| !menu.folders.is_empty() || !menu.refs.is_empty());
+    menus
+}
+
 /// The rows `refs` show. `current` is the checked-out branch's short name: only the folders
 /// on the way to it start open, and `toggled` names the folders opened or shut against
 /// that. A non-empty `filter` keeps the refs whose short name holds it, ignoring case, and
@@ -197,7 +249,7 @@ fn walk(
 
 #[cfg(test)]
 mod tests {
-    use super::{BranchRow, RefKind, branch_rows};
+    use super::{BranchRow, RefKind, RefMenu, branch_rows, ref_menus};
     use condr_core::GitRef;
     use std::collections::HashSet;
 
@@ -286,6 +338,43 @@ mod tests {
         assert_eq!(
             labels(&branch_rows(&refs, Some("feat/x"), "X", &toggled)),
             ["0local/", "1feat/", "2x"]
+        );
+    }
+
+    #[test]
+    fn the_branch_menus_are_local_each_remote_and_tags_folded_by_slash() {
+        let refs = refs(&[
+            "HEAD",
+            "refs/heads/main",
+            "refs/heads/feat/x",
+            "refs/remotes/origin/main",
+            "refs/remotes/upstream/main",
+        ]);
+        let menus = ref_menus(&refs);
+        let kinds: Vec<_> = menus
+            .iter()
+            .map(|(kind, name, _)| (*kind, name.as_str()))
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                (RefKind::Local, ""),
+                (RefKind::Remote, "origin"),
+                (RefKind::Remote, "upstream")
+            ],
+            "no tags, no menu"
+        );
+        let local = &menus[0].2;
+        assert_eq!(
+            local.refs,
+            [("main".to_owned(), "refs/heads/main".to_owned())]
+        );
+        assert_eq!(
+            local.folders["feat"],
+            RefMenu {
+                folders: Default::default(),
+                refs: vec![("x".into(), "refs/heads/feat/x".into())],
+            }
         );
     }
 }

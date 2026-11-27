@@ -4,6 +4,7 @@
 
 mod branches;
 mod details;
+mod filters;
 mod lanes;
 mod table;
 
@@ -14,6 +15,7 @@ use crate::app::list_row::{RowKind, tree_row};
 use crate::app::placeholders::{empty_state, failed_state};
 use branches::{BranchRow, RefKind, branch_rows, short_name};
 use condr_core::{GIT_LOG_PAGE, GitRef, LogStart, Viewer};
+use filters::{AuthorFilter, DateFilter, log_filter};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::resizable::{h_resizable, resizable_panel};
 use gpui_kit::component::table::{DataTable, TableEvent, TableState};
@@ -73,10 +75,13 @@ struct GitGraphView {
     table: Entity<TableState<CommitTable>>,
     text: Entity<InputState>,
     search: Entity<InputState>,
-    /// The ref the commits are filtered to, by its full name or `HEAD`; `None` for every ref.
+    /// The ref the commits are filtered to, by its full name or `HEAD`, which it starts as,
+    /// following the checked-out branch as IntelliJ's log does; `None` for every ref.
     branch: Option<String>,
     /// The text filter as last applied, on Enter or when its field lost the keyboard.
     text_filter: String,
+    author: Option<AuthorFilter>,
+    date: DateFilter,
     selected_ref: Option<String>,
     /// The branch folders opened or shut against where they start (see `branch_rows`).
     toggled: HashSet<String>,
@@ -222,6 +227,7 @@ impl Condr {
                     more: false,
                     loading: true,
                     user_email: None,
+                    authors: BTreeMap::new(),
                     selected: None,
                     filtered: false,
                     generation: None,
@@ -274,8 +280,10 @@ impl Condr {
                 table,
                 text,
                 search,
-                branch: None,
+                branch: Some("HEAD".into()),
                 text_filter: String::new(),
+                author: None,
+                date: DateFilter::All,
                 selected_ref: None,
                 toggled: HashSet::new(),
                 selected_commit: None,
@@ -318,7 +326,7 @@ impl Condr {
             None => LogStart::All,
             Some(name) => LogStart::Ref(name.to_owned()),
         };
-        let text = (!view.text_filter.is_empty()).then(|| view.text_filter.clone());
+        let filter = log_filter(view);
         let workspace_id = view.workspace_id;
         let repository = self.git_history_directory(key, workspace_id);
         if let Some(request_id) = self.send_request(key, |server_id, session_id, request_id| {
@@ -329,7 +337,7 @@ impl Condr {
                 workspace_id,
                 from,
                 start,
-                text,
+                filter,
                 skip,
                 limit: GIT_LOG_PAGE,
                 repository,
@@ -364,11 +372,13 @@ impl Condr {
         }
     }
 
-    /// Another repository's commits: what Git Graph loaded of the last one goes (ADR 0073).
+    /// Another repository's commits: what Git Graph loaded of the last one goes, and its
+    /// branch filter goes back to `HEAD` (ADR 0073).
     pub(in crate::app) fn forget_git_graph(
         &mut self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
+        cx: &mut Context<Self>,
     ) {
         let tabs: Vec<PaneId> = self
             .git_graph
@@ -378,7 +388,9 @@ impl Condr {
                 *connection == key && view.workspace_id == workspace_id
             })
             .map(|((_, pane_id), view)| {
-                view.branch = None;
+                view.branch = Some("HEAD".into());
+                view.table
+                    .update(cx, |table, _| table.delegate_mut().authors.clear());
                 view.selected_ref = None;
                 view.selected_commit = None;
                 view.selected_file = None;
@@ -591,6 +603,15 @@ impl Condr {
             delegate.filtered = filtered;
             match log {
                 Some(Ok(log)) => {
+                    // The User filter offers everyone met so far, whatever filters it then.
+                    for commit in &log.commits {
+                        delegate
+                            .authors
+                            .entry(commit.author_email.to_lowercase())
+                            .or_insert_with(|| {
+                                (commit.author.clone(), commit.author_email.clone())
+                            });
+                    }
                     delegate.rows = graph_rows(log, current);
                     delegate.more = log.more;
                     delegate.user_email.clone_from(&log.user_email);
@@ -654,9 +675,9 @@ impl Condr {
         };
         let commits = v_flex()
             .size_full()
-            .child(self.render_git_graph_filters(view, key, workspace_id, pane_id, git, cx))
+            .child(self.render_git_graph_filters(view, key, pane_id, refs, cx))
             .child(div().flex_1().min_h_0().child(commits));
-        let branches = self.render_git_graph_branches(view, key, pane_id, refs, current, cx);
+        let branches = self.render_git_graph_branches(view, key, pane_id, git, refs, current, cx);
         let details = self.render_git_graph_commit(view, key, pane_id, refs, current, cx);
         div()
             .id(SharedString::from(format!(
@@ -697,74 +718,15 @@ impl Condr {
             .into_any_element()
     }
 
-    /// Above the commits: the repository, when there are several, the text filter and the
-    /// branch filter, as IntelliJ's log has them.
-    fn render_git_graph_filters(
-        &self,
-        view: &GitGraphView,
-        key: ConnectionKey,
-        workspace_id: WorkspaceId,
-        pane_id: PaneId,
-        git: &WorkspaceGitSnapshot,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let muted = cx.theme().muted_foreground;
-        let owner = cx.weak_entity();
-        let branch = match view.branch.as_deref() {
-            Some(name) => h_flex()
-                .debug_selector(|| "git-graph-branch-filter".into())
-                .flex_none()
-                .gap_1()
-                .items_center()
-                .text_xs()
-                .child(t!("git_graph.branch_filter", branch = short_name(name)))
-                .child(
-                    Button::new("git-graph-clear-branch")
-                        .debug_selector(|| "git-graph-clear-branch".into())
-                        .ghost()
-                        .xsmall()
-                        .icon(Icon::new(IconName::Close))
-                        .tooltip(t!("git_graph.clear_branch"))
-                        .accessibility_label(t!("git_graph.clear_branch"))
-                        .on_click(move |_, _, cx| {
-                            let _ = owner.update(cx, |this, cx| {
-                                this.set_git_graph_branch(key, pane_id, None, cx);
-                            });
-                        }),
-                )
-                .into_any_element(),
-            None => div()
-                .flex_none()
-                .text_xs()
-                .text_color(muted)
-                .child(t!("git_graph.branch_any"))
-                .into_any_element(),
-        };
-        column_header(cx)
-            .children(self.git_history_repository_menu(
-                "git-graph-repository",
-                key,
-                workspace_id,
-                git,
-                cx,
-            ))
-            .child(
-                div().w(rems(18.)).child(
-                    Input::new(&view.text)
-                        .xsmall()
-                        .prefix(Icon::new(IconName::Search).size_3().text_color(muted)),
-                ),
-            )
-            .child(branch)
-            .into_any_element()
-    }
-
-    /// The branch tree, under its own filter field.
+    /// The branch tree, under its own filter field, and under the repository it shows when
+    /// the Workspace has several: the repository scopes the branches and the commits alike.
+    #[allow(clippy::too_many_arguments)]
     fn render_git_graph_branches(
         &self,
         view: &GitGraphView,
         key: ConnectionKey,
         pane_id: PaneId,
+        git: &WorkspaceGitSnapshot,
         refs: &[GitRef],
         current: Option<&str>,
         cx: &mut Context<Self>,
@@ -774,17 +736,26 @@ impl Condr {
         for row in branch_rows(refs, current, &filter, &view.toggled) {
             list = list.child(self.render_branch_row(view, key, pane_id, row, cx));
         }
+        let search = Input::new(&view.search)
+            .xsmall()
+            .prefix(Icon::new(IconName::Search).size_3());
+        let repository = self.git_history_repository_menu(
+            "git-graph-repository",
+            key,
+            view.workspace_id,
+            git,
+            cx,
+        );
+        let (header, search) = match repository {
+            Some(menu) => (menu, Some(div().flex_none().p_1().child(search))),
+            None => (search.into_any_element(), None),
+        };
         v_flex()
             .size_full()
             .border_r_1()
             .border_color(cx.theme().border)
-            .child(
-                column_header(cx).child(
-                    Input::new(&view.search)
-                        .xsmall()
-                        .prefix(Icon::new(IconName::Search).size_3()),
-                ),
-            )
+            .child(column_header(cx).child(header))
+            .children(search)
             .child(
                 sidebar_list(
                     SharedString::from(format!("git-graph-branches-{}", pane_id.as_u64())),
@@ -882,6 +853,20 @@ impl Condr {
                 .into_any_element()
             }
         }
+    }
+}
+
+#[cfg(all(feature = "test-support", target_os = "macos"))]
+impl Condr {
+    /// Every branch's commits rather than `HEAD`'s, as the Branch filter's clear button
+    /// gives, for the screenshots.
+    pub(in crate::app) fn show_every_git_graph_branch(
+        &mut self,
+        key: ConnectionKey,
+        pane_id: PaneId,
+        cx: &mut Context<Self>,
+    ) {
+        self.set_git_graph_branch(key, pane_id, None, cx);
     }
 }
 

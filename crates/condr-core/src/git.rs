@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 pub use changes::{
     CommitDetails, CommitPerson, CommitSummary, DiffHunk, DiffLine, DiffLineKind, FileDiff,
     FileDiffContent, GIT_LOG_PAGE, GitChangeEntry, GitChangeStatus, GitChanges, GitDiffStat,
-    GitLog, GitRef, LogStart, MAX_DIFF_BYTES, MAX_GIT_CHANGES, OldFile,
+    GitLog, GitRef, LogFilter, LogStart, MAX_DIFF_BYTES, MAX_GIT_CHANGES, OldFile,
 };
 #[cfg(feature = "runtime")]
 pub use repository::{

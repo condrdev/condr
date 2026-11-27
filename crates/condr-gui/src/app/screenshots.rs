@@ -674,6 +674,10 @@ fn git_graph(
     };
     wait(cx, "the Git Graph Pane", |app| tab(app).is_some());
     let pane_id = cx.read(|app| tab(app)).unwrap();
+    // `HEAD`'s commits until the Branch filter is cleared; every branch shows the graph.
+    update(cx, window, view, move |this, _, cx| {
+        this.show_every_git_graph_branch(1, pane_id, cx);
+    });
     wait(cx, "the commits loaded", |app| {
         view.read(app).git_graph_subjects(1, pane_id, app).len() == 9
     });

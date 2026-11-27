@@ -150,7 +150,7 @@ fn a_request_that_panics_is_answered_with_an_error() {
                 workspace_id,
                 from: Vec::new(),
                 start: condr_core::LogStart::Head,
-                text: None,
+                filter: condr_core::LogFilter::default(),
                 skip: 0,
                 limit: 10,
                 repository: Default::default(),

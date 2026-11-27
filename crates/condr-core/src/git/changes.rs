@@ -140,6 +140,20 @@ pub enum LogStart {
     Ref(String),
 }
 
+/// Which of the commits a log walks it keeps (ADR 0079); the default keeps them all.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct LogFilter {
+    /// Only the commits whose message holds it, ignoring case, or whose id starts with
+    /// one of its words of 7 to 64 hex digits, as IntelliJ's log filters.
+    pub text: Option<String>,
+    /// Only the commits whose author's email is this one, ignoring case.
+    pub author: Option<String>,
+    /// Only the commits authored at or after this time, in seconds since the Unix epoch.
+    pub since: Option<i64>,
+    /// Only the commits authored at or before this time.
+    pub until: Option<i64>,
+}
+
 /// A branch, tag or `HEAD`, and the commit it names (ADR 0079).
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct GitRef {

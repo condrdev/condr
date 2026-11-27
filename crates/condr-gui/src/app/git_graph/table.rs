@@ -162,6 +162,9 @@ pub(in crate::app) struct CommitTable {
     pub(super) loading: bool,
     /// The repository's `user.email`, whose commits are bold.
     pub(super) user_email: Option<String>,
+    /// Everyone who authored a commit this view loaded, by lowercased email: their name
+    /// and email, for the User filter.
+    pub(super) authors: BTreeMap<String, (String, String)>,
     /// The selected row, which Kit keeps to itself, for its outline.
     pub(super) selected: Option<usize>,
     /// The text filter is set, so an empty table says nothing matched.

@@ -103,7 +103,7 @@ impl Condr {
         let shown = self.git_history_repository(key, workspace_id, git)?;
         let label = |repository: &RepositoryGitSnapshot| {
             let name = self.repository_name(key, workspace_id, &repository.directory);
-            format!("{name} · {}", repository_branch(repository))
+            name.to_string()
         };
         let choices: Vec<(RelativePathBuf, String)> = git
             .repositories
@@ -200,7 +200,7 @@ impl Condr {
             connection.resources.logs.remove(&workspace_id);
             connection.resources.pending_logs.remove(&workspace_id);
         }
-        self.forget_git_graph(key, workspace_id);
+        self.forget_git_graph(key, workspace_id, cx);
         cx.notify();
     }
 
@@ -553,7 +553,7 @@ impl Condr {
                 workspace_id,
                 from,
                 start: condr_core::LogStart::Head,
-                text: None,
+                filter: condr_core::LogFilter::default(),
                 skip,
                 limit: GIT_LOG_PAGE,
                 repository,

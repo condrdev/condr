@@ -10,13 +10,13 @@ History (ADR 0046) lists `HEAD`'s commits two lines each in a sidebar 400 px wid
 
 ## The Git Graph Pane
 
-**A viewer Pane** (ADR 0078), at most one per Workspace, in a Tab of its own when it first opens, opened through `ShowViewer` by a button beside Refresh in the right sidebar's header while Git History shows (Lucide `git-graph`), and by "Open Git Graph" in the Command Palette (ADR 0064); it has no default shortcut. Only a Workspace that has Git History offers it. The Session holds only that the Pane exists; the branch filter, the text filter, the selection, column widths and split positions are this Client's view and are not remembered. With several repositories (ADR 0073) it shows the one Git History shows, through the same choice, as a menu at the start of its filter bar.
+**A viewer Pane** (ADR 0078), at most one per Workspace, in a Tab of its own when it first opens, opened through `ShowViewer` by a button beside Refresh in the right sidebar's header while Git History shows (Lucide `git-graph`), and by "Open Git Graph" in the Command Palette (ADR 0064); it has no default shortcut. Only a Workspace that has Git History offers it. The Session holds only that the Pane exists; the filters, the selection, column widths and split positions are this Client's view and are not remembered. With several repositories (ADR 0073) it shows the one Git History shows, through the same choice, as a menu heading the branch tree, since the repository scopes the branches and the commits alike; the "Branch or tag" field moves under it. The menu names each repository alone, without its branch, in Git History too. Opening Git Graph closes the Workspace's right sidebar, whose Git History it shows more of.
 
 **Three columns, as IDEA lays them out**: the branches; the commits; and the selected commit's files above its details. The branches start 180 px wide and the right column 300 px, so the commits take the rest; the details start 240 px high under the files; every divider drags. Git History in the sidebar stays as it is but for the button that opens Git Graph.
 
 ### Branches
 
-The tree has IDEA's groups, each shown only when it has entries: `HEAD` with the current branch, Local, Remote with a node per remote, and Tags. Names group by `/` into folders. The current branch comes first, then folders, then names. A "Branch or tag" field above the tree filters it as typed. A single click selects; a double-click filters the commits to that branch, `HEAD` included, and the filter bar shows `Branch: name` with a clear button that returns to every branch. One branch at a time. The tree's rows take no keyboard, so IDEA's Enter there is left out.
+The tree has IDEA's groups, each shown only when it has entries: `HEAD` with the current branch, Local, Remote with a node per remote, and Tags. Names group by `/` into folders. The current branch comes first, then folders, then names. A "Branch or tag" field above the tree filters it as typed. A single click selects; a double-click filters the commits to that branch, `HEAD` included, as the Branch filter does. One branch at a time. The tree starts folded but for the folders on the way to the checked-out branch; a click toggles a folder against that. The tree's rows take no keyboard, so IDEA's Enter there is left out.
 
 ### Commits
 
@@ -30,7 +30,14 @@ The tree has IDEA's groups, each shown only when it has entries: `HEAD` with the
 
 **Dates are the author's**, as IDEA formats them: "N minutes ago" within the hour, "Today 14:25", "Yesterday 14:25", and otherwise `2026/11/25 14:25` in local time, where IDEA uses the system's format. Local time needs a time zone database, so `chrono`, which GPUI Kit already builds with its clock, becomes the GUI's sixth declared dependency on Kit's version.
 
-**The text filter** ("Text or hash") applies on Enter or when the field loses focus, not per keystroke. It matches the full message, ignoring case, and a word of 7 to 64 hex digits also matches a commit by id prefix. The Server filters as it walks, so pages count matches.
+**The filters**, in IDEA's order above the commits, with Refresh at the far end; each set filter shows its value and a clear button. The Server applies them all as it walks, so pages count matches.
+
+- **Text or hash** applies on Enter or when the field loses focus, not per keystroke. It matches the full message, ignoring case, and a word of 7 to 64 hex digits also matches a commit by id prefix.
+- **Branch** starts at `HEAD`, as IDEA's log does, so the log follows a checkout; its clear button shows every branch. Its menu has All, `HEAD`, then a submenu each for the local branches, every remote and the tags, folded by `/`. A double-click in the tree sets it too.
+- **User** keeps one author, by email, ignoring case. Its menu has All, Me, the repository's `user.email`, and everyone who authored a commit this view has loaded. IDEA's Select…, typing several names, is left out.
+- **Date** keeps commits by author date: All, Last 24 hours, Last 7 days, or Select…, a calendar of two months picking the first and last day, or only the first. Days are local and whole.
+
+The commit's file tree has IDEA's Expand All and Collapse All in its header.
 
 **Keys and menu.** Up and Down move the selection, Right goes to the parent commit and Left to the child, `Cmd+L` (`Ctrl+L`) focuses the text filter, and `Cmd+D` (`Ctrl+D`) shows the selected file's diff. A row's menu has Copy Commit ID, Go to Parent Commit and Go to Child Commit.
 
@@ -46,7 +53,7 @@ Git Graph reloads its first page and the refs when `HEAD` or its upstream moves 
 
 ## The wire
 
-- **`GitLog`** names where the walk starts: `HEAD`, as Git History asks, newest commit time first; every branch, tag and `HEAD`, as Git Graph opens; or one ref, `HEAD` among them, as its branch filter asks; the last two in date order. It takes an optional text. `from` becomes a repeated field on the same number, which a Server older than this reads as its one `from`. The reply returns the commits the walk started from, which later pages send back, so pages stay consistent while refs move, generalizing ADR 0046's `from`; the refs, each with its name, kind (`HEAD`, local, remote, tag) and peeled commit; and the repository's `user.email`.
+- **`GitLog`** names where the walk starts: `HEAD`, as Git History asks, newest commit time first; every branch, tag and `HEAD`, as Git Graph opens; or one ref, `HEAD` among them, as its branch filter asks; the last two in date order. It takes an optional text, author email and span of author dates. `from` becomes a repeated field on the same number, which a Server older than this reads as its one `from`. The reply returns the commits the walk started from, which later pages send back, so pages stay consistent while refs move, generalizing ADR 0046's `from`; the refs, each with its name, kind (`HEAD`, local, remote, tag) and peeled commit; and the repository's `user.email`.
 - **`CommitSummary`** gains its parents, the author's email, whether the committer differs, and whether `HEAD` reaches it. That mark costs one pass: children come before parents in this order, so it passes from `HEAD` to each marked commit's parents as the walk goes.
 - **`CommitDetails`** gains the author's email, and the committer's name and time when they differ.
 - **`GitCommitBranches { workspace_id, repository, commit }`** returns the local and remote branches whose tips reach the commit: one date-order walk from every tip, each commit passing the set of tips that reach it to its parents, until the commit comes up. A merge base per branch, tried first, took 13 s for 200 branches. It runs off the Client's request loop, as ADR 0046's requests do.
@@ -57,7 +64,7 @@ An older Server refuses `ShowViewer` (ADR 0078). Git History still works against
 
 ## Not in this decision
 
-Everything in IDEA that changes the repository; favourite branches; Go to Hash; Show Repository at Revision; Compare Versions and Compare with Local; Open in Browser; signatures; clickable ids in messages; the regex and match-case toggles; filters by author, date and path; several branches at once; the diff preview; the Root column; the branch tree's toolbar; the Companion and the `condr` CLI.
+Everything in IDEA that changes the repository; favourite branches; Go to Hash; Show Repository at Revision; Compare Versions and Compare with Local; Open in Browser; signatures; clickable ids in messages; the regex and match-case toggles; the Paths filter; several branches or authors at once; Recent and Favorites in the Branch menu; the diff preview; the Root column; the branch tree's toolbar; the Companion and the `condr` CLI.
 
 ## Delivery
 
@@ -66,4 +73,4 @@ Everything in IDEA that changes the repository; favourite branches; Go to Hash; 
 
 ## Tests
 
-`condr-core`: date order keeping parents after children under clock skew; walking from every ref, from one and from `HEAD` as a ref with the refs; the text filter over the full message, ignoring case, and an id prefix of seven digits or more; pages staying consistent from the returned starts while a branch moves; refs with their kinds and annotated tags peeled; the `HEAD` marks; a differing committer; the branches reaching a commit; every new field round-tripping. GUI: lane layout for a line, a fork and merge, an octopus merge and lanes cut at a page's end; ref labels merging; the branch tree's groups, folders, folding and filter; dates at each boundary; with a real Server, Git Graph opening from Git History's header, every branch listed, a double-click filtering by branch and the clear button undoing it, Right stepping to the first parent, the text filter focused with its shortcut and applied on Enter, a selected commit listing its files, details and branches, and a double-clicked file opening the Diff Pane; offscreen screenshots in dark and light.
+`condr-core`: date order keeping parents after children under clock skew; walking from every ref, from one and from `HEAD` as a ref with the refs; the text filter over the full message, ignoring case, and an id prefix of seven digits or more; the author filter by email, ignoring case, and the date filter keeping both ends; pages staying consistent from the returned starts while a branch moves; refs with their kinds and annotated tags peeled; the `HEAD` marks; a differing committer; the branches reaching a commit; every new field round-tripping. GUI: lane layout for a line, a fork and merge, an octopus merge and lanes cut at a page's end; ref labels merging; the branch tree's groups, folders, folding and filter; the Branch menu's submenus; the Date filter's local days; dates at each boundary; with a real Server, Git Graph opening from Git History's header on `HEAD` and closing the right sidebar, its filters and Refresh rendering, a double-click filtering by branch and the clear button showing every branch, Right stepping to the first parent, the text filter focused with its shortcut and applied on Enter, a selected commit listing its files, details and branches, and a double-clicked file opening the Diff Pane; offscreen screenshots in dark and light.

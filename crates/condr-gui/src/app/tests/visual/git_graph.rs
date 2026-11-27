@@ -20,8 +20,9 @@ fn double_click(window: &mut VisualTestContext, bounds: Bounds<Pixels>) {
     }
 }
 
-/// Git Graph opens from Git History's header as a Tab of its own, lists every branch's
-/// commits, filters by a branch double-clicked in its tree and by text on Enter, steps to a
+/// Git Graph opens from Git History's header as a Tab of its own on `HEAD`'s commits,
+/// filters by a branch double-clicked in its tree, by every branch once that filter is
+/// cleared, and by text on Enter, steps to a
 /// parent with Right, and shows a selected commit's files and details, a double-clicked file
 /// in the Diff Pane beside it (ADR 0078, ADR 0079).
 #[test]
@@ -104,7 +105,7 @@ fn git_graph_lists_every_branch_filters_and_opens_a_commits_file() {
     };
     assert!(
         wait_until(window, |window| subjects(window).len() == 4),
-        "every branch's commits: {:?}",
+        "HEAD reaches every commit through the merge: {:?}",
         subjects(window)
     );
     assert_eq!(
@@ -112,6 +113,15 @@ fn git_graph_lists_every_branch_filters_and_opens_a_commits_file() {
         ["merge", "second", "feature work", "first"]
     );
     assert!(window.debug_bounds("git-graph").is_some());
+    // `HEAD` is the Branch filter it opens with, beside User, Date and Refresh.
+    for control in [
+        "git-graph-branch-filter-clear",
+        "git-graph-user-filter",
+        "git-graph-date-filter",
+        "git-graph-refresh",
+    ] {
+        assert!(window.debug_bounds(control).is_some(), "{control} renders");
+    }
 
     // A double-click in the tree filters by that branch; the clear button shows them all.
     let feature = window
@@ -122,7 +132,9 @@ fn git_graph_lists_every_branch_filters_and_opens_a_commits_file() {
         subjects(window) == ["feature work", "first"]
     }));
     assert!(window.debug_bounds("git-graph-branch-filter").is_some());
-    let clear = window.debug_bounds("git-graph-clear-branch").unwrap();
+    let clear = window
+        .debug_bounds("git-graph-branch-filter-clear")
+        .unwrap();
     window.simulate_click(clear.center(), Modifiers::default());
     assert!(wait_until(window, |window| subjects(window).len() == 4));
 

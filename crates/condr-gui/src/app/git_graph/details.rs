@@ -75,7 +75,7 @@ impl Condr {
         current: Option<&str>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let column = |header: Option<SharedString>, body: AnyElement, cx: &App| {
+        let column = |header: Option<AnyElement>, body: AnyElement, cx: &App| {
             v_flex()
                 .size_full()
                 .border_l_1()
@@ -122,10 +122,16 @@ impl Condr {
             Some(Ok(details)) => details,
         };
         let branches = resources.commit_branches.get(&slot);
-        let header = t!(
-            "git_history.changed_files",
-            count = details.changes.entries.len()
-        );
+        let header = h_flex()
+            .w_full()
+            .items_center()
+            .child(div().flex_1().truncate().child(t!(
+                "git_history.changed_files",
+                count = details.changes.entries.len()
+            )))
+            .child(self.git_graph_fold_button(key, pane_id, details, false, cx))
+            .child(self.git_graph_fold_button(key, pane_id, details, true, cx))
+            .into_any_element();
         let body = v_resizable(SharedString::from(format!(
             "git-graph-commit-{}",
             pane_id.as_u64()
@@ -137,7 +143,61 @@ impl Condr {
             self.render_git_graph_details(view, key, pane_id, details, refs, current, branches, cx),
         ))
         .into_any_element();
-        column(Some(header.into()), body, cx)
+        column(Some(header), body, cx)
+    }
+
+    /// Expand All, or with `fold` Collapse All, for the commit's file tree, as IntelliJ has
+    /// them over its Changes.
+    fn git_graph_fold_button(
+        &self,
+        key: ConnectionKey,
+        pane_id: PaneId,
+        details: &CommitDetails,
+        fold: bool,
+        cx: &mut Context<Self>,
+    ) -> Button {
+        let (id, icon, label) = if fold {
+            (
+                "git-graph-collapse-all",
+                Glyph::ChevronsDownUp,
+                t!("git_graph.collapse_all"),
+            )
+        } else {
+            (
+                "git-graph-expand-all",
+                Glyph::ChevronsUpDown,
+                t!("git_graph.expand_all"),
+            )
+        };
+        // Every directory the tree draws, unfolded, is one Collapse All folds.
+        let directories: Vec<RelativePathBuf> = if fold {
+            let entries: Vec<&GitChangeEntry> = details.changes.entries.iter().collect();
+            tree_rows(&entries, &[], |_| false)
+                .into_iter()
+                .filter_map(|row| match row {
+                    TreeRow::Directory { path, .. } => Some(path),
+                    TreeRow::File { .. } => None,
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let owner = cx.weak_entity();
+        Button::new(id)
+            .debug_selector(move || id.into())
+            .ghost()
+            .xsmall()
+            .icon(Icon::new(icon))
+            .tooltip(label.clone())
+            .accessibility_label(label)
+            .on_click(move |_, _, cx| {
+                let _ = owner.update(cx, |this, cx| {
+                    if let Some(view) = this.git_graph.views.get_mut(&(key, pane_id)) {
+                        view.collapsed_dirs = directories.iter().cloned().collect();
+                        cx.notify();
+                    }
+                });
+            })
     }
 
     /// The files the commit changed, as Git History draws them, each folder counting its

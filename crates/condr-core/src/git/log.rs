@@ -16,14 +16,13 @@ impl GitRepository {
     /// Graph walks, in `git rev-list --date-order`'s order, no parent before all its
     /// children, which first visits everything the tips reach (ADR 0079). A first page walks
     /// from `start` and returns where it started; a later one names those commits in `from`,
-    /// so it stays put while refs move. With `text`, only the commits whose message holds
-    /// it, ignoring case, or whose id starts with one of its words of 7 to 64 hex digits, as
-    /// IntelliJ's log filters. Each page walks again from the start.
+    /// so it stays put while refs move. Only the commits `filter` keeps count. Each page
+    /// walks again from the start.
     pub fn log(
         &self,
         from: &[String],
         start: &LogStart,
-        text: Option<&str>,
+        filter: &LogFilter,
         skip: u32,
         limit: u32,
     ) -> Result<GitLog, GitError> {
@@ -88,14 +87,21 @@ impl GitRepository {
         } else {
             Box::new(date_order(&repo, tips)?)
         };
-        let filter = text.map(TextFilter::new);
+        let text = filter.text.as_deref().map(TextFilter::new);
         let mut skipped = 0;
         for walked in walk {
             let (id, parents) = walked?;
             let commit = repo.find_commit(id).map_err(git_error)?;
-            if let Some(filter) = &filter
-                && !filter.matches(&id, &commit)
-            {
+            let author = commit.author().map_err(git_error)?;
+            let time = author.time().map_err(git_error)?.seconds;
+            let kept = text.as_ref().is_none_or(|text| text.matches(&id, &commit))
+                && filter
+                    .author
+                    .as_deref()
+                    .is_none_or(|email| author.email.eq_ignore_ascii_case(email.as_bytes()))
+                && filter.since.is_none_or(|since| time >= since)
+                && filter.until.is_none_or(|until| time <= until);
+            if !kept {
                 continue;
             }
             if skipped < skip {
@@ -106,13 +112,12 @@ impl GitRepository {
                 log.more = true;
                 break;
             }
-            let author = commit.author().map_err(git_error)?;
             let committer = commit.committer().map_err(git_error)?;
             log.commits.push(CommitSummary {
                 id: id.to_string(),
                 subject: commit.message().map_err(git_error)?.summary().to_string(),
                 author: author.name.to_string(),
-                time: author.time().map_err(git_error)?.seconds,
+                time,
                 parents: parents.iter().map(ToString::to_string).collect(),
                 author_email: author.email.to_string(),
                 committer_differs: author.name != committer.name || author.email != committer.email,

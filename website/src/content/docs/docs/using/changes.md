@@ -56,19 +56,24 @@ Git History only reads the repository: it does not check out, revert or create c
 
 Click the graph button in Git History's header, or choose **Open Git Graph** in the Command Palette, to open **Git Graph**: the Workspace's commits on every branch and tag, laid out as IntelliJ IDEA's Git log lays them out.
 
-- **Branches** on the left: `HEAD`, then Local, Remote with each remote, and Tags, with names like `feat/search` grouped into folders. Type in the field above to find one. Double-click a branch to show only its commits; the filter above the commits names it, and its clear button shows every branch again.
-- **Commits** in the middle, with the graph of how branches fork and merge drawn beside each subject, the branches and tags at each commit, the author, the date and the short ID. Merge commits are grey and your own commits bold. Scroll down and the next commits load. Type in **Text or hash** and press Enter to keep only the commits whose message holds the text, or whose ID starts with a hash of seven digits or more.
-- **The selected commit** on the right: the files it changed above its message, its author and when, who committed it if someone else did, its branches and tags, and every branch it is on. Double-click a file to open it in the Diff Pane as that commit changed it.
+- **Branches** on the left: `HEAD`, then Local, Remote with each remote, and Tags, with names like `feat/search` grouped into folders, folded but for the way to your current branch. Type in the field above to find one. Double-click a branch to show only its commits.
+- **Commits** in the middle, with the graph of how branches fork and merge drawn beside each subject, the branches and tags at each commit, the author, the date and the short ID. Merge commits are grey and your own commits bold. Scroll down and the next commits load. Above them, as in IntelliJ IDEA:
+  - **Text or hash**: press Enter to keep only the commits whose message holds the text, or whose ID starts with a hash of seven digits or more.
+  - **Branch** starts at `HEAD`, your current branch, and follows it when you check out another. Pick All, `HEAD` or any branch or tag from its menu, or clear it to see every branch.
+  - **User** keeps one author: you (**me**) or anyone in the commits loaded so far.
+  - **Date** keeps the last 24 hours, the last 7 days, or the days you **Select…** in a calendar.
+  - **Refresh** at the far end reloads the commits and branches.
+- **The selected commit** on the right: the files it changed, with **Expand All** and **Collapse All** above them, then its message, its author and when, who committed it if someone else did, its branches and tags, and every branch it is on. Double-click a file to open it in the Diff Pane as that commit changed it.
 - **Keys**: Up and Down move through the commits, Right goes to the parent and Left to the child, `Cmd + L` (`Ctrl + L`) jumps to the text filter, and `Cmd + D` (`Ctrl + D`) opens the selected file's diff. A commit's right-click menu copies its ID and goes to its parent or child.
 
-Git Graph reloads when `HEAD` or its upstream moves; click **Refresh** to pick up a branch fetched or committed elsewhere. Like Git History, it only reads.
+Opening Git Graph closes the right sidebar. It reloads when `HEAD` or its upstream moves; click **Refresh** to pick up a branch fetched or committed elsewhere. Like Git History, it only reads.
 
 ## Several repositories in one Workspace
 
 When a Workspace's folder holds repositories directly inside it, such as `api/` and `web/`, Condr shows each of them, beside the folder's own repository if it is one:
 
 - **Changes** lists every repository with changes as a row of its own inside the Conflicts, Tracked and Untracked groups, with how many files it holds there and its branch. A repository without changes is not listed.
-- **Git History** and **Git Graph** show one repository at a time; the menu in Git History's top row, and at the start of Git Graph's filters, names each repository's branch and switches between them.
+- **Git History** and **Git Graph** show one repository at a time; the menu in Git History's top row, and above Git Graph's branches, names each repository and switches between them.
 - **Files** grays out what each repository ignores.
 - The Workspace's row in the left sidebar shows the folder's own branch, or, when the folder is no repository, how many repositories it holds. A repository cloned into the folder appears on its own.
 

@@ -101,9 +101,11 @@ gpui_kit::assets::icon_assets!(
         // The right sidebar's strip of views (ADR 0076).
         FolderTree,
         GitCommitHorizontal,
-        // Git Graph's button and its tags (ADR 0079).
+        // Git Graph's button, its tags and its file tree's Expand All and Collapse All (ADR 0079).
         GitGraph,
         Tag,
+        ChevronsUpDown,
+        ChevronsDownUp,
     ]
 );
 

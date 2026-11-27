@@ -12,12 +12,68 @@ git_graph:
   branch_any:
     en: Branch
     zh-CN: 分支
-  branch_filter:
-    en: 'Branch: %{branch}'
-    zh-CN: '分支：%{branch}'
+  filter_value:
+    en: '%{name}: %{value}'
+    zh-CN: '%{name}：%{value}'
+  all:
+    en: All
+    zh-CN: 全部
   clear_branch:
     en: Show every branch
     zh-CN: 显示全部分支
+  user:
+    name:
+      en: User
+      zh-CN: 用户
+    me:
+      en: me
+      zh-CN: 我
+    clear:
+      en: Show every author
+      zh-CN: 显示所有作者
+  date:
+    name:
+      en: Date
+      zh-CN: 日期
+    last_day:
+      en: Last 24 hours
+      zh-CN: 最近 24 小时
+    last_week:
+      en: Last 7 days
+      zh-CN: 最近 7 天
+    select:
+      en: Select…
+      zh-CN: 选择…
+    days:
+      en: '%{first} – %{last}'
+      zh-CN: '%{first} – %{last}'
+    since:
+      en: 'since %{day}'
+      zh-CN: '%{day} 起'
+    until:
+      en: 'until %{day}'
+      zh-CN: '截至 %{day}'
+    title:
+      en: Select Dates
+      zh-CN: 选择日期
+    apply:
+      en: Apply
+      zh-CN: 应用
+    placeholder:
+      en: First day – last day
+      zh-CN: 开始日期 – 结束日期
+    pick:
+      en: Pick a day
+      zh-CN: 请选择日期
+    clear:
+      en: Show every date
+      zh-CN: 显示所有日期
+  expand_all:
+    en: Expand All
+    zh-CN: 全部展开
+  collapse_all:
+    en: Collapse All
+    zh-CN: 全部收起
   no_matches:
     en: No commits match
     zh-CN: 没有匹配的提交

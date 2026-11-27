@@ -806,7 +806,7 @@ pub(super) fn handle_client(
                 workspace_id,
                 from,
                 start,
-                text,
+                filter,
                 skip,
                 limit,
                 repository,
@@ -829,7 +829,7 @@ pub(super) fn handle_client(
                             );
                             repository.and_then(|repository| {
                                 repository
-                                    .log(&from, &start, text.as_deref(), skip, limit)
+                                    .log(&from, &start, &filter, skip, limit)
                                     .map_err(|error| error.to_string())
                             })
                         },

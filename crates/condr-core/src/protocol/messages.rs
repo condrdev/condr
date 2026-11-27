@@ -85,9 +85,9 @@ pub enum ClientMessage {
     },
     /// A page of a Workspace's log (ADR 0046, ADR 0079): up to `limit` commits after skipping
     /// `skip`, walking from `from` once a first page named it, else from `start`, only those
-    /// `text` matches. Answered with [`ServerMessage::GitLog`]. Only a Server that reports
+    /// `filter` keeps. Answered with [`ServerMessage::GitLog`]. Only a Server that reports
     /// [`WorkspaceGitSnapshot::head`] knows it, and one older than ADR 0079 walks from
-    /// `HEAD` whatever `start` and `text` say.
+    /// `HEAD` whatever `start` and `filter` say.
     GitLog {
         server_id: ServerId,
         session_id: SessionId,
@@ -95,7 +95,7 @@ pub enum ClientMessage {
         workspace_id: WorkspaceId,
         from: Vec<String>,
         start: crate::LogStart,
-        text: Option<String>,
+        filter: crate::LogFilter,
         skip: u32,
         limit: u32,
         /// [`RepositoryGitSnapshot::directory`]: which repository (ADR 0073).

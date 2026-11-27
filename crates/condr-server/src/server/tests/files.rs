@@ -291,7 +291,7 @@ fn the_repository_a_path_or_a_git_history_request_names_answers() {
             workspace_id,
             from: Vec::new(),
             start: condr_core::LogStart::All,
-            text: None,
+            filter: condr_core::LogFilter::default(),
             skip: 0,
             limit: 10,
             repository: repository.into(),

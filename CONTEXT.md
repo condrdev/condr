@@ -119,7 +119,7 @@ The third view of the right sidebar, for a Workspace inside a repository or abov
 _Avoid_: History, Log, commit list
 
 **Git Graph**:
-The viewer Pane that shows a Workspace's commits on every branch and tag as IntelliJ's log does (ADR 0079): the branch tree, the commits with their graph, ref labels, author, date and id under a text and a branch filter, and the selected commit's files above its details. Opened from Git History's header or the Command Palette; at most one per Workspace. The Session holds only that it exists; its filters and selection are each Client's own. It only reads.
+The viewer Pane that shows a Workspace's commits on every branch and tag as IntelliJ's log does (ADR 0079): the branch tree, the commits with their graph, ref labels, author, date and id under text, branch (`HEAD` until another is picked), user and date filters, and the selected commit's files above its details. Opened from Git History's header or the Command Palette; at most one per Workspace. The Session holds only that it exists; its filters and selection are each Client's own. It only reads.
 _Avoid_: Log, History Tab, Git Graph Tab
 
 **Unsupported Pane**:

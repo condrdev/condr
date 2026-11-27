@@ -10,8 +10,8 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use condr_core::{
-    DiffLineKind, FileDiffContent, GitChangeStatus, GitDiffStat, LogStart, MAX_DIFF_BYTES, OldFile,
-    discover_repository, workspace_repositories,
+    DiffLineKind, FileDiffContent, GitChangeStatus, GitDiffStat, LogFilter, LogStart,
+    MAX_DIFF_BYTES, OldFile, discover_repository, workspace_repositories,
 };
 
 static NEXT_REPO: AtomicU64 = AtomicU64::new(0);
@@ -919,7 +919,9 @@ fn git_log_pages_from_a_fixed_commit_while_head_moves() {
     let repository = discover_repository(&root).unwrap().unwrap();
     assert_eq!(repository.head(), None, "an unborn HEAD names no commit");
     assert_eq!(
-        repository.log(&[], &LogStart::Head, None, 0, 10).unwrap(),
+        repository
+            .log(&[], &LogStart::Head, &LogFilter::default(), 0, 10)
+            .unwrap(),
         condr_core::GitLog::default()
     );
 
@@ -943,7 +945,9 @@ fn git_log_pages_from_a_fixed_commit_while_head_moves() {
             .collect::<Vec<_>>()
     };
 
-    let first = repository.log(&[], &LogStart::Head, None, 0, 2).unwrap();
+    let first = repository
+        .log(&[], &LogStart::Head, &LogFilter::default(), 0, 2)
+        .unwrap();
     assert_eq!(first.from, std::slice::from_ref(&head));
     assert_eq!(subjects(&first), ["fifth", "fourth"]);
     assert!(first.more);
@@ -954,11 +958,11 @@ fn git_log_pages_from_a_fixed_commit_while_head_moves() {
     fs::write(root.join("log.txt"), "sixth\n").unwrap();
     commit_all_at(&root, "sixth", 1_010);
     let second = repository
-        .log(&first.from, &LogStart::Head, None, 2, 2)
+        .log(&first.from, &LogStart::Head, &LogFilter::default(), 2, 2)
         .unwrap();
     assert_eq!(subjects(&second), ["third", "second"]);
     let last = repository
-        .log(&first.from, &LogStart::Head, None, 4, 2)
+        .log(&first.from, &LogStart::Head, &LogFilter::default(), 4, 2)
         .unwrap();
     assert_eq!(subjects(&last), ["first"]);
     assert!(!last.more);
@@ -967,7 +971,7 @@ fn git_log_pages_from_a_fixed_commit_while_head_moves() {
             &discover_repository(&root)
                 .unwrap()
                 .unwrap()
-                .log(&[], &LogStart::Head, None, 0, 1)
+                .log(&[], &LogStart::Head, &LogFilter::default(), 0, 1)
                 .unwrap()
         ),
         ["sixth"]
@@ -1019,8 +1023,14 @@ fn git_graph_walks_every_ref_in_date_order_and_marks_what_head_reaches() {
             .map(|commit| commit.subject.clone())
             .collect::<Vec<_>>()
     };
+    let text = |text: &str| LogFilter {
+        text: Some(text.into()),
+        ..LogFilter::default()
+    };
 
-    let all = repository.log(&[], &LogStart::All, None, 0, 10).unwrap();
+    let all = repository
+        .log(&[], &LogStart::All, &LogFilter::default(), 0, 10)
+        .unwrap();
     assert_eq!(subjects(&all), ["main work", "feature work", "root"]);
     assert_eq!(all.commits[0].parents, [all.commits[2].id.clone()]);
     assert!(all.commits[0].committer_differs);
@@ -1055,7 +1065,13 @@ fn git_graph_walks_every_ref_in_date_order_and_marks_what_head_reaches() {
     );
 
     let head = repository
-        .log(&[], &LogStart::Ref("HEAD".into()), None, 0, 10)
+        .log(
+            &[],
+            &LogStart::Ref("HEAD".into()),
+            &LogFilter::default(),
+            0,
+            10,
+        )
         .unwrap();
     assert_eq!(subjects(&head), ["main work", "root"]);
     assert!(
@@ -1066,7 +1082,7 @@ fn git_graph_walks_every_ref_in_date_order_and_marks_what_head_reaches() {
         .log(
             &[],
             &LogStart::Ref("refs/heads/feature".into()),
-            None,
+            &LogFilter::default(),
             0,
             10,
         )
@@ -1076,18 +1092,44 @@ fn git_graph_walks_every_ref_in_date_order_and_marks_what_head_reaches() {
 
     // The text matches the whole message, ignoring case, or an id by its prefix.
     let parser = repository
-        .log(&[], &LogStart::All, Some("parser"), 0, 10)
+        .log(&[], &LogStart::All, &text("parser"), 0, 10)
         .unwrap();
     assert_eq!(subjects(&parser), ["main work"]);
     let prefix = all.commits[2].id[..7].to_owned();
     let by_id = repository
-        .log(&[], &LogStart::All, Some(&prefix), 0, 10)
+        .log(&[], &LogStart::All, &text(&prefix), 0, 10)
         .unwrap();
     assert_eq!(subjects(&by_id), ["root"]);
     let short = repository
-        .log(&[], &LogStart::All, Some(&all.commits[2].id[..6]), 0, 10)
+        .log(&[], &LogStart::All, &text(&all.commits[2].id[..6]), 0, 10)
         .unwrap();
     assert!(short.commits.is_empty(), "six digits are not an id");
+
+    // The author by email, ignoring case; the committer does not count. Times are the
+    // author's, both ends kept.
+    let by =
+        |filter: LogFilter| subjects(&repository.log(&[], &LogStart::All, &filter, 0, 10).unwrap());
+    let author = |email: &str| LogFilter {
+        author: Some(email.into()),
+        ..LogFilter::default()
+    };
+    assert_eq!(by(author("CONDR@example.com")).len(), 3);
+    assert!(by(author("grace@example.com")).is_empty());
+    assert_eq!(
+        by(LogFilter {
+            since: Some(1_000),
+            ..LogFilter::default()
+        }),
+        ["main work", "root"]
+    );
+    assert_eq!(
+        by(LogFilter {
+            since: Some(900),
+            until: Some(1_000),
+            ..LogFilter::default()
+        }),
+        ["feature work", "root"]
+    );
 
     let mut branches = repository.commit_branches(&all.commits[2].id).unwrap();
     branches.sort_unstable();

@@ -179,6 +179,11 @@ message GitLogRequest {
   optional string ref = 10;
   // Only commits whose message holds it, or whose id a word of it starts.
   optional string text = 11;
+  // Only commits by the author with this email, and authored in this span, in seconds
+  // since the Unix epoch, both ends kept.
+  optional string author = 12;
+  optional int64 since = 13;
+  optional int64 until = 14;
 }
 
 // The local and remote branches that reach a commit (ADR 0079).
