@@ -462,6 +462,7 @@ message LayoutCommand {
     ShowViewer show_viewer = 27;
     MoveTabInto move_tab_into = 28;
     PaneTarget move_pane_to_new_tab = 29;
+    MoveTabBeside move_tab_beside = 30;
   }
   // 0.2's `show_diff` and `show_file`, which `show_viewer` replaced (ADR 0078).
   reserved 24, 25;
@@ -482,6 +483,13 @@ message ShowViewer {
 message MoveTabInto {
   uint64 tab_id = 1;
   uint64 target_pane_id = 2;
+  PaneDirection side = 3;
+}
+
+// Puts all of a Tab beside all of another Tab of its Workspace (ADR 0078).
+message MoveTabBeside {
+  uint64 tab_id = 1;
+  uint64 other_tab_id = 2;
   PaneDirection side = 3;
 }
 

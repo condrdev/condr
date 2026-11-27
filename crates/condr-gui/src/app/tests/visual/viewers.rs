@@ -1,6 +1,6 @@
 use super::dock::create_workspace;
 use super::*;
-use gpui_kit::{Pixels, Point};
+use gpui_kit::{Bounds, Pixels, Point};
 
 /// A viewer opens in a Tab of its own; that Tab dragged from the strip onto a terminal's
 /// right edge merges beside it, and the viewer's header dragged back onto the strip makes
@@ -98,7 +98,9 @@ fn a_viewer_tab_merges_beside_a_terminal_and_its_header_leaves_for_a_tab() {
 }
 
 /// Two terminal Tabs: the second dragged from the strip onto the first's right edge
-/// becomes the right half of the first, and its Tab closes (ADR 0078).
+/// becomes the right half of the first, and its Tab closes. A third, shown, dragged onto
+/// its own Pane's right edge joins the Tab before it as IntelliJ's editor tabs do
+/// (ADR 0078).
 #[test]
 fn a_terminal_tab_dragged_onto_another_tabs_pane_merges_beside_it() {
     let _serial_guard = acquire_visual_test_lock();
@@ -156,18 +158,66 @@ fn a_terminal_tab_dragged_onto_another_tabs_pane_merges_beside_it() {
     let from = window
         .debug_bounds(leaked_selector(format!("tab-{}", second_tab.as_u64())))
         .unwrap();
-    window.simulate_mouse_down(from.center(), MouseButton::Left, Modifiers::default());
-    window.simulate_mouse_move(to, MouseButton::Left, Modifiers::default());
-    window.run_until_parked();
-    window.update(|window, cx| _ = window.draw(cx));
-    window.simulate_mouse_move(to, MouseButton::Left, Modifiers::default());
-    window.run_until_parked();
-    window.update(|window, cx| _ = window.draw(cx));
-    window.simulate_mouse_up(to, MouseButton::Left, Modifiers::default());
+    let drag = |window: &mut VisualTestContext, from: Bounds<Pixels>, to: Point<Pixels>| {
+        window.simulate_mouse_down(from.center(), MouseButton::Left, Modifiers::default());
+        window.simulate_mouse_move(to, MouseButton::Left, Modifiers::default());
+        window.run_until_parked();
+        window.update(|window, cx| _ = window.draw(cx));
+        window.simulate_mouse_move(to, MouseButton::Left, Modifiers::default());
+        window.run_until_parked();
+        window.update(|window, cx| _ = window.draw(cx));
+        window.simulate_mouse_up(to, MouseButton::Left, Modifiers::default());
+    };
+    drag(window, from, to);
     assert!(
         wait_until(window, |window| tabs(window)
             .is_some_and(|tabs| tabs == [(first_tab, 2)])),
         "the second Tab merged into the first: {:?}",
         tabs(window)
     );
+
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.send_layout(LayoutCommand::CreateTab {
+                name: None,
+                cwd_from: None,
+                workspace_id,
+            });
+        });
+    });
+    assert!(wait_until(window, |window| tabs(window)
+        .is_some_and(|tabs| tabs.len() == 2)));
+    let third_tab = tabs(window).unwrap()[1].0;
+    assert!(wait_until(window, |window| window.read(|app| {
+        view.read(app)
+            .main_view()
+            .dock_surface
+            .map(|surface| surface.tab_id)
+            == Some(third_tab)
+    })));
+    let third = window.read(|app| {
+        let session = view.read(app).active_session().unwrap();
+        session.tab(third_tab).unwrap().focused_pane().unwrap().id()
+    });
+    window.update(|window, cx| _ = window.draw(cx));
+    let body = window
+        .debug_bounds(leaked_selector(format!("terminal-pane-{}", third.as_u64())))
+        .expect("the shown Tab's terminal renders");
+    let from = window
+        .debug_bounds(leaked_selector(format!("tab-{}", third_tab.as_u64())))
+        .unwrap();
+    drag(window, from, point(body.right() - px(10.), body.center().y));
+    assert!(
+        wait_until(window, |window| tabs(window)
+            .is_some_and(|tabs| tabs == [(first_tab, 3)])),
+        "the shown Tab joined the one before it: {:?}",
+        tabs(window)
+    );
+    let rects = window.read(|app| {
+        let session = view.read(app).active_session().unwrap();
+        session.tab(first_tab).unwrap().pane_rects()
+    });
+    let rect = |id| *rects.iter().find(|rect| rect.id == id).unwrap();
+    assert!(rect(terminal).right <= rect(third).left + 1e-6);
+    assert_eq!((rect(third).top, rect(third).bottom), (0., 1.));
 }

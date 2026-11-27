@@ -531,6 +531,13 @@ pub enum LayoutCommand {
     MovePaneToNewTab {
         pane_id: PaneId,
     },
+    /// Puts all of Tab `tab_id` beside all of Tab `other_tab_id` of its Workspace, and
+    /// closes it (ADR 0078).
+    MoveTabBeside {
+        tab_id: TabId,
+        other_tab_id: TabId,
+        side: PaneDirection,
+    },
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]

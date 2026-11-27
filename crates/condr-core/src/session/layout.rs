@@ -48,6 +48,30 @@ pub(super) fn split_layout_with(
     true
 }
 
+/// Makes all of `layout` one side of a split and `new` the other, on `side`.
+pub(super) fn split_root_with(
+    layout: &mut PaneLayout,
+    new: PaneLayout,
+    side: PaneDirection,
+    ratio: f32,
+) {
+    let direction = match side {
+        PaneDirection::Left | PaneDirection::Right => SplitDirection::Horizontal,
+        PaneDirection::Up | PaneDirection::Down => SplitDirection::Vertical,
+    };
+    let old = layout.clone();
+    let (first, second) = match side {
+        PaneDirection::Left | PaneDirection::Up => (new, old),
+        PaneDirection::Right | PaneDirection::Down => (old, new),
+    };
+    *layout = PaneLayout::Split {
+        direction,
+        ratio,
+        first: Box::new(first),
+        second: Box::new(second),
+    };
+}
+
 /// How deep a layout's deepest Pane sits, the layout itself being 1.
 pub(super) fn layout_depth(layout: &PaneLayout) -> usize {
     match layout {

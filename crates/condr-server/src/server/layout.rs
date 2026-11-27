@@ -758,6 +758,17 @@ pub(super) fn apply_layout_command(
                 );
             }
         }
+        LayoutCommand::MoveTabBeside {
+            tab_id,
+            other_tab_id,
+            side,
+        } => {
+            if !candidate.move_tab_beside(tab_id, other_tab_id, side) {
+                return Err(
+                    "the two Tabs must share a Workspace, be apart, and fit the layout".into(),
+                );
+            }
+        }
         LayoutCommand::MovePaneToNewTab { pane_id } => {
             let tab_id = candidate.move_pane_to_new_tab(pane_id).ok_or_else(|| {
                 "unknown Pane, a Tab's only Pane, or Session Tab limit reached".to_string()

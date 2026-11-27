@@ -1170,6 +1170,15 @@ impl TryFrom<&LayoutCommand> for super::LayoutCommand {
             LayoutCommand::MovePaneToNewTab { pane_id } => {
                 Command::MovePaneToNewTab(pane_target(pane_id))
             }
+            LayoutCommand::MoveTabBeside {
+                tab_id,
+                other_tab_id,
+                side,
+            } => Command::MoveTabBeside(super::MoveTabBeside {
+                tab_id: tab_id.as_u64(),
+                other_tab_id: other_tab_id.as_u64(),
+                side: direction(side),
+            }),
         };
         Ok(Self {
             command: Some(command),
@@ -1296,6 +1305,11 @@ impl TryFrom<super::LayoutCommand> for LayoutCommand {
             },
             Command::MovePaneToNewTab(target) => Self::MovePaneToNewTab {
                 pane_id: pane(target.pane_id),
+            },
+            Command::MoveTabBeside(target) => Self::MoveTabBeside {
+                tab_id: tab(target.tab_id),
+                other_tab_id: tab(target.other_tab_id),
+                side: pane_direction(target.side)?,
             },
         })
     }

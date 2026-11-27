@@ -261,7 +261,7 @@ impl Session {
         };
         let moved = TabLayout::single(pane);
         let (_, to_ix, _) = self.find_pane(target).expect("the target stays");
-        self.attach_layout(workspace_ix, to_ix, target, moved, side)
+        self.attach_layout(workspace_ix, to_ix, Some(target), moved, side)
     }
 
     /// Puts all of Tab `tab_id` beside `target`, a Pane of another Tab of its Workspace, as
@@ -287,7 +287,30 @@ impl Session {
         }
         let moved = self.workspaces[workspace_ix].tabs.remove(from_ix).layout;
         let (_, to_ix, _) = self.find_pane(target).expect("the target stays");
-        self.attach_layout(workspace_ix, to_ix, target, moved, side)
+        self.attach_layout(workspace_ix, to_ix, Some(target), moved, side)
+    }
+
+    /// Puts all of Tab `tab_id` beside all of Tab `other` of its Workspace, as one side of
+    /// a split, and closes it: the shown Tab dropped on its own edge joins its neighbour,
+    /// as an editor tab dropped on its own edge does in IntelliJ (ADR 0078).
+    pub fn move_tab_beside(&mut self, tab_id: TabId, other: TabId, side: PaneDirection) -> bool {
+        let Some(workspace_ix) = self.workspaces.iter().position(|workspace| {
+            workspace.tabs.iter().any(|tab| tab.id == tab_id)
+                && workspace.tabs.iter().any(|tab| tab.id == other)
+        }) else {
+            return false;
+        };
+        let tabs = &self.workspaces[workspace_ix].tabs;
+        let from_ix = tabs.iter().position(|tab| tab.id == tab_id).expect("found");
+        let to_ix = tabs.iter().position(|tab| tab.id == other).expect("found");
+        let depth = layout_depth(&tabs[from_ix].layout.layout)
+            .max(layout_depth(&tabs[to_ix].layout.layout));
+        if from_ix == to_ix || depth + 1 > MAX_SNAPSHOT_LAYOUT_DEPTH {
+            return false;
+        }
+        let moved = self.workspaces[workspace_ix].tabs.remove(from_ix).layout;
+        let to_ix = if from_ix < to_ix { to_ix - 1 } else { to_ix };
+        self.attach_layout(workspace_ix, to_ix, None, moved, side)
     }
 
     /// Makes `pane_id` a Tab of its own, right after the one it leaves; `None` for a Tab's
@@ -355,17 +378,23 @@ impl Session {
     }
 
     /// Splits `target` in Tab `tab_ix` with `moved` on `side`, which takes the focus.
+    /// Splits Tab `tab_ix` with `moved` beside `target`, or beside all of it for `None`.
     fn attach_layout(
         &mut self,
         workspace_ix: usize,
         tab_ix: usize,
-        target: PaneId,
+        target: Option<PaneId>,
         moved: TabLayout,
         side: PaneDirection,
     ) -> bool {
         let tab = &mut self.workspaces[workspace_ix].tabs[tab_ix].layout;
-        if !split_layout_with(&mut tab.layout, target, moved.layout, side, 0.5) {
-            return false;
+        match target {
+            Some(target) => {
+                if !split_layout_with(&mut tab.layout, target, moved.layout, side, 0.5) {
+                    return false;
+                }
+            }
+            None => split_root_with(&mut tab.layout, moved.layout, side, 0.5),
         }
         let previous = tab.focused_pane;
         tab.focus_history.retain(|id| *id != previous);

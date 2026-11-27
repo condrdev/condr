@@ -1155,6 +1155,20 @@ fn panes_move_across_tabs_and_tabs_merge_into_each_other() {
     assert!(rect(diff_pane).bottom <= rect(graph).top + 1e-6);
     let only = tabs[0].id();
     assert!(!session.move_tab_into(only, terminal, PaneDirection::Left));
+    assert!(!session.move_tab_beside(only, only, PaneDirection::Right));
+
+    // A Tab beside another goes beside all of it, whatever its splits.
+    let beside = session.move_pane_to_new_tab(graph).unwrap();
+    assert!(session.move_tab_beside(beside, only, PaneDirection::Right));
+    let tabs = session.workspaces()[0].tabs();
+    assert_eq!(tabs.len(), 1);
+    assert_eq!(tabs[0].focused_pane().unwrap().id(), graph);
+    let rects = tabs[0].pane_rects();
+    let rect = |id| *rects.iter().find(|rect| rect.id == id).unwrap();
+    for pane in [diff_pane, terminal] {
+        assert!(rect(pane).right <= rect(graph).left + 1e-6);
+    }
+    assert!((rect(graph).top, rect(graph).bottom) == (0., 1.));
     assert!(Session::restore(session.snapshot()).is_ok());
 }
 

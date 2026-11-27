@@ -1296,6 +1296,11 @@ fn viewer_and_cross_tab_layout_commands_round_trip() {
         LayoutCommand::MovePaneToNewTab {
             pane_id: crate::PaneId::from_u64(6),
         },
+        LayoutCommand::MoveTabBeside {
+            tab_id: crate::TabId::from_u64(7),
+            other_tab_id: crate::TabId::from_u64(8),
+            side: crate::PaneDirection::Right,
+        },
     ] {
         let encoded = super::LayoutCommand::try_from(&command).unwrap();
         assert_eq!(LayoutCommand::try_from(encoded).unwrap(), command);

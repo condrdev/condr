@@ -587,18 +587,31 @@ impl Condr {
             gpui_kit::base::Placement::Top => PaneDirection::Up,
             gpui_kit::base::Placement::Bottom => PaneDirection::Down,
         };
-        // Another Tab, dragged from the strip, merges beside the Pane; the centre puts it
-        // to the right (ADR 0078).
+        // Another Tab, dragged from the strip, merges beside the Pane; the shown Tab
+        // dropped on its own Panes joins the Tab closing it would show, as IntelliJ's
+        // editor tab dropped on its own edge does. The centre puts it to the right
+        // (ADR 0078).
         if let Some(tab) = item.value().downcast_ref::<super::workspace::DraggedTab>() {
-            if tab.key == key && tab.tab_id != surface_key.tab_id {
-                self.send_layout_to(
-                    key,
-                    LayoutCommand::MoveTabInto {
+            if tab.key != key {
+                return;
+            }
+            let side = placement.map_or(PaneDirection::Right, side);
+            let command = if tab.tab_id != surface_key.tab_id {
+                Some(LayoutCommand::MoveTabInto {
+                    tab_id: tab.tab_id,
+                    target_pane_id: target_pane,
+                    side,
+                })
+            } else {
+                self.tab_closing_shows(key, tab.workspace_id, tab.tab_id)
+                    .map(|other_tab_id| LayoutCommand::MoveTabBeside {
                         tab_id: tab.tab_id,
-                        target_pane_id: target_pane,
-                        side: placement.map_or(PaneDirection::Right, side),
-                    },
-                );
+                        other_tab_id,
+                        side,
+                    })
+            };
+            if let Some(command) = command {
+                self.send_layout_to(key, command);
             }
             return;
         }
@@ -628,6 +641,25 @@ impl Condr {
             },
         };
         self.send_layout_to(key, command);
+    }
+
+    /// The Tab shown once `tab_id` closes: the one after it, else the one before, as
+    /// `ServerConnection` moves a View off a Tab that went.
+    fn tab_closing_shows(
+        &self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        tab_id: TabId,
+    ) -> Option<TabId> {
+        let tabs = self
+            .connection(key)?
+            .session()?
+            .workspace(workspace_id)?
+            .tabs();
+        let ix = tabs.iter().position(|tab| tab.id() == tab_id)?;
+        tabs.get(ix + 1)
+            .or(ix.checked_sub(1).and_then(|before| tabs.get(before)))
+            .map(Tab::id)
     }
 
     /// The Pane a Dock tab group shows: every group here holds exactly one Panel.
