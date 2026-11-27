@@ -57,7 +57,7 @@ Git History only reads the repository: it does not check out, revert or create c
 Click the graph button in Git History's header, or choose **Open Git Graph** in the Command Palette, to open **Git Graph**: the Workspace's commits on every branch and tag, laid out as IntelliJ IDEA's Git log lays them out.
 
 - **Branches** on the left: `HEAD`, then Local, Remote with each remote, and Tags, with names like `feat/search` grouped into folders, folded but for the way to your current branch. Type in the field above to find one. Double-click a branch to show only its commits.
-- **Commits** in the middle, with the graph of how branches fork and merge drawn beside each subject, the branches and tags at each commit, the author, the date and the short ID. Merge commits are grey and your own commits bold. Scroll down and the next commits load. Above them, as in IntelliJ IDEA:
+- **Commits** in the middle, with the graph of how branches fork and merge drawn beside each subject, the branches and tags at each commit, the author, the date and the short ID. Merge commits are grey. Scroll down and the next commits load. Above them, as in IntelliJ IDEA:
   - **Text or hash**: press Enter to keep only the commits whose message holds the text, or whose ID starts with a hash of seven digits or more.
   - **Branch** starts at `HEAD`, your current branch, and follows it when you check out another. Pick All, `HEAD` or any branch or tag from its menu, or clear it to see every branch.
   - **User** keeps one author: you (**me**) or anyone in the commits loaded so far.

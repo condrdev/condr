@@ -160,7 +160,7 @@ pub(in crate::app) struct CommitTable {
     pub(super) rows: Vec<CommitRow>,
     pub(super) more: bool,
     pub(super) loading: bool,
-    /// The repository's `user.email`, whose commits are bold.
+    /// The repository's `user.email`, the User filter's Me.
     pub(super) user_email: Option<String>,
     /// Everyone who authored a commit this view loaded, by lowercased email: their name
     /// and email, for the User filter.
@@ -259,10 +259,6 @@ impl TableDelegate for CommitTable {
         cx: &mut Context<TableState<Self>>,
     ) -> Stateful<Div> {
         let row = &self.rows[row_ix];
-        let own = self
-            .user_email
-            .as_deref()
-            .is_some_and(|email| email == row.commit.author_email);
         let theme = cx.theme();
         div()
             .id(("git-graph-row", row_ix))
@@ -284,7 +280,6 @@ impl TableDelegate for CommitTable {
             .when(row.commit.parents.len() > 1, |this| {
                 this.text_color(theme.muted_foreground)
             })
-            .when(own, |this| this.font_weight(FontWeight::BOLD))
     }
 
     fn render_td(
