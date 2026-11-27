@@ -88,6 +88,8 @@ pub enum TerminalScroll {
     PageDown,
     Top,
     Bottom,
+    /// The viewport's top row, counted from the top of the scrollback (ADR 0077).
+    Row(u32),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -119,4 +121,15 @@ pub enum TerminalCommand {
     Copy {
         selection: Option<TerminalSelection>,
     },
+    /// Sets the Pane's search; an empty needle ends it (ADR 0077).
+    Search(String),
+    /// Selects the search's next match and scrolls to it when it is off screen.
+    SearchStep(TerminalSearchStep),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum TerminalSearchStep {
+    /// Up from the prompt, into the history.
+    Older,
+    Newer,
 }

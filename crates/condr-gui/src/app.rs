@@ -191,6 +191,7 @@ actions!(
         SwapUp,
         SwapDown,
         ToggleZoom,
+        Find,
         ToggleSidebar,
         ToggleRightSidebar,
         ToggleTasks,

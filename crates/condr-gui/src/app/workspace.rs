@@ -1040,6 +1040,7 @@ impl Render for Condr {
             .on_action(cx.listener(Self::action_swap_up))
             .on_action(cx.listener(Self::action_swap_down))
             .on_action(cx.listener(Self::action_toggle_zoom))
+            .on_action(cx.listener(Self::action_find))
             .on_action(cx.listener(Self::action_toggle_sidebar))
             .on_action(cx.listener(Self::action_toggle_right_sidebar))
             .on_action(cx.listener(Self::action_toggle_tasks))

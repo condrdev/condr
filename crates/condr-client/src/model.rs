@@ -359,6 +359,8 @@ mod tests {
                 revision,
                 size: TerminalSize::new(1, 1),
                 display_offset: 0,
+                history_rows: 0,
+                search: Default::default(),
                 mouse_tracking: TerminalMouseTracking::None,
                 cells: vec![cell()],
                 cursor: None,
@@ -375,6 +377,8 @@ mod tests {
                 base_revision,
                 revision,
                 display_offset: 0,
+                history_rows: 0,
+                search: None,
                 mouse_tracking: TerminalMouseTracking::None,
                 cursor: None,
                 runs: vec![TerminalCellRun {

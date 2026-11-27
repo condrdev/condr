@@ -217,6 +217,9 @@ pub struct TerminalView {
     pub revision: u64,
     pub size: TerminalSize,
     pub display_offset: u32,
+    /// Scrollback rows above the active area; with `display_offset` and the row count
+    /// they place a scrollbar (ADR 0077).
+    pub history_rows: u32,
     pub mouse_tracking: TerminalMouseTracking,
     pub cells: Vec<TerminalCell>,
     pub cursor: Option<TerminalCursor>,
@@ -225,6 +228,30 @@ pub struct TerminalView {
     pub selection: Option<TerminalSelection>,
     /// The kitty graphics images in the viewport, in the order to draw them.
     pub images: Vec<TerminalImagePlacement>,
+    pub search: TerminalSearch,
+}
+
+/// A Pane's search as its frames show it (ADR 0077); the default, without a needle, is
+/// no search.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct TerminalSearch {
+    pub needle: String,
+    /// Matches found so far on the screen shown.
+    pub total: u32,
+    /// The selected match's place, counted from the newest, which is 0.
+    pub selected: Option<u32>,
+    /// Caught up with the terminal.
+    pub complete: bool,
+    /// The matches on the viewport, and the selected one when it is there, each clipped
+    /// to the viewport as the selection is.
+    pub matches: Vec<TerminalSelection>,
+    pub selected_match: Option<TerminalSelection>,
+}
+
+impl TerminalSearch {
+    pub fn is_active(&self) -> bool {
+        !self.needle.is_empty()
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -238,12 +265,15 @@ pub struct TerminalViewDelta {
     pub base_revision: u64,
     pub revision: u64,
     pub display_offset: u32,
+    pub history_rows: u32,
     pub mouse_tracking: TerminalMouseTracking,
     pub cursor: Option<TerminalCursor>,
     pub selection: Option<TerminalSelection>,
     pub runs: Vec<TerminalCellRun>,
     /// The whole list when it changed, `None` when it did not.
     pub images: Option<Vec<TerminalImagePlacement>>,
+    /// The whole search when it changed, `None` when it did not.
+    pub search: Option<TerminalSearch>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -319,11 +349,14 @@ impl TerminalView {
         }
 
         let images_changed = previous.images != current.images;
+        let search_changed = previous.search != current.search;
         let metadata_changed = previous.display_offset != current.display_offset
+            || previous.history_rows != current.history_rows
             || previous.mouse_tracking != current.mouse_tracking
             || previous.cursor != current.cursor
             || previous.selection != current.selection
-            || images_changed;
+            || images_changed
+            || search_changed;
         if changed_cells == 0 && !metadata_changed {
             return None;
         }
@@ -335,11 +368,13 @@ impl TerminalView {
             base_revision: previous.revision,
             revision: current.revision,
             display_offset: current.display_offset,
+            history_rows: current.history_rows,
             mouse_tracking: current.mouse_tracking,
             cursor: current.cursor,
             selection: current.selection,
             runs,
             images: images_changed.then(|| current.images.clone()),
+            search: search_changed.then(|| current.search.clone()),
         }))
     }
 
@@ -403,11 +438,15 @@ impl TerminalView {
         }
         self.revision = delta.revision;
         self.display_offset = delta.display_offset;
+        self.history_rows = delta.history_rows;
         self.mouse_tracking = delta.mouse_tracking;
         self.cursor = delta.cursor;
         self.selection = delta.selection;
         if let Some(images) = &delta.images {
             self.images.clone_from(images);
+        }
+        if let Some(search) = &delta.search {
+            self.search.clone_from(search);
         }
     }
 }

@@ -58,6 +58,12 @@ pub struct GhosttyRenderStateImageIteratorImpl {
 pub type GhosttyRenderStateImageIterator = *mut GhosttyRenderStateImageIteratorImpl;
 #[repr(C)]
 #[derive(Debug)]
+pub struct GhosttySearchImpl {
+    _unused: [u8; 0],
+}
+pub type GhosttySearch = *mut GhosttySearchImpl;
+#[repr(C)]
+#[derive(Debug)]
 pub struct GhosttyFormatterImpl {
     _unused: [u8; 0],
 }
@@ -559,6 +565,25 @@ const _: () = {
         [::std::mem::offset_of!(GhosttySelection, end) - 32usize];
     ["Offset of field: GhosttySelection::rectangle"]
         [::std::mem::offset_of!(GhosttySelection, rectangle) - 56usize];
+};
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct GhosttySelectionBuffer {
+    pub ptr: *mut GhosttySelection,
+    pub cap: usize,
+    pub len: usize,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of GhosttySelectionBuffer"][::std::mem::size_of::<GhosttySelectionBuffer>() - 24usize];
+    ["Alignment of GhosttySelectionBuffer"]
+        [::std::mem::align_of::<GhosttySelectionBuffer>() - 8usize];
+    ["Offset of field: GhosttySelectionBuffer::ptr"]
+        [::std::mem::offset_of!(GhosttySelectionBuffer, ptr) - 0usize];
+    ["Offset of field: GhosttySelectionBuffer::cap"]
+        [::std::mem::offset_of!(GhosttySelectionBuffer, cap) - 8usize];
+    ["Offset of field: GhosttySelectionBuffer::len"]
+        [::std::mem::offset_of!(GhosttySelectionBuffer, len) - 16usize];
 };
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -1450,6 +1475,14 @@ unsafe extern "C" {
         terminal: GhosttyTerminal,
         point: GhosttyPoint,
         out_ref: *mut GhosttyGridRef,
+    ) -> GhosttyResult;
+}
+unsafe extern "C" {
+    pub fn ghostty_terminal_point_from_grid_ref(
+        terminal: GhosttyTerminal,
+        ref_: *const GhosttyGridRef,
+        tag: GhosttyPointTag,
+        out: *mut GhosttyPointCoordinate,
     ) -> GhosttyResult;
 }
 #[repr(C)]
@@ -2482,6 +2515,82 @@ unsafe extern "C" {
         buf: *mut ::std::os::raw::c_char,
         buf_len: usize,
         out_written: *mut usize,
+    ) -> GhosttyResult;
+}
+impl GhosttySearchStatus {
+    pub const GHOSTTY_SEARCH_STATUS_RUNNING: GhosttySearchStatus = GhosttySearchStatus(0);
+    pub const GHOSTTY_SEARCH_STATUS_FEED_REQUIRED: GhosttySearchStatus = GhosttySearchStatus(1);
+    pub const GHOSTTY_SEARCH_STATUS_COMPLETE: GhosttySearchStatus = GhosttySearchStatus(2);
+    pub const GHOSTTY_SEARCH_STATUS_MAX_VALUE: GhosttySearchStatus =
+        GhosttySearchStatus(2147483647);
+}
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub struct GhosttySearchStatus(pub ::std::os::raw::c_int);
+impl GhosttySearchScroll {
+    pub const GHOSTTY_SEARCH_SCROLL_IF_NEEDED: GhosttySearchScroll = GhosttySearchScroll(0);
+    pub const GHOSTTY_SEARCH_SCROLL_NONE: GhosttySearchScroll = GhosttySearchScroll(1);
+    pub const GHOSTTY_SEARCH_SCROLL_MAX_VALUE: GhosttySearchScroll =
+        GhosttySearchScroll(2147483647);
+}
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub struct GhosttySearchScroll(pub ::std::os::raw::c_int);
+impl GhosttySearchData {
+    pub const GHOSTTY_SEARCH_DATA_STATUS: GhosttySearchData = GhosttySearchData(0);
+    pub const GHOSTTY_SEARCH_DATA_NEEDLE: GhosttySearchData = GhosttySearchData(1);
+    pub const GHOSTTY_SEARCH_DATA_TOTAL_MATCHES: GhosttySearchData = GhosttySearchData(2);
+    pub const GHOSTTY_SEARCH_DATA_SELECTED_INDEX: GhosttySearchData = GhosttySearchData(3);
+    pub const GHOSTTY_SEARCH_DATA_SELECTED_MATCH: GhosttySearchData = GhosttySearchData(4);
+    pub const GHOSTTY_SEARCH_DATA_MATCHES: GhosttySearchData = GhosttySearchData(5);
+    pub const GHOSTTY_SEARCH_DATA_VIEWPORT_MATCHES: GhosttySearchData = GhosttySearchData(6);
+    pub const GHOSTTY_SEARCH_DATA_SELECT_SCROLL: GhosttySearchData = GhosttySearchData(7);
+    pub const GHOSTTY_SEARCH_DATA_MAX_VALUE: GhosttySearchData = GhosttySearchData(2147483647);
+}
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub struct GhosttySearchData(pub ::std::os::raw::c_int);
+impl GhosttySearchOption {
+    pub const GHOSTTY_SEARCH_OPT_NEEDLE: GhosttySearchOption = GhosttySearchOption(0);
+    pub const GHOSTTY_SEARCH_OPT_SELECT_NEXT: GhosttySearchOption = GhosttySearchOption(1);
+    pub const GHOSTTY_SEARCH_OPT_SELECT_PREV: GhosttySearchOption = GhosttySearchOption(2);
+    pub const GHOSTTY_SEARCH_OPT_SELECT_SCROLL: GhosttySearchOption = GhosttySearchOption(3);
+    pub const GHOSTTY_SEARCH_OPT_MAX_VALUE: GhosttySearchOption = GhosttySearchOption(2147483647);
+}
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub struct GhosttySearchOption(pub ::std::os::raw::c_int);
+unsafe extern "C" {
+    pub fn ghostty_search_new(
+        allocator: *const GhosttyAllocator,
+        out_search: *mut GhosttySearch,
+        terminal: GhosttyTerminal,
+    ) -> GhosttyResult;
+}
+unsafe extern "C" {
+    pub fn ghostty_search_free(search: GhosttySearch);
+}
+unsafe extern "C" {
+    pub fn ghostty_search_tick(
+        search: GhosttySearch,
+        out_status: *mut GhosttySearchStatus,
+    ) -> GhosttyResult;
+}
+unsafe extern "C" {
+    pub fn ghostty_search_feed(search: GhosttySearch) -> GhosttyResult;
+}
+unsafe extern "C" {
+    pub fn ghostty_search_set(
+        search: GhosttySearch,
+        option: GhosttySearchOption,
+        value: *const ::std::os::raw::c_void,
+    ) -> GhosttyResult;
+}
+unsafe extern "C" {
+    pub fn ghostty_search_get(
+        search: GhosttySearch,
+        data: GhosttySearchData,
+        value: *mut ::std::os::raw::c_void,
     ) -> GhosttyResult;
 }
 unsafe extern "C" {

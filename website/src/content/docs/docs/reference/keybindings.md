@@ -85,6 +85,7 @@ Every key combination not declared on this page passes through to the child proc
 
 | Action | macOS | Windows / Linux |
 | :--- | :--- | :--- |
+| Find in the Pane's history | `Cmd + F` | `Ctrl + Shift + F` |
 | Split horizontally (new Pane to the right) | `Cmd + D` | `Alt + Shift + =` |
 | Split vertically (new Pane below) | `Cmd + Shift + D` | `Alt + Shift + -` |
 | Close the current Pane | `Cmd + W` | `Ctrl + Shift + W` |
@@ -144,6 +145,8 @@ Every key combination not declared on this page passes through to the child proc
 | Jump to the previous / next shell prompt | `Cmd + ↑` / `Cmd + ↓` | `Ctrl + ↑` / `Ctrl + ↓` |
 | Scroll line by line | Mouse wheel | Mouse wheel |
 
+* **Scrollbar**: shows at the Pane's right edge once you scroll into the history, while a search is open, or when the pointer is over that edge; drag it to move through the history.
+* **Find**: `Cmd + F` (`Ctrl + Shift + F` on Windows and Linux) searches the whole history, see [Find in the terminal](/docs/using/workspaces/#find-in-the-terminal).
 * **Snap to bottom**: while you browse the scrollback, any key typed into the terminal jumps straight back to the newest line.
 * **Prompt jumps**: work while the shell waits at its prompt and needs [shell integration](/docs/using/preferences/#shell-integration). Anywhere else, such as inside vim, the keys go to the program.
 * **Alt screen mode (vim, less and the like)**: `Shift + PageUp / PageDown` pass through to the TUI program; the mouse wheel is translated into `↑` / `↓` arrow key events.

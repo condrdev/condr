@@ -127,7 +127,7 @@ toggle-zoom = []
 | Workspaces | `next-workspace`、`previous-workspace`、`new-workspace`、`rename-workspace`、`close-workspace` |
 | Agents | `next-agent`、`previous-agent` |
 | Tabs | `new-tab`、`next-tab`、`previous-tab`、`rename-tab`、`close-tab`、`go-to-tab-1` … `go-to-tab-9` |
-| Panes | `split-right`、`split-down`、`close-pane`、`toggle-zoom`、`focus-left`、`focus-right`、`focus-up`、`focus-down`、`resize-left`、`resize-right`、`resize-up`、`resize-down`、`swap-left`、`swap-right`、`swap-up`、`swap-down` |
+| Panes | `find`、`split-right`、`split-down`、`close-pane`、`toggle-zoom`、`focus-left`、`focus-right`、`focus-up`、`focus-down`、`resize-left`、`resize-right`、`resize-up`、`resize-down`、`swap-left`、`swap-right`、`swap-up`、`swap-down` |
 
 设备（Devices）组、Workspace 与 Tab 的重命名和关闭、新建 Workspace（New workspace）以及 Pane 的交换默认没有按键，需要时自己绑定。打开[命令面板](/zh-cn/docs/reference/keybindings/#命令面板)的双击 `Shift` 不在这张表里，不能修改。
 

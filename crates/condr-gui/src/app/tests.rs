@@ -98,6 +98,8 @@ fn terminal_view(revision: u64, text: &str) -> TerminalView {
         revision,
         size: TerminalSize::new(1, u16::try_from(cells.len()).unwrap()),
         display_offset: 0,
+        history_rows: 0,
+        search: Default::default(),
         mouse_tracking: TerminalMouseTracking::None,
         cells,
         cursor: None,

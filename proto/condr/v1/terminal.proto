@@ -124,6 +124,10 @@ message TerminalView {
   TerminalCursor cursor = 7;
   TerminalSelection selection = 8;
   TerminalImages images = 9;
+  // Scrollback rows above the active area (ADR 0077).
+  uint32 history_rows = 10;
+  // Absent without a search.
+  TerminalSearch search = 11;
 }
 
 // Runs of changed cells, flattened: the cells of every run in one set of columns, run i
@@ -141,6 +145,22 @@ message TerminalViewDelta {
   TerminalCells cells = 10;
   // Present, whole, only when the images changed.
   TerminalImages images = 11;
+  uint32 history_rows = 12;
+  // Present, whole, only when the search changed; one without a needle ended it.
+  TerminalSearch search = 13;
+}
+
+// A Pane's search (ADR 0077).
+message TerminalSearch {
+  string needle = 1;
+  // Matches found so far on the screen shown.
+  uint32 total = 2;
+  // The selected match's place, counted from the newest.
+  optional uint32 selected = 3;
+  bool complete = 4;
+  // The matches on the viewport, and the selected one when it is there, clipped to it.
+  repeated TerminalSelection matches = 5;
+  TerminalSelection selected_match = 6;
 }
 
 message TerminalViewFrame {
@@ -249,6 +269,8 @@ message TerminalScroll {
   oneof scroll {
     sint32 lines = 1;
     TerminalScrollTarget target = 2;
+    // The viewport's top row, counted from the top of the scrollback (ADR 0077).
+    uint32 row = 3;
   }
 }
 
@@ -299,5 +321,15 @@ message TerminalCommand {
     // Text as a paste, then Return once the program has had time to take it, as one
     // unit no other input can split.
     string submit = 11;
+    // An empty needle ends the search (ADR 0077).
+    string search = 12;
+    TerminalSearchStep search_step = 13;
   }
+}
+
+// No fallback.
+enum TerminalSearchStep {
+  TERMINAL_SEARCH_STEP_UNSPECIFIED = 0;
+  TERMINAL_SEARCH_STEP_OLDER = 1;
+  TERMINAL_SEARCH_STEP_NEWER = 2;
 }

@@ -37,6 +37,8 @@ fn terminal_view(revision: u64, text: &str) -> TerminalView {
         revision,
         size: TerminalSize::new(1, u16::try_from(cells.len()).unwrap()),
         display_offset: 0,
+        history_rows: 0,
+        search: Default::default(),
         mouse_tracking: TerminalMouseTracking::None,
         cells,
         cursor: None,
@@ -220,6 +222,8 @@ fn terminal_frame_batch_is_atomic_when_a_later_pane_has_a_gap() {
                 base_revision: 1,
                 revision: 2,
                 display_offset: 0,
+                history_rows: 0,
+                search: None,
                 mouse_tracking: TerminalMouseTracking::None,
                 cursor: None,
                 runs: vec![TerminalCellRun {
@@ -236,6 +240,8 @@ fn terminal_frame_batch_is_atomic_when_a_later_pane_has_a_gap() {
                 base_revision: 99,
                 revision: 100,
                 display_offset: 0,
+                history_rows: 0,
+                search: None,
                 mouse_tracking: TerminalMouseTracking::None,
                 cursor: None,
                 runs: vec![TerminalCellRun {
@@ -276,6 +282,8 @@ fn terminal_frame_batch_bounds_hyperlinks_across_retained_deltas() {
                 base_revision: 1,
                 revision: 2,
                 display_offset: 0,
+                history_rows: 0,
+                search: None,
                 mouse_tracking: TerminalMouseTracking::None,
                 cursor: None,
                 runs: vec![TerminalCellRun {
@@ -317,6 +325,8 @@ fn terminal_frame_batch_canonicalizes_links_across_retained_deltas() {
                 base_revision: 1,
                 revision: 2,
                 display_offset: 0,
+                history_rows: 0,
+                search: None,
                 mouse_tracking: TerminalMouseTracking::None,
                 cursor: None,
                 runs: vec![TerminalCellRun {
@@ -355,6 +365,8 @@ fn visual_slot_composes_pending_deltas_into_one_signal() {
         base_revision: 1,
         revision: 2,
         display_offset: 0,
+        history_rows: 0,
+        search: None,
         mouse_tracking: TerminalMouseTracking::None,
         cursor: None,
         runs: vec![TerminalCellRun {
@@ -368,6 +380,8 @@ fn visual_slot_composes_pending_deltas_into_one_signal() {
         base_revision: 2,
         revision: 3,
         display_offset: 0,
+        history_rows: 0,
+        search: None,
         mouse_tracking: TerminalMouseTracking::None,
         cursor: None,
         runs: vec![TerminalCellRun {
@@ -417,6 +431,8 @@ fn visual_slot_publish_is_atomic_across_panes() {
             base_revision,
             revision: base_revision + 1,
             display_offset: 0,
+            history_rows: 0,
+            search: None,
             mouse_tracking: TerminalMouseTracking::None,
             cursor: None,
             runs: vec![TerminalCellRun {
@@ -510,6 +526,8 @@ fn delta_composition_keeps_later_cell_values_and_latest_metadata() {
         base_revision: 4,
         revision: 5,
         display_offset: 0,
+        history_rows: 0,
+        search: None,
         mouse_tracking: TerminalMouseTracking::None,
         cursor: None,
         runs: vec![TerminalCellRun {
@@ -523,6 +541,8 @@ fn delta_composition_keeps_later_cell_values_and_latest_metadata() {
         base_revision: 5,
         revision: 6,
         display_offset: 3,
+        history_rows: 0,
+        search: None,
         mouse_tracking: TerminalMouseTracking::None,
         cursor: None,
         runs: vec![TerminalCellRun {

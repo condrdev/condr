@@ -46,6 +46,7 @@ use prelude::*;
 pub use input::{
     TerminalCommand, TerminalKey, TerminalKeyEventKind, TerminalModifiers, TerminalMouseButton,
     TerminalMouseEvent, TerminalMousePosition, TerminalMouseWheel, TerminalScroll,
+    TerminalSearchStep,
 };
 pub use view::{
     CELL_BLINK, CELL_BOLD, CELL_FAINT, CELL_INVERSE, CELL_INVISIBLE, CELL_ITALIC, CELL_OVERLINE,
@@ -56,8 +57,9 @@ pub use view::{
     TerminalCellRun, TerminalColor, TerminalColors, TerminalCursor, TerminalCursorShape,
     TerminalFrameError, TerminalHyperlinkBudget, TerminalImageKey, TerminalImageLayer,
     TerminalImagePlacement, TerminalMouseTracking, TerminalPosition, TerminalProgress,
-    TerminalProgressState, TerminalSelection, TerminalSelectionUnit, TerminalSide, TerminalSize,
-    TerminalUpdate, TerminalView, TerminalViewDelta, TerminalViewFrame, default_indexed_color,
+    TerminalProgressState, TerminalSearch, TerminalSelection, TerminalSelectionUnit, TerminalSide,
+    TerminalSize, TerminalUpdate, TerminalView, TerminalViewDelta, TerminalViewFrame,
+    default_indexed_color,
 };
 pub(crate) use view::{
     decode_position, decode_selection, decode_size, encode_position, encode_selection,

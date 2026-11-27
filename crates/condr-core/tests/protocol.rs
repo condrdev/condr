@@ -180,6 +180,31 @@ fn terminal_key_round_trip_preserves_its_event_kind() {
 }
 
 #[test]
+fn scrolling_to_a_row_and_searching_round_trip() {
+    use condr_core::{TerminalCommand, TerminalScroll, TerminalSearchStep};
+    for command in [
+        TerminalCommand::Scroll(TerminalScroll::Row(70_000)),
+        TerminalCommand::Search("error[E".into()),
+        TerminalCommand::Search(String::new()),
+        TerminalCommand::SearchStep(TerminalSearchStep::Older),
+        TerminalCommand::SearchStep(TerminalSearchStep::Newer),
+    ] {
+        let message = ClientMessage::Terminal {
+            server_id: ServerId(4),
+            session_id: SessionId(1),
+            pane_id: PaneId::from_u64(3),
+            command,
+        };
+        let mut bytes = Vec::new();
+        write_message(&mut bytes, &message).unwrap();
+        assert_eq!(
+            read_message::<_, ClientMessage>(&mut bytes.as_slice()).unwrap(),
+            message
+        );
+    }
+}
+
+#[test]
 fn worktree_command_round_trip_preserves_its_target() {
     let mut session = condr_core::Session::new();
     let parent_workspace_id = session
@@ -609,6 +634,8 @@ fn terminal_snapshot(pane_id: PaneId, text: String) -> PaneTerminalSnapshot {
             revision: 11,
             size: condr_core::TerminalSize::new(1, 1),
             display_offset: 0,
+            history_rows: 1_000,
+            search: Default::default(),
             mouse_tracking: condr_core::TerminalMouseTracking::None,
             cells: vec![condr_core::TerminalCell {
                 text: text.into(),

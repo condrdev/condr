@@ -529,6 +529,14 @@ impl TerminalRuntime {
                 Ok(None)
             }
             TerminalCommand::Copy { selection } => Ok(self.copy_range(selection)),
+            TerminalCommand::Search(needle) => {
+                self.with_view_change(|terminal| terminal.set_search(&needle));
+                Ok(None)
+            }
+            TerminalCommand::SearchStep(step) => {
+                self.with_view_change(|terminal| terminal.step_search(step));
+                Ok(None)
+            }
         }
     }
 
@@ -627,10 +635,15 @@ impl TerminalRuntime {
     }
 
     pub fn scroll(&self, scroll: TerminalScroll) {
+        self.with_view_change(|terminal| terminal.scroll(scroll));
+    }
+
+    /// Runs `change` on the VT and publishes a frame when it says the view changed.
+    fn with_view_change(&self, change: impl FnOnce(&mut Vt) -> bool) {
         let Ok(mut terminal) = lock_pane(&self.terminal) else {
             return;
         };
-        if terminal.scroll(scroll) {
+        if change(&mut terminal) {
             drop(terminal);
             publish_view(&self.revision, &self.update_sender);
         }

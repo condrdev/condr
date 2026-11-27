@@ -29,6 +29,8 @@ fn frame_test_view(revision: u64, text: &str) -> TerminalView {
         revision,
         size: TerminalSize::new(1, columns.max(1)),
         display_offset: 0,
+        history_rows: 0,
+        search: Default::default(),
         mouse_tracking: TerminalMouseTracking::None,
         cells,
         cursor: None,
@@ -64,11 +66,33 @@ fn terminal_frame_wire_interns_hyperlinks_and_round_trips() {
     for cell in &mut view.cells[1..4] {
         cell.hyperlink = Some(uri.into());
     }
+    let found = TerminalSelection {
+        start: TerminalPosition {
+            row: 0,
+            column: 1,
+            side: TerminalSide::Left,
+        },
+        end: TerminalPosition {
+            row: 0,
+            column: 3,
+            side: TerminalSide::Right,
+        },
+        display_offset: 0,
+    };
+    view.search = TerminalSearch {
+        needle: "bcd".into(),
+        total: 9,
+        selected: Some(0),
+        complete: false,
+        matches: vec![found],
+        selected_match: Some(found),
+    };
     let delta = TerminalViewDelta {
         selection: None,
         base_revision: 7,
         revision: 8,
-        display_offset: 0,
+        display_offset: 2,
+        history_rows: 40,
         mouse_tracking: TerminalMouseTracking::None,
         cursor: None,
         runs: vec![TerminalCellRun {
@@ -76,6 +100,8 @@ fn terminal_frame_wire_interns_hyperlinks_and_round_trips() {
             cells: view.cells[1..4].to_vec(),
         }],
         images: None,
+        // A search that ended travels as one without a needle.
+        search: Some(TerminalSearch::default()),
     };
 
     for frame in [
@@ -111,6 +137,8 @@ fn link_free_deltas_take_the_budget_fast_path_without_changing_results() {
         base_revision: 1,
         revision: 2,
         display_offset: 0,
+        history_rows: 0,
+        search: None,
         mouse_tracking: TerminalMouseTracking::None,
         cursor: None,
         runs: vec![TerminalCellRun {
@@ -156,6 +184,8 @@ fn retained_hyperlinks_share_storage_across_sparse_deltas() {
                 base_revision: 1,
                 revision: 2,
                 display_offset: 0,
+                history_rows: 0,
+                search: None,
                 mouse_tracking: TerminalMouseTracking::None,
                 cursor: None,
                 runs: vec![TerminalCellRun {
@@ -205,6 +235,8 @@ fn terminal_delta_rejects_revision_gaps_and_invalid_runs() {
         base_revision: 5,
         revision: 6,
         display_offset: 0,
+        history_rows: 0,
+        search: None,
         mouse_tracking: TerminalMouseTracking::None,
         cursor: None,
         runs: Vec::new(),
@@ -223,6 +255,8 @@ fn terminal_delta_rejects_revision_gaps_and_invalid_runs() {
         base_revision: 4,
         revision: 5,
         display_offset: 0,
+        history_rows: 0,
+        search: None,
         mouse_tracking: TerminalMouseTracking::None,
         cursor: None,
         runs: vec![TerminalCellRun {

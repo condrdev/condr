@@ -8,7 +8,7 @@ use crate::terminal::{
 use crate::{
     TerminalCommand, TerminalKey, TerminalKeyEventKind, TerminalModifiers, TerminalMouseButton,
     TerminalMouseEvent, TerminalMousePosition, TerminalMouseWheel, TerminalScroll,
-    TerminalSelectionUnit, TerminalView, TerminalViewDelta, TerminalViewFrame,
+    TerminalSearchStep, TerminalSelectionUnit, TerminalView, TerminalViewDelta, TerminalViewFrame,
 };
 
 impl From<&TerminalViewFrame> for super::TerminalViewFrame {
@@ -243,6 +243,7 @@ fn encode_scroll(scroll: TerminalScroll) -> super::TerminalScroll {
             TerminalScroll::PageDown => target(Target::PageDown),
             TerminalScroll::Top => target(Target::Top),
             TerminalScroll::Bottom => target(Target::Bottom),
+            TerminalScroll::Row(row) => Scroll::Row(row),
         }),
     }
 }
@@ -252,6 +253,7 @@ fn decode_scroll(scroll: super::TerminalScroll) -> WireResult<TerminalScroll> {
     use terminal_scroll::Scroll;
     Ok(match member(scroll.scroll)? {
         Scroll::Lines(lines) => TerminalScroll::Lines(lines),
+        Scroll::Row(row) => TerminalScroll::Row(row),
         Scroll::Target(raw) => match enum_value(raw, "scroll target")? {
             Target::Unspecified => unreachable!("enum_value rejects 0"),
             Target::PageUp => TerminalScroll::PageUp,
@@ -304,6 +306,11 @@ impl From<&TerminalCommand> for super::TerminalCommand {
                 } as i32,
             }),
             TerminalCommand::Copy { selection: target } => Command::Copy(selection(target)),
+            TerminalCommand::Search(needle) => Command::Search(needle.clone()),
+            TerminalCommand::SearchStep(step) => Command::SearchStep(match step {
+                TerminalSearchStep::Older => super::TerminalSearchStep::Older,
+                TerminalSearchStep::Newer => super::TerminalSearchStep::Newer,
+            } as i32),
         };
         Self {
             command: Some(command),
@@ -346,6 +353,12 @@ impl TryFrom<super::TerminalCommand> for TerminalCommand {
             Command::Copy(copy) => Self::Copy {
                 selection: copy.selection.map(decode_selection).transpose()?,
             },
+            Command::Search(needle) => Self::Search(needle),
+            Command::SearchStep(raw) => Self::SearchStep(match enum_value(raw, "search step")? {
+                super::TerminalSearchStep::Unspecified => unreachable!("enum_value rejects 0"),
+                super::TerminalSearchStep::Older => TerminalSearchStep::Older,
+                super::TerminalSearchStep::Newer => TerminalSearchStep::Newer,
+            }),
         })
     }
 }

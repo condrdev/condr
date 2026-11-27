@@ -5,7 +5,7 @@ use crate::app::terminal_input::IMAGE_PASTE_KEY;
 use crate::app::terminal_input::ReportedTerminalMouseMotion;
 use condr_core::DETECTED_LINK_FLAG;
 #[cfg(unix)]
-use condr_core::{TerminalMouseButton, TerminalMouseEvent};
+use condr_core::{TerminalMouseButton, TerminalMouseEvent, TerminalScroll};
 #[cfg(unix)]
 use gpui_kit::{KeyDownEvent, Keystroke, PlatformInput};
 
@@ -188,6 +188,259 @@ fn terminal_pageup_reaches_the_pty_while_shift_pageup_scrolls_history() {
                 .is_some_and(|terminal| terminal.view.display_offset > 0)
         })
     }));
+}
+
+/// ADR 0077: off the bottom the scrollbar stays, and dragging its thumb asks the Server
+/// for a row, which moves the viewport every Client shares.
+#[cfg(unix)]
+#[test]
+fn dragging_the_scrollbar_moves_the_viewport_through_history() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                root_directory: empty_root(),
+            });
+        });
+    });
+    let mut pane_id = None;
+    assert!(wait_until(window, |window| {
+        pane_id = window.read(|app| {
+            let session = view.read(app).active_session()?;
+            let tab = session.workspaces().first()?.tabs().first()?;
+            Some(tab.focused_pane()?.id())
+        });
+        pane_id.is_some_and(|pane_id| {
+            window.debug_bounds(terminal_selector(pane_id)).is_some()
+                && window.read(|app| view.read(app).terminal(1, pane_id).is_some())
+        })
+    }));
+    let pane_id = pane_id.unwrap();
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.terminal_command(
+                1,
+                pane_id,
+                TerminalCommand::Text(
+                    "i=0; while [ $i -lt 300 ]; do echo CONDR_LINE_$i; i=$((i+1)); done\r".into(),
+                ),
+            );
+        });
+    });
+    let history_rows = |window: &mut VisualTestContext| {
+        window.read(|app| {
+            let view = &view.read(app).terminal(1, pane_id).unwrap().view;
+            (view.history_rows, view.display_offset)
+        })
+    };
+    assert!(wait_until_event_driven(window, |window| {
+        terminal_contains(window, &view, 1, pane_id, "CONDR_LINE_299")
+            && history_rows(window).0 >= 200
+    }));
+
+    // At the bottom there is no bar until the pointer reaches the Pane's edge.
+    let bar = Box::leak(format!("terminal-scrollbar-{}", pane_id.as_u64()).into_boxed_str());
+    let pane = window.debug_bounds(terminal_selector(pane_id)).unwrap();
+    let pointer_at = |window: &mut VisualTestContext, position| {
+        window.simulate_mouse_move(position, None, Modifiers::default());
+        window.update(|window, cx| _ = window.draw(cx));
+        window.debug_bounds(bar).is_some()
+    };
+    assert!(!pointer_at(window, pane.center()), "no bar at the bottom");
+    assert!(
+        pointer_at(window, point(pane.right() - px(4.), pane.center().y)),
+        "the edge under the pointer shows it"
+    );
+    assert!(
+        !pointer_at(window, pane.center()),
+        "and it goes with the pointer"
+    );
+
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.terminal_command(1, pane_id, TerminalCommand::Scroll(TerminalScroll::Top));
+        });
+    });
+    let (history, _) = history_rows(window);
+    assert!(wait_until_event_driven(window, |window| {
+        history_rows(window).1 == history
+    }));
+    window.update(|window, cx| _ = window.draw(cx));
+    assert!(
+        window.debug_bounds(bar).is_some(),
+        "off the bottom it stays"
+    );
+
+    // The thumb sits at the top of the track, at the Pane's right edge.
+    let pane = window.debug_bounds(terminal_selector(pane_id)).unwrap();
+    let grab = point(pane.right() - px(7.), pane.top() + px(30.));
+    let drop = point(grab.x, pane.top() + pane.size.height * 0.6);
+    window.simulate_mouse_move(grab, None, Modifiers::default());
+    window.update(|window, cx| _ = window.draw(cx));
+    window.simulate_mouse_down(grab, MouseButton::Left, Modifiers::default());
+    window.simulate_mouse_move(drop, MouseButton::Left, Modifiers::default());
+    window.update(|window, cx| _ = window.draw(cx));
+    window.simulate_mouse_up(drop, MouseButton::Left, Modifiers::default());
+    assert!(wait_until_event_driven(window, |window| {
+        let (history, offset) = history_rows(window);
+        offset > 0 && offset < history
+    }));
+    assert!(
+        window.read(|app| view.read(app).terminal_input.selection.is_none()),
+        "the drag went to the scrollbar, not to a selection"
+    );
+}
+
+/// ADR 0077: `find` opens a bar over the Pane without resizing it, the needle typed there
+/// searches the Pane's history on the Server, Enter steps to a match and scrolls to it,
+/// and Escape ends the search and gives the keyboard back to the terminal.
+#[cfg(unix)]
+#[test]
+fn find_searches_the_panes_history_from_a_bar_over_it() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        super::super::super::startup::bind_keys(cx);
+    });
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                root_directory: empty_root(),
+            });
+        });
+    });
+    let mut pane_id = None;
+    assert!(wait_until(window, |window| {
+        pane_id = window.read(|app| {
+            let session = view.read(app).active_session()?;
+            let tab = session.workspaces().first()?.tabs().first()?;
+            Some(tab.focused_pane()?.id())
+        });
+        let Some(pane_id) = pane_id else {
+            return false;
+        };
+        let focus = window.read(|app| {
+            view.read(app)
+                .panels
+                .get(&(1, pane_id))
+                .map(|panel| panel.read(app).focus_handle.clone())
+        });
+        window.read(|app| view.read(app).terminal(1, pane_id).is_some())
+            && focus.is_some_and(|focus| window.update(|window, _| focus.is_focused(window)))
+    }));
+    let pane_id = pane_id.unwrap();
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.terminal_command(
+                1,
+                pane_id,
+                TerminalCommand::Text(
+                    "printf 'FOUND_%s\\n' ME; i=0; while [ $i -lt 200 ]; do echo CONDR_ROW_$i; i=$((i+1)); done\r"
+                        .into(),
+                ),
+            );
+        });
+    });
+    assert!(wait_until_event_driven(window, |window| {
+        terminal_contains(window, &view, 1, pane_id, "CONDR_ROW_199")
+    }));
+    let terminal_view = |window: &mut VisualTestContext| {
+        window.read(|app| view.read(app).terminal(1, pane_id).unwrap().view.clone())
+    };
+    let size = terminal_view(window).size;
+    let terminal_focused = |window: &mut VisualTestContext| {
+        let focus = window.read(|app| {
+            view.read(app).panels[&(1, pane_id)]
+                .read(app)
+                .focus_handle
+                .clone()
+        });
+        window.update(|window, _| focus.is_focused(window))
+    };
+
+    let render_cache = window.read(|app| {
+        view.read(app).panels[&(1, pane_id)]
+            .read(app)
+            .render_cache
+            .clone()
+    });
+    window.update(|window, cx| _ = window.draw(cx));
+    let shaped = render_cache.borrow().shaped_cells();
+
+    window.simulate_keystrokes("cmd-f");
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
+    let bar = Box::leak(format!("terminal-find-{}", pane_id.as_u64()).into_boxed_str());
+    assert!(window.debug_bounds(bar).is_some(), "Cmd+F opens the bar");
+    assert!(
+        !terminal_focused(window),
+        "the keyboard is in the bar's field"
+    );
+
+    window.simulate_input("found_me");
+    // Only the output matches: the command line printed `FOUND_%s`.
+    assert!(wait_until_event_driven(window, |window| {
+        let search = terminal_view(window).search.clone();
+        search.needle == "found_me" && search.complete && search.total == 1
+    }));
+    assert_eq!(
+        terminal_view(window).display_offset,
+        0,
+        "typing does not scroll"
+    );
+    window.update(|window, cx| _ = window.draw(cx));
+    assert_eq!(
+        render_cache.borrow().shaped_cells(),
+        shaped,
+        "frames that only highlight matches reuse the shaped cells"
+    );
+
+    window.simulate_keystrokes("enter");
+    assert!(wait_until_event_driven(window, |window| {
+        let view = terminal_view(window);
+        view.search.selected == Some(0)
+            && view.display_offset > 0
+            && view.search.selected_match.is_some()
+    }));
+
+    window.simulate_keystrokes("escape");
+    assert!(wait_until_event_driven(window, |window| {
+        !terminal_view(window).search.is_active()
+    }));
+    window.update(|window, cx| _ = window.draw(cx));
+    assert!(window.debug_bounds(bar).is_none(), "Escape closes the bar");
+    assert!(terminal_focused(window), "and gives the keyboard back");
+    assert_eq!(
+        terminal_view(window).size,
+        size,
+        "the bar never resized the Pane"
+    );
+
+    // The Pane menu's first item opens it too.
+    let menu = window
+        .debug_bounds(Box::leak(
+            format!("terminal-pane-menu-{}", pane_id.as_u64()).into_boxed_str(),
+        ))
+        .unwrap();
+    window.simulate_mouse_down(menu.center(), MouseButton::Left, Modifiers::default());
+    window.simulate_mouse_up(menu.center(), MouseButton::Left, Modifiers::default());
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
+    window.simulate_keystrokes("down enter");
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
+    assert!(
+        window.debug_bounds(bar).is_some(),
+        "Find from the Pane menu"
+    );
+    assert!(!terminal_focused(window));
 }
 
 #[test]
@@ -2056,6 +2309,8 @@ fn underlines_and_overlines_are_drawn_apart_from_the_text_in_their_own_colour() 
         revision: 1,
         size: TerminalSize::new(2, 4),
         display_offset: 0,
+        history_rows: 0,
+        search: Default::default(),
         mouse_tracking: TerminalMouseTracking::None,
         cells: vec![
             cell("a", CELL_UNDERLINE_CURLY, red),
@@ -2095,6 +2350,7 @@ fn underlines_and_overlines_are_drawn_apart_from_the_text_in_their_own_colour() 
                 cursor_blink_hidden: false,
                 render_cache: cache.clone(),
                 scroll_remainder: Rc::new(RefCell::new(point(0., 0.))),
+                scrollbar: crate::terminal_element::TerminalScrollbar::new(px(5.)),
             },
         )
     });
@@ -2174,6 +2430,8 @@ fn the_cursor_follows_the_ime_insertion_point_inside_the_composition() {
         revision: 1,
         size: TerminalSize::new(1, 10),
         display_offset: 0,
+        history_rows: 0,
+        search: Default::default(),
         mouse_tracking: TerminalMouseTracking::None,
         cells,
         cursor: Some(condr_core::TerminalCursor {
@@ -2203,6 +2461,7 @@ fn the_cursor_follows_the_ime_insertion_point_inside_the_composition() {
                 cursor_blink_hidden: false,
                 render_cache: Rc::new(RefCell::new(TerminalRenderCache::default())),
                 scroll_remainder: Rc::new(RefCell::new(point(0., 0.))),
+                scrollbar: crate::terminal_element::TerminalScrollbar::new(px(5.)),
             },
         )
     });
@@ -2282,6 +2541,8 @@ fn selected_block_elements_stay_visible_in_the_selection_text_color() {
         revision: 1,
         size: TerminalSize::new(1, 2),
         display_offset: 0,
+        history_rows: 0,
+        search: Default::default(),
         mouse_tracking: TerminalMouseTracking::None,
         cells: vec![cell("█"), cell("x")],
         cursor: None,
@@ -2315,6 +2576,7 @@ fn selected_block_elements_stay_visible_in_the_selection_text_color() {
                 cursor_blink_hidden: false,
                 render_cache: Rc::new(RefCell::new(TerminalRenderCache::default())),
                 scroll_remainder: Rc::new(RefCell::new(point(0., 0.))),
+                scrollbar: crate::terminal_element::TerminalScrollbar::new(px(5.)),
             },
         )
     });
@@ -2340,6 +2602,8 @@ fn selected_block_elements_stay_visible_in_the_selection_text_color() {
         revision: 2,
         size: TerminalSize::new(1, 1),
         display_offset: 0,
+        history_rows: 0,
+        search: Default::default(),
         mouse_tracking: TerminalMouseTracking::None,
         cells: vec![TerminalCell {
             hyperlink: Some("https://example.com".into()),
@@ -2363,6 +2627,7 @@ fn selected_block_elements_stay_visible_in_the_selection_text_color() {
                 cursor_blink_hidden: false,
                 render_cache: linked_cache.clone(),
                 scroll_remainder: Rc::new(RefCell::new(point(0., 0.))),
+                scrollbar: crate::terminal_element::TerminalScrollbar::new(px(5.)),
             },
         )
     });
@@ -2770,6 +3035,8 @@ fn placed_images_are_prepared_in_their_layers_at_the_windows_cells() {
         revision: 1,
         size: TerminalSize::new(2, 4),
         display_offset: 0,
+        history_rows: 0,
+        search: Default::default(),
         mouse_tracking: TerminalMouseTracking::None,
         cells: vec![blank; 8],
         cursor: None,
@@ -2825,6 +3092,7 @@ fn placed_images_are_prepared_in_their_layers_at_the_windows_cells() {
                             cursor_blink_hidden: false,
                             render_cache: Rc::clone(&render_cache),
                             scroll_remainder: Rc::new(RefCell::new(point(0., 0.))),
+                            scrollbar: crate::terminal_element::TerminalScrollbar::new(px(5.)),
                         },
                     )
                 },

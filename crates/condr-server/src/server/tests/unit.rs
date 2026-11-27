@@ -687,6 +687,8 @@ fn client_terminal_baseline_advances_only_for_an_accepted_render() {
         revision,
         size: TerminalSize::new(1, 1),
         display_offset: 0,
+        history_rows: 0,
+        search: Default::default(),
         mouse_tracking: condr_core::TerminalMouseTracking::None,
         cells: Vec::new(),
         cursor: None,
@@ -812,6 +814,8 @@ fn retained_terminal_hyperlinks_stay_bounded_across_deltas() {
             base_revision: 0,
             revision: 1,
             display_offset: 0,
+            history_rows: 0,
+            search: None,
             mouse_tracking: condr_core::TerminalMouseTracking::None,
             cursor: None,
             runs: vec![condr_core::TerminalCellRun {
@@ -828,6 +832,8 @@ fn retained_terminal_hyperlinks_stay_bounded_across_deltas() {
             base_revision: 1,
             revision: 2,
             display_offset: 0,
+            history_rows: 0,
+            search: None,
             mouse_tracking: condr_core::TerminalMouseTracking::None,
             cursor: None,
             runs: vec![condr_core::TerminalCellRun {
@@ -868,6 +874,8 @@ fn retained_terminal_hyperlinks_stay_bounded_across_deltas() {
             base_revision: 2,
             revision: 3,
             display_offset: 0,
+            history_rows: 0,
+            search: None,
             mouse_tracking: condr_core::TerminalMouseTracking::None,
             cursor: None,
             runs: vec![
@@ -1476,6 +1484,8 @@ fn wide_view(revision: u64, bytes: usize) -> TerminalView {
         revision,
         size: TerminalSize::new(1, u16::try_from(columns).unwrap()),
         display_offset: 0,
+        history_rows: 0,
+        search: Default::default(),
         mouse_tracking: condr_core::TerminalMouseTracking::None,
         cells: vec![
             condr_core::TerminalCell {

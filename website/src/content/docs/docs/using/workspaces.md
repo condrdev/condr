@@ -38,6 +38,17 @@ Click the menu in the top-right corner of a Pane:
 
 ## Tips for working efficiently
 
+### Find in the terminal
+
+Press `Cmd + F` (`Ctrl + Shift + F` on Windows and Linux), or choose **Find…** in the Pane's menu. A bar opens at the Pane's top right, and what you type is found in the Pane's whole history, including what scrolled off long ago:
+
+- **Highlights**: every match sits on a slightly raised background, and the selected one is bold on the accent colour; both follow your colour scheme and light or dark mode. The bar counts the matches, `3/17` once one is selected, with a `+` while it is still searching.
+- **Move between matches**: `Enter` goes to the previous match, up into the history; `Shift + Enter` comes back down. The view scrolls only when the match is off screen.
+- **Close**: `Escape` or **×** ends the search and returns the keyboard to the terminal.
+- **Matching**: plain text, without case for English letters. For regular expressions, read the history from the command line instead: `condr pane read <pane> --lines 5000 | grep -E '…'`.
+
+The search belongs to the Pane, like its scroll position: another window showing the same Pane shows the same search, and moving between matches scrolls the Pane wherever it shows, the phone app included.
+
 ### Send a screenshot to a remote Agent
 
 When you run an Agent on a remote server, copy a screenshot locally and press the same key you paste images into a local Agent with. It follows the computer you are on, not the remote Device:

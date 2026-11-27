@@ -17,6 +17,8 @@ fn frame_test_view(revision: u64, text: &str) -> TerminalView {
         revision,
         size: TerminalSize::new(1, columns.max(1)),
         display_offset: 0,
+        history_rows: 0,
+        search: Default::default(),
         mouse_tracking: TerminalMouseTracking::None,
         cells,
         cursor: None,
@@ -98,6 +100,24 @@ fn terminal_hyperlinks_stay_within_the_frame_byte_budget() {
         None
     );
 }
+/// ADR 0077: a frame says how much history sits above the screen, and `Row` puts the
+/// viewport's top on a row counted from the top of the scrollback.
+#[test]
+fn frames_count_the_history_and_row_scrolls_to_a_row_from_the_top() {
+    let size = TerminalSize::new(3, 10);
+    let mut vt = terminal_showing(size, b"a\r\nb\r\nc\r\nd\r\ne\r\nf\r\ng");
+    let view = vt.view(size, 1, None);
+    assert_eq!((view.history_rows, view.display_offset), (4, 0));
+
+    assert!(vt.scroll(TerminalScroll::Row(1)));
+    let view = vt.view(size, 2, None);
+    assert_eq!((view.history_rows, view.display_offset), (4, 3));
+    assert_eq!(view.cells[0].text, "b");
+    assert!(!vt.scroll(TerminalScroll::Row(1)));
+    assert!(vt.scroll(TerminalScroll::Row(99)));
+    assert_eq!(vt.view(size, 3, None).display_offset, 0);
+}
+
 #[test]
 fn server_selection_follows_scrolled_output_and_still_copies_it() {
     let size = TerminalSize::new(3, 10);
@@ -312,6 +332,8 @@ fn terminal_frame_wire_drops_hyperlinks_over_budget_without_losing_text() {
         base_revision: 6,
         revision: 7,
         display_offset: 0,
+        history_rows: 0,
+        search: None,
         mouse_tracking: TerminalMouseTracking::None,
         cursor: None,
         runs: vec![TerminalCellRun {
@@ -352,6 +374,106 @@ fn terminal_frame_wire_drops_hyperlinks_over_budget_without_losing_text() {
         );
         assert!(cells.last().unwrap().hyperlink.is_none());
     }
+}
+
+/// ADR 0077: a view carries the Pane's search; a step selects a match and scrolls to it
+/// when it is off screen, and output during a search is found too.
+#[test]
+fn views_carry_the_search_and_a_step_scrolls_to_its_match() {
+    let size = TerminalSize::new(2, 10);
+    let mut vt = terminal_showing(size, b"error a\r\nok\r\nok\r\nerror b");
+    let caught_up = |vt: &mut Terminal| {
+        while vt.search_pending() {
+            vt.advance_search(Duration::from_millis(5));
+        }
+    };
+    assert!(vt.set_search("error"));
+    assert!(
+        !vt.set_search("error"),
+        "the same needle keeps what was found"
+    );
+    caught_up(&mut vt);
+    let search = vt.view(size, 1, None).search;
+    assert_eq!(
+        (
+            search.needle.as_str(),
+            search.total,
+            search.selected,
+            search.complete
+        ),
+        ("error", 2, None, true)
+    );
+    let found = |row, end| TerminalSelection {
+        start: TerminalPosition {
+            row,
+            column: 0,
+            side: TerminalSide::Left,
+        },
+        end: TerminalPosition {
+            row,
+            column: end,
+            side: TerminalSide::Right,
+        },
+        display_offset: 0,
+    };
+    assert_eq!(search.matches, [found(1, 4)]);
+
+    assert!(vt.step_search(TerminalSearchStep::Older));
+    assert!(vt.step_search(TerminalSearchStep::Older));
+    vt.advance_search(Duration::from_millis(5));
+    let view = vt.view(size, 2, None);
+    assert_eq!(view.display_offset, 2, "the older match was off screen");
+    assert_eq!(view.search.selected, Some(1));
+    assert_eq!(
+        view.search.selected_match,
+        Some(TerminalSelection {
+            display_offset: 2,
+            ..found(0, 4)
+        })
+    );
+
+    vt.write(b"\r\nerror c");
+    // A caught-up search reads new output when the next frame is taken.
+    vt.advance_search(Duration::from_millis(5));
+    caught_up(&mut vt);
+    assert_eq!(vt.view(size, 3, None).search.total, 3);
+    assert!(vt.set_search(""));
+    assert!(!vt.search_pending());
+    assert_eq!(vt.view(size, 4, None).search, TerminalSearch::default());
+}
+
+/// ADR 0077: the frame path moves a search on, a search finding more gives a frame of
+/// its own, and a delta carries the search only when it changed.
+#[test]
+fn frames_carry_a_search_only_when_it_changed() {
+    let size = TerminalSize::new(3, 12);
+    let terminal = Arc::new(Mutex::new(terminal_showing(size, b"needle\r\nhay")));
+    let revision = Arc::new(AtomicU64::new(1));
+    let source = source_for(&terminal, size, &revision);
+    assert!(source.take_frame().is_some());
+
+    assert!(terminal.lock().unwrap().set_search("needle"));
+    let mut search = None;
+    for _ in 0..10 {
+        if source.frame_wakeup().is_none() {
+            break;
+        }
+        // Each step that finds more is a frame of its own, though no output arrived.
+        let Some(TerminalViewFrame::Delta(delta)) = source.take_frame() else {
+            panic!("a step's frame is a delta");
+        };
+        search = delta.search.or(search);
+    }
+    let search = search.expect("the search changed");
+    assert_eq!((search.total, search.complete), (1, true));
+    assert_eq!(source.frame_wakeup(), None, "a caught-up search sleeps");
+
+    terminal.lock().unwrap().write(b"\r\nmore");
+    revision.fetch_add(1, Ordering::AcqRel);
+    let Some(TerminalViewFrame::Delta(delta)) = source.take_frame() else {
+        panic!("output is a delta");
+    };
+    assert_eq!(delta.search, None, "the search did not change");
 }
 
 #[test]

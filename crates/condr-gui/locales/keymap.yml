@@ -110,6 +110,9 @@ keymap:
     go_to_tab_9:
       en: Go to tab 9
       zh-CN: 前往 Tab 9
+    find:
+      en: Find in terminal
+      zh-CN: 在终端中搜索
     split_right:
       en: Split right
       zh-CN: 向右拆分

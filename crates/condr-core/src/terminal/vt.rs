@@ -90,6 +90,10 @@ pub(super) struct Vt {
     /// The clock animations run on, and when the next frame is due.
     animation_epoch: Instant,
     animation_due: Option<Instant>,
+    /// The Pane's search, empty for none, and where it stood after its last step
+    /// (ADR 0077).
+    search_needle: String,
+    search_status: Option<ghostty::SearchStatus>,
 }
 
 /// Where the next event `condr agent-hook` wrote is in `bytes`.
@@ -205,6 +209,8 @@ impl Vt {
             fresh_images: Vec::new(),
             animation_epoch: Instant::now(),
             animation_due: None,
+            search_needle: String::new(),
+            search_status: None,
         })
     }
 
@@ -356,6 +362,7 @@ impl Vt {
             TerminalScroll::PageDown => ghostty::Scroll::Delta(page),
             TerminalScroll::Top => ghostty::Scroll::Top,
             TerminalScroll::Bottom => ghostty::Scroll::Bottom,
+            TerminalScroll::Row(row) => ghostty::Scroll::Row(row as usize),
         });
         self.terminal.scrollbar().offset != before
     }
@@ -718,15 +725,19 @@ impl Vt {
             self.read_images();
         }
         let display_offset = u32::try_from(self.display_offset()).unwrap_or(u32::MAX);
+        let bar = self.terminal.scrollbar();
+        let history_rows = u32::try_from(bar.total.saturating_sub(bar.len)).unwrap_or(u32::MAX);
         let mut view = TerminalView {
             revision,
             size,
             display_offset,
+            history_rows,
             mouse_tracking: self.mouse_tracking(),
             cells,
             cursor: self.cursor(size),
             selection: self.viewport_selection(&selected, size, display_offset),
             images: self.images.clone(),
+            search: self.search_view(display_offset),
         };
         detect_links(&mut view);
         let mut hyperlinks = Hyperlinks::default();
@@ -897,6 +908,77 @@ impl Vt {
             lines.pop();
         }
         lines.join("\n")
+    }
+
+    /// Searches for `needle`, an empty one ending the search (ADR 0077); whether that
+    /// changed anything.
+    pub(super) fn set_search(&mut self, needle: &str) -> bool {
+        if needle == self.search_needle {
+            return false;
+        }
+        if let Err(error) = self.terminal.set_search(needle) {
+            tracing::warn!(%error, "terminal search failed");
+            return false;
+        }
+        self.search_needle = needle.to_owned();
+        self.search_status = (!needle.is_empty()).then_some(ghostty::SearchStatus::FeedRequired);
+        true
+    }
+
+    /// Selects the next match and scrolls to it when it is off screen; `false` when
+    /// there is none.
+    pub(super) fn step_search(&mut self, step: TerminalSearchStep) -> bool {
+        self.terminal
+            .select_search_match(step == TerminalSearchStep::Older)
+    }
+
+    /// Catches the search up with the terminal for at most `budget`.
+    pub(super) fn advance_search(&mut self, budget: Duration) {
+        if self.terminal.searching() {
+            self.search_status = self.terminal.advance_search(budget);
+        }
+    }
+
+    /// The search has more to find before it has caught up.
+    pub(super) fn search_pending(&self) -> bool {
+        self.search_status
+            .is_some_and(|status| status != ghostty::SearchStatus::Complete)
+    }
+
+    fn search_view(&self, display_offset: u32) -> TerminalSearch {
+        if self.search_needle.is_empty() {
+            return TerminalSearch::default();
+        }
+        let selection = |((start_x, start_y), (end_x, end_y)): ghostty::ViewportMatch| {
+            let row = |y: u32| u16::try_from(y).unwrap_or(u16::MAX);
+            TerminalSelection {
+                start: TerminalPosition {
+                    row: row(start_y),
+                    column: start_x,
+                    side: TerminalSide::Left,
+                },
+                end: TerminalPosition {
+                    row: row(end_y),
+                    column: end_x,
+                    side: TerminalSide::Right,
+                },
+                display_offset,
+            }
+        };
+        let count = |value: usize| u32::try_from(value).unwrap_or(u32::MAX);
+        TerminalSearch {
+            needle: self.search_needle.clone(),
+            total: count(self.terminal.search_total()),
+            selected: self.terminal.search_selected().map(count),
+            complete: self.search_status == Some(ghostty::SearchStatus::Complete),
+            matches: self
+                .terminal
+                .search_viewport_matches()
+                .into_iter()
+                .map(selection)
+                .collect(),
+            selected_match: self.terminal.search_selected_match().map(selection),
+        }
     }
 
     /// One bounded step of compressing the scrollback, once no output has arrived since

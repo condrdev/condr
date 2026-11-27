@@ -1160,7 +1160,8 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
     window.update(|window, cx| {
         _ = window.draw(cx);
     });
-    window.simulate_keystrokes("down enter");
+    // Find leads the menu, in a group of its own (ADR 0077).
+    window.simulate_keystrokes("down down enter");
     let split_right = wait_until(window, |window| {
         window.read(|app| {
             view.read(app)

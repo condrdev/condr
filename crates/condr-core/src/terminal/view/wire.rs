@@ -551,6 +551,37 @@ pub(crate) fn decode_selection(selection: pb::TerminalSelection) -> WireResult<T
     })
 }
 
+fn encode_search(search: &TerminalSearch) -> pb::TerminalSearch {
+    pb::TerminalSearch {
+        needle: search.needle.clone(),
+        total: search.total,
+        selected: search.selected,
+        complete: search.complete,
+        matches: search
+            .matches
+            .iter()
+            .copied()
+            .map(encode_selection)
+            .collect(),
+        selected_match: search.selected_match.map(encode_selection),
+    }
+}
+
+fn decode_search(search: pb::TerminalSearch) -> WireResult<TerminalSearch> {
+    Ok(TerminalSearch {
+        needle: search.needle,
+        total: search.total,
+        selected: search.selected,
+        complete: search.complete,
+        matches: search
+            .matches
+            .into_iter()
+            .map(decode_selection)
+            .collect::<WireResult<_>>()?,
+        selected_match: search.selected_match.map(decode_selection).transpose()?,
+    })
+}
+
 fn encode_images(images: &[TerminalImagePlacement]) -> pb::TerminalImages {
     use pb::TerminalImageLayer as Wire;
     pb::TerminalImages {
@@ -629,12 +660,14 @@ impl From<&TerminalView> for pb::TerminalView {
             revision: view.revision,
             size: Some(encode_size(view.size)),
             display_offset: view.display_offset,
+            history_rows: view.history_rows,
             mouse_tracking: encode_mouse_tracking(view.mouse_tracking),
             hyperlinks: hyperlinks.values.into_iter().map(String::from).collect(),
             cells: Some(cells),
             cursor: view.cursor.map(encode_cursor),
             selection: view.selection.map(encode_selection),
             images: Some(encode_images(&view.images)),
+            search: view.search.is_active().then(|| encode_search(&view.search)),
         }
     }
 }
@@ -657,6 +690,7 @@ impl TryFrom<pb::TerminalView> for TerminalView {
             revision: view.revision,
             size,
             display_offset: view.display_offset,
+            history_rows: view.history_rows,
             mouse_tracking: decode_mouse_tracking(view.mouse_tracking)?,
             cells,
             cursor: view.cursor.map(decode_cursor).transpose()?,
@@ -664,6 +698,11 @@ impl TryFrom<pb::TerminalView> for TerminalView {
             images: view
                 .images
                 .map(decode_images)
+                .transpose()?
+                .unwrap_or_default(),
+            search: view
+                .search
+                .map(decode_search)
                 .transpose()?
                 .unwrap_or_default(),
         })
@@ -685,6 +724,7 @@ impl From<&TerminalViewDelta> for pb::TerminalViewDelta {
             base_revision: delta.base_revision,
             revision: delta.revision,
             display_offset: delta.display_offset,
+            history_rows: delta.history_rows,
             mouse_tracking: encode_mouse_tracking(delta.mouse_tracking),
             cursor: delta.cursor.map(encode_cursor),
             selection: delta.selection.map(encode_selection),
@@ -697,6 +737,7 @@ impl From<&TerminalViewDelta> for pb::TerminalViewDelta {
                 .collect(),
             cells: Some(cells),
             images: delta.images.as_deref().map(encode_images),
+            search: delta.search.as_ref().map(encode_search),
         }
     }
 }
@@ -758,11 +799,13 @@ impl TryFrom<pb::TerminalViewDelta> for TerminalViewDelta {
             base_revision: delta.base_revision,
             revision: delta.revision,
             display_offset: delta.display_offset,
+            history_rows: delta.history_rows,
             mouse_tracking: decode_mouse_tracking(delta.mouse_tracking)?,
             cursor: delta.cursor.map(decode_cursor).transpose()?,
             selection: delta.selection.map(decode_selection).transpose()?,
             runs,
             images: delta.images.map(decode_images).transpose()?,
+            search: delta.search.map(decode_search).transpose()?,
         })
     }
 }

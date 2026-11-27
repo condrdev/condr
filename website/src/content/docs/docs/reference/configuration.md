@@ -127,7 +127,7 @@ Each entry replaces one action's default keys on this platform; `[]` leaves it n
 | Workspaces | `next-workspace`, `previous-workspace`, `new-workspace`, `rename-workspace`, `close-workspace` |
 | Agents | `next-agent`, `previous-agent` |
 | Tabs | `new-tab`, `next-tab`, `previous-tab`, `rename-tab`, `close-tab`, `go-to-tab-1` … `go-to-tab-9` |
-| Panes | `split-right`, `split-down`, `close-pane`, `toggle-zoom`, `focus-left`, `focus-right`, `focus-up`, `focus-down`, `resize-left`, `resize-right`, `resize-up`, `resize-down`, `swap-left`, `swap-right`, `swap-up`, `swap-down` |
+| Panes | `find`, `split-right`, `split-down`, `close-pane`, `toggle-zoom`, `focus-left`, `focus-right`, `focus-up`, `focus-down`, `resize-left`, `resize-right`, `resize-up`, `resize-down`, `swap-left`, `swap-right`, `swap-up`, `swap-down` |
 
 The Devices group, Rename and Close for Workspaces and Tabs, New workspace and the Pane swaps have no key until you give them one. `Shift` pressed twice, which opens the [Command Palette](/docs/reference/keybindings/#command-palette), is not in this table and cannot be changed.
 

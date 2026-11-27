@@ -1,5 +1,6 @@
 use super::*;
 use render::{Color, Underline};
+use std::time::Duration;
 
 fn terminal(cols: u16, rows: u16) -> Terminal {
     terminal_with_images(cols, rows, 0)
@@ -185,6 +186,59 @@ fn the_viewport_scrolls_through_history() {
     assert_eq!(screen(&mut render), ["a", "b"]);
     terminal.scroll_viewport(Scroll::Bottom);
     assert_eq!(terminal.scrollbar().offset, 2);
+    terminal.scroll_viewport(Scroll::Row(1));
+    assert_eq!(terminal.scrollbar().offset, 1);
+    // Past the end clamps to the active area.
+    terminal.scroll_viewport(Scroll::Row(9));
+    assert_eq!(terminal.scrollbar().offset, 2);
+}
+
+/// ADR 0077: the library's search finds matches in the scrollback, counts them newest
+/// first, scrolls to one off screen, and reports those on the viewport.
+#[test]
+fn the_search_finds_scrollback_matches_and_scrolls_to_them() {
+    let mut terminal = terminal(10, 2);
+    terminal.write(b"Error a\r\nok\r\nerror b\r\nok\r\nok\r\nERROR c");
+    assert!(!terminal.searching());
+    terminal.set_search("error").unwrap();
+    let done = (0..100)
+        .map(|_| terminal.advance_search(Duration::from_millis(5)))
+        .find(|status| *status == Some(SearchStatus::Complete));
+    assert_eq!(done, Some(Some(SearchStatus::Complete)));
+    assert_eq!(terminal.search_total(), 3);
+    assert_eq!(terminal.search_selected(), None);
+    // ASCII case aside, bytes match exactly; the newest match is on the bottom row.
+    assert_eq!(terminal.search_viewport_matches(), [((0, 1), (4, 1))]);
+
+    assert!(terminal.select_search_match(true));
+    assert_eq!(terminal.search_selected(), Some(0));
+    assert!(terminal.select_search_match(true));
+    assert_eq!(terminal.search_selected(), Some(1));
+    // "error b" was off screen, so the viewport moved to it.
+    assert!(terminal.scrollbar().offset < 4);
+    assert_eq!(terminal.search_selected_match(), Some(((0, 0), (4, 0))));
+    assert!(terminal.select_search_match(false));
+    assert_eq!(terminal.search_selected(), Some(0));
+
+    terminal.set_search("").unwrap();
+    assert!(!terminal.searching());
+    assert_eq!(terminal.search_total(), 0);
+    assert_eq!(terminal.advance_search(Duration::ZERO), None);
+}
+
+#[test]
+fn the_search_covers_the_alternate_screen_while_it_shows() {
+    let mut terminal = terminal(10, 3);
+    terminal.write(b"needle\r\n");
+    terminal.set_search("needle").unwrap();
+    while terminal.advance_search(Duration::from_millis(5)) != Some(SearchStatus::Complete) {}
+    assert_eq!(terminal.search_total(), 1);
+    terminal.write(b"\x1b[?1049h\x1b[Hneedle needle");
+    while terminal.advance_search(Duration::from_millis(5)) != Some(SearchStatus::Complete) {}
+    assert_eq!(terminal.search_total(), 2);
+    terminal.write(b"\x1b[?1049l");
+    while terminal.advance_search(Duration::from_millis(5)) != Some(SearchStatus::Complete) {}
+    assert_eq!(terminal.search_total(), 1);
 }
 
 #[test]

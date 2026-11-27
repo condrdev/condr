@@ -333,6 +333,15 @@ pub(super) const GROUPS: &[(&str, &[Shortcut])] = &[
     (
         "keymap.group.panes",
         &[
+            // Every terminal's and browser's Find; elsewhere Ctrl+F is readline's
+            // forward-char, so Shift joins it (ADR 0077).
+            shortcut(
+                "find",
+                "keymap.action.find",
+                &Find,
+                Needs::Pane,
+                on(&["cmd-f"], &["ctrl-shift-f"]),
+            ),
             shortcut(
                 "split-right",
                 "keymap.action.split_right",

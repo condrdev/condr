@@ -141,6 +141,7 @@ action_handlers! {
     action_swap_up(SwapUp) |this, window, cx| { this.swap_direction(PaneDirection::Up); }
     action_swap_down(SwapDown) |this, window, cx| { this.swap_direction(PaneDirection::Down); }
     action_toggle_zoom(ToggleZoom) |this, window, cx| { this.toggle_zoom(); }
+    action_find(Find) |this, window, cx| { this.open_find(window, cx); }
     action_toggle_sidebar(ToggleSidebar) |this, window, cx| { this.toggle_sidebar(window, cx); }
     action_toggle_right_sidebar(ToggleRightSidebar) |this, window, cx| { this.toggle_right_sidebar(cx); }
     action_toggle_tasks(ToggleTasks) |this, window, cx| { this.toggle_tasks(window, cx); }

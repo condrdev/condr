@@ -1,9 +1,13 @@
 //! A terminal Pane as a GPUI Dock panel.
 
 use super::*;
-use condr_core::{TerminalProgress, TerminalProgressState};
+use crate::terminal_element::TerminalScrollbar;
+use condr_core::{TerminalProgress, TerminalProgressState, TerminalScroll};
 use gpui_kit::component::progress::Progress;
+use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
 use rust_i18n::t;
+
+mod find_bar;
 
 pub(super) struct TerminalPanel {
     connection_key: ConnectionKey,
@@ -12,6 +16,10 @@ pub(super) struct TerminalPanel {
     pub(super) focus_handle: FocusHandle,
     pub(super) render_cache: Rc<RefCell<TerminalRenderCache>>,
     pub(super) scroll_remainder: Rc<RefCell<Point<f32>>>,
+    scrollbar: TerminalScrollbar,
+    /// The pointer is over the strip at the Pane's right edge the scrollbar takes.
+    scrollbar_edge_hovered: bool,
+    find: Option<find_bar::FindBar>,
     /// Focus listeners belong to a window; a Panel moved to another window (ADR 0043)
     /// listens again there.
     focus_subscriptions: Option<(AnyWindowHandle, [Subscription; 2])>,
@@ -20,6 +28,9 @@ pub(super) struct TerminalPanel {
     /// Runs only while the focused cursor asks to blink; dropping it stops the blink.
     _cursor_blink: Option<Task<()>>,
 }
+
+/// The gap between the Pane's border and its grid, painted as the terminal's background.
+const TERMINAL_INSET: Pixels = px(5.);
 
 /// Half a blink period, matching the common host-terminal cadence.
 const CURSOR_BLINK_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
@@ -38,6 +49,9 @@ impl TerminalPanel {
             focus_handle: cx.focus_handle(),
             render_cache: Rc::new(RefCell::new(TerminalRenderCache::default())),
             scroll_remainder: Rc::new(RefCell::new(point(0., 0.))),
+            scrollbar: TerminalScrollbar::new(TERMINAL_INSET),
+            scrollbar_edge_hovered: false,
+            find: None,
             focus_subscriptions: None,
             ime_terminal_revision: None,
             cursor_blink_hidden: false,
@@ -238,6 +252,32 @@ impl Render for TerminalPanel {
 
         let key = self.connection_key;
         let pane_id = self.pane_id;
+        // Kit's scrollbar asks this Panel to render after a drag or a click on its track.
+        if let Some(row) = self.scrollbar.take_requested_row() {
+            let owner = self.owner.clone();
+            window.defer(cx, move |_, cx| {
+                let _ = owner.update(cx, |app, _| {
+                    let scroll = TerminalCommand::Scroll(TerminalScroll::Row(row));
+                    app.terminal_command(key, pane_id, scroll)
+                });
+            });
+        }
+        let search = terminal
+            .as_ref()
+            .map(|terminal| terminal.view.search.clone())
+            .unwrap_or_default();
+        self.follow_search(&search.needle, window, cx);
+        let find_bar = self.render_find_bar(&search, cx);
+        // At the bottom, where a Pane nearly always is, there is no bar until the pointer
+        // reaches the edge (ADR 0077). Not Kit's Hover mode: Kit shows its bar for a moment
+        // whenever the offset changes or its state is new, which every line of output and
+        // every Pane shown again would do there.
+        let show_scrollbar = self.scrollbar_edge_hovered
+            || self.scrollbar.dragging()
+            || search.is_active()
+            || terminal
+                .as_ref()
+                .is_some_and(|terminal| terminal.view.display_offset > 0);
         let link_tooltip = hovered_link
             .as_ref()
             .map(|link| SharedString::from(link.uri.as_str()));
@@ -280,7 +320,7 @@ impl Render for TerminalPanel {
             .rounded_b(INNER_RADIUS)
             // The gap between border and grid belongs to the terminal, so it is
             // painted in the terminal's background rather than the pane chrome.
-            .p(px(5.))
+            .p(TERMINAL_INSET)
             .bg(cx
                 .try_global::<TerminalPalette>()
                 .cloned()
@@ -304,6 +344,7 @@ impl Render for TerminalPanel {
                         cursor_blink_hidden: self.cursor_blink_hidden,
                         render_cache: self.render_cache.clone(),
                         scroll_remainder: self.scroll_remainder.clone(),
+                        scrollbar: self.scrollbar.clone(),
                     },
                 )
                 .into_any_element()
@@ -318,6 +359,32 @@ impl Render for TerminalPanel {
                     .child(t!("terminal.unavailable"))
                     .into_any_element()
             })
+            .when(show_scrollbar, |body| {
+                body.child(
+                    div()
+                        .debug_selector(move || format!("terminal-scrollbar-{}", pane_id.as_u64()))
+                        .absolute()
+                        .inset_0()
+                        .child(Scrollbar::vertical(&self.scrollbar).mode(ScrollbarMode::Always)),
+                )
+            })
+            .child(
+                div()
+                    .id("terminal-scrollbar-edge")
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .right_0()
+                    // Kit's track.
+                    .w(px(16.))
+                    .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                        if this.scrollbar_edge_hovered != *hovered {
+                            this.scrollbar_edge_hovered = *hovered;
+                            cx.notify();
+                        }
+                    })),
+            )
+            .children(find_bar)
             .when_some(link_tooltip, |this, uri| {
                 this.tooltip(move |window, cx| Tooltip::new(uri.clone()).build(window, cx))
             })
@@ -346,55 +413,57 @@ impl Render for TerminalPanel {
                 let _ = menu_owner.update(cx, |app, cx| {
                     app.set_target_pane(key, pane_id, cx);
                 });
-                menu.menu_with_enable(
-                    t!("terminal.pane_menu.split_right"),
-                    Box::new(SplitRight),
-                    can_mutate,
-                )
-                .menu_with_enable(
-                    t!("terminal.pane_menu.split_down"),
-                    Box::new(SplitDown),
-                    can_mutate,
-                )
-                .separator()
-                .submenu(
-                    t!("terminal.pane_menu.swap"),
-                    window,
-                    cx,
-                    move |menu, _, _| {
-                        menu.menu_with_enable(
-                            t!("terminal.pane_menu.swap_left"),
-                            Box::new(SwapLeft),
-                            can_mutate,
-                        )
-                        .menu_with_enable(
-                            t!("terminal.pane_menu.swap_right"),
-                            Box::new(SwapRight),
-                            can_mutate,
-                        )
-                        .menu_with_enable(
-                            t!("terminal.pane_menu.swap_up"),
-                            Box::new(SwapUp),
-                            can_mutate,
-                        )
-                        .menu_with_enable(
-                            t!("terminal.pane_menu.swap_down"),
-                            Box::new(SwapDown),
-                            can_mutate,
-                        )
-                    },
-                )
-                .separator()
-                .menu_with_enable(
-                    t!("terminal.pane_menu.toggle_zoom"),
-                    Box::new(ToggleZoom),
-                    can_mutate,
-                )
-                .menu_with_enable(
-                    t!("terminal.pane_menu.close_pane"),
-                    Box::new(ClosePane),
-                    can_mutate,
-                )
+                menu.menu_with_enable(t!("terminal.pane_menu.find"), Box::new(Find), can_mutate)
+                    .separator()
+                    .menu_with_enable(
+                        t!("terminal.pane_menu.split_right"),
+                        Box::new(SplitRight),
+                        can_mutate,
+                    )
+                    .menu_with_enable(
+                        t!("terminal.pane_menu.split_down"),
+                        Box::new(SplitDown),
+                        can_mutate,
+                    )
+                    .separator()
+                    .submenu(
+                        t!("terminal.pane_menu.swap"),
+                        window,
+                        cx,
+                        move |menu, _, _| {
+                            menu.menu_with_enable(
+                                t!("terminal.pane_menu.swap_left"),
+                                Box::new(SwapLeft),
+                                can_mutate,
+                            )
+                            .menu_with_enable(
+                                t!("terminal.pane_menu.swap_right"),
+                                Box::new(SwapRight),
+                                can_mutate,
+                            )
+                            .menu_with_enable(
+                                t!("terminal.pane_menu.swap_up"),
+                                Box::new(SwapUp),
+                                can_mutate,
+                            )
+                            .menu_with_enable(
+                                t!("terminal.pane_menu.swap_down"),
+                                Box::new(SwapDown),
+                                can_mutate,
+                            )
+                        },
+                    )
+                    .separator()
+                    .menu_with_enable(
+                        t!("terminal.pane_menu.toggle_zoom"),
+                        Box::new(ToggleZoom),
+                        can_mutate,
+                    )
+                    .menu_with_enable(
+                        t!("terminal.pane_menu.close_pane"),
+                        Box::new(ClosePane),
+                        can_mutate,
+                    )
             })
             .anchor(Anchor::TopRight);
         // The zoom state is otherwise invisible: a zoomed Pane looks like a one-Pane Tab.

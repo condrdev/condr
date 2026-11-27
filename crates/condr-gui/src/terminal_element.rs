@@ -5,6 +5,7 @@ mod geometry;
 mod images;
 mod input;
 mod preedit;
+mod scrollbar;
 
 use crate::{Condr, ConnectionKey};
 use cache::{ShapedCell, TerminalRenderCacheKey, cell_font};
@@ -24,6 +25,7 @@ pub(crate) use decoration::Decorations;
 #[cfg(test)]
 pub(crate) use decoration::{Decoration, LineStyle};
 use geometry::*;
+use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::{
     App, BorderStyle, Bounds, ClipboardItem, ContentMask, CursorStyle, Element, ElementId,
     ElementInputHandler, Entity, FocusHandle, Font, Global, GlobalElementId, Hitbox,
@@ -38,6 +40,7 @@ use input::{
     terminal_mouse_button, terminal_mouse_position, terminal_position, wheel_steps,
 };
 pub(crate) use preedit::{MarkedText, PreeditLayout};
+pub(crate) use scrollbar::TerminalScrollbar;
 use smol_str::SmolStr;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -70,6 +73,7 @@ pub(crate) struct TerminalElementProps {
     pub(crate) cursor_blink_hidden: bool,
     pub(crate) render_cache: Rc<RefCell<TerminalRenderCache>>,
     pub(crate) scroll_remainder: Rc<RefCell<Point<f32>>>,
+    pub(crate) scrollbar: TerminalScrollbar,
 }
 
 /// A link under the pointer. Presentation is enabled while the secondary modifier is held.
@@ -217,6 +221,9 @@ impl Element for TerminalElement {
             });
         }
 
+        self.props
+            .scrollbar
+            .update(bounds, cell_size.height, &self.props.terminal);
         let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
         let palette = cx
             .try_global::<TerminalPalette>()
@@ -250,6 +257,19 @@ impl Element for TerminalElement {
             Some((start..=end, color))
         });
 
+        // A search's matches take colours of their own, as herdr draws them: every match
+        // the text colour on the background raised toward it, the selected one the
+        // scheme's accent under its own text, bold (ADR 0077).
+        let search_marks = search_marks(&self.props.terminal);
+        let found = SearchColors {
+            background: palette.background.blend(palette.foreground.opacity(0.2)),
+            foreground: palette.foreground,
+        };
+        let current = SearchColors {
+            background: cx.theme().primary,
+            foreground: cx.theme().primary_foreground,
+        };
+
         // Terminal revisions often change only a cursor or spinner cell.
         for row in 0..self.props.terminal.size.rows {
             for column in 0..self.props.terminal.size.columns {
@@ -263,11 +283,19 @@ impl Element for TerminalElement {
                     || hovered_range
                         .as_ref()
                         .is_some_and(|range| range.contains(&(cache_index as u32)));
-                let flags = if linked && cell.flags & CELL_UNDERLINE == 0 {
+                let mark = match search_marks.get(cache_index) {
+                    Some(SearchMark::Found) => Some(&found),
+                    Some(SearchMark::Current) => Some(&current),
+                    _ => None,
+                };
+                let mut flags = if linked && cell.flags & CELL_UNDERLINE == 0 {
                     cell.flags | CELL_UNDERLINE_SINGLE
                 } else {
                     cell.flags
                 };
+                if search_marks.get(cache_index) == Some(&SearchMark::Current) {
+                    flags |= CELL_BOLD;
+                }
                 let cell_bounds = Bounds::new(
                     point(
                         bounds.left() + cell_size.width * usize::from(column),
@@ -279,6 +307,9 @@ impl Element for TerminalElement {
                 let mut background = terminal_color(cell.background, false, &palette);
                 if flags & CELL_INVERSE != 0 {
                     std::mem::swap(&mut foreground, &mut background);
+                }
+                if let Some(mark) = mark {
+                    background = mark.background;
                 }
                 if background != palette.background {
                     let start_line = i64::from(row) * BLOCK_SUBLINES;
@@ -320,6 +351,9 @@ impl Element for TerminalElement {
                 }
                 if flags & CELL_FAINT != 0 {
                     foreground = foreground.opacity(0.65);
+                }
+                if let Some(mark) = mark {
+                    foreground = mark.foreground;
                 }
                 // Before block elements turn into quads, so a selected █ takes the
                 // selection text color too.
@@ -1040,6 +1074,48 @@ impl Element for TerminalElement {
     }
 }
 
+/// Where a cell stands in the Pane's search.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SearchMark {
+    None,
+    Found,
+    Current,
+}
+
+struct SearchColors {
+    background: Hsla,
+    foreground: Hsla,
+}
+
+/// Each viewport cell's place in the search, empty without matches on screen.
+fn search_marks(view: &TerminalView) -> Vec<SearchMark> {
+    let search = &view.search;
+    if search.matches.is_empty() && search.selected_match.is_none() {
+        return Vec::new();
+    }
+    let mut marks = vec![SearchMark::None; view.cells.len()];
+    let ranges = search
+        .matches
+        .iter()
+        .map(|range| (range, SearchMark::Found))
+        .chain(
+            search
+                .selected_match
+                .iter()
+                .map(|range| (range, SearchMark::Current)),
+        );
+    for (range, mark) in ranges {
+        let Some((start, end)) = range.selected_cell_range(view.size.columns) else {
+            continue;
+        };
+        let end = (end as usize).min(marks.len().saturating_sub(1));
+        for cell in marks.iter_mut().take(end + 1).skip(start as usize) {
+            *cell = mark;
+        }
+    }
+    marks
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1049,6 +1125,53 @@ mod tests {
         assert_eq!(
             TerminalPalette::default().colors(),
             TerminalColors::default()
+        );
+    }
+
+    /// ADR 0077: the selected match is marked over the others, and a range running past
+    /// the grid stops at its last cell.
+    #[test]
+    fn search_marks_put_the_selected_match_over_the_others() {
+        let blank = condr_core::TerminalCell {
+            text: " ".into(),
+            foreground: TerminalColor::Default,
+            background: TerminalColor::Default,
+            underline_color: TerminalColor::Default,
+            flags: 0,
+            hyperlink: None,
+        };
+        let range = |row, start, end| TerminalSelection {
+            start: TerminalPosition {
+                row,
+                column: start,
+                side: TerminalSide::Left,
+            },
+            end: TerminalPosition {
+                row,
+                column: end,
+                side: TerminalSide::Right,
+            },
+            display_offset: 0,
+        };
+        let mut view = TerminalView {
+            selection: None,
+            revision: 1,
+            size: TerminalSize::new(2, 4),
+            display_offset: 0,
+            history_rows: 0,
+            search: Default::default(),
+            mouse_tracking: TerminalMouseTracking::None,
+            cells: vec![blank; 8],
+            cursor: None,
+            images: Vec::new(),
+        };
+        assert!(search_marks(&view).is_empty(), "no search, no marks");
+        view.search.matches = vec![range(0, 1, 2), range(1, 2, 9)];
+        view.search.selected_match = Some(range(0, 1, 2));
+        use SearchMark::{Current, Found, None as No};
+        assert_eq!(
+            search_marks(&view),
+            [No, Current, Current, No, No, No, Found, Found]
         );
     }
 
@@ -1077,6 +1200,8 @@ mod tests {
             revision: 1,
             size: TerminalSize::new(1, cells.len() as u16),
             display_offset: 0,
+            history_rows: 0,
+            search: Default::default(),
             mouse_tracking: TerminalMouseTracking::None,
             cells,
             cursor: None,

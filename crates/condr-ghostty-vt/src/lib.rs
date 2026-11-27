@@ -15,6 +15,7 @@ mod image;
 mod key;
 mod mouse;
 mod render;
+mod search;
 
 pub use image::{Image, ImageFormat};
 pub use key::{KeyAction, KeyEncoder, KeyEvent, Mods, PhysicalKey};
@@ -23,6 +24,7 @@ pub use render::{
     Cell, CellWidth, Color, Cursor, CursorStyle, Dirty, ImageLayer, ImagePlacement, RenderState,
     Row, Style, Underline,
 };
+pub use search::{SearchStatus, ViewportMatch};
 
 use bindings as sys;
 use std::ffi::{c_char, c_void};
@@ -303,6 +305,9 @@ pub enum Scroll {
     Bottom,
     /// Rows down (positive) or up (negative).
     Delta(isize),
+    /// The viewport's top row, counted from the top of the scrollback as
+    /// [`Scrollbar::offset`] counts it.
+    Row(usize),
     /// Shell prompts (OSC 133) down (positive) or up (negative).
     Prompts(isize),
 }
@@ -330,6 +335,8 @@ pub struct Terminal {
     raw: sys::GhosttyTerminal,
     /// Owned through a raw pointer, since the library holds it for the terminal's life.
     callbacks: *mut Callbacks,
+    /// The terminal's search, null when there is none (ADR 0077).
+    search: sys::GhosttySearch,
 }
 
 // SAFETY: libghostty-vt asks only that calls on one terminal be serialized, and every
@@ -358,7 +365,11 @@ impl Terminal {
             scheme: options.colors.scheme(),
             panics: 0,
         }));
-        let mut terminal = Self { raw, callbacks };
+        let mut terminal = Self {
+            raw,
+            callbacks,
+            search: ptr::null_mut(),
+        };
         terminal.install(&options)?;
         terminal.apply_colors(&options.colors)?;
         // Creation takes no cell size, and without one no image has a size to draw at.
@@ -700,29 +711,32 @@ impl Terminal {
     }
 
     pub fn scroll_viewport(&mut self, scroll: Scroll) {
-        let (tag, delta) = match scroll {
+        let none = sys::GhosttyTerminalScrollViewportValue { delta: 0 };
+        let (tag, value) = match scroll {
             Scroll::Top => (
                 sys::GhosttyTerminalScrollViewportTag::GHOSTTY_SCROLL_VIEWPORT_TOP,
-                0,
+                none,
             ),
             Scroll::Bottom => (
                 sys::GhosttyTerminalScrollViewportTag::GHOSTTY_SCROLL_VIEWPORT_BOTTOM,
-                0,
+                none,
             ),
             Scroll::Delta(delta) => (
                 sys::GhosttyTerminalScrollViewportTag::GHOSTTY_SCROLL_VIEWPORT_DELTA,
-                delta,
+                sys::GhosttyTerminalScrollViewportValue { delta },
             ),
             Scroll::Prompts(prompts) => (
                 sys::GhosttyTerminalScrollViewportTag::GHOSTTY_SCROLL_VIEWPORT_DELTA_PROMPT,
-                prompts,
+                sys::GhosttyTerminalScrollViewportValue {
+                    delta_prompt: prompts,
+                },
+            ),
+            Scroll::Row(row) => (
+                sys::GhosttyTerminalScrollViewportTag::GHOSTTY_SCROLL_VIEWPORT_ROW,
+                sys::GhosttyTerminalScrollViewportValue { row },
             ),
         };
-        // `delta` and `delta_prompt` share the union's first word.
-        let behavior = sys::GhosttyTerminalScrollViewport {
-            tag,
-            value: sys::GhosttyTerminalScrollViewportValue { delta },
-        };
+        let behavior = sys::GhosttyTerminalScrollViewport { tag, value };
         // SAFETY: a live terminal; `&mut self` serializes the call.
         unsafe { sys::ghostty_terminal_scroll_viewport(self.raw, behavior) }
     }
@@ -974,6 +988,7 @@ impl Terminal {
 
 impl Drop for Terminal {
     fn drop(&mut self) {
+        self.end_search();
         // SAFETY: created by `new` and freed only here, the terminal before the callbacks
         // it may still call.
         unsafe {

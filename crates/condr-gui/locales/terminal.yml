@@ -6,10 +6,29 @@ terminal:
   unavailable:
     en: Terminal unavailable
     zh-CN: 终端不可用
+  find:
+    placeholder:
+      en: Find
+      zh-CN: 搜索
+    no_results:
+      en: No results
+      zh-CN: 无结果
+    older:
+      en: Previous match (Enter)
+      zh-CN: 上一个匹配（Enter）
+    newer:
+      en: Next match (Shift+Enter)
+      zh-CN: 下一个匹配（Shift+Enter）
+    close:
+      en: Close (Escape)
+      zh-CN: 关闭（Esc）
   pane_menu:
     tooltip:
       en: Pane actions
       zh-CN: Pane 操作
+    find:
+      en: Find…
+      zh-CN: 搜索…
     split_right:
       en: Split Right
       zh-CN: 向右拆分

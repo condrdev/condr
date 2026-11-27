@@ -17,6 +17,8 @@ fn view(cells: TerminalCells, rows: u32, columns: u32) -> super::TerminalView {
             cell_height: 0,
         }),
         display_offset: 0,
+        history_rows: 0,
+        search: None,
         mouse_tracking: super::TerminalMouseTracking::None as i32,
         hyperlinks: vec!["https://example.com".into()],
         cells: Some(cells),
@@ -904,6 +906,8 @@ fn the_cell_columns_round_trip() {
         revision: 7,
         size: TerminalSize::new(1, 4),
         display_offset: 0,
+        history_rows: 0,
+        search: Default::default(),
         mouse_tracking: TerminalMouseTracking::None,
         cells: vec![
             cell("中", CELL_WIDE | CELL_UNDERLINE_CURLY, rgb),

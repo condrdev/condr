@@ -87,6 +87,7 @@ Condr 的快捷键分为两层逻辑：
 
 | 操作 | macOS | Windows / Linux |
 | :--- | :--- | :--- |
+| 在 Pane 的历史中搜索 | `Cmd + F` | `Ctrl + Shift + F` |
 | 水平拆分（向右新建） | `Cmd + D` | `Alt + Shift + =` |
 | 垂直拆分（向下新建） | `Cmd + Shift + D` | `Alt + Shift + -` |
 | 关闭当前 Pane | `Cmd + W` | `Ctrl + Shift + W` |
@@ -146,6 +147,8 @@ Condr 的快捷键分为两层逻辑：
 | 跳到上一个 / 下一个 Shell 提示符 | `Cmd + ↑` / `Cmd + ↓` | `Ctrl + ↑` / `Ctrl + ↓` |
 | 逐行滚动 | 鼠标滚轮 | 鼠标滚轮 |
 
+* **滚动条**：滚进历史内容、正在搜索，或鼠标移到 Pane 右边缘时，右侧出现滚动条，拖动即可在历史中移动。
+* **搜索**：`Cmd + F`（Windows 和 Linux 上是 `Ctrl + Shift + F`）在整个历史中搜索，详见[在终端中搜索](/zh-cn/docs/using/workspaces/#在终端中搜索)。
 * **自动沉底**：浏览历史缓冲区时，向终端输入任意按键均会立即复位滚动条至最新行。
 * **提示符跳转**：仅在 Shell 停在提示符时生效，需要开启 [Shell 集成](/zh-cn/docs/using/preferences/#shell-集成)。其他情况下（例如在 vim 里）按键照常交给程序。
 * **Alt Screen 模式（vim / less 等）**：`Shift + PageUp / PageDown` 透传至 TUI 程序内部处理；鼠标滚轮将自动转义为 `↑` / `↓` 方向键事件分发。

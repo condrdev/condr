@@ -8,7 +8,7 @@
 //! ```
 //!
 //! It starts a TCP Server with one Workspace, opens Condr against it, and saves one PNG
-//! per state: the Workspace, the Command Palette's pages, Tasks mode with Tasks and with an
+//! per state: the Workspace, a Pane's find bar, the Command Palette's pages, Tasks mode with Tasks and with an
 //! Agent in every column and with columns folded, the same Agents in the sidebar's Agents
 //! section by Workspace, by state and in the tree's order, the Ports page empty, with forwards, for one Device, the right
 //! sidebar's transfer strip, the left sidebar with its Device folded, and a finished
@@ -153,6 +153,56 @@ pub(crate) fn run(directory: PathBuf) {
         })
     });
     shot(&mut cx, window, &directory, "01g-terminal-image");
+
+    // A search of the Pane's history from its find bar, scrolled to the third match
+    // (ADR 0077); the bar follows a needle another Client set.
+    admin
+        .terminal(
+            pane_id,
+            condr_core::TerminalCommand::Text(
+                "seq 1 120 | sed 's/7$/7 error[E0308]: mismatched types/'\r".into(),
+            ),
+        )
+        .unwrap();
+    let search = |app: &App| {
+        view.read(app)
+            .connection(1)
+            .and_then(|connection| connection.model.terminals.get(&pane_id))
+            .map(|terminal| terminal.view.search.clone())
+            .unwrap_or_default()
+    };
+    wait(&mut cx, "the history printed", |app| {
+        view.read(app)
+            .connection(1)
+            .and_then(|connection| connection.model.terminals.get(&pane_id))
+            .is_some_and(|terminal| terminal.view.history_rows > 60)
+    });
+    admin
+        .terminal(pane_id, condr_core::TerminalCommand::Search("error".into()))
+        .unwrap();
+    wait(&mut cx, "the search caught up", |app| search(app).complete);
+    for _ in 0..3 {
+        admin
+            .terminal(
+                pane_id,
+                condr_core::TerminalCommand::SearchStep(condr_core::TerminalSearchStep::Older),
+            )
+            .unwrap();
+    }
+    wait(&mut cx, "the third match is selected", |app| {
+        search(app).selected == Some(2) && search(app).selected_match.is_some()
+    });
+    shot(&mut cx, window, &directory, "01h-terminal-find");
+    admin
+        .terminal(pane_id, condr_core::TerminalCommand::Search(String::new()))
+        .unwrap();
+    admin
+        .terminal(
+            pane_id,
+            condr_core::TerminalCommand::Scroll(condr_core::TerminalScroll::Bottom),
+        )
+        .unwrap();
+    wait(&mut cx, "the search ended", |app| !search(app).is_active());
     update(&mut cx, window, &view, |this, _, cx| {
         this.sidebar_folded_devices.insert(1);
         cx.notify();

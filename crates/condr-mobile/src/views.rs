@@ -374,6 +374,8 @@ mod tests {
             revision: 3,
             size: TerminalSize::new(2, 2),
             display_offset: 7,
+            history_rows: 0,
+            search: Default::default(),
             mouse_tracking: TerminalMouseTracking::None,
             cells: Vec::new(),
             cursor: None,

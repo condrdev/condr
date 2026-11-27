@@ -9,10 +9,6 @@ Condr is in Public Preview. This page lists what comes next; the order is the or
 
 ## Next
 
-### Search in the terminal
-
-Search the current Pane's terminal, including what has scrolled off screen, with matches highlighted and scrolled into view.
-
 ### Port detection
 
 When an Agent starts a dev server in a Workspace, Condr shows the ports it listens on, on its Pane and on the **Ports** page. On a remote Device, clicking one forwards it to this machine.

@@ -434,12 +434,14 @@ pub fn merge_terminal_deltas(
         base_revision: previous.base_revision,
         revision: next.revision,
         display_offset: next.display_offset,
+        history_rows: next.history_rows,
         mouse_tracking: next.mouse_tracking,
         cursor: next.cursor,
         selection: next.selection,
         runs,
         // The later list wins; neither changed them when both are `None`.
         images: next.images.or(previous.images),
+        search: next.search.or(previous.search),
     })
 }
 

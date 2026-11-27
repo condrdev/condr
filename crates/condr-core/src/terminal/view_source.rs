@@ -17,6 +17,11 @@ pub(super) type TerminalDamageBaseline = TerminalView;
 /// [`TerminalViewSource::compress_if_idle`] has nothing left (ADR 0051).
 pub const TERMINAL_IDLE_CHECK: Duration = Duration::from_secs(1);
 
+/// How often a search that has not caught up takes its next step, and how long each
+/// step may hold the terminal's lock (ADR 0077).
+const SEARCH_STEP_INTERVAL: Duration = Duration::from_millis(16);
+const SEARCH_STEP_BUDGET: Duration = Duration::from_millis(3);
+
 impl TerminalViewSource {
     pub fn view(&self) -> TerminalView {
         let Ok(mut terminal) = lock_pane(&self.terminal) else {
@@ -31,13 +36,17 @@ impl TerminalViewSource {
     }
 
     /// When the monitor must look again without new output: a held cursor move or an
-    /// open synchronized update times out then.
+    /// open synchronized update times out then, and a search takes its next step.
     pub fn frame_wakeup(&self) -> Option<Duration> {
-        let hold = lock_pane(&self.terminal).ok()?.hold_remaining();
+        let (hold, search) = {
+            let terminal = lock_pane(&self.terminal).ok()?;
+            let search = terminal.search_pending().then_some(SEARCH_STEP_INTERVAL);
+            (terminal.hold_remaining(), search)
+        };
         let settle = self
             .cursor_settle_pending()
             .then_some(CURSOR_POSITION_SETTLE);
-        hold.into_iter().chain(settle).min()
+        hold.into_iter().chain(settle).chain(search).min()
     }
 
     /// Compresses the Pane's scrollback once output has stopped since the last look, one
@@ -106,6 +115,8 @@ impl TerminalViewSource {
         if terminal.hold_remaining().is_some() {
             return None;
         }
+        // A search catches up with the output before the frame shows its matches.
+        terminal.advance_search(SEARCH_STEP_BUDGET);
         let size = pane_size(&self.size);
         let mut revision = self.revision.load(Ordering::Acquire);
         let mut baseline = lock_pane(&self.damage_baseline).ok()?;
@@ -116,11 +127,13 @@ impl TerminalViewSource {
         view.cursor = self.settled_cursor(view.cursor);
         if baseline.as_ref().is_some_and(|baseline| {
             revision <= baseline.revision
-                && (baseline.cursor != view.cursor || baseline.images != view.images)
+                && (baseline.cursor != view.cursor
+                    || baseline.images != view.images
+                    || baseline.search != view.search)
         }) {
-            // Nothing new arrived from the PTY, but the settled cursor moved or an
-            // animation turned a frame: give that frame its own revision so clients
-            // accept it.
+            // Nothing new arrived from the PTY, but the settled cursor moved, an
+            // animation turned a frame or a search found more: give that frame its own
+            // revision so clients accept it.
             revision = self.revision.fetch_add(1, Ordering::AcqRel) + 1;
             view.revision = revision;
         }
@@ -144,6 +157,8 @@ fn blank_view(size: TerminalSize, revision: u64) -> TerminalView {
         revision,
         size,
         display_offset: 0,
+        history_rows: 0,
+        search: Default::default(),
         mouse_tracking: TerminalMouseTracking::None,
         cells: vec![super::view::blank_cell(); usize::from(size.columns) * usize::from(size.rows)],
         cursor: None,

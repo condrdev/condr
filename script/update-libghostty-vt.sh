@@ -77,6 +77,12 @@ functions=(
   ghostty_render_state_set
   ghostty_render_state_update
   ghostty_row_get
+  ghostty_search_feed
+  ghostty_search_free
+  ghostty_search_get
+  ghostty_search_new
+  ghostty_search_set
+  ghostty_search_tick
   ghostty_sys_set
   ghostty_terminal_compress
   ghostty_terminal_compression_activity
@@ -84,6 +90,7 @@ functions=(
   ghostty_terminal_get
   ghostty_terminal_grid_ref
   ghostty_terminal_new
+  ghostty_terminal_point_from_grid_ref
   ghostty_terminal_resize
   ghostty_terminal_scroll_viewport
   ghostty_terminal_select_line
@@ -117,6 +124,11 @@ types=(
   GhosttyRenderStateKittyPlacementKind
   GhosttyRenderStateRowSelection
   GhosttyRowData
+  GhosttySearchData
+  GhosttySearchOption
+  GhosttySearchScroll
+  GhosttySearchStatus
+  GhosttySelectionBuffer
   GhosttySgrUnderline
   GhosttySizeReportSize
   GhosttyString
