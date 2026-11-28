@@ -73,7 +73,7 @@ fn git_graph_lists_every_branch_filters_and_opens_a_commits_file() {
     }));
     let history = window.debug_bounds("right-sidebar-git-history").unwrap();
     window.simulate_click(history.center(), Modifiers::default());
-    window.update(|window, cx| _ = window.draw(cx));
+    settle_sidebars(window, &view);
     let open = window
         .debug_bounds("right-sidebar-git-graph")
         .expect("Git History's header opens Git Graph");

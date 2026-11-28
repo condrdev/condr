@@ -36,6 +36,7 @@ pub(crate) mod screenshots;
 mod server_connection;
 mod server_management;
 mod settings;
+mod sidebar_motion;
 mod slide;
 mod startup;
 mod syntax;

@@ -79,7 +79,7 @@ fn files_upload_and_download_through_the_gui_and_collect_in_the_strip() {
         let _ = window;
         view.update(cx, |this, cx| this.toggle_right_sidebar(cx))
     });
-    window.update(|window, cx| _ = window.draw(cx));
+    settle_sidebars(window, &view);
     assert!(window.debug_bounds("transfer-strip").is_some());
     let clear = window
         .debug_bounds("transfer-clear")

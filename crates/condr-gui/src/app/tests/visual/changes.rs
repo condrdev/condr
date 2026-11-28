@@ -56,7 +56,7 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_pane() {
         let button = window.debug_bounds("right-sidebar-changes").unwrap();
         window.simulate_click(button.center(), Modifiers::default());
         window.run_until_parked();
-        window.update(|window, cx| _ = window.draw(cx));
+        settle_sidebars(window, &view);
     };
     open_changes(window);
     assert!(window.debug_bounds("condr-right-sidebar").is_some());
@@ -287,7 +287,7 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_pane() {
     let toggle = window.debug_bounds("right-sidebar-changes").unwrap();
     window.simulate_click(toggle.center(), Modifiers::default());
     window.run_until_parked();
-    window.update(|window, cx| _ = window.draw(cx));
+    settle_sidebars(window, &view);
     assert!(window.debug_bounds("condr-right-sidebar").is_none());
 }
 

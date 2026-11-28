@@ -1,3 +1,4 @@
+use super::sidebar_motion::SidebarMotion;
 use super::*;
 
 /// What a window shows of the Session tree (ADR 0043). Detaching moves: a Device,
@@ -84,6 +85,11 @@ pub(super) struct WindowView {
     pub(super) agents_collapsed: bool,
     pub(super) agents_order: left_sidebar::AgentsOrder,
     pub(super) right_sidebar_width: Pixels,
+    /// How far open each sidebar is drawn as it springs to its state, and which
+    /// Workspace's right sidebar the right one was last (another's lands at once).
+    pub(super) left_motion: SidebarMotion,
+    pub(super) right_motion: SidebarMotion,
+    pub(super) right_motion_for: Cell<Option<(ConnectionKey, WorkspaceId)>>,
     /// The title bar's Tab strip scrolls when the Tabs outgrow it; a newly active Tab
     /// is scrolled into view once, which `last_scrolled_tab` remembers across renders.
     pub(super) tab_strip_scroll: ScrollHandle,
@@ -159,6 +165,9 @@ impl WindowView {
             agents_collapsed: false,
             agents_order: left_sidebar::AgentsOrder::default(),
             right_sidebar_width: INITIAL_RIGHT_SIDEBAR_WIDTH,
+            left_motion: SidebarMotion::default(),
+            right_motion: SidebarMotion::default(),
+            right_motion_for: Cell::new(None),
             tab_strip_scroll: ScrollHandle::new(),
             last_scrolled_tab: Cell::new(None),
             bounds: window.window_bounds().into(),
@@ -237,6 +246,15 @@ impl Condr {
             && !inside
         {
             self.open_in_new_window_at(scope, position, window, cx);
+        }
+    }
+
+    /// Whether a sidebar of `window` is springing open or shut: its terminals keep their
+    /// size until it settles, so each is resized once rather than on every frame.
+    pub(crate) fn sidebars_moving(&self, window: &Window) -> bool {
+        self.owns_window(window) && {
+            let view = self.window_view(window);
+            view.left_motion.moving() || view.right_motion.moving()
         }
     }
 

@@ -606,7 +606,7 @@ fn the_sidebar_keeps_its_dragged_width_across_window_resizes() {
         .expect("the title bar should expose the sidebar toggle");
     window.simulate_click(toggle.center(), Modifiers::default());
     window.run_until_parked();
-    window.update(|window, cx| _ = window.draw(cx));
+    settle_sidebars(window, &view);
     assert_eq!(
         window.debug_bounds("condr-sidebar").unwrap().size.width,
         px(48.),
@@ -622,7 +622,7 @@ fn the_sidebar_keeps_its_dragged_width_across_window_resizes() {
     );
     window.simulate_click(toggle.center(), Modifiers::default());
     window.run_until_parked();
-    window.update(|window, cx| _ = window.draw(cx));
+    settle_sidebars(window, &view);
     assert_eq!(
         window.debug_bounds("condr-sidebar").unwrap().size.width,
         initial,
@@ -1232,4 +1232,65 @@ fn a_device_folds_its_workspaces_away_and_remembers_it() {
         let state = view.read(app).collect_state(app);
         assert!(state.servers.values().all(|server| !server.folded));
     });
+}
+
+/// The right sidebar springs open over several frames; the terminal beside it keeps its
+/// size, sending none, until the sidebar settles, and is then resized once to the room
+/// left, so an agent's screen is redrawn once rather than on every frame.
+#[test]
+fn a_springing_sidebar_resizes_the_terminal_beside_it_once_it_settles() {
+    let _serial_guard = acquire_visual_test_lock();
+    let root = TestDirectory::new("sidebar-spring");
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    let (_, _, pane) = super::dock::create_workspace(window, &view, &root);
+    // What the terminal last asked the Server for, and what its frames carry.
+    let sizes = |window: &mut VisualTestContext| {
+        window.read(|app| {
+            let condr = view.read(app);
+            (
+                condr
+                    .pending_sizes
+                    .get(&(1, pane))
+                    .map(|pending| pending.size),
+                condr.terminal(1, pane).map(|terminal| terminal.view.size),
+            )
+        })
+    };
+    assert!(wait_until(window, |window| {
+        window.update(|window, cx| _ = window.draw(cx));
+        matches!(sizes(window), (None, Some(size)) if size.columns > 0)
+    }));
+    let (_, Some(before)) = sizes(window) else {
+        unreachable!()
+    };
+
+    window.update(|_, cx| view.update(cx, |this, cx| this.toggle_right_sidebar(cx)));
+    let mut frames = 0;
+    loop {
+        std::thread::sleep(Duration::from_millis(20));
+        let moving = window.update(|window, cx| {
+            _ = window.draw(cx);
+            view.read(cx).sidebars_moving(window)
+        });
+        if !moving {
+            break;
+        }
+        frames += 1;
+        assert_eq!(
+            sizes(window),
+            (None, Some(before)),
+            "nothing is resized while the sidebar springs"
+        );
+    }
+    assert!(frames > 1, "the sidebar springs over several frames");
+    assert!(
+        wait_until(window, |window| {
+            window.update(|window, cx| _ = window.draw(cx));
+            matches!(sizes(window), (_, Some(size)) if size.columns < before.columns)
+        }),
+        "settled, the terminal takes the room left: {:?}",
+        sizes(window)
+    );
 }

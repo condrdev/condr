@@ -1,5 +1,6 @@
 use super::icons::CondrIconName;
 use super::left_sidebar::{DragPreview, DropTarget, attach_drop_target, drop_index};
+use super::sidebar_motion::width_between;
 use super::*;
 use gpui_fps::fps_monitor;
 use gpui_kit::component::InteractiveElementExt as _;
@@ -797,10 +798,11 @@ const TITLE_TOGGLE_SLOT: Pixels = px(24.);
 ///
 /// `tabs_width` is the Workspace's width below while the right sidebar is open: the header
 /// then takes the rest, window controls included, and its edge meets the sidebar's.
+/// `title_sidebar_width` is the left sidebar's width as drawn, springing or not.
 #[allow(clippy::too_many_arguments)]
 fn workspace_title_bar(
     title: String,
-    sidebar_width: Pixels,
+    title_sidebar_width: Pixels,
     sidebar_collapsed: bool,
     tab_strip: Option<AnyElement>,
     open_in: Option<AnyElement>,
@@ -811,11 +813,6 @@ fn workspace_title_bar(
     cx: &App,
 ) -> TitleBar {
     let theme = cx.theme();
-    let title_sidebar_width = if sidebar_collapsed {
-        COLLAPSED_SIDEBAR_WIDTH
-    } else {
-        sidebar_width
-    };
     let toggle_label = if sidebar_collapsed {
         t!("workspace.expand_sidebar")
     } else {
@@ -953,14 +950,42 @@ impl Render for Condr {
         let strip = shown_sidebar
             .as_ref()
             .map(|shown| self.render_right_sidebar_strip(shown, cx));
-        let open_sidebar = shown_sidebar.as_ref().filter(|shown| shown.open);
-        let right_header = open_sidebar.map(|shown| self.render_right_sidebar_header(shown, cx));
-        let right_column = open_sidebar.map(|shown| self.render_right_sidebar(view, shown, cx));
-        let tabs_width = open_sidebar.map(|_| {
-            (window.viewport_size().width
-                - view.sidebar_layout_width()
-                - view.right_sidebar_width
-                - RIGHT_SIDEBAR_STRIP_WIDTH)
+        // Each sidebar springs to its width; the chrome around it follows, and a terminal
+        // keeps its size until both settle, then is resized once (`sidebars_moving`).
+        let was_moving = view.left_motion.moving() || view.right_motion.moving();
+        let reduce_motion = cx.reduce_motion();
+        let left_open = view
+            .left_motion
+            .progress(!view.sidebar_collapsed, reduce_motion);
+        let left_width = width_between(COLLAPSED_SIDEBAR_WIDTH, view.sidebar_width, left_open);
+        let shown_for = shown_sidebar
+            .as_ref()
+            .map(|shown| (shown.key, shown.workspace_id));
+        if view.right_motion_for.replace(shown_for) != shown_for {
+            view.right_motion.land();
+        }
+        let right_open = shown_sidebar.as_ref().map_or(0., |shown| {
+            view.right_motion.progress(shown.open, reduce_motion)
+        });
+        let right_width = view.right_sidebar_width * right_open;
+        let moving = view.left_motion.moving() || view.right_motion.moving();
+        if moving {
+            window.request_animation_frame();
+        } else if was_moving {
+            // A terminal's panel is cached: the frame they settle on measures them again.
+            let panels: Vec<_> = self.panels.values().cloned().collect();
+            cx.defer(move |cx| {
+                for panel in panels {
+                    panel.update(cx, |_, cx| cx.notify());
+                }
+            });
+        }
+        // Drawn while open or shutting.
+        let drawn_sidebar = shown_sidebar.as_ref().filter(|_| right_open > 0.);
+        let right_header = drawn_sidebar.map(|shown| self.render_right_sidebar_header(shown, cx));
+        let right_column = drawn_sidebar.map(|shown| self.render_right_sidebar(view, shown, cx));
+        let tabs_width = drawn_sidebar.map(|_| {
+            (window.viewport_size().width - left_width - right_width - RIGHT_SIDEBAR_STRIP_WIDTH)
                 .max(px(0.))
         });
         // The Tasks window draws Tasks alone, as a Tab window draws its Tab (ADR 0069).
@@ -1075,7 +1100,7 @@ impl Render for Condr {
                 }
                 let title_bar = workspace_title_bar(
                     title,
-                    view.sidebar_width,
+                    left_width,
                     view.sidebar_collapsed,
                     tab_strip,
                     open_in,
@@ -1119,12 +1144,23 @@ impl Render for Condr {
                             div()
                                 .debug_selector(|| "condr-sidebar".into())
                                 .relative()
-                                .w(view.sidebar_layout_width())
+                                .w(left_width)
                                 .flex_none()
                                 .h_full()
+                                .when(moving, |this| this.overflow_hidden())
+                                // Laid out at the width it settles at and uncovered from the
+                                // window's edge, so nothing in it reflows as it springs.
                                 .child(
-                                    AnyView::from(sidebar)
-                                        .cached(StyleRefinement::default().size_full()),
+                                    div()
+                                        .absolute()
+                                        .top_0()
+                                        .left_0()
+                                        .h_full()
+                                        .w(view.sidebar_layout_width())
+                                        .child(
+                                            AnyView::from(sidebar)
+                                                .cached(StyleRefinement::default().size_full()),
+                                        ),
                                 )
                                 // Kit's handle inside its trailing edge, as Kit's Dock puts
                                 // a left panel's: its line is the sidebar's border. It
@@ -1149,10 +1185,20 @@ impl Render for Condr {
                                 div()
                                     .debug_selector(|| "condr-right-sidebar-column".into())
                                     .relative()
-                                    .w(view.right_sidebar_width)
+                                    .w(right_width)
                                     .flex_none()
                                     .h_full()
-                                    .child(column)
+                                    .when(moving, |this| this.overflow_hidden())
+                                    // As the left one, from the window's right edge.
+                                    .child(
+                                        div()
+                                            .absolute()
+                                            .top_0()
+                                            .right_0()
+                                            .h_full()
+                                            .w(view.right_sidebar_width)
+                                            .child(column),
+                                    )
                                     // Inside its leading edge, as Kit's Dock puts a right
                                     // panel's.
                                     .child(

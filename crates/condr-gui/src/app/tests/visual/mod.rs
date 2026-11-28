@@ -452,6 +452,18 @@ fn wait_until(
     false
 }
 
+/// Draws until `window`'s sidebars have sprung to their widths, which they do in real
+/// time, frame by frame.
+fn settle_sidebars(window: &mut VisualTestContext, view: &Entity<Condr>) {
+    assert!(
+        wait_until(window, |window| window.update(|window, cx| {
+            _ = window.draw(cx);
+            !view.read(cx).sidebars_moving(window)
+        })),
+        "the sidebars settle"
+    );
+}
+
 fn wait_until_event_driven(
     window: &mut VisualTestContext,
     mut predicate: impl FnMut(&mut VisualTestContext) -> bool,

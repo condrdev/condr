@@ -199,14 +199,17 @@ impl Element for TerminalElement {
         let connection_key = self.props.connection_key;
         let pane_id = self.props.pane_id;
         let active = window.is_window_active();
-        if !view.read(cx).terminal_layout_is_current(
-            connection_key,
-            pane_id,
-            bounds,
-            cell_size,
-            terminal_size,
-            active,
-        ) {
+        // A springing sidebar resizes nothing until it settles (`sidebars_moving`).
+        if !view.read(cx).sidebars_moving(window)
+            && !view.read(cx).terminal_layout_is_current(
+                connection_key,
+                pane_id,
+                bounds,
+                cell_size,
+                terminal_size,
+                active,
+            )
+        {
             window.defer(cx, move |window, cx| {
                 view.update(cx, |view, cx| {
                     view.update_terminal_geometry(
